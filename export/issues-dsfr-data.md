@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 29 demandes — 3 bugs, 26 améliorations.
+> 31 demandes — 3 bugs, 28 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -152,7 +152,7 @@ Un avertissement console systématique quand la troncature est effective (un `co
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant, annuaire-services-dgfip, barometre-france-num.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant, annuaire-services-dgfip, barometre-france-num, signalconso, rappelconso, centres-controle-technique.
 
 ### Constat
 
@@ -180,7 +180,7 @@ Quand la source demande un chargement complet (pas de `server-side`, pas de pagi
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente, fiscalite-locale.
+Rencontré sur : decp-augmente, fiscalite-locale, rappelconso.
 
 ### Constat
 
@@ -236,7 +236,7 @@ Ajouter `distinct` (ou `count-distinct`) à la grammaire commune, et signaler un
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, decp-augmente, restauration-notre-dame, comptabilite-generale, barometre-france-num.
+Rencontré sur : plan-de-relance, decp-augmente, restauration-notre-dame, comptabilite-generale, barometre-france-num, signalconso.
 
 ### Constat
 
@@ -292,7 +292,7 @@ Faire accepter à `dsfr-data-context-tags` une source de type `dsfr-data-facets`
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : catalogue, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, entreprise-patrimoine-vivant, annuaire-services-dgfip.
+Rencontré sur : catalogue, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, entreprise-patrimoine-vivant, annuaire-services-dgfip, centres-controle-technique, rappelconso.
 
 ### Constat
 
@@ -348,7 +348,7 @@ Poser un `where` initial sur la source, ou accepter un premier rendu approximati
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant, annuaire-services-dgfip, barometre-france-num.
+Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant, annuaire-services-dgfip, barometre-france-num, signalconso, rappelconso, centres-controle-technique.
 
 ### Constat
 
@@ -404,7 +404,7 @@ Un attribut du type `refine-on-click="champ"` sur la couche, qui émettrait la m
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap, prix-des-carburants, entreprise-patrimoine-vivant, annuaire-services-dgfip.
+Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap, prix-des-carburants, entreprise-patrimoine-vivant, annuaire-services-dgfip, centres-controle-technique.
 
 ### Constat
 
@@ -536,6 +536,34 @@ Exposer le taux d'appariement sur le composant (attribut de diagnostic ou `conso
 
 ---
 
+## AM-027 — Une carte ignore en silence les lignes sans code géographique
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-chart`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : signalconso.
+
+### Constat
+
+L'agrégation Signal Conso par département renvoie un groupe dont le `dep_code` est nul : 95 309 signalements, soit 5,5 % du total. La carte les écarte sans rien afficher, et le total qu'elle représente n'est donc pas celui du KPI affiché juste au-dessus. C'est le pendant cartographique du piège des valeurs nulles (AM-005) : sur un graphique elles deviennent « Série N », sur une carte elles disparaissent.
+
+### Observation
+
+`group_by=dep_code, dep_name` sur signalconso : premier groupe `{dep_code: null, n: 95309}`. Carte rendue sans mention, KPI total à 1 733 022.
+
+### Contournement actuel
+
+Compter soi-même les lignes sans code et l'indiquer en note, ou les exclure explicitement par un `where` pour que les chiffres concordent.
+
+### Demande
+
+Signaler, sur le composant ou en console, le nombre de lignes écartées faute de code géographique reconnu — l'écart entre total et total cartographié est une source d'erreur classique.
+
+---
+
 ## AM-009 — `fit-bounds` pourrait clipper automatiquement quand `insets` est déclaré
 
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map`
@@ -600,7 +628,7 @@ Répartir les encarts sur la largeur disponible.
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, prix-des-carburants, entreprise-patrimoine-vivant, annuaire-services-dgfip.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, prix-des-carburants, entreprise-patrimoine-vivant, annuaire-services-dgfip, centres-controle-technique.
 
 ### Constat
 
@@ -712,7 +740,7 @@ Un attribut `where` sur `dsfr-data-kpi`, ou une grammaire d'agrégation conditio
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : prix-des-carburants.
+Rencontré sur : prix-des-carburants, signalconso, rappelconso.
 
 ### Constat
 
@@ -813,3 +841,31 @@ Aucun sans pré-agrégation serveur — possible avec `year(...)` dans un `group
 ### Demande
 
 Une granularité de facette sur les champs date (`granularity="year"`), ou une fonction d'extraction dans `compute`.
+
+---
+
+## AM-028 — Le séparateur de valeurs multiples entre en conflit avec la grammaire des attributs
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-normalize`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : rappelconso.
+
+### Constat
+
+Le champ `risques_encourus` de Rappel Conso vaut `blessures|incendie` : des valeurs séparées par une barre verticale dans une chaîne. C'est exactement le cas prévu par `dsfr-data-normalize split="champ:séparateur"` — sauf que la barre verticale est aussi le séparateur d'entrées de la grammaire d'attributs de la bibliothèque (`labels="a:A | b:B"`). Aucun échappement n'est documenté.
+
+### Observation
+
+Valeurs du champ inspectées à l'API : `blessures|incendie`, `chimique|allergene`. Le champ est finalement affiché tel quel plutôt que facetté.
+
+### Contournement actuel
+
+Aucun de propre. On peut renoncer à la facette, ou pré-traiter la donnée hors de la page.
+
+### Demande
+
+Documenter un échappement (par exemple `\\|`), ou accepter une écriture alternative du séparateur (`split="champ:pipe"`).
