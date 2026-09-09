@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prix des carburants — open-data-viz</title>
+  <meta name="description" content="Reproduction avec dsfr-data de la dataviz Prix des carburants de data.economie.gouv.fr, sur le flux instantané.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.economie.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Catalogue des visualisations</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Prix des carburants</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Prix des carburants&nbsp;— flux instantané</h1>
+
+    <div class="fr-callout fr-icon-database-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.economie.gouv.fr/explore/dataset/prix-des-carburants-en-france-flux-instantane-v2/"
+           target="_blank" rel="noopener external"><code>prix-des-carburants-en-france-flux-instantane-v2</code></a>
+        — 9&nbsp;805 stations-service, prix relevés en continu, publiés par la DGCCRF. C'est le jeu
+        le plus consulté du portail&nbsp;: trois entrées du catalogue s'appuient dessus, dont le site
+        officiel <code>prix-carburants.gouv.fr</code> et un service de France Bleu.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       Un chargement (/exports/json + select : 1,9 s pour 9 805 stations), puis
+       tout se dérive côté client. `dsfr-data-unpivot` bascule les six colonnes
+       de prix en lignes, ce qui rend le prix moyen par carburant calculable.
+       ========================================================================== -->
+
+  <dsfr-data-source id="pc"
+    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/exports/json"
+    params='{"select":"id, ville, cp, adresse, geom, region, code_region, departement, gazole_prix, sp95_prix, sp98_prix, e10_prix, e85_prix, gplc_prix, carburants_disponibles, horaires_automate_24_24, services_service"}'
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Six colonnes de prix -> une ligne par (station, carburant). -->
+  <dsfr-data-unpivot id="pc-long" source="pc-f"
+    id-cols="id, ville, region, code_region, departement"
+    value-cols="gazole_prix, sp95_prix, sp98_prix, e10_prix, e85_prix, gplc_prix"
+    var-name="carburant" value-name="prix" drop-empty>
+  </dsfr-data-unpivot>
+
+  <dsfr-data-query id="pc-par-carburant-brut" source="pc-long"
+    group-by="carburant" aggregate="prix:avg:prix_moyen" order-by="prix_moyen:desc">
+  </dsfr-data-query>
+
+  <!-- L'unpivot laisse les noms de colonnes en étiquettes : une règle de
+       remplacement par carburant pour les rendre lisibles. -->
+  <dsfr-data-normalize id="pc-par-carburant" source="pc-par-carburant-brut"
+    replace-fields="carburant:gazole_prix:Gazole | carburant:sp95_prix:SP95 | carburant:sp98_prix:SP98 | carburant:e10_prix:E10 | carburant:e85_prix:E85 | carburant:gplc_prix:GPLc">
+  </dsfr-data-normalize>
+
+  <dsfr-data-query id="pc-par-region" source="pc-f"
+    group-by="region, code_region" aggregate="gazole_prix:avg:prix_moyen" order-by="prix_moyen:desc">
+  </dsfr-data-query>
+
+  <dsfr-data-query id="pc-departements" source="pc-f" group-by="departement"
+    aggregate="id:count:nb">
+  </dsfr-data-query>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="odv-dashboard">
+
+      <div class="odv-filtres">
+        <h2 class="fr-h6">Rechercher et filtrer</h2>
+
+        <dsfr-data-search id="pc-q" source="pc"
+          fields="ville, adresse, cp"
+          label="Rechercher une commune" placeholder="Commune, adresse, code postal…"
+          operator="words" count>
+        </dsfr-data-search>
+
+        <dsfr-data-facets id="pc-f" source="pc-q"
+          fields="carburants_disponibles, region, departement, horaires_automate_24_24, services_service"
+          labels="carburants_disponibles:Carburant disponible | region:Région | departement:Département | horaires_automate_24_24:Automate 24/24 | services_service:Service proposé"
+          searchable="departement, region, services_service" sort="-count" max-values="6">
+        </dsfr-data-facets>
+      </div>
+
+      <div>
+        <dsfr-data-kpi-group class="fr-mb-4w">
+          <dsfr-data-kpi source="pc-f" value="count" format="nombre"
+            heading="Sélection courante" label="stations-service" col="4"></dsfr-data-kpi>
+          <dsfr-data-kpi source="pc-f" value="gazole_prix:avg" format="decimal"
+            heading="Prix moyen" label="€/L de gazole" col="4"></dsfr-data-kpi>
+          <dsfr-data-kpi source="pc-departements" value="count" format="nombre"
+            heading="Couverture" label="départements" col="4"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+          <div class="fr-col-12 fr-col-lg-5">
+            <div class="odv-chart-slot">
+              <dsfr-data-chart id="g-carburant" source="pc-par-carburant" type="bar" horizontal
+                label-field="carburant" value-field="prix_moyen" name='["Prix moyen (€/L)"]'
+                unit-tooltip=" €/L"
+                databox databox-title="Prix moyen par carburant"
+                databox-source="DGCCRF — flux instantané, via data.economie.gouv.fr"
+                databox-download>
+              </dsfr-data-chart>
+              <dsfr-data-a11y for="g-carburant" source="pc-par-carburant" table download></dsfr-data-a11y>
+            </div>
+          </div>
+          <div class="fr-col-12 fr-col-lg-7">
+            <div class="odv-chart-slot">
+              <dsfr-data-chart id="g-region-map" source="pc-par-region" type="map-reg"
+                code-field="code_region" value-field="prix_moyen"
+                name='["Prix moyen du gazole (€/L)"]' unit-tooltip=" €/L"
+                databox databox-title="Prix moyen du gazole par région"
+                databox-source="DGCCRF — flux instantané, via data.economie.gouv.fr"
+                databox-download>
+              </dsfr-data-chart>
+              <dsfr-data-a11y for="g-region-map" source="pc-par-region" table download></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+
+        <h2 class="fr-h4">Où sont les stations</h2>
+        <dsfr-data-map name="Carte des stations-service et de leurs prix"
+          center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
+          fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
+          <dsfr-data-map-layer source="pc-f" type="circle" radius="4"
+            geo-field="geom" color="#000091" tooltip-field="ville" cluster>
+          </dsfr-data-map-layer>
+          <dsfr-data-map-popup mode="panel-right" title-field="ville" width="340px">
+            <template>
+              <p class="fr-text--sm fr-mb-1v">{{adresse|}}</p>
+              <p class="fr-text--sm fr-mb-2v"><strong>{{cp}} {{ville}}</strong> — {{departement}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Gazole</strong> {{gazole_prix|non proposé}} €/L</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>SP95</strong> {{sp95_prix|non proposé}} €/L
+                · <strong>SP98</strong> {{sp98_prix|non proposé}} €/L</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>E10</strong> {{e10_prix|non proposé}} €/L
+                · <strong>E85</strong> {{e85_prix|non proposé}} €/L
+                · <strong>GPLc</strong> {{gplc_prix|non proposé}} €/L</p>
+              <p class="fr-text--xs">Automate 24/24&nbsp;: {{horaires_automate_24_24|non renseigné}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+
+        <h2 class="fr-h4 fr-mt-4w">Les stations</h2>
+        <dsfr-data-list source="pc-f"
+          columns="ville:Commune, cp:CP, adresse:Adresse, gazole_prix:Gazole, sp95_prix:SP95, e10_prix:E10, departement:Département"
+          sort="gazole_prix:asc" pagination="20" export="csv">
+        </dsfr-data-list>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — Prix des carburants</h2>
+
+      <p class="fr-text--lead">
+        Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/dataviz-prix-des-carburants"
+        target="_blank" rel="noopener external">dataviz-prix-des-carburants</a> —
+        10&nbsp;900 caractères, une autocomplétion de commune écrite à la main, deux
+        <code>ods-select</code> alimentés par des facettes, une carte, et deux agrégations de
+        comptage. La page ne montre <em>aucun prix</em> hors du survol de la carte.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Les six colonnes de prix deviennent une dimension.</strong> Le jeu range un
+              carburant par colonne — <code>gazole_prix</code>, <code>sp95_prix</code>,
+              <code>sp98_prix</code>, <code>e10_prix</code>, <code>e85_prix</code>,
+              <code>gplc_prix</code>. <code>dsfr-data-unpivot</code> les bascule en lignes
+              (<code>carburant</code>, <code>prix</code>), et le prix moyen par carburant devient
+              un simple <code>group-by</code>. Sans ce composant, il faudrait six agrégations et un
+              assemblage à la main. C'est la première page du banc d'essai où un format de données
+              «&nbsp;large&nbsp;» est redressé en une balise.</li>
+            <li><strong>Une carte choroplèthe sans données géographiques.</strong>
+              <code>type="map-reg"</code> et <code>code-field="code_region"</code>&nbsp;: la
+              géométrie des régions est embarquée dans la bibliothèque. Aucun fond à charger,
+              contrairement à la page <a href="/viz/entreprises-restauration-notre-dame">Notre-Dame</a>
+              où il a fallu aller chercher les polygones sur un autre portail.</li>
+            <li><strong>L'autocomplétion, en une balise.</strong> L'original écrit une trentaine de
+              lignes — un <code>ods-adv-analysis</code> avec une clause <code>LIKE</code> interpolée,
+              un débounce à 1&nbsp;000&nbsp;ms, une liste déroulante maison et un compteur
+              «&nbsp;+ de 10 résultats&nbsp;». <code>dsfr-data-search</code> fait le même travail, et
+              cherche en plus dans l'adresse et le code postal.</li>
+            <li><strong>Deux champs multi-valeurs, gratuits.</strong>
+              <code>carburants_disponibles</code> et <code>services_service</code> arrivent en
+              tableaux&nbsp;: les facettes les traitent nativement, comme sur
+              <a href="/viz/tourisme-et-handicap">Tourisme &amp; Handicap</a>.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>L'unpivot multiplie les lignes, et il est en aval des facettes.</strong>
+              9&nbsp;805 stations × 6 colonnes de prix font près de 59&nbsp;000 lignes intermédiaires,
+              recalculées à chaque clic de facette. C'est le prix à payer pour que le graphique des
+              prix moyens suive la sélection. Un <code>dsfr-data-unpivot</code> qui délègue son
+              agrégation au serveur n'existe pas&nbsp;: la bascule est purement cliente.</li>
+            <li><strong>Les noms de colonnes se retrouvent en étiquettes.</strong> Après l'unpivot,
+              l'axe affiche <code>gazole_prix</code>, <code>sp95_prix</code>… et non
+              «&nbsp;Gazole&nbsp;», «&nbsp;SP95&nbsp;». <code>var-format</code> ne sait reformater
+              qu'à partir des jetons d'un motif (dates, numéros), pas appliquer une table de
+              correspondance. Il a fallu ajouter un <code>dsfr-data-normalize replace-fields</code>
+              en aval, avec <em>six règles</em> pour six carburants — une balise et six substitutions
+              pour ce qui devrait être un dictionnaire d'étiquettes sur l'unpivot lui-même
+              (registre&nbsp;: AM-020).</li>
+            <li><strong>Aucun repère de fraîcheur.</strong> Le jeu s'appelle «&nbsp;flux
+              instantané&nbsp;» et porte une date de mise à jour par carburant
+              (<code>gazole_maj</code>…), mais rien dans la bibliothèque ne permet d'afficher
+              «&nbsp;données à jour au …&nbsp;» sans écrire un KPI dédié sur un champ date.
+              <code>databox-date</code> attend une chaîne fixe, pas une valeur lue dans les
+              données (registre&nbsp;: AM-021).</li>
+            <li><strong>Un prix moyen n'est pas un prix.</strong> Remarque éditoriale, pas
+              technique&nbsp;: moyenner des prix par région sans pondérer par les volumes vendus
+              produit un chiffre facile à mal lire. La page d'origine évite le sujet en n'affichant
+              aucun prix agrégé — prudence qu'on peut lui reconnaître.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>autocomplétion maison (30 lignes)</td><td><code>dsfr-data-search</code></td><td>Une balise</td></tr>
+            <tr><td>facettes multi-valeurs</td><td><code>dsfr-data-facets</code></td><td>Natif des deux côtés</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-unpivot</code></td><td>Sans équivalent&nbsp;: rend le prix par carburant calculable</td></tr>
+            <tr><td>—</td><td><code>type="map-reg"</code></td><td>Choroplèthe régionale sans fond à charger</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-list</code> + export CSV</td><td>Sans équivalent</td></tr>
+            <tr><td>—</td><td>étiquettes de série lisibles</td><td><strong>Manquant&nbsp;: les noms de colonnes restent bruts</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Reproduction facile, et la version ici en dit nettement plus que
+          l'original.</strong> La page du portail se contente de localiser des stations&nbsp;; celle-ci
+          répond à la question que le jeu de données pose — combien coûte quoi, et où. Deux
+          composants font tout le travail&nbsp;: <code>dsfr-data-unpivot</code>, qui redresse un
+          format en colonnes, et <code>type="map-reg"</code>, qui dessine une choroplèthe sans aller
+          chercher de géométrie. La friction restante est cosmétique mais visible&nbsp;: les
+          étiquettes de série gardent les noms techniques des colonnes.</p>
+        <p class="fr-text--sm fr-hint-text">
+          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-020
+          (étiquettes après unpivot), AM-021 (fraîcheur des données), AV-012
+          (<code>map-reg</code> sans fond à charger), AV-013 (<code>unpivot</code> sans équivalent).
+        </p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.20.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
