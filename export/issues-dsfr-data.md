@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 14 demandes — 2 bugs, 12 améliorations.
+> 19 demandes — 2 bugs, 17 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -124,7 +124,7 @@ Un avertissement console systématique quand la troncature est effective (un `co
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame.
 
 ### Constat
 
@@ -208,7 +208,7 @@ Ajouter `distinct` (ou `count-distinct`) à la grammaire commune, et signaler un
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, decp-augmente.
+Rencontré sur : plan-de-relance, decp-augmente, restauration-notre-dame.
 
 ### Constat
 
@@ -256,6 +256,34 @@ Faire accepter à `dsfr-data-context-tags` une source de type `dsfr-data-facets`
 
 ---
 
+## AM-007 — Pas de conditionnelle dans les templates : les liens optionnels deviennent un défaut d'accessibilité
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-display`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : catalogue, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame.
+
+### Constat
+
+Le moteur de template gère `{{champ}}`, `{{champ|défaut}}`, `{{champ:number}}` et les chemins pointés, mais pas de conditionnelle. Sur la page catalogue, cela obligeait seulement à précalculer les données — un déplacement de complexité acceptable. Les trois pages d'annuaire du lot 2 en montrent la vraie conséquence : `site_web` est vide pour une partie des établissements, et `<a href="{{site_web}}">` produirait alors un lien vide, qui pointe vers la page courante et qu'un lecteur d'écran annonce comme un lien valide. Sur la page Tourisme & Handicap, consacrée à l'accessibilité, l'ironie est complète.
+
+### Observation
+
+Champ `site_web` absent d'une partie des enregistrements des trois jeux d'annuaire. Le contournement retenu — afficher l'URL en texte plutôt qu'en lien — est visible sur les cartes et les panneaux de détail des trois pages.
+
+### Contournement actuel
+
+Précalculer en données quand c'est possible (page catalogue), ou renoncer au lien et afficher la valeur en texte (pages d'annuaire). Aucune des deux solutions ne restitue un lien cliquable quand la valeur existe.
+
+### Demande
+
+Au minimum, une conditionnelle de présence (`{{#si champ}}…{{/si}}`) pour envelopper un fragment. À défaut, un mécanisme dédié aux liens optionnels, le cas étant fréquent dans les annuaires publics.
+
+---
+
 ## AM-008 — `bbox` ne filtre pas le premier chargement
 
 **Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-map-layer`
@@ -292,7 +320,7 @@ Poser un `where` initial sur la source, ou accepter un premier rendu approximati
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente, plan-de-relance, synthese, retours.
+Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame.
 
 ### Constat
 
@@ -312,31 +340,59 @@ Corriger la recette CDN de la skill : retirer `chart.js`, ou préciser dans quel
 
 ---
 
-## AM-007 — Pas de conditionnelle dans les templates de `dsfr-data-display`
+## AM-015 — Cliquer un objet de la carte ne filtre pas les autres vues
 
-**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-display`
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-map-layer`
 
 ### Contexte
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : catalogue.
+Rencontré sur : restauration-notre-dame.
 
 ### Constat
 
-Le moteur gère `{{champ}}`, `{{champ|défaut}}`, `{{champ:number}}` et les chemins pointés, mais pas de `ng-if`. Toute logique d'affichage doit être précalculée en données.
+Opendatasoft offre `refine-on-click-context`, `refine-on-click-context-field` et `refine-on-click-map-field` : cliquer un objet de la carte pose un filtre sur le contexte, donc sur toutes les vues de la page. `dsfr-data-map-layer` n'a pas d'équivalent — un clic ouvre une popup ou un panneau, il n'émet aucune commande vers la source. Sur une cartographie d'annuaire, c'est l'interaction attendue : je clique un point, la liste et les compteurs se recentrent dessus.
 
 ### Observation
 
-Page catalogue : la logique « lien interne ou externe ? quel badge ? » a été déplacée dans `public/data/registre.json` (`repro_url`, `repro_cible`, `repro_badge`).
+Attributs `refine-on-click-*` présents sur la couche entreprises de la page d'origine. Aucun attribut correspondant dans la référence de `dsfr-data-map-layer`, et aucun événement de commande émis au clic (la couche n'émet que vers le compagnon popup).
 
 ### Contournement actuel
 
-Précalculer en données — ce qui est la bonne pratique, et rend le template lisible.
+Aucun sans JavaScript.
 
 ### Demande
 
-À arbitrer : soit une conditionnelle minimale, soit documenter explicitement « précalculer en données » comme la réponse officielle. Le contournement étant meilleur que le problème, la deuxième option se défend.
+Un attribut du type `refine-on-click="champ"` sur la couche, qui émettrait la même commande `where` que les facettes vers la source amont.
+
+---
+
+## AM-017 — Aucun fond de carte neutre parmi les préréglages
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-map`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap.
+
+### Constat
+
+Les préréglages sont `ign-plan`, `ign-ortho`, `ign-cadastre`, `osm-fr`, `osm-standard`, `opentopomap` — tous très détaillés. `carto-positron`, le fond clair et neutre, est déprécié et redirige vers `ign-plan`. Or une carte thématique a besoin d'un fond qui s'efface : sur `ign-plan`, les aplats régionaux de la page Notre-Dame sont quasi invisibles et les grappes de points se disputent l'attention avec le réseau routier. Les cartes d'origine du portail utilisent `jawg.light`, précisément pour cette raison.
+
+### Observation
+
+Couche régions rendue (26 polygones confirmés par `getRenderedCount()`) mais illisible à l'écran sur `ign-plan`, même en remontant l'opacité. Le préréglage `carto-positron` émet un avertissement de dépréciation et bascule sur `ign-plan`.
+
+### Contournement actuel
+
+Une URL de tuiles personnalisée avec `tiles-attribution` — mais on sort alors des fonds souverains, ce qui annule l'avantage principal de la bibliothèque sur ce terrain.
+
+### Demande
+
+Un préréglage clair et neutre, souverain de préférence (l'IGN publie un style `plan-ign-clair`), pour que la donnée thématique reste lisible.
 
 ---
 
@@ -393,3 +449,87 @@ Aucun sans CSS externe.
 ### Demande
 
 Répartir les encarts sur la largeur disponible.
+
+---
+
+## AM-013 — L'interface des facettes se rend là où la balise est écrite, pas là où on la veut
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-facets`, `dsfr-data-search`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame.
+
+### Constat
+
+Le câblage du pipeline se fait par `id`, indépendamment de la position dans le DOM — c'est la bonne propriété. Mais `dsfr-data-facets` et `dsfr-data-search` rendent leur interface à l'endroit exact où la balise est écrite. Sur un tableau de bord à colonne de filtres, ils doivent donc être physiquement dans cette colonne, alors que les `dsfr-data-query` qui les consomment s'écrivent plus haut. L'ordre du fichier cesse de refléter l'ordre du pipeline.
+
+### Observation
+
+Constaté sur les quatre pages à colonne de filtres du dépôt. Première écriture de la page Plan de relance : les facettes déclarées dans le bloc de pipeline s'affichaient au-dessus du conteneur, hors de la colonne.
+
+### Contournement actuel
+
+Déclarer les composants d'interface dans le conteneur voulu et les référencer par `id` depuis le bloc de pipeline. Ça marche, mais la lecture du fichier en souffre.
+
+### Demande
+
+Un attribut de rendu délégué (par exemple `render-into="#mon-conteneur"`) qui découplerait le point de déclaration du point d'affichage, comme le `for` de `dsfr-data-a11y` le fait déjà pour sa cible.
+
+---
+
+## AM-014 — Pas de moyen de replier des colonnes parallèles en une seule facette
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-facets`, `dsfr-data-unpivot`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : tourisme-et-handicap.
+
+### Constat
+
+Le jeu Tourisme & Handicap porte quatre colonnes booléennes parallèles — `handicap_auditif`, `handicap_mental`, `handicap_moteur`, `handicap_visuel` — qui décrivent la même dimension. En faire une facette « handicap couvert » demanderait de les replier en un champ multi-valeurs. `dsfr-data-unpivot` bascule des colonnes en lignes, ce qui multiplierait les établissements au lieu de les enrichir.
+
+### Observation
+
+Le jeu fournit heureusement une colonne de résumé `handicaps_attribues`, déjà en tableau, qui rend le repliage inutile ici. Sans elle, la facette n'aurait pas été reproductible sans JavaScript.
+
+### Contournement actuel
+
+S'appuyer sur une colonne de résumé quand le producteur en fournit une — ce qui est le cas ici, et ce que fait aussi la page d'origine.
+
+### Demande
+
+Une option de repliage de colonnes en champ multi-valeurs (par exemple `fold="handicap_*:handicaps"` sur `dsfr-data-normalize`), le motif « une colonne booléenne par modalité » étant courant dans les données publiques.
+
+---
+
+## AM-016 — Pas de fond administratif embarqué pour une couche geoshape
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map`, `dsfr-data-map-layer`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : restauration-notre-dame.
+
+### Constat
+
+Afficher les contours des régions comme repère oblige à charger un jeu externe : 26 polygones, 135 Ko, 4 à 5 s de réponse, pour du décor. Or `dsfr-data-chart type="map-reg"` embarque déjà les géométries administratives françaises pour ses cartes choroplèthes.
+
+### Observation
+
+Couche régions de la page Notre-Dame alimentée par `public.opendatasoft.com/…/georef-france-region/records` : 4,3 à 5,5 s selon les essais, 135 Ko.
+
+### Contournement actuel
+
+Charger le jeu externe, en parallèle du reste. Ça n'empêche rien, mais c'est un aller-retour et une dépendance de plus.
+
+### Demande
+
+Exposer les fonds administratifs déjà embarqués (régions, départements) comme couche déclarative de `dsfr-data-map`, par exemple `<dsfr-data-map-layer builtin="regions">`.
