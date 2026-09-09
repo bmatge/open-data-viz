@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 19 demandes — 2 bugs, 17 améliorations.
+> 21 demandes — 2 bugs, 19 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -396,6 +396,34 @@ Un préréglage clair et neutre, souverain de préférence (l'IGN publie un styl
 
 ---
 
+## AM-018 — Les opérateurs de date `year-of` et `month-of` refusent une date complète
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-context-filter`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : rappel-conso.
+
+### Constat
+
+`year-of` n'accepte que « AAAA », `month-of` que « AAAA-MM », `lt-day-after` que « AAAA-MM-JJ ». Un tableau de bord daté (« au 9 septembre : total, année en cours, mois en cours ») a besoin des trois à partir d'une seule date. Un `<input type="date">` ne peut pas les nourrir, et la valeur au mauvais format ne produit ni erreur ni avertissement : `monthRange`/`yearRange` renvoient null, la clause est vide, le filtre est simplement absent. Le compteur « année » affiche alors le total sans que rien ne le signale.
+
+### Observation
+
+Source `dsfr-data-context-filter.ts` : `monthRange` teste `/^(\d{4})-(\d{2})$/`, `yearRange` teste `/^\d{4}$/`, retour null → `buildColonWhere` renvoie ''. En navigateur, avec les champs cachés : `where=date_publication < "2026-09-10" AND date_publication >= "2026-01-01" AND date_publication < "2027-01-01"` sur rc-annee, 2 402 fiches, chiffre égal à la facette date_publication=2026 de l'API.
+
+### Contournement actuel
+
+Deux `<input type="hidden">` (AAAA et AAAA-MM) dérivés de la date par un script de dix lignes, qui dispatche un `change` sur chacun. C'est le seul JavaScript de la page Rappel Conso.
+
+### Demande
+
+—
+
+---
+
 ## AM-009 — `fit-bounds` pourrait clipper automatiquement quand `insets` est déclaré
 
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map`
@@ -533,3 +561,31 @@ Charger le jeu externe, en parallèle du reste. Ça n'empêche rien, mais c'est 
 ### Demande
 
 Exposer les fonds administratifs déjà embarqués (régions, départements) comme couche déclarative de `dsfr-data-map`, par exemple `<dsfr-data-map-layer builtin="regions">`.
+
+---
+
+## AM-019 — Pas de valeur par défaut dynamique (« aujourd'hui ») pour un filtre de contexte
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-context-filter`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : rappel-conso.
+
+### Constat
+
+Un filtre s'applique au montage si son UI est déjà remplie, et `url-sync` sait pré-remplir depuis l'URL. Mais rien ne permet de déclarer « la date du jour » comme valeur initiale d'une entrée : une page statique ne connaît pas la date. Sans script, un tableau de bord « au jour J » s'ouvre soit vide (année et mois montrent le total), soit figé sur une date écrite en dur.
+
+### Observation
+
+Chronométrage en navigateur : les sept requêtes partent à +230 ms, toutes avec la clause de date, aucune requête non filtrée préalable. En retirant le script, les compteurs année et mois affichent 18 581 (le total) au chargement.
+
+### Contournement actuel
+
+Le même script que AM-018 pose `date.value = aujourd'hui` avant le chargement de dsfr-data ; le filtre trouve une UI remplie au montage et s'applique dès la première requête — une seule salve de sept requêtes, sans double fetch.
+
+### Demande
+
+—

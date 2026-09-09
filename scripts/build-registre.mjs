@@ -9,7 +9,10 @@
 //   a-faire        -> reproductible, pas encore traitee
 //   analyse        -> non reproduite, analyse detaillee a la place
 //   hors-perimetre -> la cible n'est pas une page de dataviz du portail ODS
-//   impossible     -> page cible et/ou jeu de donnees source disparus
+//   page-retiree   -> page cible 404, mais le jeu de donnees vit (souvent sous un
+//                     nouvel identifiant) : analyse + reproduction libre possibles
+//   doublon        -> l'entree est absorbee par une autre entree du catalogue
+//   impossible     -> page cible ET jeu de donnees source disparus
 
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +29,8 @@ const LIBELLES = {
   'a-faire': { texte: 'À reproduire', classe: 'fr-badge--info' },
   analyse: { texte: 'Analyse seule', classe: 'fr-badge--new' },
   'hors-perimetre': { texte: 'Hors périmètre', classe: 'fr-badge--grey' },
+  'page-retiree': { texte: 'Page retirée, données vivantes', classe: 'fr-badge--warning' },
+  doublon: { texte: 'Doublon', classe: 'fr-badge--grey' },
   impossible: { texte: 'Source disparue', classe: 'fr-badge--error' }
 };
 
@@ -45,12 +50,14 @@ const STATUTS = {
   '/pages/fiscalite-locale-particuliers/?headless=true': ['a-faire', null, ''],
   '/pages/barometre-france-num/': ['a-faire', null, ''],
 
-  '/pages/comptabilite-etat/': ['impossible', null, 'Page 404 et jeu de données absent du catalogue'],
-  '/pages/signalconso/': ['impossible', null, 'Page 404 (le jeu de données, lui, existe toujours)'],
-  '/pages/rappelconso/': ['impossible', null, 'Page 404 et jeu de données absent du catalogue'],
-  '/pages/annuaire-centres-controles-techniques/': ['impossible', null, 'Page 404, jeux de données absents, accès non public'],
-  '/pages/livre-d-or/': ['impossible', null, 'Page 404'],
-  '/pages/visualisation-liste-des-complements-alimentaires/': ['impossible', null, 'Page servie mais jeu de données supprimé : dataviz vide en production']
+  // Requalifications du 2026-09-09 apres recherche dans le catalogue complet du
+  // portail (619 jeux) : trois des six « sources disparues » ont en fait migre.
+  '/pages/comptabilite-etat/': ['doublon', null, 'Remplacée par « Comptabilité générale de l\'État » (jeu balances_des_comptes_etat, page comptabilite-generale)'],
+  '/pages/signalconso/': ['page-retiree', null, 'Page 404 ; le jeu signalconso vit toujours (1,7 M lignes) et sa description pointe encore vers cette page'],
+  '/pages/rappelconso/': ['reproduite', '/viz/rappel-conso', 'Jeu et page avaient migré ; 7 agrégations serveur, 2 contextes, sélecteur de date'],
+  '/pages/annuaire-centres-controles-techniques/': ['page-retiree', null, 'Page 404 et accès non public ; les jeux vivent sous annuaire-centres-controle-technique et prix-controle-technique'],
+  '/pages/livre-d-or/': ['impossible', null, 'Page 404, aucun jeu de données associé'],
+  '/pages/visualisation-liste-des-complements-alimentaires/': ['impossible', null, 'Page servie mais jeu supprimé : seul survit un jeu « [Obsolète] » à 0 ligne. Dataviz vide en production']
 };
 
 const DEFAUT_HORS_PERIMETRE = 'Cible externe au portail : pas une page de dataviz Opendatasoft';

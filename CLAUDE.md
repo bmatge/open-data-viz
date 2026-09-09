@@ -81,6 +81,9 @@ Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.m
 | Jeu suffixé `@public` | Convention de fédération Opendatasoft : le jeu vit sur `public.opendatasoft.com`, pas sur le portail courant. Sans clé, CORS ouvert. |
 | Deux colonnes pour la même info | Compter les valeurs nulles de chaque candidate avant de choisir (ex. `reg_name` 30 vides / `nom_officiel_region` 3 vides). |
 | `chart.js` en dépendance CDN | Inutile : DSFR Chart 2.1.1 l'embarque. Ne pas le charger. |
+| `display:` de page sur un composant | Une règle sur le nom de balise écrase le `:host` du composant (`dsfr-data-kpi-group` est `grid`). Ne poser `display:block` que sur les composants sans style d'hôte (PG-007). |
+| `year-of` / `month-of` nourris par un `<input type="date">` | Ils lisent « AAAA » et « AAAA-MM » ; une date complète donne un filtre **silencieusement absent**. Dériver deux champs cachés (AM-018). |
+| Un lien 404 dans le catalogue | Ne prouve pas que le jeu a disparu : chercher dans `/api/explore/v2.1/catalog/exports/json` et dans les descriptions des jeux voisins (LIM-004). |
 
 ## Spécifications des composants
 

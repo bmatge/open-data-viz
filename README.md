@@ -102,15 +102,24 @@ node scripts/build-retours.mjs      # -> export/issues-dsfr-data.md + note du va
 
 Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 
-- **5 reproduites** — [catalogue](public/index.html) ·
+- **6 reproduites** — [catalogue](public/index.html) ·
   [DECP augmenté](public/viz/decp-augmente.html) ·
   [Plan de relance](public/viz/plan-de-relance.html) ·
   [Qualité Tourisme](public/viz/qualite-tourisme.html) ·
   [Tourisme & Handicap](public/viz/tourisme-et-handicap.html) ·
-  [Rebâtir Notre-Dame](public/viz/entreprises-restauration-notre-dame.html)
+  [Rebâtir Notre-Dame](public/viz/entreprises-restauration-notre-dame.html) ·
+  [Rappel Conso](public/viz/rappel-conso.html)
 - **8 à reproduire**
 - **8 hors périmètre** (liens sortants vers d'autres sites de l'État)
-- **5 sources disparues** (page 404 et/ou jeu de données supprimé)
+- **2 pages retirées, données vivantes** (Signal Conso, contrôle technique : le jeu existe,
+  parfois sous un nouvel identifiant, mais la page a disparu → analyse à la place)
+- **1 doublon** (Comptes de l'État, absorbé par Comptabilité générale)
+- **1 source disparue** (Compléments alimentaires : page servie, jeu supprimé)
+
+Trois entrées classées « source disparue » au lot 1 ont été requalifiées le 9 septembre après
+recherche dans l'export complet du catalogue (619 jeux) : Rappel Conso avait simplement changé
+d'identifiant de jeu **et** de slug de page. Un lien 404 ne prouve pas que la donnée a disparu
+(LIM-004).
 
 ## Ce que le banc d'essai a trouvé jusqu'ici
 
