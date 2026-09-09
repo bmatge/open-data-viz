@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 31 demandes — 3 bugs, 28 améliorations.
+> 37 demandes — 4 bugs, 33 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -57,6 +57,34 @@ Console navigateur : « Request header field apikey is not allowed by Access-Con
 ### Demande
 
 Appeler `normalizeProviderAuthHeaders` dans l'adaptateur au moment de construire la requête, pas seulement dans l'UI du builder.
+
+---
+
+## BUG-004 — `fit-bounds` + `max-bounds` : la carte ne zoome jamais sur une sélection réduite à un point
+
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-map`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : prix-des-carburants, qualite-tourisme, tourisme-et-handicap, entreprises-restauration-notre-dame, annuaire-services-dgfip, entreprise-patrimoine-vivant, centres-controle-technique, plan-de-relance.
+
+### Constat
+
+Quand `max-bounds` est posé (ce que le CLAUDE.md impose dès qu'un jeu a des DROM), `clipBoundsForFit` intersecte l'emprise des données avec la zone et renvoie null si `south >= north || west >= east`. Une sélection d'un seul point — ou de plusieurs points au même endroit — a une emprise de surface nulle : la condition est vraie, le fit est ignoré, la vue ne bouge pas. Or c'est le résultat le plus courant d'une recherche par commune sur un annuaire. Les trois annuaires du lot 2 sont touchés.
+
+### Observation
+
+Navigateur, page prix-des-carburants avec `fit-bounds max-bounds="41,-5.5,51.5,10"` : facette Occitanie → zoom 7 centré 43.76,2.30 (le fit marche) ; recherche « Montgenèvre » (1 station, layerBounds 6.733,44.934,6.733,44.934) → zoom 5, centre inchangé. Après retrait de `max-bounds` : zoom 18 centré 44.93,6.73. Source : `packages/core/src/components/dsfr-data-map.ts`, `clipBoundsForFit`, `if (south >= north || west >= east) return null`.
+
+### Contournement actuel
+
+Vérifié sur une variante de la page Prix des carburants sans `max-bounds` ni `insets` (le jeu est purement métropolitain : 0 point hors [41–51.5, -6–10]) : Leaflet zoome alors au maximum sur le point. La page retenue garde `max-bounds` par cohérence avec le gabarit ; huit pages sont touchées.
+
+### Demande
+
+—
 
 ---
 
@@ -564,6 +592,90 @@ Signaler, sur le composant ou en console, le nombre de lignes écartées faute d
 
 ---
 
+## AM-029 — Les opérateurs de date `year-of` et `month-of` refusent une date complète
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-context-filter`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : rappel-conso-tableau-de-bord.
+
+### Constat
+
+`year-of` n'accepte que « AAAA », `month-of` que « AAAA-MM », `lt-day-after` que « AAAA-MM-JJ ». Un tableau de bord daté (« au 9 septembre : total, année en cours, mois en cours ») a besoin des trois à partir d'une seule date. Un `<input type="date">` ne peut pas les nourrir, et la valeur au mauvais format ne produit ni erreur ni avertissement : `monthRange`/`yearRange` renvoient null, la clause est vide, le filtre est simplement absent. Le compteur « année » affiche alors le total sans que rien ne le signale.
+
+### Observation
+
+Source `dsfr-data-context-filter.ts` : `monthRange` teste `/^(\d{4})-(\d{2})$/`, `yearRange` teste `/^\d{4}$/`, retour null → `buildColonWhere` renvoie ''. En navigateur, avec les champs cachés : `where=date_publication < "2026-09-10" AND date_publication >= "2026-01-01" AND date_publication < "2027-01-01"` sur rc-annee, 2 402 fiches, chiffre égal à la facette date_publication=2026 de l'API. Page : /viz/rappel-conso-tableau-de-bord (reproduction fidèle de la page vivante /pages/rappel-conso-v2/, variante de /viz/rappelconso).
+
+### Contournement actuel
+
+Deux `<input type="hidden">` (AAAA et AAAA-MM) dérivés de la date par un script de dix lignes, qui dispatche un `change` sur chacun. C'est le seul JavaScript de la page Rappel Conso.
+
+### Demande
+
+—
+
+---
+
+## AM-031 — Les formats de KPI n'ont pas de réglage de décimales : `euro` arrondit à l'unité
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-kpi`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : prix-des-carburants.
+
+### Constat
+
+`format="euro"` passe par `Intl.NumberFormat` avec `maximumFractionDigits: 0` : un prix moyen du gazole s'affiche « 2 € ». `format="decimal"` impose 1 à 2 décimales : « 2,29 » à côté de « 2,1 » (pour 2,10), et la troisième décimale des prix à la pompe est perdue. Aucun attribut ne règle le nombre de décimales ni l'unité.
+
+### Observation
+
+Source `packages/shared/src/utils/formatters.ts` : `formatCurrency` → `minimumFractionDigits: 0, maximumFractionDigits: 0` ; `formatDecimal` → 1 à 2. Navigateur : KPI E10 rendu « 2,1 » quand la moyenne vaut 2,10, Gazole « 2,29 » (API : 2,2942).
+
+### Contournement actuel
+
+`format="decimal"` avec l'unité écrite dans `label` (« € / litre »).
+
+### Demande
+
+—
+
+---
+
+## AM-032 — Les encarts territoriaux n'ont pas de largeur par défaut : ils s'écrasent à la largeur de leur libellé
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-map-inset`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : entreprises-restauration-notre-dame, prix-des-carburants, qualite-tourisme, tourisme-et-handicap.
+
+### Constat
+
+`dsfr-data-map-inset` se pose en `display:inline-block` sans largeur, et la mini-carte interne n'en a pas non plus : chaque encart prend la largeur de son libellé, de 48 px (Guyane) à 77 px (Guadeloupe), pour 160 px de haut. Les trois annuaires du lot 2 vivaient avec depuis leur livraison ; AV-003 (« encarts en un attribut ») a été écrit sans regarder leur rendu de près.
+
+### Observation
+
+`getBoundingClientRect()` des cinq encarts : 77×188, 69×188, 48×188, 70×188, 53×188 sur les pages prix-des-carburants ET qualite-tourisme ; 160×188 chacun après la règle de page.
+
+### Contournement actuel
+
+Règle de page : `dsfr-data-map-inset { width: 10rem; margin: .5rem .5rem 0 0 }`.
+
+### Demande
+
+—
+
+---
+
 ## AM-009 — `fit-bounds` pourrait clipper automatiquement quand `insets` est déclaré
 
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map`
@@ -869,3 +981,59 @@ Aucun de propre. On peut renoncer à la facette, ou pré-traiter la donnée hors
 ### Demande
 
 Documenter un échappement (par exemple `\\|`), ou accepter une écriture alternative du séparateur (`split="champ:pipe"`).
+
+---
+
+## AM-030 — Pas de valeur par défaut dynamique (« aujourd'hui ») pour un filtre de contexte
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-context-filter`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : rappel-conso-tableau-de-bord.
+
+### Constat
+
+Un filtre s'applique au montage si son UI est déjà remplie, et `url-sync` sait pré-remplir depuis l'URL. Mais rien ne permet de déclarer « la date du jour » comme valeur initiale d'une entrée : une page statique ne connaît pas la date. Sans script, un tableau de bord « au jour J » s'ouvre soit vide (année et mois montrent le total), soit figé sur une date écrite en dur.
+
+### Observation
+
+Chronométrage en navigateur : les sept requêtes partent à +230 ms, toutes avec la clause de date, aucune requête non filtrée préalable. En retirant le script, les compteurs année et mois affichent 18 581 (le total) au chargement. Page : /viz/rappel-conso-tableau-de-bord (reproduction fidèle de la page vivante /pages/rappel-conso-v2/, variante de /viz/rappelconso).
+
+### Contournement actuel
+
+Le même script que AM-029 pose `date.value = aujourd'hui` avant le chargement de dsfr-data ; le filtre trouve une UI remplie au montage et s'applique dès la première requête — une seule salve de sept requêtes, sans double fetch.
+
+### Demande
+
+—
+
+---
+
+## AM-033 — Le tableau `dsfr-data-a11y` affiche les flottants bruts
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-a11y`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : prix-des-carburants.
+
+### Constat
+
+Le tableau équivalent sous le graphique des prix par région rend « 2.2665920000000006 » là où le graphique dit 2,27. Un lecteur d'écran lira seize chiffres. Le formateur `fr-FR` existe (il sert au KPI et à `{{champ:number}}` des templates), il n'est pas appliqué ici.
+
+### Observation
+
+Navigateur : `dsfr-data-a11y tbody tr` première ligne « Corse | 2.2665920000000006 | 126 ».
+
+### Contournement actuel
+
+Aucun déclaratif ; arrondir en amont demanderait un `dsfr-data-query` avec une fonction d'arrondi, qui n'existe pas.
+
+### Demande
+
+—

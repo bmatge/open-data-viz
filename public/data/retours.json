@@ -1271,5 +1271,210 @@
     "verifie": "Trois pages en ligne, chiffres contrôlés contre l'API : 1 733 022 / 998 440 transmis / 666 552 réponses ; 18 331 rappels sur 10 catégories ; 6 113 centres sur 18 régions.",
     "statut": "acte",
     "date": "2026-09-09"
+  },
+  {
+    "id": "LIM-006",
+    "titre": "Le catalogue de visualisations du portail contient des liens morts que rien ne signale",
+    "type": "limite-dure",
+    "severite": "moyenne",
+    "composants": [],
+    "dataviz": [
+      "catalogue",
+      "centres-controle-technique",
+      "non-reproduites",
+      "rappelconso",
+      "signalconso"
+    ],
+    "constat": "Six des vingt-six cartes du catalogue officiel mènent à une page 404. Les jeux de données, eux, ont pour moitié survécu sous un autre identifiant : rappelconso0 → rappelconso-v2-gtin-espaces (et la page a migré vers /pages/rappel-conso-v2/), prix-des-controles-techniques-* → annuaire-centres-controle-technique + prix-controle-technique, signalconso intact mais page retirée. Le catalogue étant lui-même un jeu de données édité à la main (interne-contenus-catalogue-visualisations), aucune contrainte d'intégrité ne lie une carte à la page ou au jeu qu'elle désigne. Ce n'est un défaut ni d'Opendatasoft ni de ChartsBuilder : c'est un défaut d'exploitation du portail, que les deux outils héritent à l'identique puisque notre page d'accueil lit le même jeu. (Les trois reconstitutions du lot 6 sont parties du même constat, sans savoir que la page Rappel Conso vivait toujours sous /pages/rappel-conso-v2/.)",
+    "verifie": "Le 2026-09-09 : curl sur les six liens → 404 ; export JSON complet du catalogue (619 jeux) grep en local sur les identifiants et titres ; liens extraits des descriptions des jeux survivants (la description de signalconso pointe encore vers la page 404, celle de rappelconso-v2-gtin-espaces vers /pages/rappel-conso-v2/ qui répond 200).",
+    "contournement": "Côté banc d'essai : registre de statuts requalifié (page-retiree, doublon, a-faire) après recherche systématique, plutôt que de conclure « disparu » sur la seule foi du lien. Côté portail : un contrôle de liens sur le jeu catalogue résoudrait le problème, quel que soit l'outil de dataviz.",
+    "statut": "acte",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "AM-029",
+    "titre": "Les opérateurs de date `year-of` et `month-of` refusent une date complète",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-context-filter"
+    ],
+    "dataviz": [
+      "rappel-conso-tableau-de-bord"
+    ],
+    "constat": "`year-of` n'accepte que « AAAA », `month-of` que « AAAA-MM », `lt-day-after` que « AAAA-MM-JJ ». Un tableau de bord daté (« au 9 septembre : total, année en cours, mois en cours ») a besoin des trois à partir d'une seule date. Un `<input type=\"date\">` ne peut pas les nourrir, et la valeur au mauvais format ne produit ni erreur ni avertissement : `monthRange`/`yearRange` renvoient null, la clause est vide, le filtre est simplement absent. Le compteur « année » affiche alors le total sans que rien ne le signale.",
+    "contournement": "Deux `<input type=\"hidden\">` (AAAA et AAAA-MM) dérivés de la date par un script de dix lignes, qui dispatche un `change` sur chacun. C'est le seul JavaScript de la page Rappel Conso.",
+    "proposition": "Accepter une date ISO complète dans `year-of` et `month-of` (tronquer à 4 ou 7 caractères), et signaler par `reportConfigError` ou `console.warn` une valeur non parsable au lieu de retirer silencieusement le filtre.",
+    "verifie": "Source `dsfr-data-context-filter.ts` : `monthRange` teste `/^(\\d{4})-(\\d{2})$/`, `yearRange` teste `/^\\d{4}$/`, retour null → `buildColonWhere` renvoie ''. En navigateur, avec les champs cachés : `where=date_publication < \"2026-09-10\" AND date_publication >= \"2026-01-01\" AND date_publication < \"2027-01-01\"` sur rc-annee, 2 402 fiches, chiffre égal à la facette date_publication=2026 de l'API. Page : /viz/rappel-conso-tableau-de-bord (reproduction fidèle de la page vivante /pages/rappel-conso-v2/, variante de /viz/rappelconso).",
+    "statut": "a-deposer",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "AM-030",
+    "titre": "Pas de valeur par défaut dynamique (« aujourd'hui ») pour un filtre de contexte",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-context-filter"
+    ],
+    "dataviz": [
+      "rappel-conso-tableau-de-bord"
+    ],
+    "constat": "Un filtre s'applique au montage si son UI est déjà remplie, et `url-sync` sait pré-remplir depuis l'URL. Mais rien ne permet de déclarer « la date du jour » comme valeur initiale d'une entrée : une page statique ne connaît pas la date. Sans script, un tableau de bord « au jour J » s'ouvre soit vide (année et mois montrent le total), soit figé sur une date écrite en dur.",
+    "contournement": "Le même script que AM-029 pose `date.value = aujourd'hui` avant le chargement de dsfr-data ; le filtre trouve une UI remplie au montage et s'applique dès la première requête — une seule salve de sept requêtes, sans double fetch.",
+    "proposition": "Un attribut `default` sur `dsfr-data-context-filter` acceptant des littéraux relatifs (`today`, `first-of-month`, `first-of-year`), appliqué à l'UI au montage puis émis par le chemin habituel — cohérent avec l'esprit de `last-n-days` et `current-year`, qui savent déjà calculer « maintenant » côté clause.",
+    "verifie": "Chronométrage en navigateur : les sept requêtes partent à +230 ms, toutes avec la clause de date, aucune requête non filtrée préalable. En retirant le script, les compteurs année et mois affichent 18 581 (le total) au chargement. Page : /viz/rappel-conso-tableau-de-bord (reproduction fidèle de la page vivante /pages/rappel-conso-v2/, variante de /viz/rappelconso).",
+    "statut": "a-deposer",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "PG-011",
+    "titre": "Un `display` de page sur la balise d'un composant écrase son `:host` — les KPI s'empilaient depuis le lot 1",
+    "type": "piege",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-kpi-group"
+    ],
+    "dataviz": [
+      "decp-augmente",
+      "entreprises-restauration-notre-dame",
+      "qualite-tourisme",
+      "rappelconso",
+      "tourisme-et-handicap"
+    ],
+    "constat": "Notre `site.css` posait `dsfr-data-kpi-group { display: block }` dans une liste de composants à afficher en bloc (les custom elements étant `inline` par défaut). Or le composant déclare `:host { display: grid; grid-template-columns: repeat(12, 1fr) }` dans son shadow DOM, et une règle de la page sur le nom de balise l'emporte toujours sur `:host`. Résultat : les KPI occupaient chacun 100 % de la largeur, en colonne, sur toutes les pages qui en avaient — sans erreur, sans avertissement, et personne ne l'a vu pendant deux lots parce que « ça avait l'air correct ». Ce n'est pas un défaut de la bibliothèque : c'est le comportement normal de la cascade CSS. Mais c'est un piège que tout intégrateur qui « met en bloc » les custom elements tombera dedans.",
+    "contournement": "Ne jamais poser de `display` sur un composant qui gère le sien ; ne le faire que pour ceux qui rendent en light DOM sans style d'hôte. La règle a été retirée, avec un commentaire qui l'interdit.",
+    "verifie": "Avant : `getComputedStyle(kpi).width` = 1 200 px (largeur du conteneur) pour chacun des trois KPI de rappel-conso, `display: inline` sur les enfants. Après retrait de la règle : 389 px chacun sur rappel-conso, 288 px sur qualite-tourisme (trois KPI dans une colonne de 2/3).",
+    "statut": "acte",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "BUG-004",
+    "titre": "`fit-bounds` + `max-bounds` : la carte ne zoome jamais sur une sélection réduite à un point",
+    "type": "bug",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-map"
+    ],
+    "dataviz": [
+      "prix-des-carburants",
+      "qualite-tourisme",
+      "tourisme-et-handicap",
+      "entreprises-restauration-notre-dame",
+      "annuaire-services-dgfip",
+      "entreprise-patrimoine-vivant",
+      "centres-controle-technique",
+      "plan-de-relance"
+    ],
+    "constat": "Quand `max-bounds` est posé (ce que le CLAUDE.md impose dès qu'un jeu a des DROM), `clipBoundsForFit` intersecte l'emprise des données avec la zone et renvoie null si `south >= north || west >= east`. Une sélection d'un seul point — ou de plusieurs points au même endroit — a une emprise de surface nulle : la condition est vraie, le fit est ignoré, la vue ne bouge pas. Or c'est le résultat le plus courant d'une recherche par commune sur un annuaire. Les trois annuaires du lot 2 sont touchés.",
+    "contournement": "Vérifié sur une variante de la page Prix des carburants sans `max-bounds` ni `insets` (le jeu est purement métropolitain : 0 point hors [41–51.5, -6–10]) : Leaflet zoome alors au maximum sur le point. La page retenue garde `max-bounds` par cohérence avec le gabarit ; huit pages sont touchées.",
+    "proposition": "Dans `clipBoundsForFit`, traiter une emprise dégénérée (point ou segment) comme un point : si elle est dans la zone, renvoyer un petit carré autour (ou `setView` au zoom max) au lieu de null. La condition `>=` devrait être `>`.",
+    "verifie": "Navigateur, page prix-des-carburants avec `fit-bounds max-bounds=\"41,-5.5,51.5,10\"` : facette Occitanie → zoom 7 centré 43.76,2.30 (le fit marche) ; recherche « Montgenèvre » (1 station, layerBounds 6.733,44.934,6.733,44.934) → zoom 5, centre inchangé. Après retrait de `max-bounds` : zoom 18 centré 44.93,6.73. Source : `packages/core/src/components/dsfr-data-map.ts`, `clipBoundsForFit`, `if (south >= north || west >= east) return null`.",
+    "statut": "a-deposer",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "PG-012",
+    "titre": "`sort=\"-count\"` sur les facettes trie par compte CROISSANT : la convention est l'inverse d'Opendatasoft",
+    "type": "piege",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-facets"
+    ],
+    "dataviz": [
+      "catalogue",
+      "retours",
+      "annuaire-services-dgfip",
+      "barometre-france-num",
+      "centres-controle-technique",
+      "entreprise-patrimoine-vivant",
+      "entreprises-restauration-notre-dame",
+      "plan-de-relance",
+      "prix-des-carburants",
+      "qualite-tourisme",
+      "tourisme-et-handicap"
+    ],
+    "constat": "Dans `dsfr-data-facets`, `sort=\"count\"` (le défaut) trie du plus fréquent au plus rare, et `sort=\"-count\"` du plus rare au plus fréquent. Chez Opendatasoft (`ods-facet-results-sort`) comme dans la plupart des API, le tiret signifie « décroissant ». En écrivant `-count` pour obtenir « les plus fréquents d'abord », onze de nos pages ont affiché, depuis le lot 1, les valeurs les plus rares en tête — et, avec `max-values=\"6\"`, caché Gazole, Auvergne-Rhône-Alpes ou Bouches-du-Rhône derrière « Voir plus ». Personne ne l'a vu pendant trois lots : les listes avaient l'air correctes, juste « dans un ordre ».",
+    "contournement": "Ne rien écrire (`count` décroissant est le défaut). Retiré sur les onze pages.",
+    "proposition": "Aligner la sémantique sur la convention dominante (`-count` = décroissant) ou, à défaut, l'écrire noir sur blanc dans la fiche du composant, qui liste aujourd'hui « count, -count, alpha, -alpha » sans dire lequel est lequel.",
+    "verifie": "Source `_sortValues` : `case 'count': b.count - a.count` ; `case '-count': a.count - b.count`. Navigateur, facette carburants avec `-count` : GPLc 1494, SP95 2935, E85 3933, SP98 7163 (croissant, Gazole 9531 caché) ; sans attribut : Gazole 9529, E10 7231, SP98 7155, E85 3931.",
+    "statut": "acte",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "PG-013",
+    "titre": "`max-items` d'une couche carte plafonne à 5 000 : la moitié des stations manquaient",
+    "type": "piege",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-map-layer"
+    ],
+    "dataviz": [
+      "prix-des-carburants",
+      "annuaire-services-dgfip",
+      "centres-controle-technique"
+    ],
+    "constat": "Le plafond par défaut d'une couche est de 5 000 éléments. Sur 9 805 stations, la carte n'en dessinait que 5 000 et affichait un bandeau « 5 000 éléments affichés sur 9 805 disponibles. Zoomez pour voir plus de détail » — sauf que zoomer ne charge rien de plus, les données étant déjà là. Le bandeau se répète dans chaque encart territorial (la couche y est clonée) et en recouvre les libellés. Même famille qu'AM-002 (`max-records`) : un plafond utile, mais un défaut trop bas pour un jeu national avec grappes, et un message qui promet un remède qui n'existe pas en mode client. Deux autres pages étaient dans le même cas sans le savoir : l'annuaire DGFiP (21 761 structures chargées, 5 000 dessinées — 77 % manquantes) et les centres de contrôle technique (6 113).",
+    "contournement": "`max-items=\"12000\"` sur la couche. Avec `cluster`, 9 805 points se rendent sans peine.",
+    "verifie": "`getRenderedCount()` = 5000 et 1 bandeau par carte (6 avec les encarts) avant ; 9805 et 0 bandeau après. Sur main : `max-items` posé sur les trois pages ; comptes rendus vérifiés au navigateur après correctif.",
+    "statut": "acte",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "AM-031",
+    "titre": "Les formats de KPI n'ont pas de réglage de décimales : `euro` arrondit à l'unité",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-kpi"
+    ],
+    "dataviz": [
+      "prix-des-carburants"
+    ],
+    "constat": "`format=\"euro\"` passe par `Intl.NumberFormat` avec `maximumFractionDigits: 0` : un prix moyen du gazole s'affiche « 2 € ». `format=\"decimal\"` impose 1 à 2 décimales : « 2,29 » à côté de « 2,1 » (pour 2,10), et la troisième décimale des prix à la pompe est perdue. Aucun attribut ne règle le nombre de décimales ni l'unité.",
+    "contournement": "`format=\"decimal\"` avec l'unité écrite dans `label` (« € / litre »).",
+    "proposition": "Un attribut `decimals` (min = max) et un attribut `unit` (suffixe libre) sur `dsfr-data-kpi`, ou un `format=\"euro:3\"`. `formatCurrency` et `formatDecimal` sont dans `@dsfr-data/shared` : la modification est locale.",
+    "verifie": "Source `packages/shared/src/utils/formatters.ts` : `formatCurrency` → `minimumFractionDigits: 0, maximumFractionDigits: 0` ; `formatDecimal` → 1 à 2. Navigateur : KPI E10 rendu « 2,1 » quand la moyenne vaut 2,10, Gazole « 2,29 » (API : 2,2942).",
+    "statut": "a-deposer",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "AM-032",
+    "titre": "Les encarts territoriaux n'ont pas de largeur par défaut : ils s'écrasent à la largeur de leur libellé",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-map-inset"
+    ],
+    "dataviz": [
+      "entreprises-restauration-notre-dame",
+      "prix-des-carburants",
+      "qualite-tourisme",
+      "tourisme-et-handicap"
+    ],
+    "constat": "`dsfr-data-map-inset` se pose en `display:inline-block` sans largeur, et la mini-carte interne n'en a pas non plus : chaque encart prend la largeur de son libellé, de 48 px (Guyane) à 77 px (Guadeloupe), pour 160 px de haut. Les trois annuaires du lot 2 vivaient avec depuis leur livraison ; AV-003 (« encarts en un attribut ») a été écrit sans regarder leur rendu de près.",
+    "contournement": "Règle de page : `dsfr-data-map-inset { width: 10rem; margin: .5rem .5rem 0 0 }`.",
+    "proposition": "Une largeur par défaut (l'attribut `height` existe déjà, un `width` symétrique suffirait) ou un ratio.",
+    "verifie": "`getBoundingClientRect()` des cinq encarts : 77×188, 69×188, 48×188, 70×188, 53×188 sur les pages prix-des-carburants ET qualite-tourisme ; 160×188 chacun après la règle de page.",
+    "statut": "a-deposer",
+    "date": "2026-09-09"
+  },
+  {
+    "id": "AM-033",
+    "titre": "Le tableau `dsfr-data-a11y` affiche les flottants bruts",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-a11y"
+    ],
+    "dataviz": [
+      "prix-des-carburants"
+    ],
+    "constat": "Le tableau équivalent sous le graphique des prix par région rend « 2.2665920000000006 » là où le graphique dit 2,27. Un lecteur d'écran lira seize chiffres. Le formateur `fr-FR` existe (il sert au KPI et à `{{champ:number}}` des templates), il n'est pas appliqué ici.",
+    "contournement": "Aucun déclaratif ; arrondir en amont demanderait un `dsfr-data-query` avec une fonction d'arrondi, qui n'existe pas.",
+    "proposition": "Formater les nombres du tableau a11y comme le graphique (même locale, mêmes décimales), ou exposer un attribut `decimals`.",
+    "verifie": "Navigateur : `dsfr-data-a11y tbody tr` première ligne « Corse | 2.2665920000000006 | 126 ».",
+    "statut": "a-deposer",
+    "date": "2026-09-09"
   }
 ]
