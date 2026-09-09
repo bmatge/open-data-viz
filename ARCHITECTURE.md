@@ -112,6 +112,10 @@ ci-dessous ne se voient qu'au runtime, et deux ne produisent aucun message.
 | `fit-bounds` seul sur données ultramarines | Vue au milieu du Pacifique. Ajouter `max-bounds` + `insets="drom"`. |
 | Attributs français de `dsfr-data-list` | Dépréciés → `columns` / `search` / `filters` / `sort`. |
 | Pas d'agrégat `distinct` | Intercaler un `dsfr-data-query group-by` et compter ses lignes. |
+| Chargement complet via `/records` | 100 lignes/requête, en série. Passer par `/exports/json`. |
+| `select` incluant un champ texte long | Plus lent que l'export complet. Écarter les textes longs, ou pas de `select` du tout. |
+| Jeu suffixé `@public` | Vit sur `public.opendatasoft.com`, pas sur le portail courant. |
+| `chart.js` en CDN | Inutile : DSFR Chart 2.1.1 l'embarque. |
 
 Deux pièges de données côté portail, à ne pas prendre pour des bugs de reproduction : le champ
 `procedure` de `decp_augmente` contient des doublons d'encodage (« Appel d offres ouvert » *et*

@@ -102,10 +102,13 @@ node scripts/build-retours.mjs      # -> export/issues-dsfr-data.md + note du va
 
 Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 
-- **2 reproduites** — [catalogue](public/index.html) ·
+- **5 reproduites** — [catalogue](public/index.html) ·
   [DECP augmenté](public/viz/decp-augmente.html) ·
-  [Plan de relance](public/viz/plan-de-relance.html)
-- **11 à reproduire**
+  [Plan de relance](public/viz/plan-de-relance.html) ·
+  [Qualité Tourisme](public/viz/qualite-tourisme.html) ·
+  [Tourisme & Handicap](public/viz/tourisme-et-handicap.html) ·
+  [Rebâtir Notre-Dame](public/viz/entreprises-restauration-notre-dame.html)
+- **8 à reproduire**
 - **8 hors périmètre** (liens sortants vers d'autres sites de l'État)
 - **5 sources disparues** (page 404 et/ou jeu de données supprimé)
 

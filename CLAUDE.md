@@ -35,6 +35,10 @@ Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.m
   imputer le coût à `dsfr-data` produit des critiques fausses : c'est arrivé deux fois au
   lot 1 (FP-001 et FP-002 du registre). Chercher l'architecture native **avant** d'écrire
   qu'une chose est impossible.
+- **Chronométrer avant de conclure sur la performance.** Le poids transféré et le nombre
+  d'allers-retours sont deux choses différentes, et c'est presque toujours le second qui
+  coûte. Mesurer la durée de chaque requête ET la concurrence observée avant d'incriminer
+  quoi que ce soit (script type dans l'historique : `perf.mjs`, `chrono.mjs`).
 - **Vérifier au navigateur avant de conclure.** Playwright est disponible via
   `~/Developer/GitHub/dsfr-data/node_modules/playwright` ; charger la page, relever les
   erreurs console et capturer un écran. Une page qui « a l'air correcte » dans le HTML
@@ -42,6 +46,12 @@ Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.m
 - **Dataviz non reproductible** (page 404, jeu de données supprimé, cible hors portail)
   → analyse détaillée à la place, et statut correspondant dans le registre.
 - Après avoir traité une dataviz, trois gestes :
+  0. **Fusionner avant d'ajouter.** Si un constat existe déjà au registre, ne pas créer
+     d'entrée : ajouter la dataviz à son champ `dataviz`, et enrichir le constat de ce que
+     la nouvelle page apprend. Une remarque qui revient sur plusieurs dataviz gagne en
+     poids, pas en nombre d'entrées. Le lot 2 a ainsi requalifié AM-007 (les liens
+     optionnels sont passés du confort à l'accessibilité) et PG-004 (la règle du `select`
+     s'est inversée) sans créer de doublon.
   1. **Consigner les constats** dans `public/data/retours.json` — un objet par constat,
      typé (`faux-probleme`, `bug`, `amelioration`, `limite-dure`, `avantage`, `piege`),
      avec un champ `verifie` décrivant l'observation qui l'établit. **Pas de champ
@@ -66,6 +76,11 @@ Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.m
 | `fit-bounds` seul sur données ultramarines | La vue part au milieu du Pacifique. Ajouter `max-bounds` + `insets="drom"`. |
 | Attributs français de `dsfr-data-list` | `colonnes`/`recherche`/`filtres`/`tri` sont dépréciés → `columns`/`search`/`filters`/`sort`. |
 | Pas d'agrégat `distinct` | Intercaler un `dsfr-data-query group-by="…"` et compter ses lignes avec `value="count"`. |
+| Chargement complet via `/records` | 100 lignes par requête, en série : 31 s pour 3 080 lignes. Passer par `/exports/json` en source générique (`url=` + `params`). |
+| `select` sur un champ texte long | Contre-intuitif : plus lent que l'export complet. Soit on écarte les textes longs par `select`, soit on ne met PAS de `select` du tout. Jamais un `select` qui les inclut. |
+| Jeu suffixé `@public` | Convention de fédération Opendatasoft : le jeu vit sur `public.opendatasoft.com`, pas sur le portail courant. Sans clé, CORS ouvert. |
+| Deux colonnes pour la même info | Compter les valeurs nulles de chaque candidate avant de choisir (ex. `reg_name` 30 vides / `nom_officiel_region` 3 vides). |
+| `chart.js` en dépendance CDN | Inutile : DSFR Chart 2.1.1 l'embarque. Ne pas le charger. |
 
 ## Spécifications des composants
 
