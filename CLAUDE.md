@@ -83,6 +83,10 @@ Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.m
 | `chart.js` en dépendance CDN | Inutile : DSFR Chart 2.1.1 l'embarque. Ne pas le charger. |
 | `display:` de page sur un composant | Une règle sur le nom de balise écrase le `:host` du composant (`dsfr-data-kpi-group` est `grid`). Ne poser `display:block` que sur les composants sans style d'hôte (PG-007). |
 | `year-of` / `month-of` nourris par un `<input type="date">` | Ils lisent « AAAA » et « AAAA-MM » ; une date complète donne un filtre **silencieusement absent**. Dériver deux champs cachés (AM-018). |
+| `sort="-count"` sur `dsfr-data-facets` | Trie par compte **croissant** (inverse d'ODS). Ne rien écrire : `count` décroissant est le défaut (PG-008). |
+| `max-items` d'une couche carte (5 000 par défaut) | Tronque avec un bandeau « zoomez » qui ne charge rien de plus. Le relever dès qu'un jeu dépasse 5 000 points (PG-009). |
+| `fit-bounds` + `max-bounds` sur un seul point | Le clip renvoie vide : pas de zoom. Sans DROM dans le jeu, retirer `max-bounds` et `insets` (BUG-003). |
+| Encarts `insets="drom"` | Pas de largeur par défaut : `site.css` leur donne 10 rem (AM-021). Vérifier qu'il y a des points ultramarins avant d'en poser. |
 | Un lien 404 dans le catalogue | Ne prouve pas que le jeu a disparu : chercher dans `/api/explore/v2.1/catalog/exports/json` et dans les descriptions des jeux voisins (LIM-004). |
 
 ## Spécifications des composants

@@ -102,14 +102,15 @@ node scripts/build-retours.mjs      # -> export/issues-dsfr-data.md + note du va
 
 Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 
-- **6 reproduites** — [catalogue](public/index.html) ·
+- **7 reproduites** — [catalogue](public/index.html) ·
   [DECP augmenté](public/viz/decp-augmente.html) ·
   [Plan de relance](public/viz/plan-de-relance.html) ·
   [Qualité Tourisme](public/viz/qualite-tourisme.html) ·
   [Tourisme & Handicap](public/viz/tourisme-et-handicap.html) ·
   [Rebâtir Notre-Dame](public/viz/entreprises-restauration-notre-dame.html) ·
-  [Rappel Conso](public/viz/rappel-conso.html)
-- **8 à reproduire**
+  [Rappel Conso](public/viz/rappel-conso.html) ·
+  [Prix des carburants](public/viz/prix-des-carburants.html)
+- **7 à reproduire**
 - **8 hors périmètre** (liens sortants vers d'autres sites de l'État)
 - **2 pages retirées, données vivantes** (Signal Conso, contrôle technique : le jeu existe,
   parfois sous un nouvel identifiant, mais la page a disparu → analyse à la place)

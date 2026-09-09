@@ -39,7 +39,7 @@ const STATUTS = {
   '/pages/visualisation-decp-augmente/': ['reproduite', '/viz/decp-augmente', '4 graphiques agrégés côté serveur sur 994 000 lignes'],
   '/pages/dataviz-plan-de-relance': ['reproduite', '/viz/plan-de-relance', 'Carte POI + 2 graphiques + facettes sur un seul fetch'],
 
-  '/pages/dataviz-prix-des-carburants': ['a-faire', null, ''],
+  '/pages/dataviz-prix-des-carburants': ['reproduite', '/viz/prix-des-carburants', 'Gabarit annuaire cartographié ; les prix, absents de l\'original, deviennent visibles'],
   '/pages/entreprise-patrimoine-vivant/': ['a-faire', null, ''],
   '/pages/comptabilite-generale/': ['a-faire', null, ''],
   '/pages/qualite-tourisme/': ['reproduite', '/viz/qualite-tourisme', 'Annuaire cartographié : 1 carte au lieu de 6, facettes cherchables'],
