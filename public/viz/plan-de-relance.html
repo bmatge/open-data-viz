@@ -7,6 +7,9 @@
   <meta name="description" content="Reproduction avec dsfr-data de la dataviz Plan de relance de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.economie.gouv.fr" crossorigin>
+
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
@@ -46,11 +49,18 @@
   <!-- ==========================================================================
        Un seul fetch, puis tout se dérive côté client :
        source -> facettes -> (carte | 2 agrégations -> 2 graphiques | KPI)
+
+       Le fetch passe par /exports/json et non par /records : l'endpoint d'export
+       renvoie les 3 080 lignes EN UNE REQUÊTE, là où /records plafonne à 100 et
+       impose 31 allers-retours séquentiels (mesurés à 29 s de chargement).
+       Le `select` écarte `description_projet`, qui pèse à lui seul 85 % du jeu.
+       Résultat mesuré : 0,6 s et 185 Ko, contre 31 s et 3,4 Mo.
        ========================================================================== -->
 
-  <dsfr-data-source id="pdr" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="plan-de-relance"
-    api-key-ref="ods-mef" max-records="3500">
+  <dsfr-data-source id="pdr"
+    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/plan-de-relance/exports/json"
+    params='{"select":"entreprise, type_entreprise, mesure_light, filiere, nom_region, nom_departement, nom_commune, coordonnees_gps"}'
+    api-key-ref="ods-mef">
   </dsfr-data-source>
 
   <dsfr-data-query id="pdr-region" source="pdr-filtre"
@@ -107,7 +117,10 @@
               <p class="fr-badge fr-badge--sm fr-badge--blue-ecume fr-mb-2v">{{mesure_light}}</p>
               <p class="fr-text--sm fr-mb-1v"><strong>{{nom_commune}}</strong> ({{nom_departement}}, {{nom_region}})</p>
               <p class="fr-text--xs fr-mb-2v">Filière&nbsp;: {{filiere|non renseignée}} — {{type_entreprise}}</p>
-              <p class="fr-text--sm">{{description_projet|Pas de description.}}</p>
+              <p class="fr-text--sm">
+                <a href="https://data.economie.gouv.fr/explore/dataset/plan-de-relance/table/?q={{entreprise}}"
+                   target="_blank" rel="noopener external">Voir la fiche complète du projet sur data.economie.gouv.fr</a>
+              </p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
@@ -161,23 +174,18 @@
             <li><strong>Le modèle «&nbsp;un fetch, N vues&nbsp;».</strong> 3&nbsp;080 lignes tiennent
               en mémoire. Une source, une balise de facettes, et tout l'aval — carte, deux graphiques,
               trois KPI — se recalcule sur la sélection courante sans une seule requête supplémentaire.
-              C'est plus réactif que l'original, qui repart au serveur à chaque clic de facette.
-              <br><strong>C'est un choix, pas une contrainte</strong>, et il mérite d'être posé
-              explicitement&nbsp;: l'API Opendatasoft plafonnant à 100 enregistrements par appel, ce
-              modèle coûte 31 requêtes au chargement. On l'assume ici parce que 3&nbsp;080 lignes
-              s'échangent contre un filtrage instantané sur quatre vues. À un ordre de grandeur
-              au-dessus, il faudrait basculer sur l'autre architecture que la bibliothèque propose —
-              voir ci-contre.</li>
-            <li><strong>L'autre architecture, quand le jeu devient gros.</strong>
-              <code>dsfr-data-map-layer bbox</code> charge la carte par viewport&nbsp;: à chaque
-              déplacement, la couche envoie <code>in_bbox(champ, latSW, lonSW, latNE, lonNE)</code>
-              en ODSQL à sa source, qui ne rapatrie que les points visibles. En parallèle, les
-              graphiques n'ont jamais besoin des lignes&nbsp;: une source par agrégation
-              (<code>select</code> + <code>group-by</code>) coûte une requête chacune, quel que soit
-              le volume — c'est le modèle de la page
-              <a href="/viz/decp-augmente">DECP augmenté</a>, qui tient sur 994&nbsp;123 lignes.
-              Vérifié sur ce jeu de données&nbsp;: 100 enregistrements par déplacement au lieu de
-              3&nbsp;080 au chargement.</li>
+              C'est plus réactif que l'original, qui repart au serveur à chaque clic de facette.</li>
+            <li><strong>Un chargement complet à 0,6&nbsp;s, via <code>/exports/json</code>.</strong>
+              La première version de cette page mettait <strong>31&nbsp;secondes</strong> à s'afficher.
+              Diagnostic&nbsp;: en mode adaptateur, un chargement complet passe par <code>/records</code>,
+              qui plafonne à 100 enregistrements — soit 31 allers-retours <em>strictement séquentiels</em>
+              (concurrence mesurée&nbsp;: 1&nbsp;; 28,9&nbsp;s passées dans les requêtes, 37&nbsp;ms entre
+              elles). Le poids n'y était pour rien&nbsp;: alléger le transfert d'un facteur 3,7 n'a fait
+              gagner aucune seconde. La sortie est ailleurs — Opendatasoft expose
+              <code>/exports/json</code>, qui renvoie le jeu <em>entier</em> en une requête et accepte un
+              <code>select</code>. La source est donc écrite en mode générique&nbsp;:
+              <strong>1 requête, 0,62&nbsp;s, 185&nbsp;Ko</strong> au lieu de 31 requêtes, 31&nbsp;s et
+              3,4&nbsp;Mo. Rien d'autre n'a changé dans la page.</li>
             <li><strong>La carte.</strong> <code>ods-map</code> + <code>ods-map-layer-group</code> +
               <code>ods-map-layer</code> avec ses quinze attributs devient
               <code>dsfr-data-map</code> + <code>dsfr-data-map-layer</code>. Le
@@ -200,6 +208,19 @@
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
+            <li><strong>Le bon endpoint ne se devine pas.</strong> Rien, dans les attributs de
+              <code>dsfr-data-source</code>, ne suggère que le mode adaptateur va enchaîner 31 requêtes
+              là où l'API sait tout renvoyer d'un coup. Il a fallu chronométrer pour le découvrir, et
+              renoncer au mode adaptateur pour y échapper — on y perd la délégation serveur du
+              <code>where</code>, sans conséquence ici puisque toute la page travaille côté client.
+              C'est la demande la plus rentable du registre&nbsp;: que l'adaptateur choisisse
+              <code>/exports/json</code> quand il charge tout (AM-011).</li>
+            <li><strong>Un champ texte long coûte très cher.</strong> <code>description_projet</code>
+              pèse à lui seul 85&nbsp;% du jeu&nbsp;: 1,3&nbsp;Mo avec, 185&nbsp;Ko sans. Il n'était
+              affiché que dans le panneau de détail, une fiche à la fois. Il a donc été retiré de la
+              source, et le panneau renvoie vers la fiche complète sur le portail. Curiosité mesurée au
+              passage&nbsp;: un <code>select</code> <em>incluant</em> la description est plus lent
+              (7,9&nbsp;s) que l'export complet sans <code>select</code> (4,8&nbsp;s).</li>
             <li><strong>Le plafond <code>max-records</code>, silencieux.</strong> Le plafond par
               défaut de l'adaptateur Opendatasoft est de 1&nbsp;000 enregistrements. Sans
               <code>max-records="3500"</code>, cette page afficherait 1&nbsp;000 des 3&nbsp;080
@@ -257,6 +278,7 @@
             <tr><td>fond <code>jawg.light</code></td><td><code>tiles="ign-plan"</code></td><td>Avantage&nbsp;: fond souverain par défaut</td></tr>
             <tr><td>—</td><td><code>insets="drom"</code></td><td>Sans équivalent&nbsp;: gain net</td></tr>
             <tr><td><code>ods-facets</code> (serveur)</td><td><code>dsfr-data-facets</code> (client, par choix)</td><td>Plus réactif&nbsp;; <code>server-facets</code> disponible si besoin</td></tr>
+            <tr><td>contexte ODS paginé à 100</td><td><code>/exports/json</code> en source générique</td><td>1 requête au lieu de 31&nbsp;: 31&nbsp;s → 0,6&nbsp;s</td></tr>
             <tr><td>—</td><td><code>bbox</code> sur la couche</td><td>Chargement par viewport&nbsp;: sans équivalent ici</td></tr>
             <tr><td><code>series-breakdown</code> + <code>stacked</code></td><td><code>group-by</code> à 2 champs + <code>series-field</code></td><td>Équivalent</td></tr>
             <tr><td><code>ods-filter-summary</code></td><td>—</td><td>Manquant avec <code>dsfr-data-facets</code></td></tr>
@@ -278,8 +300,11 @@
           le modèle d'Opendatasoft au lieu de choisir parmi ceux que <code>dsfr-data</code> offre.
           La bibliothèque propose ici <em>trois</em> architectures (tout charger, agréger côté
           serveur, charger par viewport)&nbsp;; se tromper d'architecture n'est pas une limite de
-          l'outil. Ce constat est consigné au <a href="/retours">registre des retours</a> sous
-          FP-002.</p>
+          l'outil. Et la mesure a corrigé la correction&nbsp;: le bon levier pour cette page n'était
+          ni l'agrégation ni le viewport — une carte nationale a besoin de ses 3&nbsp;080 points —
+          mais un endpoint que je n'avais pas regardé. <strong>Chronométrer avant de conclure&nbsp;:
+          le poids ne coûtait rien, les allers-retours coûtaient tout.</strong> Consigné au
+          <a href="/retours">registre des retours</a> sous FP-002, AM-011 et PG-004.</p>
       </div>
     </div>
   </section>
@@ -289,7 +314,6 @@
 <div id="site-footer"></div>
 
 <script src="/assets/layout.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
 <!-- bundle complet (ESM) : la cartographie charge Leaflet en import dynamique -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.20.0/dist/dsfr-data.esm.js"></script>

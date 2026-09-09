@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 12 demandes — 2 bugs, 10 améliorations.
+> 14 demandes — 2 bugs, 12 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -113,6 +113,34 @@ Fixer `max-records` explicitement dès qu'un jeu peut dépasser 1 000 lignes —
 ### Demande
 
 Un avertissement console systématique quand la troncature est effective (un `console.warn` existe mais dépend d'un `total_count` que l'API ne fournit pas toujours — voir BUG-001), et idéalement un état visible sur le composant.
+
+---
+
+## AM-011 — L'adaptateur Opendatasoft devrait charger par `/exports/json`, pas par 31 requêtes paginées
+
+**Labels suggérés** : `enhancement`, `severity:haute`, `opendatasoft-adapter`, `dsfr-data-source`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : plan-de-relance.
+
+### Constat
+
+En mode adaptateur, un chargement complet passe par `/records` avec `limit=100` et un `offset` croissant : la boucle de `fetchAll` est strictement séquentielle (packages/core/src/adapters/opendatasoft-adapter.ts:121). Pour 3 080 lignes, cela fait 31 allers-retours l'un après l'autre. Or Opendatasoft expose `/exports/json`, qui renvoie le jeu entier en une requête, accepte `select`, et répond en CORS `*`.
+
+### Observation
+
+Chronométrage en navigateur sur la même page : 31 requêtes, concurrence maximale 1, durée moyenne 931 ms (max 3 721 ms — la pagination profonde se dégrade), 28,9 s passées dans les requêtes contre 37 ms entre elles. Le poids n'y est pour rien : un `select` divisant le transfert par 3,7 n'a fait gagner aucune seconde. La même page basculée sur `/exports/json` : 1 requête, 0,62 s, 185 Ko.
+
+### Contournement actuel
+
+Écrire la source en mode générique (`url=` vers `/exports/json` + `params` pour le `select`) au lieu du mode adaptateur. On y perd la délégation serveur du `where`/`order-by` — sans conséquence quand toute la page travaille côté client.
+
+### Demande
+
+Quand la source demande un chargement complet (pas de `server-side`, pas de pagination), utiliser `/exports/json` plutôt que la boucle sur `/records`. À défaut, paralléliser les pages une fois `total_count` connu : 8 requêtes concurrentes prennent 0,44 s contre 2,4 s en série.
 
 ---
 
@@ -253,6 +281,34 @@ Poser un `where` initial sur la source, ou accepter un premier rendu approximati
 ### Demande
 
 Émettre la commande bbox une fois la carte prête, avant ou à la place du premier fetch de la source.
+
+---
+
+## AM-012 — La recette CDN recommandée charge Chart.js pour rien
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `skills`, `documentation`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : decp-augmente, plan-de-relance, synthese, retours.
+
+### Constat
+
+La skill `compositionPatterns` prescrit six dépendances CDN « dans cet ordre exact », dont `chart.js@4.4.1` avant `@gouvfr/dsfr-chart@2.1.1`. Or DSFR Chart 2.1.1 embarque déjà Chart.js : le script séparé pèse 201 Ko et ne sert à rien.
+
+### Observation
+
+Les quatre pages du dépôt privées de `chart.umd.min.js` : les huit graphiques (barres, barres horizontales, camemberts) se dessinent tous — vérifié en lisant les pixels du canvas, pas seulement la présence de la balise. `window.Chart` est `undefined`, donc rien d'autre ne s'appuyait sur la variable globale.
+
+### Contournement actuel
+
+Retirer la ligne. 201 Ko économisés par page.
+
+### Demande
+
+Corriger la recette CDN de la skill : retirer `chart.js`, ou préciser dans quel cas il reste nécessaire.
 
 ---
 
