@@ -118,12 +118,25 @@ Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 - **4 analyses détaillées** au lieu d'une reproduction —
   [Formations France Num](public/viz/formations-france-num.html) (jeu à zéro enregistrement) et
   [l'inventaire des entrées non reproduites](public/viz/non-reproduites.html)
-- **11 hors périmètre** (liens sortants vers d'autres sites de l'État)
+- **6 entrées « hors périmètre » reproduites quand même** (lot 8) — leur lien sort du portail, mais
+  leur donnée y est : [Fermeture du réseau cuivre](public/viz/fermeture-reseau-cuivre.html) ·
+  [Aides de minimis](public/viz/aides-de-minimis.html) (page Studio) ·
+  [Impôt sur le revenu](public/viz/impot-sur-le-revenu.html) ·
+  [BOFiP](public/viz/bofip.html) · [Aide publique au développement](public/viz/aide-publique-developpement.html) ·
+  [Prix des contrôles techniques](public/viz/prix-controle-technique.html)
+- **3 renvois** vers des pages déjà reproduites (France Bleu et prix-carburants.gouv.fr → Prix des
+  carburants ; Label EPV → Entreprises du patrimoine vivant)
+- **1 analyse de plus** : [OFGL](public/viz/ofgl.html), un atelier de cartes sur des agrégats qui ne
+  sont pas ceux du portail
+- **1 seule entrée réellement hors périmètre** : la Charte Open Data, un document sans jeu de données
 - **0 à reproduire**
 
-Les trois dernières reproductions sont des **reconstitutions** : leur page officielle renvoie une
-404 et leur identifiant de jeu est périmé, mais la donnée existe toujours — parfois mise à jour le
-jour même — sous un autre nom.
+Au total : **24 entrées reproduites, 5 analyses, 1 hors périmètre** sur 30.
+
+Les trois reconstitutions du lot 6 (Signal Conso, Rappel Conso, contrôle technique) ont une page
+officielle en 404 et un identifiant de jeu périmé, mais la donnée existe toujours — parfois mise à
+jour le jour même — sous un autre nom. Rappel Conso a en plus une variante fidèle à sa page vivante,
+retrouvée sous un nouveau slug.
 
 ## Ce que le banc d'essai a trouvé jusqu'ici
 

@@ -87,7 +87,10 @@ Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.m
 | `fit-bounds` + `max-bounds` sur un seul point | Le clip renvoie vide : pas de zoom. Sans DROM dans le jeu, retirer `max-bounds` et `insets` (BUG-004). |
 | Encarts `insets="drom"` | Pas de largeur par défaut : `site.css` leur donne 10 rem (AM-032). Vérifier qu'il y a des points ultramarins avant d'en poser. |
 | `year-of` / `month-of` nourris par un `<input type="date">` | Ils lisent « AAAA » et « AAAA-MM » ; une date complète donne un filtre **silencieusement absent**. Dériver deux champs cachés (AM-029). |
-| Un lien 404 dans le catalogue | Ne prouve pas que le jeu a disparu : chercher dans `/api/explore/v2.1/catalog/exports/json` et dans les descriptions des jeux voisins, qui pointent souvent la page vivante (LIM-006). |
+| `group-by` avec une fonction ODSQL (`year(…)`) | L'adaptateur l'entoure d'accents graves → 400. Source générique (`url` + `params`), qui n'écoute plus le contexte (PG-014). |
+| `replace-fields` sur une valeur ISO | Deux-points réservés par la grammaire, comparaison stricte : impossible. Pas de regex (AM-038). |
+| Jeu sans facette déclarée au back-office | `server-facets` rend une liste vide (`/facets` vide). Filtres en `<select>` + contexte (ex. prix-controle-technique). |
+| Un lien 404 ou « hors périmètre » dans le catalogue | Ne prouve ni que le jeu a disparu ni que la dataviz est irreproductible : le champ `datasets` de l'entrée dit ce qu'il faut ; 10 des 11 « hors périmètre » ont été traités au lot 8. Ne prouve pas que le jeu a disparu : chercher dans `/api/explore/v2.1/catalog/exports/json` et dans les descriptions des jeux voisins, qui pointent souvent la page vivante (LIM-006). |
 
 ## Spécifications des composants
 

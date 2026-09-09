@@ -5,6 +5,13 @@
 - **Jeu** : `etablissements-labellises-tourisme-et-handicap` — **3 708 lignes**, public, 50 champs (dont `activite`, `handicaps_attribues` multivalué `;`, `handicap_auditif/mental/moteur/visuel`, `date_du_classement`, `note_moyenne_nationale`, `note_moyenne_regionale`, `organisme_evaluateur`, `relai_local`, `filiere`, `autres_labels`… **non affichés** par la page).
 - **Relevé visuel** : 2026-09-09.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Quels établissements touristiques sont labellisés accessibles pour *mon* handicap (moteur, visuel, auditif, mental) ? » Annuaire de recherche pour les personnes en situation de handicap et leurs proches.
+- **Message porté** : le label couvre les quatre familles de handicap, sur tout le territoire (DROM inclus) et tous les types d'activité (22) ; le filtre **Handicap** est la raison d'être de la page par rapport à Qualité Tourisme.
+- **Information que l'utilisateur doit obtenir** : pour un établissement, les handicaps couverts (pictos), l'activité, l'adresse, les contacts, le site ; le compteur global (3 708) et le nombre par handicap (MENTAL 3 311 · AUDITIF 3 174 · MOTEUR 2 893 · VISUEL 2 696).
+- **Ce que le jeu contient mais que la page tait** : dates de classement, notes moyennes, organisme évaluateur, avis de commission. L'original choisit de ne pas les montrer ; les ajouter changerait le positionnement (annuaire, pas évaluation).
+
 ## Différences avec Qualité Tourisme (tout le reste est identique)
 
 1. **En-tête** : H1 « Tourisme et Handicap » sans logo ; paragraphe « Le label Tourisme & Handicap contribue à mieux répondre aux besoins des personnes en situation de handicap, quel que soit le handicap : moteur, visuel, auditif et mental, afin de permettre à chacun de choisir ses vacances et ses loisirs en toute liberté. » puis lien « En savoir plus ↗ ». Pas de lien « nos données ».

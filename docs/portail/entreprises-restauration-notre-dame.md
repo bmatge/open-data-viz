@@ -6,6 +6,13 @@
 - Champs : `id, entreprise, siret, siren, epv, categories_de_metiers, etablissement_* (adresse éclatée), indiquez_l_adresse_de_votre_site_internet, presentez_brievement_votre_entreprise_et_votre_activite, presentez_brievement_votre_intervention_sur_le_chantier_de_notre_dame_de_paris, indiquez_le_s_credit_s_des_photos_deposees, est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public, indiquez_le_lien_ci_apres_pour_les_conditions_de_visite, adresse_complete, images, coordonnees_manuelle, nom_officiel_region, geo_point, reg_name`.
 - **Relevé visuel** : 2026-09-09.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Qui a reconstruit Notre-Dame, avec quel savoir-faire, et peut-on visiter ces ateliers ? » Page de **valorisation** (DGE + établissement public Rebâtir Notre-Dame) : mettre en lumière des entreprises et des métiers, susciter des vocations (paragraphe sur le recrutement et la formation des jeunes).
+- **Message porté** : l'excellence française est répartie sur tout le territoire (carte, régions teintées, 30 entreprises hors de France) et couvre quatre familles de métiers (art et patrimoine 103, accompagnement 54, pilotage 48, bâtiment 20) ; l'ampleur humaine (« + 3 000 compagnons et artisans », chiffre éditorial) ; l'ouverture au public (61 entreprises visitables, 28 labellisées EPV).
+- **Information que l'utilisateur doit obtenir** : pour une entreprise, son rôle précis sur le chantier (paragraphe dédié), son activité, sa catégorie, son adresse, son site, si elle se visite et comment réserver, et **ses photos** (la galerie est le support émotionnel de la page).
+- **Registre** : storytelling institutionnel autant que dataviz ; les sections éditoriales (établissement public, « En savoir plus ») font partie du message.
+
 ## Structure (de haut en bas)
 
 1. **H1** « Les entreprises à l'œuvre pour la restauration de Notre-Dame de Paris » + 4 paragraphes éditoriaux (incendie du 15 avril 2019, réouverture le 8 décembre 2024, DGE + établissement public Rebâtir Notre-Dame de Paris, « Cette cartographie a vocation à évoluer… ») avec deux liens externes ; flèche courbe vers les filtres.

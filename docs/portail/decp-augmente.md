@@ -5,6 +5,13 @@
 - **Jeu** : `decp_augmente` — **994 123 lignes** (au 2026-09-09).
 - **Relevé visuel** : 2026-09-09. Gabarit « catalogue » (fil d'Ariane, H1, encadré « Les jeux de données utilisés » → `decp_augmente`) puis une grande carte DSFR : badge « **994 123 enregistrements** », colonne de facettes à gauche (250 px), 4 graphiques à droite. Aucune carte géographique.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « D'où viennent les données essentielles de la commande publique collectées, et comment se répartissent les marchés par nature et par procédure ? » Page de **contrôle de collecte** (DAJ) autant que de statistique : le premier graphique porte sur la *source* des données (AWS-Achat, API AIFE, PES Marchés, Dematis…), pas sur les marchés eux-mêmes.
+- **Message porté** : l'ampleur (994 123 lignes), la prédominance des marchés (599 071) et accords-cadres (349 117), de la procédure adaptée (579 644) et des appels d'offres ouverts ; la multiplicité des canaux de collecte.
+- **Information que l'utilisateur doit obtenir** : les quatre répartitions (source, nature ×2, procédure) et la capacité de les restreindre par facette (source, forme de prix, nature, procédure, année de notification, objet, acheteur). Aucun montant, aucune série temporelle : pas de lecture financière.
+- **Qualité de données visible** : doublons de libellés et mojibake dans `procedure` ; l'original les montre tels quels. Une reproduction fidèle les montre aussi (ou les signale), elle ne les fusionne pas silencieusement.
+
 ## Facettes (`ods-facets` automatique : toutes les facettes du jeu, 6 valeurs + « › Plus »)
 - **source** : AWS-Achat 347 055 · API AIFE 284 714 · PES Marchés 245 179 · Dematis 71 276 · Megalis Bretagne 34 363 · Territoires numériques BFC 10 873 · (Plus : Grand Lyon 264).
 - **formePrix** : Révisable 496 879 · Ferme 282 094 · Ferme et actualisable 196 281 · Ferme actualisable 28 · Non disponible 1.

@@ -5,6 +5,14 @@
 - **Jeux de données affichés dans l'encadré « Les jeux de données utilisés »** : `interne-test-discussions` (lien mort / jeu interne, ne sert à rien dans la page), `prix-des-carburants-en-france-flux-instantane-v2` (le seul jeu réellement utilisé).
 - **Relevé visuel** : 2026-09-09, Chrome, viewport 1440 px.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Où trouver, près de chez moi, une station qui a *ce* carburant, et à quel prix ? » Usage grand public, orienté recherche locale (commune, département), pas analyse.
+- **Message porté** : la disponibilité (et l'indisponibilité, filtre à part entière) autant que le prix ; la fraîcheur de l'information (chaque prix est daté à l'heure près dans l'infobulle ; la carte est « mise à jour en temps réel » selon le catalogue).
+- **Information que l'utilisateur doit obtenir** : pour une station donnée, les 6 prix (Gazole, SP95-E10, E85, SP98, SP95, GPLc) avec leur date, l'adresse, les services et l'automate 24/24 ; et une idée du nombre de stations correspondant à ses critères (« 126 parmi 9 805 »).
+- **Ce que l'original ne cherche pas à dire** : aucune comparaison de prix (pas de moyenne, min, max, ni de classement) ; ce n'est pas un comparateur, c'est un localisateur. Une reproduction qui ajouterait des statistiques changerait l'objet.
+- **Public** : automobilistes ; l'entrée principale est la commune (champ en tête de colonne, autofocus).
+
 ## Structure de la page (de haut en bas)
 
 1. Fil d'Ariane « Catalogue des visualisations / Prix des carburants ».

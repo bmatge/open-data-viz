@@ -5,6 +5,13 @@
 - **Jeu** : `etablissements-labellises-qualite-tourisme` — 3 604 lignes, public. Champs : `docid, nom_du_professionnel, partenaires, activite_du_professionnel, ville, code_postal_du_professionnel, site_web, adresse, telephone, email_de_l_etablissement, questionnaire_de_satisfaction, coordonnees_geographiques, region, departement` (146 lignes sans département).
 - **Relevé visuel** : 2026-09-09.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Quels établissements touristiques portent la marque Qualité Tourisme™ près de là où je vais, et comment les contacter ? » Annuaire de recherche grand public.
+- **Message porté** : la marque est une garantie d'État sur l'accueil (texte d'intro), présente partout, y compris outre-mer (recentrages Martinique, Guadeloupe, Guyane, La Réunion, Mayotte) et dans tous les types d'activité (28).
+- **Information que l'utilisateur doit obtenir** : un établissement identifié (nom, activité, ville, CP), puis sa fiche (adresse complète, département/région, site, téléphone, e-mail) et la possibilité de **donner son avis** (lien questionnaire de satisfaction, spécifique à cette marque). Le compteur global (3 604) sert de preuve d'ampleur.
+- **Ce qui n'est pas dans l'objet** : aucune note, aucun classement, aucune statistique par activité ou territoire ; c'est une liste qualifiée, pas une analyse.
+
 ## Page principale
 
 1. **En-tête** : logo « Qualité Tourisme » + H1 « Qualité Tourisme ». Deux paragraphes : « La marque Qualité Tourisme™ est la seule marque d'État attribuée aux professionnels du tourisme pour la qualité de leur accueil et de leurs prestations. » puis « Découvrez *nos données* ↗ (lien vers `/explore/dataset/etablissements-labellises-qualite-tourisme`) ainsi que les établissements labellisés. *En savoir plus* ↗ (atout-france.fr/fr/qualite-tourisme) ».
@@ -16,7 +23,7 @@
    - Bouton bleu **Rechercher** : c'est lui qui applique les filtres (les selects ne filtrent pas à la volée : ils remplissent `params.search`, le bouton copie dans `ctx.parameters`). Les facettes des selects sont calculées sur un contexte `ctxsearch` séparé (elles se restreignent mutuellement, pas par le résultat affiché).
    - Un lien de réinitialisation (« Nouvelle recherche ») remet tout à zéro. L'URL est synchronisée avec les filtres (`ctxurl-urlsync`).
 3. **Compteur** H4 bleu « **3604** établissements labellisés » (COUNT du contexte filtré) et, à droite, un **select « Vue carte / Vue liste »** (Vue carte par défaut).
-4. **Vue carte** : une carte Leaflet pleine largeur (≈ 600 px), fond Huwise/diplomatie, une couche `#000091` en clusters numérotés (au chargement : 442, 317, 281, 238, 795, 704, 201, 178, 164, 23 en Corse…). **Infobulle au clic** = une `fr-card` : tag « <activité> » avec icône gobelet, titre bleu = nom, « VILLE - CP », bouton secondaire « Voir la fiche » vers la page de détail. Sous la carte, bandeau bleu pâle « **Centrer la carte sur :** » avec 6 boutons : France Métropolitaine (actif, plein) / Martinique / Guadeloupe / Guyane / La Réunion / Mayotte — chaque bouton remplace la carte par une autre `ods-map` (six `ng-if`) centrée sur le territoire.
+4. **Vue carte** : une carte Leaflet pleine largeur (≈ 600 px), fond Huwise/diplomatie, une couche `#000091` en clusters numérotés (au chargement : 442, 317, 281, 238, 795, 704, 201, 178, 164, 23 en Corse…). **Infobulle au clic** = une `fr-card` : tag « <activité> » avec icône gobelet, titre bleu = nom, « VILLE - CP », bouton secondaire « Voir la fiche » vers la page de détail. Sous la carte, bandeau bleu pâle « **Centrer la carte sur :** » avec 6 boutons : France Métropolitaine (actif, plein) / Martinique / Guadeloupe / Guyane / La Réunion / Mayotte — chaque bouton remplace la carte par une autre `ods-map` (six `ng-if`) centrée sur le territoire. **Observé** : La Réunion → plusieurs dizaines d'épingles individuelles (échelle 50 km) ; **Mayotte → carte vide** (échelle 20 km, aucun établissement labellisé) : le bouton existe mais ne montre rien.
 5. **Vue liste** : grille de **12 cartes DSFR par page** (4 colonnes) : tag violet clair « <activité> », titre en gras (nom du professionnel, casse d'origine, souvent MAJUSCULES), « VILLE - CP ». Chaque carte est un lien vers la fiche. **Pagination** en bas : « 1 2 3 4 5 6 7 8 >> » (8 numéros visibles, 301 pages en tout). Ordre = ordre du jeu (pas de tri exposé).
 
 ## Page de détail « Fiche établissement »

@@ -5,6 +5,13 @@
 - **Jeu** : `rappelconso-v2-gtin-espaces` (18 573 rappels au 2026-09-09 ; champs de la fiche RappelConso : `categorie_produit`, `sous_categorie_produit`, `nature_juridique_rappel`, `modalites_de_compensation`, `date_publication`, …).
 - **Relevé visuel** : 2026-09-09.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Combien de rappels de produits, de quels types, et sous quelle forme (obligatoire ou volontaire, remboursement ou échange), à une date donnée ? » Tableau de bord de **suivi statistique** du dispositif RappelConso (DGCCRF), pas un outil de recherche de produit rappelé.
+- **Message porté** : le volume (18 573 depuis mars 2021, 2 394 sur l'année, 90 sur le mois), la prédominance de l'alimentaire (et, en sous-catégories, lait/produits laitiers, viandes), le caractère majoritairement volontaire des rappels (87 %) et la compensation dominante (remboursement 85 %).
+- **Information que l'utilisateur doit obtenir** : les 3 compteurs à la date choisie, les répartitions par catégorie et sous-catégorie (top 20), par nature juridique et par modalité de compensation, éventuellement restreintes à une catégorie ; le lien vers le jeu pour la recherche unitaire.
+- **Le sélecteur de date** n'est pas un filtre parmi d'autres : il permet de « rejouer » le tableau de bord à une date passée (le titre change), ce qui est l'usage attendu d'un bulletin mensuel.
+
 ## Structure
 
 1. **H1 centré dynamique** : « Tableau de bord Rappel Conso de **septembre 2026** » (mois/année de la date sélectionnée, par défaut aujourd'hui).
