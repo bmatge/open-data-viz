@@ -5,7 +5,8 @@ Banc d'essai : reproduire le catalogue de visualisations de **data.economie.gouv
 ce qui a été simple ou coûteux.
 
 Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.md`
-(couplages non-évidents du repo — [[ADR-053]]).
+(couplages non-évidents du repo — [[ADR-053]]). **Avant de toucher une page, lire sa fiche
+d'audit visuel dans `docs/portail/`** : c'est la référence de fidélité des données.
 
 ## Décisions de cadrage (arrêtées en session d'ouverture, 2026-09-09)
 
@@ -90,6 +91,11 @@ Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.m
 | `group-by` avec une fonction ODSQL (`year(…)`) | L'adaptateur l'entoure d'accents graves → 400. Source générique (`url` + `params`), qui n'écoute plus le contexte (PG-014). |
 | `replace-fields` sur une valeur ISO | Deux-points réservés par la grammaire, comparaison stricte : impossible. Pas de regex (AM-038). |
 | Jeu sans facette déclarée au back-office | `server-facets` rend une liste vide (`/facets` vide). Filtres en `<select>` + contexte (ex. prix-controle-technique). |
+| KPI `count` sur une `dsfr-data-query limit` | Compte la limite, pas la donnée. Une query sans `limit` pour le KPI (PG-017). |
+| Groupe `null` d'un `group_by` (serveur ou client) | Barre sans libellé, compte décalé de l'original. `where champ is not null` / `champ:isnotnull` (PG-015, PG-018). |
+| Date dans un template | Pas de format `:date`, mais `date_format(champ, "dd/MM/yyyy 'à' HH:mm") as champ_txt` + `timezone=Europe/Paris` dans le `select` ODS fait le travail (FP-003). |
+| Conditionnelle dans un template | Aucune ; interpoler la valeur dans un attribut (`class`, `href`, `data-v`) et masquer par CSS `:empty`, `[href=""]`, `:has()` (AM-039, bloc « Annuaires » de `site.css`). |
+| Reproduire sans avoir lu `docs/portail/<page>.md` | Trois chiffres faux et deux mauvais jeux au lot 9. Lire la fiche d'audit ET le `$scope.blocks` avant d'écrire. |
 | Un lien 404 ou « hors périmètre » dans le catalogue | Ne prouve ni que le jeu a disparu ni que la dataviz est irreproductible : le champ `datasets` de l'entrée dit ce qu'il faut ; 10 des 11 « hors périmètre » ont été traités au lot 8. Ne prouve pas que le jeu a disparu : chercher dans `/api/explore/v2.1/catalog/exports/json` et dans les descriptions des jeux voisins, qui pointent souvent la page vivante (LIM-006). |
 
 ## Spécifications des composants

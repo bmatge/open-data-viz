@@ -53,7 +53,7 @@
 
   <dsfr-data-source id="qt"
     url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/etablissements-labellises-qualite-tourisme/exports/json"
-    params='{"select":"nom_du_professionnel, activite_du_professionnel, ville, code_postal_du_professionnel, adresse, site_web, telephone, region, departement, coordonnees_geographiques"}'
+    params='{"select":"nom_du_professionnel, activite_du_professionnel, ville, code_postal_du_professionnel, adresse, site_web, telephone, email_de_l_etablissement, questionnaire_de_satisfaction, region, departement, coordonnees_geographiques"}'
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
@@ -61,8 +61,17 @@
     aggregate="nom_du_professionnel:count:nb" order-by="nb:desc" limit="12">
   </dsfr-data-query>
 
-  <dsfr-data-query id="qt-departements" source="qt-f" group-by="departement"
+  <!-- Même regroupement sans `limit` : le KPI « activités représentées » comptait
+       les lignes de la requête limitée à 12 — il affichait 12 quel que soit le
+       filtre (relecture face au relevé du portail : 28 activités). -->
+  <dsfr-data-query id="qt-activites-toutes" source="qt-f" group-by="activite_du_professionnel"
     aggregate="nom_du_professionnel:count:nb">
+  </dsfr-data-query>
+
+  <!-- `where` : 146 lignes sans département formaient un groupe « null » compté
+       comme un 100e département. -->
+  <dsfr-data-query id="qt-departements" source="qt-f" group-by="departement"
+    where="departement:isnotnull" aggregate="nom_du_professionnel:count:nb">
   </dsfr-data-query>
 
   <div class="fr-container fr-mb-8w">
@@ -71,8 +80,8 @@
       <div class="odv-filtres">
         <h2 class="fr-h6">Rechercher et filtrer</h2>
         <dsfr-data-search id="qt-q" source="qt"
-          fields="nom_du_professionnel, ville, adresse, activite_du_professionnel"
-          label="Rechercher un établissement" placeholder="Nom, commune, activité…"
+          fields="nom_du_professionnel, ville, code_postal_du_professionnel, adresse, activite_du_professionnel"
+          label="Rechercher un établissement" placeholder="Nom, commune, code postal, activité…"
           operator="words" count>
         </dsfr-data-search>
 
@@ -87,7 +96,7 @@
         <dsfr-data-kpi-group class="fr-mb-4w">
           <dsfr-data-kpi source="qt-f" value="count" format="nombre"
             heading="Sélection courante" label="établissements labellisés" col="4"></dsfr-data-kpi>
-          <dsfr-data-kpi source="qt-activites" value="count" format="nombre"
+          <dsfr-data-kpi source="qt-activites-toutes" value="count" format="nombre"
             heading="Diversité" label="activités représentées" col="4"></dsfr-data-kpi>
           <dsfr-data-kpi source="qt-departements" value="count" format="nombre"
             heading="Couverture" label="départements couverts" col="4"></dsfr-data-kpi>
@@ -101,13 +110,18 @@
             geo-field="coordonnees_geographiques" color="#000091"
             tooltip-field="nom_du_professionnel" cluster>
           </dsfr-data-map-layer>
-          <dsfr-data-map-popup mode="panel-right" title-field="nom_du_professionnel" width="360px">
+          <dsfr-data-map-popup mode="panel-right" title-field="nom_du_professionnel" width="380px">
             <template>
               <p class="fr-badge fr-badge--sm fr-badge--blue-ecume fr-mb-2v">{{activite_du_professionnel|Activité non précisée}}</p>
               <p class="fr-text--sm fr-mb-1v">{{adresse|}}</p>
-              <p class="fr-text--sm fr-mb-2v"><strong>{{code_postal_du_professionnel}} {{ville}}</strong> — {{departement}}, {{region}}</p>
-              <p class="fr-text--xs fr-mb-1v">Téléphone&nbsp;: {{telephone|non renseigné}}</p>
-              <p class="fr-text--xs">Site&nbsp;: {{site_web|non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-2v"><strong>{{code_postal_du_professionnel}} {{ville}}</strong> — {{departement|département non renseigné}}, {{region|}}</p>
+              <p class="fr-text--xs fr-mb-1v odv-rubrique" data-intitule="Téléphone">{{telephone|}}</p>
+              <p class="fr-text--xs fr-mb-1v odv-rubrique" data-intitule="Courriel"><a href="mailto:{{email_de_l_etablissement}}">{{email_de_l_etablissement}}</a></p>
+              <p class="fr-text--xs fr-mb-2v odv-rubrique" data-intitule="Site"><a class="odv-lien" href="{{site_web|}}" target="_blank" rel="noopener external">{{site_web|}}</a></p>
+              <p class="fr-mb-0">
+                <a class="fr-btn fr-btn--sm fr-btn--secondary fr-btn--icon-left fr-icon-survey-line"
+                   href="{{questionnaire_de_satisfaction}}" target="_blank" rel="noopener external">Donner son avis</a>
+              </p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
@@ -192,18 +206,42 @@
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Les liens optionnels.</strong> <code>site_web</code> est vide pour une partie
-              des établissements. Faute de conditionnelle dans les templates, un
-              <code>&lt;a href="{{site_web}}"&gt;</code> produirait un lien vide — qui pointe vers la
-              page courante, et qu'un lecteur d'écran annonce comme un lien valide. L'URL est donc
-              affichée en texte plutôt qu'en lien. C'est le même manque que sur la page catalogue,
-              mais avec ici une conséquence d'accessibilité, pas seulement de confort
-              (registre&nbsp;: AM-007).</li>
+            <li><strong>Les liens optionnels — moins optionnels qu'annoncé.</strong> La première
+              version de cette analyse affirmait que <code>site_web</code> était «&nbsp;vide pour une
+              partie des établissements&nbsp;». Recompté sur l'export&nbsp;: <strong>1 valeur nulle sur
+              3&nbsp;604</strong> — et 11 URL malformées (<code>http:patisseriechapuis.fr</code>,
+              <code>htts://…</code>), ce qui est un problème de donnée, pas de template.
+              <code>email_de_l_etablissement</code> et <code>questionnaire_de_satisfaction</code> sont
+              renseignés sur 100&nbsp;% des lignes&nbsp;: ils peuvent être des liens sans aucune
+              conditionnelle. Pour le seul site manquant, une règle CSS
+              (<code>.odv-lien[href=""] { display: none }</code>, dans <code>site.css</code>) retire le
+              lien vide du flux — vérifié au navigateur&nbsp;: <code>display: none</code> sur le lien de
+              «&nbsp;BEST HOTEL&nbsp;», visible sur les autres. AM-007 reste vrai en général, mais cette
+              page n'en était pas un bon exemple.</li>
             <li><strong>Placer l'interface des facettes.</strong> <code>dsfr-data-facets</code> rend
               son interface là où la balise est écrite, alors que son <code>id</code> seul détermine
               le câblage. La balise doit donc être physiquement dans la colonne de filtres, avant
               les <code>dsfr-data-query</code> qui la consomment mais s'écrivent plus haut. On s'y
               fait, mais l'ordre du fichier cesse de refléter l'ordre du pipeline.</li>
+            <li><strong>Relecture face au relevé visuel du portail.</strong> Ajouté&nbsp;: le courriel
+              (lien <code>mailto:</code>), le bouton «&nbsp;Donner son avis&nbsp;» (lien vers le
+              questionnaire de satisfaction, propre à cette marque), le site en lien cliquable, le code
+              postal dans les champs de recherche. Corrigé&nbsp;: le KPI «&nbsp;activités
+              représentées&nbsp;» affichait 12 — il comptait les lignes de la requête limitée à 12 du
+              graphique&nbsp;; une seconde requête sans <code>limit</code> donne 28, le chiffre du
+              portail. Le KPI «&nbsp;départements&nbsp;» affichait 100&nbsp;: les 146 lignes sans
+              département formaient un groupe <code>null</code> — <code>where="departement:isnotnull"</code>
+              ramène à 99. Vérifié&nbsp;: la facette Activité liste les 28 valeurs avec les effectifs
+              exacts du portail (Office de tourisme 862, Camping 634…)&nbsp;; les cinq encarts DROM
+              s'affichent, Mayotte compris — vide comme sur le portail, le jeu n'y a aucun
+              établissement (0 point dans l'export, Guadeloupe non plus). <strong>Manque
+              encore</strong>&nbsp;: l'autocomplétion sur le nom et sur la commune/CP —
+              <code>dsfr-data-search</code> n'a pas d'attribut de suggestions (attributs vérifiés dans
+              le source&nbsp;: <code>fields</code>, <code>operator</code>, <code>debounce</code>,
+              <code>min-length</code>, <code>highlight</code>, <code>count</code>…)&nbsp;; la recherche
+              filtre à la frappe, ce qui rend le bouton «&nbsp;Rechercher&nbsp;» sans objet. La
+              «&nbsp;fiche établissement&nbsp;» est le panneau latéral de la carte, pas une page
+              dédiée&nbsp;: la mini-carte de la fiche n'a donc pas de sens ici.</li>
             <li><strong>Aucun compte par facette côté serveur.</strong> Les compteurs affichés sont
               calculés sur les 3&nbsp;604 lignes en mémoire — exact ici, mais ce serait faux si le
               jeu dépassait ce que l'on charge. Le mode <code>server-facets</code> existe pour ça,
@@ -224,6 +262,9 @@
             <tr><td>—</td><td><code>searchable</code> sur une facette</td><td>Sans équivalent&nbsp;: indispensable à 99 valeurs</td></tr>
             <tr><td><code>ods-results</code> + grille manuelle</td><td><code>dsfr-data-display</code> + <code>&lt;template&gt;</code></td><td>Équivalent, pagination incluse</td></tr>
             <tr><td>bascule carte / liste (<code>params.view</code>)</td><td>les deux affichées</td><td>Choix&nbsp;: le filtrage est commun, la bascule perd son intérêt</td></tr>
+            <tr><td>6 boutons «&nbsp;Centrer la carte sur&nbsp;» (6 <code>ods-map</code> en <code>ng-if</code>)</td><td><code>insets="drom"</code></td><td>Les cinq DROM visibles en même temps, sans bouton</td></tr>
+            <tr><td>page «&nbsp;fiche établissement&nbsp;» (9 champs, bouton «&nbsp;Donner son avis&nbsp;»)</td><td><code>dsfr-data-map-popup</code> + <code>&lt;template&gt;</code></td><td>Équivalent, en panneau latéral&nbsp;; liens sans conditionnelle car les champs sont remplis à 100&nbsp;%</td></tr>
+            <tr><td>autocomplétion (<code>ods-autocomplete</code> sur nom et commune/CP)</td><td>—</td><td>Sans équivalent&nbsp;: la recherche filtre à la frappe mais ne suggère rien</td></tr>
             <tr><td>—</td><td><code>dsfr-data-a11y</code></td><td>Sans équivalent</td></tr>
           </tbody>
         </table>
@@ -235,8 +276,9 @@
           «&nbsp;annuaire cartographié&nbsp;» est exactement ce pour quoi ces composants sont faits&nbsp;:
           33&nbsp;200 caractères de template deviennent une trentaine de lignes, sans perte de
           fonction, avec en plus la recherche dans les facettes, la carte accessible et les DROM dans
-          le cadre. Le seul point de friction — les liens optionnels — est un manque déjà consigné,
-          que cette page fait passer du registre du confort à celui de l'accessibilité.</p>
+          le cadre. Le seul point de friction — les liens optionnels — est un manque déjà consigné&nbsp;;
+          la relecture face au portail a surtout montré que cette page l'illustrait mal (1 site
+          manquant sur 3&nbsp;604) et que deux de ses KPI étaient faux par construction.</p>
         <p class="fr-text--sm fr-hint-text">
           Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-007 (liens
           optionnels), AM-013 (placement de l'UI des facettes), AV-008 (carte responsive unique).

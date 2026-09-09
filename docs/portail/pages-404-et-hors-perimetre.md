@@ -1,5 +1,13 @@
 # Pages 404 et cibles hors périmètre (constat du 2026-09-09)
 
+> **Révisé le même jour (lots 6 à 8).** Signal Conso, Rappel Conso et contrôle technique ont été
+> reconstitués sur leurs jeux successeurs (`/viz/signalconso`, `/viz/rappelconso`,
+> `/viz/centres-controle-technique`). Les deux « vues natives » sont reproduites (`/viz/impot-sur-le-revenu`,
+> `/viz/aides-de-minimis` — cette dernière est en fait une page Studio, pas une vue asset). Sur les neuf
+> cibles externes : réseau cuivre, BOFiP, APD et prix des contrôles techniques sont reproduits,
+> France Bleu, prix-carburants.gouv.fr et Label EPV renvoient à des pages existantes, OFGL est analysé
+> (`/viz/ofgl`), la Charte reste hors périmètre. Le constat d'origine est conservé ci-dessous.
+
 ## Pages du portail répondant 404 (vérifié par `curl`, code HTTP 404)
 | Entrée du catalogue | URL | Constat |
 |---|---|---|

@@ -53,13 +53,15 @@
        Le fetch passe par /exports/json et non par /records : l'endpoint d'export
        renvoie les 3 080 lignes EN UNE REQUÊTE, là où /records plafonne à 100 et
        impose 31 allers-retours séquentiels (mesurés à 29 s de chargement).
-       Le `select` écarte `description_projet`, qui pèse à lui seul 85 % du jeu.
-       Résultat mesuré : 0,6 s et 185 Ko, contre 31 s et 3,4 Mo.
+       Le `select` écartait `description_projet` (85 % du poids du jeu) : la relecture
+       face au relevé du portail l'a réintégré, l'infobulle d'origine l'affiche.
+       Re-mesuré (lot 9, réponse compressée) : 0,65 s pour 13 champs avec la
+       description, contre 0,37 s sans — et non les 7,9 s notés au lot 1.
        ========================================================================== -->
 
   <dsfr-data-source id="pdr"
     url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/plan-de-relance/exports/json"
-    params='{"select":"entreprise, type_entreprise, mesure_light, filiere, nom_region, nom_departement, nom_commune, coordonnees_gps"}'
+    params='{"select":"entreprise, type_entreprise, siren, volet_relance, mesure, mesure_light, filiere, nom_region, nom_departement, nom_commune, code_postal, coordonnees_gps, description_projet"}'
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
@@ -85,10 +87,13 @@
 
       <div class="odv-filtres">
         <h2 class="fr-h6">Filtrer</h2>
+        <!-- Les cinq facettes de l'original (`ods-facets` automatique), plus la filière.
+             `mesure` porte les libellés complets, comme lui ; la carte et le graphique
+             gardent `mesure_light` (mêmes 9 catégories, libellés courts). -->
         <dsfr-data-facets id="pdr-filtre" source="pdr"
-          fields="mesure_light, type_entreprise, nom_region, filiere"
-          labels="mesure_light:Mesure | type_entreprise:Type d'entreprise | nom_region:Région | filiere:Filière"
-          max-values="6" searchable="nom_region, filiere">
+          fields="type_entreprise, nom_departement, volet_relance, nom_region, mesure, filiere"
+          labels="type_entreprise:Type d'entreprise | nom_departement:Département | volet_relance:Volet France Relance | nom_region:Région | mesure:Mesure | filiere:Filière"
+          max-values="6" searchable="nom_departement, nom_region, filiere">
         </dsfr-data-facets>
       </div>
 
@@ -112,14 +117,20 @@
             color-map="Projets territoriaux:#6D7A87, Automobile:#619FC8, Aéronautique:#F7C87E, Relocalisation:#CB516D, Efficacité énergétique:#F7AD84, Santé - Capacités Covid:#5D9FA3, Soutien à la chaleur bas carbone:#64905C, Nucléaire:#000091, Nucléaire - Compétences:#6A6AF4"
             tooltip-field="entreprise" cluster>
           </dsfr-data-map-layer>
-          <dsfr-data-map-popup mode="panel-right" title-field="entreprise" width="380px">
+          <!-- Les neuf champs de l'infobulle d'origine (template par défaut d'ods-map) -->
+          <dsfr-data-map-popup mode="panel-right" title-field="entreprise" width="420px">
             <template>
               <p class="fr-badge fr-badge--sm fr-badge--blue-ecume fr-mb-2v">{{mesure_light}}</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>{{nom_commune}}</strong> ({{nom_departement}}, {{nom_region}})</p>
-              <p class="fr-text--xs fr-mb-2v">Filière&nbsp;: {{filiere|non renseignée}} — {{type_entreprise}}</p>
-              <p class="fr-text--sm">
+              <p class="fr-text--sm fr-mb-1v"><strong>Type d'entreprise&nbsp;:</strong> {{type_entreprise|non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>SIREN&nbsp;:</strong> {{siren|non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Commune&nbsp;:</strong> {{code_postal|}} {{nom_commune|}} ({{nom_departement|}}, {{nom_region|}})</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Volet France Relance&nbsp;:</strong> {{volet_relance|non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Mesure&nbsp;:</strong> {{mesure|non renseignée}}</p>
+              <p class="fr-text--xs fr-mb-2v">Filière&nbsp;: {{filiere|non renseignée}}</p>
+              <p class="fr-text--sm"><strong>Description du projet.</strong> {{description_projet|Non renseignée.}}</p>
+              <p class="fr-text--xs">
                 <a href="https://data.economie.gouv.fr/explore/dataset/plan-de-relance/table/?q={{entreprise}}"
-                   target="_blank" rel="noopener external">Voir la fiche complète du projet sur data.economie.gouv.fr</a>
+                   target="_blank" rel="noopener external">Voir le projet sur data.economie.gouv.fr</a>
               </p>
             </template>
           </dsfr-data-map-popup>
@@ -215,12 +226,16 @@
               <code>where</code>, sans conséquence ici puisque toute la page travaille côté client.
               C'est la demande la plus rentable du registre&nbsp;: que l'adaptateur choisisse
               <code>/exports/json</code> quand il charge tout (AM-011).</li>
-            <li><strong>Un champ texte long coûte très cher.</strong> <code>description_projet</code>
-              pèse à lui seul 85&nbsp;% du jeu&nbsp;: 1,3&nbsp;Mo avec, 185&nbsp;Ko sans. Il n'était
-              affiché que dans le panneau de détail, une fiche à la fois. Il a donc été retiré de la
-              source, et le panneau renvoie vers la fiche complète sur le portail. Curiosité mesurée au
-              passage&nbsp;: un <code>select</code> <em>incluant</em> la description est plus lent
-              (7,9&nbsp;s) que l'export complet sans <code>select</code> (4,8&nbsp;s).</li>
+            <li><strong>Un champ texte long coûte cher — mais moins qu'on ne l'a cru.</strong>
+              <code>description_projet</code> pèse à lui seul 85&nbsp;% du jeu&nbsp;: 1,3&nbsp;Mo
+              avec, 185&nbsp;Ko sans. Au lot&nbsp;1 il avait été retiré de la source (7,9&nbsp;s
+              mesurées avec, contre 4,8&nbsp;s pour l'export complet sans <code>select</code>), et
+              le panneau renvoyait vers le portail. Re-chronométré au lot&nbsp;9, en réponse
+              compressée&nbsp;: 0,65&nbsp;s pour les treize champs description comprise, 0,37&nbsp;s
+              sans, 0,65&nbsp;s mesurés dans le navigateur. La description est donc revenue dans la
+              source&nbsp;: l'infobulle d'origine l'affiche, et c'est le seul champ qui dise ce
+              qu'est le projet. Le chiffre du lot&nbsp;1 n'est pas reproductible aujourd'hui — un
+              rappel que la mesure a une date.</li>
             <li><strong>Le plafond <code>max-records</code>, silencieux.</strong> Le plafond par
               défaut de l'adaptateur Opendatasoft est de 1&nbsp;000 enregistrements. Sans
               <code>max-records="3500"</code>, cette page afficherait 1&nbsp;000 des 3&nbsp;080
@@ -262,6 +277,27 @@
               Le résultat est juste, la déclaration est fausse&nbsp;: un type d'erreur que le
               modèle déclaratif de <code>dsfr-data</code> rend plus difficile à écrire, faute de
               pouvoir mettre un champ inexistant dans un compteur.</li>
+            <li><strong>Relecture face au relevé visuel du portail.</strong> La fiche d'audit
+              (<code>docs/portail/</code>) a fait apparaître trois écarts, tous comblés, et un
+              défaut de l'original à ne pas imiter. <em>L'infobulle</em>&nbsp;: les neuf champs du
+              template par défaut d'<code>ods-map</code> (type, SIREN, commune, code postal, volet,
+              mesure, description…) sont dans le panneau — <code>siren</code>,
+              <code>code_postal</code>, <code>volet_relance</code>, <code>mesure</code> et
+              <code>description_projet</code> ont rejoint le <code>select</code> (vérifié sur
+              PROPYPLAST, Retournac). <em>Les cinq facettes</em> de l'original avec toutes leurs
+              valeurs, libellés complets de <code>mesure</code> compris&nbsp;: «&nbsp;Voir
+              plus&nbsp;» déplie les 20 régions, les 107 départements et les 9 mesures (compteurs
+              identiques au relevé&nbsp;: TPE / PME 1&nbsp;890, Bouches-du-Rhône 102,
+              Indépendance / Compétitivité 1&nbsp;962…). <em>Les couleurs</em>&nbsp;: Nucléaire et
+              Nucléaire - Compétences, sans couleur chez l'original (points noirs «&nbsp;autre&nbsp;»),
+              en ont une ici — vérifié sur les points de Lyon et de la couche filtrée. <em>Le
+              défaut à ne pas imiter</em>&nbsp;: l'histogramme région × mesure de l'original,
+              plafonné par <code>maxpoints=50</code>, ne trace que 8 régions sur 20&nbsp;; ici DSFR
+              Chart reçoit bien 9 séries × 20 régions, lu dans les attributs du
+              <code>&lt;bar-chart&gt;</code>. Deux réserves restent&nbsp;: le tableau accessible
+              sous ce graphique est plafonné à 100 lignes sur 119 (constante
+              <code>MAX_TABLE_ROWS</code> de <code>dsfr-data-a11y</code>, signalée à l'écran, le
+              CSV est complet), et la carte n'a ni recherche de lieu ni sélecteur de couches.</li>
           </ul>
         </div>
       </div>
@@ -282,6 +318,9 @@
             <tr><td>—</td><td><code>bbox</code> sur la couche</td><td>Chargement par viewport&nbsp;: sans équivalent ici</td></tr>
             <tr><td><code>series-breakdown</code> + <code>stacked</code></td><td><code>group-by</code> à 2 champs + <code>series-field</code></td><td>Équivalent</td></tr>
             <tr><td><code>ods-filter-summary</code></td><td>—</td><td>Manquant avec <code>dsfr-data-facets</code></td></tr>
+            <tr><td>infobulle par défaut (9 champs)</td><td><code>&lt;template&gt;</code> à 9 champs</td><td>Équivalent, en panneau</td></tr>
+            <tr><td><code>ods-chart</code> <code>maxpoints=50</code> (8 régions sur 20)</td><td><code>dsfr-data-chart stacked</code> sans plafond</td><td>Complet ici, tronqué là-bas</td></tr>
+            <tr><td>recherche de lieu, sélecteur de couches</td><td>—</td><td>Sans équivalent</td></tr>
           </tbody>
         </table>
       </div>
