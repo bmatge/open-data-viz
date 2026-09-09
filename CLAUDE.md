@@ -36,6 +36,20 @@ d'audit visuel dans `docs/portail/`** : c'est la référence de fidélité des d
   imputer le coût à `dsfr-data` produit des critiques fausses : c'est arrivé deux fois au
   lot 1 (FP-001 et FP-002 du registre). Chercher l'architecture native **avant** d'écrire
   qu'une chose est impossible.
+- **⚠️ Lire le JSDoc de l'attribut, pas seulement la fiche du composant.** La relecture du
+  lot 10 par le projet dsfr-data (`docs/relecture-dsfr-data-2026-09.md`) a invalidé 16 des
+  54 demandes : 3 infondées, 11 voies natives ratées, 2 contournements faux. Onze visaient
+  une capacité qui existait. Les cinq règles qui en sortent (lot 11, § 3 decies de la
+  synthèse) :
+  1. Lire le JSDoc de l'attribut (source ou `get_skill(id, section)`) : les grammaires
+     diffèrent d'un attribut à l'autre et une grammaire fausse est **silencieuse** (PG-022).
+  2. Essayer `server-facets` avant d'écrire qu'une facette ne sait pas (select peuplé,
+     cascade, facette annuelle : trois « manques » étaient des modes non essayés).
+  3. Un `where` sur la balise déjà présente vaut mieux qu'un nouvel attribut (PG-015).
+  4. Distinguer `dsfr-data` de DSFR Chart : une limite de `map-chart` se remonte chez
+     `GouvernementFR/dsfr-chart`, pas ici (AM-022, AM-016).
+  5. Un contournement qui « marche » sur le jeu testé n'est pas un équivalent : dire sur
+     quel type de jeu il cesse de marcher (PG-014).
 - **Chronométrer avant de conclure sur la performance.** Le poids transféré et le nombre
   d'allers-retours sont deux choses différentes, et c'est presque toujours le second qui
   coûte. Mesurer la durée de chaque requête ET la concurrence observée avant d'incriminer
@@ -84,15 +98,25 @@ d'audit visuel dans `docs/portail/`** : c'est la référence de fidélité des d
 | `chart.js` en dépendance CDN | Inutile : DSFR Chart 2.1.1 l'embarque. Ne pas le charger. |
 | `display:` de page sur un composant | Une règle sur le nom de balise écrase le `:host` du composant (`dsfr-data-kpi-group` est `grid`). Ne poser `display:block` que sur les composants sans style d'hôte (PG-011). |
 | `sort="-count"` sur `dsfr-data-facets` | Trie par compte **croissant** (inverse d'ODS). Ne rien écrire : `count` décroissant est le défaut (PG-012). |
+| Séparateur d'entrées d'un attribut | `\|` pour `labels` et `display` des facettes ; `,` pour `split`, `round`, `fields`. Une grammaire fausse est ignorée sans erreur : `display="a:select, b:select"` rend zéro select (PG-022). |
+| `display="champ:radio"` des facettes | Menu déroulant à panneau, pas des boutons radio en ligne. Choix unique en ligne : `display="champ:select"` (PG-023). |
+| Total d'une recherche serveur | Pas par un KPI (`count` compte la page). `dsfr-data-search count` affiche `total_count` et suit facettes et contexte — brut, « 35305 resultats » (AM-034, AM-044). |
+| Flottant IEEE dans un tableau a11y | `dsfr-data-normalize round="champ:2"` en amont. Le point décimal reste (AM-033). |
+| Milliards dans un KPI | `format="compact"` (absent du JSDoc du KPI) + facteur d'échelle dans le `select` ODSQL (`sum(x)*1000`). L'unité va dans `label` (AM-031). |
+| Facette serveur sur un champ date | `server-facets` affiche bien les années (FP-011) mais le refine `champ = "2022"` est typé texte → 400 silencieux (BUG-005). Pas de facette date en mode serveur tant que ce n'est pas corrigé. |
+| Fond de carte trop chargé | Pas de préréglage neutre, mais les tuiles sont en light DOM : classe `odv-fond-attenue` de `site.css` (`filter: grayscale(1) opacity(.55)`) (AM-017). |
+| Contours administratifs décoratifs | Pas dans DSFR Chart (SVG, pas GeoJSON). GeoJSON simplifié statique `public/data/geo/regions-simplifiees.geojson` + `transform="features"` + `geo-field="geometry"` ; métropole seulement (AM-016). |
+| `name` d'un `dsfr-data-chart` | Chaîne simple partout. La forme `'["…"]'` s'affiche littéralement sur les cartes (AM-023). |
+| Clés de jointure de types différents | Non-problème : `dsfr-data-join` convertit en chaîne des deux côtés. Un appariement nul vient du jeu (zéro de tête, référentiel homonyme), pas des types (FP-012). |
 | `max-items` d'une couche carte (5 000 par défaut) | Tronque avec un bandeau « zoomez » qui ne charge rien de plus. Le relever dès qu'un jeu dépasse 5 000 points (PG-013). |
 | `fit-bounds` + `max-bounds` sur un seul point | Le clip renvoie vide : pas de zoom. Sans DROM dans le jeu, retirer `max-bounds` et `insets` (BUG-004). |
 | Encarts `insets="drom"` | Pas de largeur par défaut : `site.css` leur donne 10 rem (AM-032). Vérifier qu'il y a des points ultramarins avant d'en poser. |
 | `year-of` / `month-of` nourris par un `<input type="date">` | Ils lisent « AAAA » et « AAAA-MM » ; une date complète donne un filtre **silencieusement absent**. Dériver deux champs cachés (AM-029). |
-| `group-by` avec une fonction ODSQL (`year(…)`) | L'adaptateur l'entoure d'accents graves → 400. Source générique (`url` + `params`), qui n'écoute plus le contexte (PG-014). |
+| `group-by` avec une fonction ODSQL (`year(…)`) | L'adaptateur l'entoure d'accents graves → 400. Seul contournement sûr : source générique (`url` + `params`), qui n'écoute plus le contexte. Grouper sur la date brute avec `year()` dans le `select` **n'est pas** grouper par année : ça ne coïncide que si le champ n'a qu'une valeur par an (à vérifier à l'API : `group_by=annee` donne autant de lignes que d'années). Sur un jeu quotidien, 365 barres par an (PG-014). |
 | `replace-fields` sur une valeur ISO | Deux-points réservés par la grammaire, comparaison stricte : impossible. Pas de regex (AM-038). |
 | Jeu sans facette déclarée au back-office | `server-facets` rend une liste vide (`/facets` vide). Filtres en `<select>` + contexte (ex. prix-controle-technique). |
 | KPI `count` sur une `dsfr-data-query limit` | Compte la limite, pas la donnée. Une query sans `limit` pour le KPI (PG-017). |
-| Groupe `null` d'un `group_by` (serveur ou client) | Barre sans libellé, compte décalé de l'original. `where champ is not null` / `champ:isnotnull` (PG-015, PG-018). |
+| Groupe `null` d'un `group_by` (serveur ou client) | Barre sans libellé, compte décalé de l'original. `where champ is not null` / `champ:isnotnull` sur la balise déjà présente ; côté client la clé ressort en `''`, pas `null` (PG-015, fusion de l'ex-PG-018). |
 | Date dans un template | Pas de format `:date`, mais `date_format(champ, "dd/MM/yyyy 'à' HH:mm") as champ_txt` + `timezone=Europe/Paris` dans le `select` ODS fait le travail (FP-003). |
 | Conditionnelle dans un template | Aucune ; interpoler la valeur dans un attribut (`class`, `href`, `data-v`) et masquer par CSS `:empty`, `[href=""]`, `:has()` (AM-039, bloc « Annuaires » de `site.css`). |
 | Reproduire sans avoir lu `docs/portail/<page>.md` | Trois chiffres faux et deux mauvais jeux au lot 9. Lire la fiche d'audit ET le `$scope.blocks` avant d'écrire. |

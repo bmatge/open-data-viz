@@ -12,6 +12,13 @@
 > bloc donne *ce qui était cru / ce qui est vrai / ce qui reste vrai / comment c'est vérifié / geste à faire ici*.
 > Le geste n'a pas été fait : le registre exige un champ `verifie` observé au navigateur sur la page, et la
 > réécriture de l'analyse de chaque page appartient à ce projet.
+>
+> **Lot 11 (2026-09-10) : les seize gestes ont été faits**, chacun rejoué au navigateur. Correspondance des
+> identifiants après requalification : AM-028 → FP-010, AM-024 → FP-011 + BUG-005, AM-025 → FP-012,
+> AM-042 → PG-023, PG-018 fusionné dans PG-015 ; nouveaux : AM-044 (rendu de `search count`), PG-022
+> (grammaires d'attributs). AM-024 tranché : le refine `= "2022"` renvoie 400 (`IncompatibleTypesInComparisonFilter`).
+> La recette « date brute » de PG-014 reste sur les deux pages où le jeu est annuel (vérifié à l'API), avec
+> la condition écrite en commentaire ; retirée du CLAUDE.md comme équivalent. Détail : § 3 decies de `synthese.html`.
 
 ## Résumé des gestes
 
