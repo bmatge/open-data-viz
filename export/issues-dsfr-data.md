@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 24 demandes — 3 bugs, 21 améliorations.
+> 27 demandes — 3 bugs, 24 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -60,7 +60,7 @@ Appeler `normalizeProviderAuthHeaders` dans l'adaptateur au moment de construire
 
 ---
 
-## BUG-003 — `type="map-reg"` journalise une erreur de parsing à chaque chargement
+## BUG-003 — Les graphiques cartographiques journalisent une erreur de parsing à chaque chargement
 
 **Labels suggérés** : `bug`, `severity:basse`, `dsfr-data-chart`
 
@@ -68,15 +68,15 @@ Appeler `normalizeProviderAuthHeaders` dans l'adaptateur au moment de construire
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : prix-des-carburants.
+Rencontré sur : prix-des-carburants, fiscalite-locale.
 
 ### Constat
 
-Un `dsfr-data-chart type="map-reg"` émet en console « Erreur lors du parsing des données data: SyntaxError: "undefined" is not valid JSON » à chaque chargement de page. La carte s'affiche correctement une fois les données arrivées : le composant DSFR Chart est manifestement instancié avec un attribut `data` encore indéfini, avant la première émission de la source. Sans conséquence fonctionnelle, mais une erreur console permanente masque les vraies.
+Un `dsfr-data-chart` de type cartographique (`map`, `map-reg`) émet en console « Erreur lors du parsing des données data: SyntaxError: "undefined" is not valid JSON » à chaque chargement de page. La carte s'affiche correctement une fois les données arrivées : le composant DSFR Chart est manifestement instancié avec un attribut `data` encore indéfini, avant la première émission de la source. Sans conséquence fonctionnelle, mais une erreur console permanente masque les vraies — et elle se multiplie : la page Fiscalité locale, qui porte deux cartes, en produit quatre.
 
 ### Observation
 
-Reproduit sur une page minimale ne contenant qu'une source et un `dsfr-data-chart type="map-reg"` : une erreur, systématique. Les graphiques `bar`, `line` et `pie` des autres pages du dépôt n'en produisent aucune.
+Reproduit sur une page minimale ne contenant qu'une source et un `dsfr-data-chart type="map-reg"` : une erreur, systématique. Confirmé sur `type="map"` (page Fiscalité locale, 4 occurrences pour 2 cartes). Les graphiques `bar`, `line` et `pie` des autres pages n'en produisent aucune.
 
 ### Contournement actuel
 
@@ -96,11 +96,11 @@ Ne créer le composant `map-chart` qu'une fois les données disponibles, ou pass
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente.
+Rencontré sur : decp-augmente, fiscalite-locale.
 
 ### Constat
 
-C'est le dernier obstacle réel pour un tableau de bord bâti sur plusieurs agrégations serveur. Les facettes émettent leur commande `where` vers leur source amont uniquement. `dsfr-data-context` sait diffuser à N sources, mais exige qu'on fournisse soi-même l'interface ET les valeurs : `dsfr-data-context-filter` lit un `<select>` ou un `<input>` (packages/core/src/components/dsfr-data-context-filter.ts:283), il ne sait pas s'abonner à un composant de facettes. Les deux mécanismes ne se composent pas.
+C'est le dernier obstacle réel pour un tableau de bord bâti sur plusieurs agrégations serveur. Les facettes émettent leur commande `where` vers leur source amont uniquement. `dsfr-data-context` sait diffuser à N sources, mais exige qu'on fournisse soi-même l'interface ET les valeurs : `dsfr-data-context-filter` lit un `<select>` ou un `<input>` (packages/core/src/components/dsfr-data-context-filter.ts:283), il ne sait pas s'abonner à un composant de facettes. Les deux mécanismes ne se composent pas. La page Fiscalité locale en donne la forme la plus visible : ses cartes s'appuient sur des agrégats départementaux et son tableau sur les 174 668 lignes brutes en pagination serveur ; filtrer le tableau sur un département ne recadre pas les cartes, et inversement. La page d'origine, elle, partage un contexte : tout se refiltre ensemble.
 
 ### Observation
 
@@ -152,7 +152,7 @@ Un avertissement console systématique quand la troncature est effective (un `co
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant.
 
 ### Constat
 
@@ -180,7 +180,7 @@ Quand la source demande un chargement complet (pas de `server-side`, pas de pagi
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente.
+Rencontré sur : decp-augmente, fiscalite-locale.
 
 ### Constat
 
@@ -292,7 +292,7 @@ Faire accepter à `dsfr-data-context-tags` une source de type `dsfr-data-facets`
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : catalogue, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame.
+Rencontré sur : catalogue, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, entreprise-patrimoine-vivant.
 
 ### Constat
 
@@ -348,7 +348,7 @@ Poser un `where` initial sur la source, ou accepter un premier rendu approximati
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants.
+Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant.
 
 ### Constat
 
@@ -404,7 +404,7 @@ Un attribut du type `refine-on-click="champ"` sur la couche, qui émettrait la m
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap, prix-des-carburants.
+Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap, prix-des-carburants, entreprise-patrimoine-vivant.
 
 ### Constat
 
@@ -449,6 +449,34 @@ Deux sources + `dsfr-data-join` + `compute` pour une différence. Rien pour une 
 ### Demande
 
 Des colonnes calculées portant sur des séries : différence entre deux séries d'un même group-by, et accès décalé (`lag`) pour les évolutions — le besoin le plus fréquent d'un tableau de bord financier ou statistique.
+
+---
+
+## AM-022 — La discrétisation d'une choroplèthe n'est pas paramétrable
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-chart`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : fiscalite-locale.
+
+### Constat
+
+`ods-color-gradient` expose le nombre de classes (`nb-classes`), les couleurs de début et de fin (`low`, `high`) et la méthode de discrétisation. `dsfr-data-chart type="map"` applique un dégradé continu qu'on ne paramètre pas : ni seuils, ni quantiles, ni nombre de paliers, ni palette. Sur des taux d'imposition dont la distribution est resserrée, un dégradé linéaire écrase les écarts que des quantiles feraient ressortir.
+
+### Observation
+
+Carte « taux moyen TFB par département » : légende continue de 21,21 à 63,2 %, la quasi-totalité des départements dans une nuance indiscernable. Aucun attribut de la référence de `dsfr-data-chart` ne concerne la discrétisation ; `selected-palette` n'agit que sur les séries catégorielles.
+
+### Contournement actuel
+
+Aucun. On peut pré-calculer des classes en amont et passer à un rendu catégoriel, mais on perd la légende continue.
+
+### Demande
+
+Exposer sur les types cartographiques le nombre de classes et la méthode (linéaire, quantiles, seuils manuels), à l'image de `ods-color-gradient`.
 
 ---
 
@@ -516,7 +544,7 @@ Répartir les encarts sur la largeur disponible.
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, prix-des-carburants.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, prix-des-carburants, entreprise-patrimoine-vivant.
 
 ### Constat
 
@@ -673,3 +701,59 @@ Attribut `databox-date` de `dsfr-data-chart` : chaîne statique. Aucun composant
 ### Demande
 
 Accepter une expression de champ dans `databox-date` (par exemple `databox-date-field="gazole_maj:max"`), et un format date pour les KPI.
+
+---
+
+## AM-023 — L'attribut `name` change de forme selon le type de graphique
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-chart`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : fiscalite-locale, prix-des-carburants.
+
+### Constat
+
+Sur les graphiques cartésiens, `name` attend un tableau JSON : `name='["Série 1"]'`. Sur les types cartographiques, la même écriture s'affiche telle quelle dans l'encadré — crochets et guillemets compris — et il faut passer une chaîne simple. La documentation ne mentionne que la forme tableau.
+
+### Observation
+
+Carte de la fiscalité locale : `name='["Taux moyen TFB (%)"]'` affiche littéralement `["Taux moyen TFB (%)"]` en titre de série ; `name="Taux moyen TFB (%)"` affiche le libellé attendu. Capture avant/après à l'appui.
+
+### Contournement actuel
+
+Chaîne simple pour les cartes, tableau JSON pour le reste.
+
+### Demande
+
+Accepter les deux formes partout, ou documenter la différence dans la référence de l'attribut.
+
+---
+
+## AM-024 — Pas de moyen d'agréger une date en facette (par année)
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-facets`, `dsfr-data-normalize`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : entreprise-patrimoine-vivant.
+
+### Constat
+
+Le portail déclare une facette `date_de_labellisation` à sept valeurs : Opendatasoft sait replier une date sur son année dans ses facettes déclarées. Côté dsfr-data, une facette sur un champ date produirait autant de valeurs que de dates distinctes. Extraire l'année demanderait une manipulation de chaîne, or `dsfr-data-normalize compute` ne gère que l'arithmétique et la concaténation.
+
+### Observation
+
+Endpoint `/facets` d'EPV : `date_de_labellisation` renvoie 7 valeurs. Le champ brut est une date pleine.
+
+### Contournement actuel
+
+Aucun sans pré-agrégation serveur — possible avec `year(...)` dans un `group_by`, mais pas pour alimenter une facette côté client.
+
+### Demande
+
+Une granularité de facette sur les champs date (`granularity="year"`), ou une fonction d'extraction dans `compute`.

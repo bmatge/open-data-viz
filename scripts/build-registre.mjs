@@ -35,14 +35,14 @@ const STATUTS = {
   '/pages/dataviz-plan-de-relance': ['reproduite', '/viz/plan-de-relance', 'Carte POI + 2 graphiques + facettes sur un seul fetch'],
 
   '/pages/dataviz-prix-des-carburants': ['reproduite', '/viz/prix-des-carburants', 'unpivot des 6 colonnes de prix + choroplèthe régionale embarquée'],
-  '/pages/entreprise-patrimoine-vivant/': ['a-faire', null, ''],
+  '/pages/entreprise-patrimoine-vivant/': ['reproduite', '/viz/entreprise-patrimoine-vivant', '61 600 caractères de template contre une trentaine de lignes'],
   '/pages/comptabilite-generale/': ['reproduite', '/viz/comptabilite-generale', '517 489 lignes, 6 agrégations serveur, aucune ligne dans le navigateur'],
   '/pages/qualite-tourisme/': ['reproduite', '/viz/qualite-tourisme', 'Annuaire cartographié : 1 carte au lieu de 6, facettes cherchables'],
   '/pages/annuaire-des-services-dgfip/': ['a-faire', null, ''],
   '/pages/tourisme-et-handicap/': ['reproduite', '/viz/tourisme-et-handicap', 'Même gabarit que Qualité Tourisme ; facette multivaluée native'],
   '/pages/accompagnements-actions-fnum/': ['a-faire', null, ''],
   '/pages/entreprises-restauration-notre-dame': ['reproduite', '/viz/entreprises-restauration-notre-dame', 'Carte à 2 couches issues de 2 portails Opendatasoft'],
-  '/pages/fiscalite-locale-particuliers/?headless=true': ['a-faire', null, ''],
+  '/pages/fiscalite-locale-particuliers/?headless=true': ['reproduite', '/viz/fiscalite-locale', 'Choroplèthe départementale + tableau serveur sur 174 668 lignes'],
   '/pages/barometre-france-num/': ['a-faire', null, ''],
 
   '/pages/comptabilite-etat/': ['impossible', null, 'Page 404 et jeu de données absent du catalogue'],
