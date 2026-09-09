@@ -7,8 +7,27 @@ filtres, le contenu des infobulles et des fiches, les KPI et leurs formules, les
 l'original. **Elles sont la référence de fidélité des données pour le portage vers `dsfr-data`** :
 la forme peut changer, pas les données, les filtres ni les niveaux de détail.
 
-Chaque fiche se termine par « Données à reproduire fidèlement ». Les listes de valeurs de facettes
-ont été vérifiées par l'API v2.1 le même jour ; les effectifs bougent avec le temps.
+Chaque fiche commence par **« Objectif de la dataviz et informations véhiculées »** (la question à
+laquelle la page répond, le message qu'elle porte, ce que l'utilisateur doit en retenir, ce que la page
+ne cherche pas à dire) et se termine par « Données à reproduire fidèlement ». Les listes de valeurs de
+facettes ont été vérifiées par l'API v2.1 le même jour ; les effectifs bougent avec le temps.
+
+## Méthode et limites du relevé
+
+- Chaque page a été chargée dans Chrome, scrollée de haut en bas, et ses interactions jouées : selects
+  ouverts et valeurs choisies, recherche saisie et validée, points de carte cliqués, fiches ouvertes,
+  accordéons dépliés, recentrages DROM, sélecteur de date, bascules carte/table, popin de notice,
+  visionneuse photo. Les captures ont été lues, pas seulement le DOM.
+- Le code `$scope.blocks` a servi à nommer les champs et les formules, jamais à décrire un rendu qui
+  n'a pas été vu. Quand le rendu réel contredisait le code, c'est le rendu qui a été retenu (Baromètre :
+  « Vue combinée » à deux barres par année ; EPV : carrousel d'exemples indépendant des filtres,
+  recherche plein-texte, épingles uniformes sur un seul univers).
+- **Non vu à l'écran** : le clic sur une valeur de facette `ods-facets` (Plan de relance, DECP) n'a pas
+  pris dans l'automate ; le comportement décrit (refine → recalcul du compteur et des graphiques) est
+  celui du composant standard, vérifié sur les tags « ✕ » d'EPV et de Notre-Dame. Le Baromètre n'a été
+  ouvert qu'avec un filtre Région ; Secteur et Taille sont supposés se comporter de même.
+- Ouvrir les 12 chapitres du Baromètre à la fois fige l'onglet (≈ 100 000 px, plusieurs centaines de
+  graphiques) : le relevé s'est fait chapitre par chapitre.
 
 | Page du portail | Fiche | Statut registre | Jeux |
 |---|---|---|---|
@@ -66,5 +85,9 @@ Relevé par `grep` sur les pages reproduites, à confirmer page par page par l'a
 - Comptabilité générale : contenu de la vue par mission qui disparaît au scroll ; barre d'onglets sticky qui masque les graphiques ; jeux annexes en visibilité *restricted* avec clé exposée.
 - Compléments alimentaires : KPI à 0 et icône cassée (logo GitLab) ; France Num : 0 session.
 - Rappel Conso : lien du catalogue en 404 (page migrée en v2).
+- Annuaire DGFiP : un filtre Public/Service sans département recadre la carte sur le monde entier (cluster unique « 16 167 »).
+- Qualité tourisme : bouton « Mayotte » qui recentre sur une carte vide (aucun établissement).
+- Fiscalité professionnels : tuiles CFE ZAE / EOL « Sans objet » et carte grise sans légende quand le département n'a pas la taxe.
+- EPV : le carrousel « Quelques exemples » ignore les filtres (le code dit le contraire).
 - DECP : facette `procedure` avec doublons et mojibake.
 - Fiscalité locale : `?headless=true` dans le catalogue (page pensée pour une iframe).

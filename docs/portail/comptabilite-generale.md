@@ -13,6 +13,14 @@
   - `nomenclature-programme` — 199 lignes (`programme`, `libelleprogramme`, `libellemission`, `mission`).
 - **Relevé visuel** : 2026-09-09, Chrome 1440 px.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Quelle est la situation patrimoniale de l'État et son résultat, sur dix exercices, et comment se décomposent-ils ? » C'est une **pédagogie du Compte général de l'État** (bilan et compte de résultat) destinée aux citoyens et parlementaires, portée par la DGFiP.
+- **Message porté** : la trajectoire — l'actif croît (1 000 → 1 326 Md€) mais le passif croît plus vite (2 180 → 3 442 Md€) ; le solde (situation nette) se creuse chaque année (-1 203 → -2 116 Md€, « + 6 % ») ; charges > produits chaque année (déficit patrimonial de -52 à -166 Md€). La vue « Soldes » avec ses évolutions N/N-1 est le cœur du message, plus que les histogrammes.
+- **Informations que l'utilisateur doit obtenir** : les 4 chiffres 2025 ; la série 2016-2025 des 4 agrégats ; la décomposition par postes (8 postes d'actif, 6 de passif, 4 de charges, 4 de produits) ; le solde et son évolution annuelle ; la définition de chaque terme (glossaire de 46 entrées relié aux graphiques). Vue par mission : la même lecture (résultat, postes) pour chacune des 56 missions budgétaires, en M€, avec son descriptif et ses faits marquants.
+- **Vocabulaire à respecter** : « Bilan », « Compte de résultat », « Actif / Passif », « Produits / Charges », « Situation nette », « Montants en Md€ » (M€ par mission). Les couleurs bleu = actif/produits, rouge = passif/charges sont un code de lecture, pas une décoration.
+- **Ce que la page n'est pas** : ni un budget (loi de finances) ni de la comptabilité budgétaire — la notice le rappelle ; ne pas mélanger avec les données de budget.gouv.fr.
+
 ## Page 1 — Vue générale (~4 000 px)
 
 ### En-tête

@@ -5,6 +5,13 @@
 - **Jeux** : `fiscalite-locale-des-particuliers-geo` (**174 668 lignes** = ~34 950 communes × 5 exercices 2021-2025 ; champs de taux `taux_global_tfb`, `taux_global_tfnb`, `taux_plein_teom`, `taux_global_th`, majoration `ind_majothrs` / `thsurtaxrstau`, population `mpoid`, EPCI `sirepci`/`optepci`/`q03`, géométries `geom`/`centroid` + une paire par millésime `geom2021…geom2025`, et les taux détaillés `b12vote…h52ggemapi`) ; `fiscalite-locale-des-entreprises-copie` (même volume, taux `taux_global_cfe_hz`, `taux_global_cfe_zae`, `taux_global_cfe_eol` à la place de la TH). Le téléchargement pointe vers `fiscalite-locale-des-particuliers` (jeu sans géométrie).
 - **Relevé visuel** : 2026-09-09.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Quels taux d'impôts locaux s'appliquent dans *ma* commune, et comment se situent-ils par rapport au département et à la région ? » Outil de **comparaison territoriale** des taux globaux (TFB, TFNB, TEOM, TH pour les particuliers ; TFB, TFNB, TEOM, trois CFE pour les professionnels), conçu pour être intégré dans impots.gouv.fr.
+- **Message porté** : le taux « vision contribuable » (communal + intercommunal + syndicats + taxes annexes), différent du taux voté ; la dispersion intra-départementale (choroplèthe à 4 classes) ; la position de chaque commune par rapport aux moyennes (Moy Dép / Moy Rég) ; la majoration de TH sur résidences secondaires quand elle existe. La notice méthodologique est constitutive du message (ce que le taux inclut et n'inclut pas, TEOM à part, REOM absente).
+- **Information que l'utilisateur doit obtenir** : pour une commune, ses 4 (ou 6) taux, sa population, son EPCI et son régime fiscal ; pour un département, la carte et les moyennes ; la possibilité de comparer plusieurs communes côte à côte et d'exporter.
+- **Niveaux** : exercice (5 ans) → région → département → commune(s). Le parcours guidé en deux écrans est un choix d'ergonomie pour un public non expert.
+
 ## Écran 1 (« slide1 ») : sélection
 
 Carte centrée étroite (≈ 780 px) **posée sur une carte de France statique floutée** en fond (`ods-map static-map`, zoom 7, `jawg.light`, sans contrôle). Contenu :
@@ -32,7 +39,7 @@ Carte centrée étroite (≈ 780 px) **posée sur une carte de France statique f
 - **Popin « Méthodologie »** (bouton Notice) : long texte en 4 puces + 4 notes de bas de page, « Focus par taxe » (TFB, TFNB, TEOM, TH avec listes d'agrégation), « Liste des acronymes » (CA, CC, CU, MET, TEOM, TFB, TFNB, TH, THRS, THLV), bouton « Retour ». Texte intégral dans `src/fiscalite-locale-particuliers.unescaped.html` (l. 420-520).
 
 ## Page Professionnels (`fiscalite-locale-entreprises`)
-Même gabarit exactement, sur `fiscalite-locale-des-entreprises-copie`, avec **6 taxes** : TFB, TFNB, TEOM, **CFE HZ** (Cotisation Foncière des Entreprises Hors Zone d'Activité Économique), **CFE ZAE** (en Zone d'Activité Économique), **CFE EOL** (Zone Éolienne) ; 6 tuiles, 6 légendes, table à 18 colonnes, cartes-communes à 6 valeurs, notice enrichie d'un « Taux de cotisation foncière des entreprises (CFE) » en 3 sous-parties et d'acronymes CFE.
+Même gabarit exactement (vérifié à l'écran en `?headless=true` : ni en-tête ni pied de page du portail), sur `fiscalite-locale-des-entreprises-copie`, avec **6 taxes** : TFB, TFNB, TEOM, **CFE HZ** (Cotisation Foncière des Entreprises Hors Zone d'Activité Économique), **CFE ZAE** (en Zone d'Activité Économique), **CFE EOL** (Zone Éolienne) ; 6 tuiles (couleur active : orange TFB, vert TFNB, brun TEOM, bleu CFE HZ, vert olive CFE ZAE, brun-rouge CFE EOL), 6 légendes, table à 18 colonnes, cartes-communes à 6 valeurs, notice enrichie d'un « Taux de cotisation foncière des entreprises (CFE) » en 3 sous-parties et d'acronymes CFE. **Observé (Finistère 2025)** : TFB Moy Dép 37,33 % / Moy Rég 40,19 % · TFNB 76,62 / 93,71 · TEOM 9,44 / 11,29 · CFE HZ 24,94 / 26,00 · **CFE ZAE et CFE EOL : « Moy Dép : Sans objet » / « Moy Rég : Sans objet »** (aucune commune concernée) et, une fois la tuile choisie, **carte entièrement grise avec une légende sans classes**. Pour la TEOM, la légende comporte une 5ᵉ entrée grise « **Aucune valeur** » (communes financées par la REOM, nombreuses dans le Finistère) — la classe « sans valeur » fait partie de la lecture, pas seulement de la palette.
 
 ## Données à reproduire fidèlement
 - Cascade exercice (5) → région → département → écran 2 ; rappel des selects ; compteur de lignes.

@@ -5,6 +5,13 @@
 - **Jeu** : `plan-de-relance` — **3 080 lignes**, public. Champs : `entreprise, type_entreprise, siren, volet_relance, mesure, nom_departement, nom_commune, code_postal, coordonnees_gps, description_projet, mesure_light, mise_a_jour, filiere, tonnes_equivalent_co2_pour_les_projets_decarbonation, code_departement, nom_region`.
 - **Relevé visuel** : 2026-09-09. Gabarit « catalogue » (fil d'Ariane, H1, encadré « Les jeux de données utilisés » → `plan-de-relance`), puis une grande carte DSFR contenant tout.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Quels projets industriels France Relance a-t-il soutenus, où, dans quels secteurs et chez quel type d'entreprises ? » Page de **redevabilité** (transparence sur l'emploi d'un plan public) plus que d'orientation.
+- **Message porté** : l'ampleur (3 080 projets) et la répartition territoriale (chaque projet est un point sur la carte, dans tous les départements, DROM compris) ; la prédominance des TPE/PME (61,8 %) ; la ventilation par mesure (territoriaux, relocalisation, automobile, aéronautique, nucléaire, efficacité énergétique…) et par volet (Indépendance/Compétitivité vs Verdissement).
+- **Information que l'utilisateur doit obtenir** : pour un projet, l'entreprise, sa taille, son SIREN, sa localisation, le volet, la mesure et la description du projet ; pour un territoire ou une mesure, le compte et la carte filtrée ; par région, le croisement région × mesure (histogramme empilé, à rendre **complet**).
+- **Ce que la page ne montre pas** : les montants (le champ `montant_participation_etat` sert d'expression mais avec COUNT ; aucune somme d'euros n'est affichée) ni le CO₂ évité. La reproduction ne doit pas inventer d'indicateur financier.
+
 ## Structure de la carte principale
 
 1. **Badge bleu nuit** « **3080 enregistrements** » (COUNT du contexte) + résumé des filtres actifs (`ods-filter-summary` avec bouton « tout effacer », masqué tant qu'aucun filtre).

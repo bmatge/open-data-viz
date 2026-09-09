@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 37 demandes — 4 bugs, 33 améliorations.
+> 42 demandes — 4 bugs, 38 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -68,7 +68,7 @@ Appeler `normalizeProviderAuthHeaders` dans l'adaptateur au moment de construire
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : prix-des-carburants, qualite-tourisme, tourisme-et-handicap, entreprises-restauration-notre-dame, annuaire-services-dgfip, entreprise-patrimoine-vivant, centres-controle-technique, plan-de-relance.
+Rencontré sur : prix-des-carburants, qualite-tourisme, tourisme-et-handicap, entreprises-restauration-notre-dame, annuaire-services-dgfip, entreprise-patrimoine-vivant, centres-controle-technique, plan-de-relance, fermeture-reseau-cuivre.
 
 ### Constat
 
@@ -208,7 +208,7 @@ Quand la source demande un chargement complet (pas de `server-side`, pas de pagi
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente, fiscalite-locale, rappelconso.
+Rencontré sur : decp-augmente, fiscalite-locale, rappelconso, prix-controle-technique.
 
 ### Constat
 
@@ -676,6 +676,34 @@ Règle de page : `dsfr-data-map-inset { width: 10rem; margin: .5rem .5rem 0 0 }`
 
 ---
 
+## AM-034 — Pas de compteur du total en mode serveur
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-kpi`, `dsfr-data-source`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : fermeture-reseau-cuivre, bofip, prix-controle-technique.
+
+### Constat
+
+Avec `server-side`, la source ne publie que la page courante ; `dsfr-data-kpi value="count"` compte donc 20 ou 30, jamais le total de la recherche. Le total est pourtant connu (`total_count` de la réponse, exposé à la pagination via getDataMeta). Sur un moteur de recherche, « 1 766 communes » ou « 12 documents » est l'information la plus utile.
+
+### Observation
+
+Page fermeture-reseau-cuivre : `records?…&limit=20`, la réponse porte `total_count: 35305` ; un KPI `count` sur la source affiche 20.
+
+### Contournement actuel
+
+Aucun déclaratif : la pagination est le seul indice du nombre de résultats. Une source agrégée `count(*)` séparée ne suit ni la recherche ni les facettes (elles ne relaient qu'à leur propre amont).
+
+### Demande
+
+—
+
+---
+
 ## AM-009 — `fit-bounds` pourrait clipper automatiquement quand `insets` est déclaré
 
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map`
@@ -1033,6 +1061,118 @@ Navigateur : `dsfr-data-a11y tbody tr` première ligne « Corse | 2.266592000000
 ### Contournement actuel
 
 Aucun déclaratif ; arrondir en amont demanderait un `dsfr-data-query` avec une fonction d'arrondi, qui n'existe pas.
+
+### Demande
+
+—
+
+---
+
+## AM-035 — Un graphique n'a pas d'état « vide tant qu'aucun filtre n'est posé »
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-chart`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : impot-sur-le-revenu.
+
+### Constat
+
+Sur un jeu où l'agrégat global n'a pas de sens (additionner toutes les cases d'une déclaration de revenus), la page s'ouvre sur une courbe absurde tant que l'utilisateur n'a rien choisi. Le composant dessine ce qu'il reçoit ; rien ne permet de dire « attends un filtre ».
+
+### Observation
+
+Page impot-sur-le-revenu sans paramètre : KPI « pic de déclarants » = max de toutes les cases confondues, courbe sur 19 388 lignes hétérogènes.
+
+### Contournement actuel
+
+Liens d'exemple (`?nom=1AJ`) et texte d'aide ; `url-params` sur les facettes pour que le catalogue pointe directement sur une case.
+
+### Demande
+
+—
+
+---
+
+## AM-036 — Les templates ne formatent pas les dates
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-display`, `dsfr-data-map-popup`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : fermeture-reseau-cuivre, bofip.
+
+### Constat
+
+`{{champ:number}}` existe, `{{champ:date}}` non : les dates ISO s'affichent brutes (« 2028-01-31 », « 2012-09-12 ») dans les cartes et les panneaux. `formatDate` existe pourtant dans `@dsfr-data/shared`.
+
+### Observation
+
+Cartes des communes du réseau cuivre : « Fermeture technique : 2028-01-31 ». Source : `formatTemplateValue` ne connaît que `number`.
+
+### Contournement actuel
+
+Aucun déclaratif.
+
+### Demande
+
+—
+
+---
+
+## AM-037 — Pas de treemap
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-chart`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : aide-publique-developpement.
+
+### Constat
+
+La page d'origine de l'APD répartit les ODD en treemap. DSFR Chart n'a pas ce type ; barres horizontales à la place.
+
+### Observation
+
+Source data.aide-developpement.gouv.fr/pages/chiffres_cles : `chart-type="treemap"` sur `odd_agrege` ; liste des types de `dsfr-data-chart` sans treemap.
+
+### Contournement actuel
+
+`type="bar" horizontal`.
+
+### Demande
+
+—
+
+---
+
+## AM-038 — `replace-fields` ne sait pas récrire une valeur qui contient des deux-points, ni par motif
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-normalize`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : aide-publique-developpement.
+
+### Constat
+
+La grammaire `CHAMP:motif:remplacement` réserve les deux-points, et la comparaison est stricte (`===`). Une date ISO (« 2018-01-01T00:00:00+00:00 ») ne peut donc ni être ciblée ni être ramenée à « 2018 » : le motif est coupé au premier deux-points de la valeur. `compute` n'a pas de fonction de sous-chaîne.
+
+### Observation
+
+Source `_parseReplaceFields` : `indexOf(':')` deux fois puis `normalizedValue === pattern` ; en page, le libellé reste « 2018-01-01T00:00:00+00:00 » après la règle.
+
+### Contournement actuel
+
+Aucun côté client ; côté serveur, `year()` est refusé par l'adaptateur (PG-014).
 
 ### Demande
 

@@ -53,6 +53,33 @@ const STATUTS = {
   '/pages/visualisation-liste-des-complements-alimentaires/': ['analyse', '/viz/non-reproduites', 'Page servie mais jeu supprimé : seul un jeu « preprod » vide subsiste']
 };
 
+// Lot 8 (2026-09-09) : les entrees « hors perimetre » reprises une a une. Le lien
+// sort du portail, mais la donnee y est : la plupart se reproduisent.
+Object.assign(STATUTS, {
+  'https://www.economie.gouv.fr/treshautdebit/la-fermeture-du-reseau-cuivre-dans-votre-commune':
+    ['reproduite', '/viz/fermeture-reseau-cuivre', 'Page Drupal derrière Cloudflare ; pipeline serveur (recherche, facettes, pagination), carte par année'],
+  '/explore/assets/registre-public-des-aides-de-minimis/view/':
+    ['reproduite', '/viz/aides-de-minimis', 'Page Studio (4 KPI, 4 filtres, tableau) : le JSON de Studio lu comme spécification'],
+  '/explore/dataset/ir-declarations-2042-nat/':
+    ['reproduite', '/viz/impot-sur-le-revenu?nom=1AJ', 'Jeu sans dataviz : exploration case par case sur 19 ans, état dans l\'URL'],
+  'https://www.economie.gouv.fr/dgfip/bulletins-officiels':
+    ['reproduite', '/viz/bofip', 'Moteur de recherche plein texte serveur sur 9 146 documents, chronologie'],
+  'https://data.aide-developpement.gouv.fr':
+    ['reproduite', '/viz/aide-publique-developpement', 'Portail Opendatasoft tiers : 7 contextes → 1, carte du monde en un attribut'],
+  'https://prix.conso.gouv.fr/controle-technique':
+    ['reproduite', '/viz/prix-controle-technique', 'Jeu successeur de controle_techn ; aucune facette déclarée : filtres en dur, choroplèthe des prix'],
+  'https://data.ofgl.fr':
+    ['analyse', '/viz/ofgl', 'Atelier de cartographie sur des agrégats OFGL, pas une dataviz ; les balances brutes exigent une règle comptable'],
+  'https://www.francebleu.fr/services/prix-carburants':
+    ['reproduite', '/viz/prix-des-carburants', 'Même jeu que Prix des carburants : la reproduction couvre carburant, distributeur et horaires'],
+  'https://www.prix-carburants.gouv.fr':
+    ['reproduite', '/viz/prix-des-carburants', 'Même jeu que Prix des carburants : carte et recherche de points de vente'],
+  'https://www.entreprises.gouv.fr/espace-entreprises/s-informer-sur-la-reglementation/le-label-entreprise-du-patrimoine-vivant':
+    ['reproduite', '/viz/entreprise-patrimoine-vivant', 'Page réglementaire ; le jeu EPV est celui de la page Entreprises du patrimoine vivant'],
+  'https://139bercy.github.io/charte-open-data-mef/':
+    ['hors-perimetre', null, 'Document de gouvernance sans jeu de données : la seule entrée réellement hors périmètre']
+});
+
 const DEFAUT_HORS_PERIMETRE = 'Cible externe au portail — voir l\'inventaire des entrées non reproduites';
 
 function statutPour(record) {

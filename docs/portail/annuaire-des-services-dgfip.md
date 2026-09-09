@@ -6,6 +6,13 @@
 - **Jeu secondaire** : `georef-france-departement-millesime` (liste des départements du select, champs `dep_code`, `dep_name`).
 - **Relevé visuel** : 2026-09-09. Page courte (~1 300 px) : en-tête, filtres, une ligne de titre, puis carte (640 px) à gauche et panneau de détail à droite.
 
+## Objectif de la dataviz et informations véhiculées
+
+- **Question à laquelle elle répond** : « Où puis-je aller, près de chez moi, pour faire *cette* démarche fiscale, et quand ? » (« Vous avez rendez-vous dans un centre des Finances publiques ? »). Guichet d'orientation pour particuliers et professionnels.
+- **Message porté** : la proximité et la diversité des points d'accueil — pas seulement les centres des Finances publiques mais aussi les permanences, les maisons France Services et les **buralistes partenaires** (paiement de proximité) : 21 761 points, dont 16 163 buralistes. Le filtre par service (payer mes impôts, amendes, factures locales, factures d'hôpital, obtenir un renseignement) est la vraie entrée fonctionnelle.
+- **Information que l'utilisateur doit obtenir** : pour un point, le type, le nom du service, le public, les démarches proposées, l'adresse, les téléphones, le courriel (ou le renvoi vers la messagerie sécurisée), les horaires et les conditions de rendez-vous ; et, quand plusieurs services partagent une adresse (SIP, SIE, trésorerie…), la liste pour choisir le bon.
+- **Choix de conception à préserver** : la commune n'est proposée qu'après le département (liste de 10 000 communes impossible sinon) ; le titre reformule la demande (« Établissements pour payer vos impôts ») ; la légende à 4 couleurs distingue les types de lieux.
+
 ## Structure
 
 1. **Titre** : logo DGFiP + « Direction générale des finances publiques » (H1 discret, gras). Aucun texte d'intro.
@@ -17,7 +24,8 @@
    | **Tous départements** | Liste des `dep_name` du jeu géographique (≈ 100), recherche par saisie (« Côte » → Côte-d'Or, Côtes-d'Armor). | pose `refine.departement` (code, ex. 21) sur tous les contextes ; l'URL se met à jour (`?refine.departement=21`). La carte se recadre sur le département. |
    | **Toutes communes** | **Désactivé tant qu'aucun département n'est choisi.** Ensuite : communes du département ayant au moins un lieu, libellé « Beaune (8 lieux) » / « Ahuy (1 lieu) », triées par nom (analyse `COUNT(*)` groupée par `current_code`/`com_name`, max 10 000). | pose `refine.current_code` (ex. 21054), URL mise à jour. |
    Sous les selects, dès qu'un filtre est actif : lien centré « **Supprimer tous les filtres ⊗** ».
-3. **Titre dynamique** en capitales : « SÉLECTIONNEZ UN LIEU SUR LA CARTE » → avec un département : « SÉLECTIONNEZ UN LIEU DANS LE DÉPARTEMENT CÔTE-D'OR ».
+3. **Titre dynamique** en capitales : « SÉLECTIONNEZ UN LIEU SUR LA CARTE » → avec un département : « SÉLECTIONNEZ UN LIEU DANS LE DÉPARTEMENT CÔTE-D'OR ». Le titre du panneau droit suit le service (observé : Professionnels + « Payer mes impôts » → « Établissements pour payer vos impôts », URL `?refine.public=professionnels&refine.service=Payer%20mes%20impôts`).
+   - **Défaut observé** : avec Public + Service mais sans département, la carte **se recadre sur le monde entier** (un seul cluster « 16 167 » au-dessus de l'Europe, du Groenland à la Mongolie) : le refit sur l'emprise de 16 167 points dont quelques DROM donne une vue inutilisable. À ne pas imiter : garder la vue France.
 4. **Carte** (gauche, ≈ 690 × 640 px, `jawg.light`, pas de barre d'outils de dessin, pas de recherche, géolocalisation activée, molette active) :
    - zoom 1-8 : **clusters** bleu nuit `#002a40` avec effectifs (au chargement : 3 129 (Paris), 1 763 (Lyon), 1 116, 1 039, 933, 895, 737, 703, 695, 671, 627, 620, 598, 593, 531, 529, 509, 503, 496, 484, 461, 441, 422, 405, 384, 377, 280, 238, 182 (Corse)…). Vue initiale : France métropolitaine (Cologne → Barcelone).
    - zoom ≥ 9 : **points colorés par `type_de_service`** en deux couches : lieux hors buralistes (France Services `#f8b334` jaune, Centre de Finances publiques `#004c6c` bleu foncé, Permanences `#5d8fa4` bleu-gris, autre `#263892`) et buralistes (`#6c5d53` brun).
