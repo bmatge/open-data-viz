@@ -27,15 +27,33 @@ Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.m
 - **L'analyse doit être vraie.** Elle est le livrable, pas l'habillage. Si une affirmation
   n'a pas été vérifiée dans le navigateur, elle ne va pas dans la page. Chaque friction
   décrite doit avoir été effectivement rencontrée pendant la reproduction.
+- **⚠️ Avant de classer quoi que ce soit en limite : est-ce la bibliothèque, ou est-ce
+  d'avoir voulu reproduire à l'identique ?** C'est la règle la plus importante du dépôt.
+  Opendatasoft impose un modèle (un contexte, un jeu de données, tout y pend) ;
+  `dsfr-data` en propose plusieurs — tout charger côté client, agréger côté serveur,
+  charger par viewport (`bbox`), paginer côté serveur. Transposer le modèle ODS puis en
+  imputer le coût à `dsfr-data` produit des critiques fausses : c'est arrivé deux fois au
+  lot 1 (FP-001 et FP-002 du registre). Chercher l'architecture native **avant** d'écrire
+  qu'une chose est impossible.
 - **Vérifier au navigateur avant de conclure.** Playwright est disponible via
   `~/Developer/GitHub/dsfr-data/node_modules/playwright` ; charger la page, relever les
   erreurs console et capturer un écran. Une page qui « a l'air correcte » dans le HTML
   n'a rien prouvé.
 - **Dataviz non reproductible** (page 404, jeu de données supprimé, cible hors portail)
   → analyse détaillée à la place, et statut correspondant dans le registre.
-- Après avoir traité une dataviz : mettre à jour la table `STATUTS` de
-  `scripts/build-registre.mjs`, relancer `node scripts/build-registre.mjs`, puis
-  reporter l'enseignement dans `public/synthese.html`.
+- Après avoir traité une dataviz, trois gestes :
+  1. **Consigner les constats** dans `public/data/retours.json` — un objet par constat,
+     typé (`faux-probleme`, `bug`, `amelioration`, `limite-dure`, `avantage`, `piege`),
+     avec un champ `verifie` décrivant l'observation qui l'établit. **Pas de champ
+     `verifie`, pas d'entrée.** Puis `node scripts/build-retours.mjs`, qui régénère
+     l'export d'issues et la note du vault.
+  2. Mettre à jour la table `STATUTS` de `scripts/build-registre.mjs`, puis
+     `node scripts/build-registre.mjs`.
+  3. Reporter l'enseignement transverse dans `public/synthese.html`.
+- **Un constat corrigé ne s'efface pas.** Quand une vérification invalide une critique déjà
+  écrite, elle devient une entrée `faux-probleme` (ce que je croyais / ce qui est vrai /
+  ce qui reste vrai / comment je l'ai vérifié), et l'analyse de la page concernée est
+  réécrite. La trace de la correction fait partie du livrable.
 
 ## Pièges déjà payés (ne pas les repayer)
 

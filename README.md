@@ -15,7 +15,9 @@ simple, ce qui a coincé, un tableau de correspondance directive ODS → composa
 `dsfr-data`, et un verdict. Quand une dataviz n'est pas reproductible (page ou jeu de
 données disparu, cible hors portail), elle reçoit une analyse détaillée à la place.
 
-La synthèse transverse vit sur [`/synthese`](public/synthese.html).
+Deux pages transverses : la synthèse des analyses sur [`/synthese`](public/synthese.html), et
+le **registre des retours** sur [`/retours`](public/retours.html) — le relevé structuré, entrée
+par entrée, de ce qu'il faut demander à ChartsBuilder et de ce qui ne dépend pas d'elle.
 
 ## Démarrer
 
@@ -44,8 +46,13 @@ public/
     cles.js               clé de lecture publique de l'API ODS du portail
     layout.js             en-tête et pied de page DSFR communs
     site.css              habillage minimal par-dessus le DSFR
+  data/retours.json       registre des retours (source de vérité)
+  retours.html            le registre, rendu avec les composants qu'il évalue
 scripts/
   build-registre.mjs      régénère public/data/registre.json depuis le catalogue vivant
+  build-retours.mjs       dérive l'export d'issues + la note du vault depuis retours.json
+export/
+  issues-dsfr-data.md     demandes prêtes à déposer sur bmatge/dsfr-data (généré)
 server.js                 serveur statique zéro-dépendance
 ```
 
@@ -66,6 +73,30 @@ page d'accueil viennent du portail, les badges d'avancement viennent d'ici.
 
 Pour le régénérer après avoir traité une dataviz : éditer la table `STATUTS` de
 `scripts/build-registre.mjs`, puis `node scripts/build-registre.mjs`.
+
+## Le registre des retours
+
+`public/data/retours.json` est la source de vérité des constats. Une entrée par constat, typée :
+
+| Type | Sens |
+|---|---|
+| `faux-probleme` | Je l'avais classé en limite ; la vérification a montré qu'une voie native existe |
+| `bug` | Comportement incorrect de la bibliothèque |
+| `amelioration` | Manque comblable → devient une issue |
+| `limite-dure` | Ne dépend pas de ChartsBuilder (API du portail, qualité des données) |
+| `avantage` | Ce que ChartsBuilder fait mieux que l'original |
+| `piege` | Ça marche, mais on se trompe facilement |
+
+**Règle** : chaque entrée porte un champ `verifie` décrivant l'observation qui l'établit —
+requête émise, message de console, chiffres comparés. Sans lui, pas d'entrée.
+
+**Règle de méthode**, la plus importante du dépôt : avant de classer quelque chose en limite,
+se demander si l'obstacle vient de la bibliothèque ou d'avoir voulu *reproduire à l'identique*
+le modèle d'Opendatasoft. Deux critiques sévères ont déjà été retirées pour cette raison.
+
+```bash
+node scripts/build-retours.mjs      # -> export/issues-dsfr-data.md + note du vault
+```
 
 ## Avancement
 
@@ -91,9 +122,11 @@ contre une quinzaine de lignes de balises ; `ods-chart` + `ods-chart-query` +
 équivalent sous chaque graphique — l'original n'a rien), les fonds de carte IGN
 souverains là où le portail utilise Jawg, et l'habillage éditorial natif (`databox-*`).
 
-**Un écart réel** : `ods-facets` construit la barre de filtres à partir des métadonnées
-du jeu de données, sans configuration. `dsfr-data` n'a pas d'équivalent quand la source
-ne renvoie que des agrégats — il faut alors écrire les valeurs de filtre à la main.
+**Un écart réel, et plus étroit qu'il n'y paraissait** : `dsfr-data-facets server-facets`
+fait bien l'équivalent d'`ods-facets` — valeurs et compteurs lus sur l'endpoint `/facets`
+d'Opendatasoft, y compris au-dessus d'une source agrégée, avec recalcul contextuel. Ce qui
+manque est un point d'assemblage : un jeu de facettes ne pilote qu'une source, donc un
+tableau de bord bâti sur plusieurs agrégations doit encore écrire ses valeurs à la main.
 
 **Des pièges silencieux**, plus dangereux que difficiles : le plafond `max-records`
 (1 000 par défaut) qui tronque sans rien dire, la clé d'API en en-tête `apikey` refusée

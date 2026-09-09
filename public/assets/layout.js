@@ -8,6 +8,7 @@
   const LIENS = [
     { href: '/', libelle: 'Catalogue' },
     { href: '/synthese', libelle: 'Synthèse' },
+    { href: '/retours', libelle: 'Registre des retours' },
     { href: 'https://data.economie.gouv.fr/pages/catalogue-visualisations/', libelle: 'Original Opendatasoft', externe: true }
   ];
 
@@ -86,6 +87,7 @@
     <div class="fr-footer__bottom">
       <ul class="fr-footer__bottom-list">
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/synthese">Synthèse des analyses</a></li>
+        <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/retours">Registre des retours</a></li>
         <li class="fr-footer__bottom-item">
           <a class="fr-footer__bottom-link" href="https://github.com/bmatge/open-data-viz" target="_blank" rel="noopener external">Code source</a>
         </li>

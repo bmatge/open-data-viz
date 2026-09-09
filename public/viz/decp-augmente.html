@@ -244,14 +244,31 @@
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Les facettes ne se génèrent pas toutes seules.</strong> C'est le vrai écart.
-              <code>ods-facets context="ctx"</code> construit la barre de filtres à partir des facettes
-              déclarées dans le back-office du jeu de données&nbsp;: <em>une balise, zéro configuration</em>.
-              Côté <code>dsfr-data</code>, <code>dsfr-data-facets</code> calcule les facettes sur les
-              données reçues — inutilisable ici, puisque les sources ne reçoivent que des agrégats.
-              Il a fallu passer par <code>dsfr-data-context</code> + trois <code>&lt;select&gt;</code>
-              DSFR <strong>dont les valeurs sont écrites en dur</strong>, relevées à la main via l'API.
-              Elles ne se mettront pas à jour toutes seules si le jeu de données évolue.</li>
+            <li><strong>Une seule chose empêche de se passer des valeurs écrites en dur.</strong>
+              Premier réflexe&nbsp;: conclure que <code>ods-facets context="ctx"</code> — une balise,
+              zéro configuration — garde un net avantage. C'est faux, et la vérification l'a montré&nbsp;:
+              <code>dsfr-data-facets</code> a un mode <code>server-facets</code> qui interroge
+              l'endpoint <code>/facets</code> d'Opendatasoft, rend les vraies valeurs avec leurs
+              compteurs, <em>y compris au-dessus d'une source agrégée</em>, et recalcule les compteurs
+              des autres facettes à chaque sélection — le comportement contextuel qu'on attend d'un
+              portail. Testé sur ce jeu de données&nbsp;: il fonctionne.
+              <br>Ce qui bloque ici est plus étroit et plus précis&nbsp;: <strong>un composant de
+              facettes ne pilote que sa propre source.</strong> Cette page repose sur quatre
+              agrégations serveur distinctes&nbsp;; avec des facettes, une seule se refiltrerait.
+              D'où le repli sur <code>dsfr-data-context</code> et trois listes déroulantes dont les
+              valeurs sont écrites à la main. Il n'existe pas de pont entre les deux mécanismes&nbsp;:
+              <code>dsfr-data-context-filter</code> lit un <code>&lt;select&gt;</code> ou un
+              <code>&lt;input&gt;</code>, pas un composant de facettes.</li>
+            <li><strong>La sortie élégante existe, et un bug la ferme.</strong> Le bon dessin serait
+              une source unique&nbsp;: un tableau croisé <code>source × nature × procedure</code>
+              agrégé par le serveur (235 lignes seulement), des facettes serveur qui le pilotent, et
+              les quatre graphiques ré-agrégés côté client à partir de ces 235 lignes. Une requête,
+              zéro valeur en dur, tout cohérent. Cette page a été construite ainsi — puis abandonnée&nbsp;:
+              sur un <code>group_by</code>, Opendatasoft renvoie un <code>total_count</code> égal à la
+              taille de page, et la boucle de pagination de l'adaptateur s'arrête donc après 100 des
+              235 lignes. Le KPI affichait 632&nbsp;062 marchés au lieu de 994&nbsp;123,
+              <strong>sans le moindre avertissement</strong>. Corriger la condition d'arrêt sur les
+              requêtes agrégées débloquerait toute cette famille de tableaux de bord.</li>
             <li><strong>Un filtre transverse à N vues demande une pièce de plus.</strong> Dans
               Opendatasoft, le contexte partagé <em>est</em> le modèle&nbsp;: tout ce qui pointe
               <code>context="ctx"</code> se refiltre. Ici il faut déclarer explicitement
@@ -286,7 +303,8 @@
           <tbody>
             <tr><td><code>ods-chart</code> / <code>-query</code> / <code>-serie</code></td><td><code>dsfr-data-chart</code></td><td>3 balises imbriquées → 1</td></tr>
             <tr><td><code>function-y="COUNT"</code> + <code>field-x</code></td><td><code>select</code> + <code>group-by</code> sur la source</td><td>Équivalent, agrégation serveur dans les deux cas</td></tr>
-            <tr><td><code>ods-facets</code> (auto depuis le back-office)</td><td><code>dsfr-data-context</code> + <code>&lt;select&gt;</code> en dur</td><td><strong>Net avantage Opendatasoft</strong></td></tr>
+            <tr><td><code>ods-facets</code> (auto depuis le back-office)</td><td><code>dsfr-data-facets server-facets</code></td><td>Équivalent — mais ne pilote qu'une source</td></tr>
+            <tr><td>contexte partagé filtrant N vues</td><td><code>dsfr-data-context</code> + <code>&lt;select&gt;</code> en dur</td><td>Le seul point où il faut écrire des valeurs à la main</td></tr>
             <tr><td><code>ods-aggregation</code> COUNT</td><td><code>dsfr-data-kpi</code></td><td>Équivalent, mieux présenté</td></tr>
             <tr><td><code>ods-filter-summary</code> (rappel des filtres)</td><td><code>dsfr-data-context-tags</code> (non utilisé ici)</td><td>Disponible, non câblé sur cette page</td></tr>
             <tr><td>—</td><td><code>dsfr-data-a11y</code></td><td>Sans équivalent&nbsp;: gain net</td></tr>
@@ -296,13 +314,20 @@
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile, à une réserve près.</strong> Les quatre graphiques et le KPI se
-          sont écrits en une passe, et le résultat est meilleur que l'original sur trois points&nbsp;:
-          l'accessibilité (tableau équivalent + export sous chaque graphique), l'habillage éditorial
-          (source et téléchargement natifs) et la lisibilité du code. La réserve tient entièrement à la
-          barre de filtres&nbsp;: Opendatasoft la génère à partir des métadonnées du jeu de données,
-          <code>dsfr-data</code> ne sait pas encore le faire quand la source ne renvoie que des agrégats.
-          C'est la seule chose qui, ici, demande de la maintenance manuelle.</p>
+        <p><strong>Reproduction facile, à une réserve près — et elle n'est pas celle qu'on croit.</strong>
+          Les quatre graphiques et le KPI se sont écrits en une passe, et le résultat dépasse l'original
+          sur trois points&nbsp;: l'accessibilité (tableau équivalent et export sous chaque graphique),
+          l'habillage éditorial et la lisibilité du code. La réserve ne porte pas sur la capacité à
+          faire des facettes serveur&nbsp;: <code>dsfr-data</code> sait le faire, aussi bien
+          qu'Opendatasoft. Elle porte sur un seul point d'assemblage&nbsp;: <strong>faire piloter
+          plusieurs agrégations par un même jeu de facettes.</strong> C'est la seule raison pour
+          laquelle des valeurs sont écrites en dur sur cette page, et c'est une demande précise à
+          adresser à la bibliothèque plutôt qu'un verdict sur elle.</p>
+        <p class="fr-text--sm fr-hint-text">
+          Les deux constats de cette page sont consignés au
+          <a href="/retours">registre des retours</a> (AM-001 et BUG-001), avec la trace de leur
+          vérification.
+        </p>
       </div>
     </div>
   </section>

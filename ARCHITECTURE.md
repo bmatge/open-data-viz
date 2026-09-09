@@ -24,6 +24,7 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 - Une page dataviz : `public/viz/plan-de-relance.html` — modèle de référence, tout y est
 - Synthèse transverse : `public/synthese.html`
 - Registre d'avancement : `scripts/build-registre.mjs:33` (table `STATUTS`)
+- Registre des retours : `public/data/retours.json` (source) → `scripts/build-retours.mjs`
 
 ## 3. Modules & responsabilités
 
@@ -33,7 +34,9 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 | Page catalogue | Reproduit la page d'accueil ODS + badges d'avancement | `public/index.html` |
 | Pages dataviz | Une par visualisation reproduite, avec sa section `#analyse` | `public/viz/*.html` |
 | Synthèse | Agrège les analyses + tableau de bord d'avancement | `public/synthese.html` |
-| Registre | État de reproduction, joint au catalogue ODS | `public/data/registre.json` |
+| Registre d'avancement | État de reproduction, joint au catalogue ODS | `public/data/registre.json` |
+| Registre des retours | Constats sur ChartsBuilder, un objet par constat | `public/data/retours.json` |
+| Page des retours | Le registre rendu avec les composants qu'il évalue | `public/retours.html` |
 | Générateur de registre | Reconstruit le registre depuis le catalogue vivant | `scripts/build-registre.mjs` |
 | Clés d'API | Clé de lecture publique du portail | `public/assets/cles.js` |
 | Habillage | En-tête / pied de page DSFR injectés | `public/assets/layout.js` |
@@ -74,8 +77,10 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 ## 5. Effets de bord & I/O
 
 - **DB / migrations** : aucune. Aucun état serveur.
-- **Fichiers** : `public/data/registre.json` est le seul fichier écrit, et seulement par
-  `scripts/build-registre.mjs` (jamais à l'exécution).
+- **Fichiers** : deux fichiers générés, jamais à l'exécution —
+  `public/data/registre.json` par `scripts/build-registre.mjs`, et
+  `export/issues-dsfr-data.md` + la note du vault par `scripts/build-retours.mjs`.
+  `public/data/retours.json` est écrit à la main : c'est une source, pas une sortie.
 - **Réseau** : lectures anonymes sur `data.economie.gouv.fr` (API Explore v2.1, CORS `*`) ;
   jsDelivr pour DSFR / DSFR Chart / dsfr-data ; tuiles IGN pour les cartes. Aucune écriture.
 - **Crons / queues** : aucun. Le TTL de 30 jours du prototype est géré par `spawn` sur le VPS.
