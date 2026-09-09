@@ -163,39 +163,126 @@ Les entrées de type *bug* et *amélioration* sont exportées prêtes à dépose
 `;
 
 // ------------------------------------------------------------ export issues
+//
+// Rapport de cadrage : toute entree qui porte un bloc `cadrage` (bugs,
+// ameliorations, et les pieges qui meritent une correction dans la lib).
+// Ordre : priorite (P1..P4), puis effort (S, M, L), puis severite.
 
-const aDeposer = [...parType('bug'), ...parType('amelioration')];
+const POIDS_PRIORITE = { P1: 0, P2: 1, P3: 2, P4: 3 };
+const POIDS_EFFORT = { S: 0, M: 1, L: 2 };
+const LIBELLE_PRIORITE = {
+  P1: 'P1 — immédiat : chiffres faux ou fonctions inutilisables, correction courte',
+  P2: 'P2 — prochain cycle : gain net, effort mesuré',
+  P3: 'P3 — backlog : confort, cas moins fréquents',
+  P4: 'P4 — hors périmètre ou refus motivé',
+};
+const LIBELLE_EFFORT = { S: 'S (moins d\'un jour)', M: 'M (un à trois jours)', L: 'L (conception + développement)' };
 
-const issue = (r) => `## ${r.id} — ${r.titre}
+const aDeposer = retours
+  .filter((r) => r.cadrage)
+  .sort(
+    (a, b) =>
+      (POIDS_PRIORITE[a.cadrage.priorite] ?? 9) - (POIDS_PRIORITE[b.cadrage.priorite] ?? 9) ||
+      (POIDS_EFFORT[a.cadrage.effort] ?? 9) - (POIDS_EFFORT[b.cadrage.effort] ?? 9) ||
+      (POIDS_SEVERITE[a.severite] ?? 3) - (POIDS_SEVERITE[b.severite] ?? 3)
+  );
 
-**Labels suggérés** : \`${r.type === 'bug' ? 'bug' : 'enhancement'}\`, \`severity:${r.severite}\`${
-  r.composants?.length ? `, \`${r.composants.join('`, `')}\`` : ''
-}
+const labelType = (r) => (r.type === 'bug' ? 'bug' : r.type === 'piege' ? 'enhancement, dx' : 'enhancement');
 
-### Contexte
+const issue = (r) => {
+  const c = r.cadrage;
+  return `## ${r.id} — ${r.titre}
 
-Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
-reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : ${(r.dataviz || []).join(', ') || '—'}.
+**Priorité** ${c.priorite} · **Effort estimé** ${LIBELLE_EFFORT[c.effort] || c.effort} · **Décision proposée** ${c.decision}
+**Labels suggérés** : \`${labelType(r)}\`, \`severity:${r.severite}\`${
+    r.composants?.length ? `, \`${r.composants.join('`, `')}\`` : ''
+  }
+**Rencontré sur** ${(r.dataviz || []).length} page(s) : ${(r.dataviz || []).join(', ') || '—'}
 
 ### Constat
 
 ${r.constat}
+${r.correction ? `\n**Ce qui est vrai.** ${r.correction}\n` : ''}${r.reste_vrai ? `\n**Ce qui reste vrai.** ${r.reste_vrai}\n` : ''}
+### Impact de l'erreur ou du manque
 
-### Observation
+${c.impact}
+
+### Objectif métier de la correction
+
+${c.objectif}
+
+### Pérennité et reproductibilité du besoin
+
+${c.perennite}
+
+### Comment ça a été vérifié
 
 ${r.verifie || '—'}
 ${r.contournement ? `\n### Contournement actuel\n\n${r.contournement}\n` : ''}
 ### Demande
 
-${r.demande || '—'}
-`;
+${r.demande || r.proposition || '—'}
 
-const exportIssues = `# Demandes à déposer sur bmatge/dsfr-data
+### Critères d'acceptation
+
+${c.acceptation.map((a) => `- [ ] ${a}`).join('\n')}
+`;
+};
+
+const parPriorite = (p) => aDeposer.filter((r) => r.cadrage.priorite === p);
+const compteEffort = (liste, e) => liste.filter((r) => r.cadrage.effort === e).length;
+
+const tableauPriorisation = ['P1', 'P2', 'P3', 'P4']
+  .map(
+    (p) => `### ${LIBELLE_PRIORITE[p]}
+
+| Id | Demande | Type | Effort | Pages | Décision |
+|---|---|---|---|---|---|
+${parPriorite(p)
+  .map((r) => `| ${r.id} | ${r.titre} | ${r.type} | ${r.cadrage.effort} | ${(r.dataviz || []).length} | ${r.cadrage.decision} |`)
+  .join('\n')}
+
+_${parPriorite(p).length} demandes — S ${compteEffort(parPriorite(p), 'S')}, M ${compteEffort(parPriorite(p), 'M')}, L ${compteEffort(parPriorite(p), 'L')}._
+`
+  )
+  .join('\n');
+
+const exportIssues = `# Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par \`node scripts/build-retours.mjs\` depuis \`public/data/retours.json\`.
-> ${aDeposer.length} demandes — ${parType('bug').length} bugs, ${parType('amelioration').length} améliorations.
+> ${aDeposer.length} demandes cadrées — ${aDeposer.filter((r) => r.type === 'bug').length} bugs,
+> ${aDeposer.filter((r) => r.type === 'amelioration').length} améliorations,
+> ${aDeposer.filter((r) => r.type === 'piege').length} pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
+
+## Comment lire ce rapport
+
+Chaque demande naît d'une reproduction réelle du banc d'essai
+[open-data-viz](https://github.com/bmatge/open-data-viz) (30 entrées du catalogue de visualisations
+de data.economie.gouv.fr, 24 reproduites) et porte la trace de sa vérification. Le cadrage ajoute ce
+qu'il faut pour décider :
+
+- **Impact** — ce qui se passe pour l'utilisateur ou l'auteur de page tant que ce n'est pas fait ;
+- **Objectif métier** — ce que la correction permet, formulé côté usage ;
+- **Pérennité** — si le besoin est structurel (tout projet le rencontrera), récurrent, ou ponctuel ;
+- **Critères d'acceptation** — des tests observables, pour clore l'issue sans discussion ;
+- **Effort** — S (moins d'un jour), M (un à trois jours), L (conception + développement), estimé
+  d'après le code source lu, pas d'après la description ;
+- **Priorité** — impact × faisabilité : P1 corrige des chiffres faux ou des fonctions inutilisables
+  à faible coût ; P2 apporte un gain net à effort mesuré ; P3 est du confort ; P4 sort du périmètre.
+
+Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il annonce. Elles sont
+ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
+vigilance qu'elles exigent de chaque auteur de page.
+
+Neuf critiques ont été **retirées** au fil du banc d'essai parce qu'une vérification a montré une voie
+native ou une erreur de notre part (faux problèmes FP-001 à FP-009 du registre) : ce rapport ne liste
+que ce qui a résisté à la vérification.
+
+## Priorisation
+
+${tableauPriorisation}
+## Les demandes
 
 ${aDeposer.map(issue).join('\n---\n\n')}`;
 
