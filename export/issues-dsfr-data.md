@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 19 demandes — 2 bugs, 17 améliorations.
+> 24 demandes — 3 bugs, 21 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -12,7 +12,7 @@
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente.
+Rencontré sur : decp-augmente, comptabilite-generale.
 
 ### Constat
 
@@ -20,11 +20,11 @@ Sur un `group_by`, l'API Opendatasoft renvoie un `total_count` égal à la TAILL
 
 ### Observation
 
-Tableau croisé `source × nature × procedure` sur decp_augmente = 235 groupes réels (mesurés en paginant à la main). Page construite dessus : une seule requête émise, KPI affiché 632 062 au lieu de 994 123 marchés. Aucun message en console.
+Deux cas. (1) DECP : tableau croisé `source × nature × procedure` = 235 groupes réels ; une page bâtie dessus n'émet qu'une requête et affiche 632 062 marchés au lieu de 994 123, sans message. (2) Comptabilité générale : le graphique « postes × année » compte 264 groupes — c'est le premier cas où le bug BLOQUE réellement une reproduction, le graphique principal de la page n'aurait montré qu'un tiers des données.
 
 ### Contournement actuel
 
-Aucun côté appelant : ni `limit` ni `max-records` ne changent la condition d'arrêt. Il faut rester sous 100 groupes (les croisements deux à deux de DECP tiennent : source×nature = 47, source×procedure = 79, nature×procedure = 83).
+**Trouvé au lot 3** : `/exports/json` accepte `group_by` et renvoie TOUS les groupes en une requête — 264 groupes en 0,5 s. Écrire la source en mode générique (`url=` vers `/exports/json` + `params`) contourne donc entièrement le bug. En mode adaptateur, aucun contournement : ni `limit` ni `max-records` ne changent la condition d'arrêt.
 
 ### Demande
 
@@ -57,6 +57,34 @@ Console navigateur : « Request header field apikey is not allowed by Access-Con
 ### Demande
 
 Appeler `normalizeProviderAuthHeaders` dans l'adaptateur au moment de construire la requête, pas seulement dans l'UI du builder.
+
+---
+
+## BUG-003 — `type="map-reg"` journalise une erreur de parsing à chaque chargement
+
+**Labels suggérés** : `bug`, `severity:basse`, `dsfr-data-chart`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : prix-des-carburants.
+
+### Constat
+
+Un `dsfr-data-chart type="map-reg"` émet en console « Erreur lors du parsing des données data: SyntaxError: "undefined" is not valid JSON » à chaque chargement de page. La carte s'affiche correctement une fois les données arrivées : le composant DSFR Chart est manifestement instancié avec un attribut `data` encore indéfini, avant la première émission de la source. Sans conséquence fonctionnelle, mais une erreur console permanente masque les vraies.
+
+### Observation
+
+Reproduit sur une page minimale ne contenant qu'une source et un `dsfr-data-chart type="map-reg"` : une erreur, systématique. Les graphiques `bar`, `line` et `pie` des autres pages du dépôt n'en produisent aucune.
+
+### Contournement actuel
+
+Aucun ; l'erreur est cosmétique.
+
+### Demande
+
+Ne créer le composant `map-chart` qu'une fois les données disponibles, ou passer un tableau vide plutôt qu'`undefined`.
 
 ---
 
@@ -124,7 +152,7 @@ Un avertissement console systématique quand la troncature est effective (un `co
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants.
 
 ### Constat
 
@@ -132,7 +160,7 @@ En mode adaptateur, un chargement complet passe par `/records` avec `limit=100` 
 
 ### Observation
 
-Chronométrage en navigateur sur la même page : 31 requêtes, concurrence maximale 1, durée moyenne 931 ms (max 3 721 ms — la pagination profonde se dégrade), 28,9 s passées dans les requêtes contre 37 ms entre elles. Le poids n'y est pour rien : un `select` divisant le transfert par 3,7 n'a fait gagner aucune seconde. La même page basculée sur `/exports/json` : 1 requête, 0,62 s, 185 Ko.
+Chronométrage en navigateur sur la même page : 31 requêtes, concurrence maximale 1, durée moyenne 931 ms (max 3 721 ms — la pagination profonde se dégrade), 28,9 s passées dans les requêtes contre 37 ms entre elles. Le poids n'y est pour rien : un `select` divisant le transfert par 3,7 n'a fait gagner aucune seconde. La même page basculée sur `/exports/json` : 1 requête, 0,62 s, 185 Ko. Lot 3 : `/exports/json` avec `group_by=postes, year(annee) as an` sur 517 489 lignes renvoie les 264 groupes en 0,50 s.
 
 ### Contournement actuel
 
@@ -140,7 +168,7 @@ Chronométrage en navigateur sur la même page : 31 requêtes, concurrence maxim
 
 ### Demande
 
-Quand la source demande un chargement complet (pas de `server-side`, pas de pagination), utiliser `/exports/json` plutôt que la boucle sur `/records`. À défaut, paralléliser les pages une fois `total_count` connu : 8 requêtes concurrentes prennent 0,44 s contre 2,4 s en série.
+Quand la source demande un chargement complet (pas de `server-side`, pas de pagination), utiliser `/exports/json` plutôt que la boucle sur `/records`. L'endpoint accepte AUSSI `group_by`, `select` et `where` : il couvre donc à la fois le chargement de lignes et les agrégations, et règle du même coup BUG-001. À défaut, paralléliser les pages une fois `total_count` connu : 8 requêtes concurrentes prennent 0,44 s contre 2,4 s en série.
 
 ---
 
@@ -208,7 +236,7 @@ Ajouter `distinct` (ou `count-distinct`) à la grammaire commune, et signaler un
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, decp-augmente, restauration-notre-dame.
+Rencontré sur : plan-de-relance, decp-augmente, restauration-notre-dame, comptabilite-generale.
 
 ### Constat
 
@@ -320,7 +348,7 @@ Poser un `where` initial sur la source, ou accepter un premier rendu approximati
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame.
+Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants.
 
 ### Constat
 
@@ -376,7 +404,7 @@ Un attribut du type `refine-on-click="champ"` sur la couche, qui émettrait la m
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap.
+Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap, prix-des-carburants.
 
 ### Constat
 
@@ -393,6 +421,34 @@ Une URL de tuiles personnalisée avec `tiles-attribution` — mais on sort alors
 ### Demande
 
 Un préréglage clair et neutre, souverain de préférence (l'IGN publie un style `plan-ign-clair`), pour que la donnée thématique reste lisible.
+
+---
+
+## AM-018 — Pas d'arithmétique entre séries (actif − passif, taux d'évolution)
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-query`, `dsfr-data-normalize`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : comptabilite-generale.
+
+### Constat
+
+La page d'origine calcule dans son template l'écart actif − passif par année, puis son taux d'évolution d'une année sur l'autre. Côté dsfr-data, `dsfr-data-normalize compute` fait de l'arithmétique LIGNE À LIGNE sur des valeurs brutes ; il ne sait ni comparer deux séries, ni accéder à la ligne précédente. Reproduire l'écart demande deux sources, un `dsfr-data-join` sur l'année et un `compute` — quatre balises pour une soustraction. Le taux d'évolution, qui suppose un décalage d'une ligne, reste hors de portée.
+
+### Observation
+
+Documentation de `compute` : « Hors périmètre : conditions, fonctions, calculs sur valeurs agrégées. » Les KPI d'évolution de la page d'origine n'ont pas été reproduits.
+
+### Contournement actuel
+
+Deux sources + `dsfr-data-join` + `compute` pour une différence. Rien pour une variation temporelle.
+
+### Demande
+
+Des colonnes calculées portant sur des séries : différence entre deux séries d'un même group-by, et accès décalé (`lag`) pour les évolutions — le besoin le plus fréquent d'un tableau de bord financier ou statistique.
 
 ---
 
@@ -460,7 +516,7 @@ Répartir les encarts sur la largeur disponible.
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, prix-des-carburants.
 
 ### Constat
 
@@ -533,3 +589,87 @@ Charger le jeu externe, en parallèle du reste. Ça n'empêche rien, mais c'est 
 ### Demande
 
 Exposer les fonds administratifs déjà embarqués (régions, départements) comme couche déclarative de `dsfr-data-map`, par exemple `<dsfr-data-map-layer builtin="regions">`.
+
+---
+
+## AM-019 — Un KPI ne sait pas filtrer sa source
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-kpi`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : comptabilite-generale.
+
+### Constat
+
+`dsfr-data-kpi` agrège tout ce que sa source lui transmet. Pour « l'actif en 2025 », il faut isoler une ligne parmi six : cela passe par un `dsfr-data-query where="categorie:eq:Actif"` par KPI. Trois KPI côte à côte coûtent donc trois transformateurs, là où l'original écrit une expression.
+
+### Observation
+
+Page comptabilité générale : trois `dsfr-data-query` n'existent que pour alimenter trois KPI. La grammaire `count:champ:valeur` existe mais ne compte que des occurrences ; elle ne sait pas sommer sous condition.
+
+### Contournement actuel
+
+Un `dsfr-data-query where` par KPI. Lisible, mais verbeux.
+
+### Demande
+
+Un attribut `where` sur `dsfr-data-kpi`, ou une grammaire d'agrégation conditionnelle du type `montant:sum:categorie=Actif`.
+
+---
+
+## AM-020 — Après un unpivot, les noms de colonnes restent en étiquettes
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-unpivot`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : prix-des-carburants.
+
+### Constat
+
+`dsfr-data-unpivot` bascule six colonnes de prix en lignes, mais la colonne `variable` contient les noms techniques : `gazole_prix`, `sp95_prix`… qui se retrouvent tels quels sur l'axe du graphique. `var-format` ne sait reformater qu'à partir des jetons d'un motif (dates, numéros), pas appliquer une table de correspondance.
+
+### Observation
+
+Premier rendu du graphique « prix moyen par carburant » : axe en `gazole_prix`, `sp98_prix`… Corrigé par un `dsfr-data-normalize replace-fields` de six règles.
+
+### Contournement actuel
+
+Un `dsfr-data-normalize replace-fields="carburant:gazole_prix:Gazole | …"` en aval — une balise et autant de règles que de colonnes dépliées.
+
+### Demande
+
+Un dictionnaire d'étiquettes sur l'unpivot lui-même, par exemple `var-labels="gazole_prix:Gazole | sp95_prix:SP95"`.
+
+---
+
+## AM-021 — Pas de moyen déclaratif d'afficher la fraîcheur des données
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-chart`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : prix-des-carburants.
+
+### Constat
+
+Le jeu s'appelle « flux instantané » et porte une date de mise à jour par carburant. Rien ne permet d'afficher « données à jour au … » : `databox-date` attend une chaîne fixe, pas une valeur lue dans les données. Sur une visualisation temps réel, c'est l'information qui manque le plus.
+
+### Observation
+
+Attribut `databox-date` de `dsfr-data-chart` : chaîne statique. Aucun composant n'expose le maximum d'un champ date autrement qu'en KPI dédié, dont le format n'affiche pas de date.
+
+### Contournement actuel
+
+Écrire la date à la main, donc la laisser vieillir.
+
+### Demande
+
+Accepter une expression de champ dans `databox-date` (par exemple `databox-date-field="gazole_maj:max"`), et un format date pour les KPI.
