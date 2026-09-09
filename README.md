@@ -102,7 +102,7 @@ node scripts/build-retours.mjs      # -> export/issues-dsfr-data.md + note du va
 
 Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 
-- **9 reproduites** — [catalogue](public/index.html) ·
+- **11 reproduites** — [catalogue](public/index.html) ·
   [DECP augmenté](public/viz/decp-augmente.html) ·
   [Plan de relance](public/viz/plan-de-relance.html) ·
   [Qualité Tourisme](public/viz/qualite-tourisme.html) ·
@@ -111,8 +111,10 @@ Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
   [Comptabilité générale de l'État](public/viz/comptabilite-generale.html) ·
   [Prix des carburants](public/viz/prix-des-carburants.html) ·
   [Fiscalité locale](public/viz/fiscalite-locale.html) ·
-  [Entreprises du patrimoine vivant](public/viz/entreprise-patrimoine-vivant.html)
-- **4 à reproduire**
+  [Entreprises du patrimoine vivant](public/viz/entreprise-patrimoine-vivant.html) ·
+  [Annuaire DGFiP](public/viz/annuaire-services-dgfip.html) ·
+  [Baromètre France Num](public/viz/barometre-france-num.html)
+- **1 analyse seule** — [Formations France Num](public/viz/formations-france-num.html) (jeu à zéro enregistrement)
 - **8 hors périmètre** (liens sortants vers d'autres sites de l'État)
 - **5 sources disparues** (page 404 et/ou jeu de données supprimé)
 

@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 27 demandes — 3 bugs, 24 améliorations.
+> 29 demandes — 3 bugs, 26 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -152,7 +152,7 @@ Un avertissement console systématique quand la troncature est effective (un `co
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant, annuaire-services-dgfip, barometre-france-num.
 
 ### Constat
 
@@ -236,7 +236,7 @@ Ajouter `distinct` (ou `count-distinct`) à la grammaire commune, et signaler un
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, decp-augmente, restauration-notre-dame, comptabilite-generale.
+Rencontré sur : plan-de-relance, decp-augmente, restauration-notre-dame, comptabilite-generale, barometre-france-num.
 
 ### Constat
 
@@ -292,7 +292,7 @@ Faire accepter à `dsfr-data-context-tags` une source de type `dsfr-data-facets`
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : catalogue, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, entreprise-patrimoine-vivant.
+Rencontré sur : catalogue, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, entreprise-patrimoine-vivant, annuaire-services-dgfip.
 
 ### Constat
 
@@ -348,7 +348,7 @@ Poser un `where` initial sur la source, ou accepter un premier rendu approximati
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant.
+Rencontré sur : decp-augmente, plan-de-relance, synthese, retours, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant, annuaire-services-dgfip, barometre-france-num.
 
 ### Constat
 
@@ -404,7 +404,7 @@ Un attribut du type `refine-on-click="champ"` sur la couche, qui émettrait la m
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap, prix-des-carburants, entreprise-patrimoine-vivant.
+Rencontré sur : restauration-notre-dame, plan-de-relance, qualite-tourisme, tourisme-et-handicap, prix-des-carburants, entreprise-patrimoine-vivant, annuaire-services-dgfip.
 
 ### Constat
 
@@ -480,6 +480,62 @@ Exposer sur les types cartographiques le nombre de classes et la méthode (liné
 
 ---
 
+## AM-025 — Une jointure sur des clés de types différents échoue sans rien dire
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-join`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : barometre-france-num.
+
+### Constat
+
+`code_unifie` est un entier dans `questions-reponses` et une chaîne dans `bfn-2022-resultats-2022`. `dsfr-data-join` compare les valeurs sans harmoniser les types : aucune ligne ne s'apparie. En jointure gauche, le symptôme est particulièrement discret — le nombre de lignes reste exact, seules les colonnes jointes sont vides.
+
+### Observation
+
+`questions-reponses` renvoie `code_unifie: 201` (int), `bfn-2022-resultats-2022` renvoie `'201'` (str). Jointure sans correction : 0 ligne appariée, aucun message. Après `dsfr-data-normalize numeric="code_unifie"` : 237 lignes appariées.
+
+### Contournement actuel
+
+`dsfr-data-normalize numeric="<clé>"` du côté où la clé est une chaîne.
+
+### Demande
+
+Comparer les clés de jointure après normalisation de type (au minimum nombre ↔ chaîne numérique), ou avertir en console quand les deux côtés n'ont pas le même type.
+
+---
+
+## AM-026 — Pas d'indicateur de couverture sur une jointure
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-join`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : barometre-france-num.
+
+### Constat
+
+Rien n'indique quelle proportion des lignes de gauche a trouvé une correspondance à droite. C'est pourtant le seul signal capable d'alerter sur une jointure qui « fonctionne » mais rapproche des clés homonymes désignant des choses différentes (voir PG-009).
+
+### Observation
+
+Sur le Baromètre, la jointure appariait 237 lignes sur 1 065 et 9 questions sur 119. Ce taux de 22 % aurait dû alerter immédiatement ; il a fallu comparer les deux jeux à la main pour le calculer.
+
+### Contournement actuel
+
+Compter soi-même dans la console du navigateur.
+
+### Demande
+
+Exposer le taux d'appariement sur le composant (attribut de diagnostic ou `console.info`), et l'afficher dans le volet Diagnostic prévu par l'epic #602 de dsfr-data.
+
+---
+
 ## AM-009 — `fit-bounds` pourrait clipper automatiquement quand `insets` est déclaré
 
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map`
@@ -544,7 +600,7 @@ Répartir les encarts sur la largeur disponible.
 
 Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
 reproduction du catalogue de visualisations de data.economie.gouv.fr.
-Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, prix-des-carburants, entreprise-patrimoine-vivant.
+Rencontré sur : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, prix-des-carburants, entreprise-patrimoine-vivant, annuaire-services-dgfip.
 
 ### Constat
 
