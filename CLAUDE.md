@@ -4,7 +4,8 @@ Banc d'essai : reproduire le catalogue de visualisations de **data.economie.gouv
 (Opendatasoft / Huwise) avec **`dsfr-data`** (ChartsBuilder), et documenter page par page
 ce qui a été simple ou coûteux.
 
-Lire `README.md` d'abord : il décrit l'objectif, la structure et l'avancement.
+Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.md`
+(couplages non-évidents du repo — [[ADR-053]]).
 
 ## Décisions de cadrage (arrêtées en session d'ouverture, 2026-09-09)
 

@@ -30,6 +30,10 @@ volontaire, l'argument à démontrer étant « une balise, un CDN, et ça marche
 
 ## Structure
 
+Les couplages non-évidents (jointure du registre, ordre de chargement des scripts,
+choix entre les deux mécanismes de filtrage) sont documentés dans
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
+
 ```
 public/
   index.html              reproduction de la page catalogue (+ son analyse)
