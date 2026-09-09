@@ -102,21 +102,28 @@ node scripts/build-retours.mjs      # -> export/issues-dsfr-data.md + note du va
 
 Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 
-- **11 reproduites** — [catalogue](public/index.html) ·
-  [DECP augmenté](public/viz/decp-augmente.html) ·
-  [Plan de relance](public/viz/plan-de-relance.html) ·
-  [Qualité Tourisme](public/viz/qualite-tourisme.html) ·
+- **15 entrées reproduites** (14 pages : le catalogue compte deux fois l'annuaire DGFiP) —
+  [catalogue](public/index.html) · [DECP augmenté](public/viz/decp-augmente.html) ·
+  [Plan de relance](public/viz/plan-de-relance.html) · [Qualité Tourisme](public/viz/qualite-tourisme.html) ·
   [Tourisme & Handicap](public/viz/tourisme-et-handicap.html) ·
   [Rebâtir Notre-Dame](public/viz/entreprises-restauration-notre-dame.html) ·
-  [Comptabilité générale de l'État](public/viz/comptabilite-generale.html) ·
+  [Comptabilité générale](public/viz/comptabilite-generale.html) ·
   [Prix des carburants](public/viz/prix-des-carburants.html) ·
   [Fiscalité locale](public/viz/fiscalite-locale.html) ·
   [Entreprises du patrimoine vivant](public/viz/entreprise-patrimoine-vivant.html) ·
   [Annuaire DGFiP](public/viz/annuaire-services-dgfip.html) ·
-  [Baromètre France Num](public/viz/barometre-france-num.html)
-- **1 analyse seule** — [Formations France Num](public/viz/formations-france-num.html) (jeu à zéro enregistrement)
-- **8 hors périmètre** (liens sortants vers d'autres sites de l'État)
-- **5 sources disparues** (page 404 et/ou jeu de données supprimé)
+  [Baromètre France Num](public/viz/barometre-france-num.html) ·
+  **[Signal Conso](public/viz/signalconso.html)** · **[Rappel Conso](public/viz/rappelconso.html)** ·
+  **[Centres de contrôle technique](public/viz/centres-controle-technique.html)**
+- **4 analyses détaillées** au lieu d'une reproduction —
+  [Formations France Num](public/viz/formations-france-num.html) (jeu à zéro enregistrement) et
+  [l'inventaire des entrées non reproduites](public/viz/non-reproduites.html)
+- **11 hors périmètre** (liens sortants vers d'autres sites de l'État)
+- **0 à reproduire**
+
+Les trois dernières reproductions sont des **reconstitutions** : leur page officielle renvoie une
+404 et leur identifiant de jeu est périmé, mais la donnée existe toujours — parfois mise à jour le
+jour même — sous un autre nom.
 
 ## Ce que le banc d'essai a trouvé jusqu'ici
 

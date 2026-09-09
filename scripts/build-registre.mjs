@@ -45,15 +45,15 @@ const STATUTS = {
   '/pages/fiscalite-locale-particuliers/?headless=true': ['reproduite', '/viz/fiscalite-locale', 'Choroplèthe départementale + tableau serveur sur 174 668 lignes'],
   '/pages/barometre-france-num/': ['reproduite', '/viz/barometre-france-num', 'Explorateur des 6 millésimes ; jointure des libellés retirée (référentiels homonymes)'],
 
-  '/pages/comptabilite-etat/': ['impossible', null, 'Page 404 et jeu de données absent du catalogue'],
-  '/pages/signalconso/': ['impossible', null, 'Page 404 (le jeu de données, lui, existe toujours)'],
-  '/pages/rappelconso/': ['impossible', null, 'Page 404 et jeu de données absent du catalogue'],
-  '/pages/annuaire-centres-controles-techniques/': ['impossible', null, 'Page 404, jeux de données absents, accès non public'],
-  '/pages/livre-d-or/': ['impossible', null, 'Page 404'],
-  '/pages/visualisation-liste-des-complements-alimentaires/': ['impossible', null, 'Page servie mais jeu de données supprimé : dataviz vide en production']
+  '/pages/comptabilite-etat/': ['analyse', '/viz/non-reproduites', 'Page 404, jeu supprimé — sujet couvert par la page Comptabilité générale'],
+  '/pages/signalconso/': ['reproduite', '/viz/signalconso', 'Page 404 mais jeu vivant : 1,7 M de signalements reconstitués'],
+  '/pages/rappelconso/': ['reproduite', '/viz/rappelconso', 'Page 404 et jeu renommé : la v2 existe, mise à jour ce jour'],
+  '/pages/annuaire-centres-controles-techniques/': ['reproduite', '/viz/centres-controle-technique', 'Page 404 et jeux renommés : 6 113 centres retrouvés'],
+  '/pages/livre-d-or/': ['analyse', '/viz/non-reproduites', 'Page 404, aucun jeu associé : rien à reprendre'],
+  '/pages/visualisation-liste-des-complements-alimentaires/': ['analyse', '/viz/non-reproduites', 'Page servie mais jeu supprimé : seul un jeu « preprod » vide subsiste']
 };
 
-const DEFAUT_HORS_PERIMETRE = 'Cible externe au portail : pas une page de dataviz Opendatasoft';
+const DEFAUT_HORS_PERIMETRE = 'Cible externe au portail — voir l\'inventaire des entrées non reproduites';
 
 function statutPour(record) {
   const lien = record.lien || '';
