@@ -74,6 +74,14 @@ page d'accueil viennent du portail, les badges d'avancement viennent d'ici.
 Pour le régénérer après avoir traité une dataviz : éditer la table `STATUTS` de
 `scripts/build-registre.mjs`, puis `node scripts/build-registre.mjs`.
 
+## Le rapport de cadrage des demandes
+
+`export/issues-dsfr-data.md` (généré) reprend les 54 demandes qui ont résisté à la vérification
+— 4 bugs, 43 améliorations, 6 pièges à désamorcer dans la bibliothèque — chacune avec son
+**impact**, son **objectif métier**, la **pérennité du besoin**, des **critères d'acceptation**
+testables, un **effort** estimé d'après le code lu et une **priorité** impact × faisabilité (P1 à P4).
+Le cadrage vit dans le champ `cadrage` de chaque entrée de `retours.json`.
+
 ## Le registre des retours
 
 `public/data/retours.json` est la source de vérité des constats. Une entrée par constat, typée :
