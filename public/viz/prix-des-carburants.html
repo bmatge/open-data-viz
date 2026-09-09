@@ -79,13 +79,18 @@
 
   <!-- L'unpivot laisse les noms de colonnes en étiquettes : une règle de
        remplacement par carburant pour les rendre lisibles. -->
-  <dsfr-data-normalize id="pc-par-carburant" source="pc-par-carburant-brut"
+  <dsfr-data-normalize id="pc-par-carburant" source="pc-par-carburant-brut" round="prix_moyen:3"
     replace-fields="carburant:gazole_prix:Gazole | carburant:sp95_prix:SP95 | carburant:sp98_prix:SP98 | carburant:e10_prix:E10 | carburant:e85_prix:E85 | carburant:gplc_prix:GPLc">
   </dsfr-data-normalize>
 
-  <dsfr-data-query id="pc-par-region" source="pc-f"
+  <dsfr-data-query id="pc-par-region-brut" source="pc-f" where="region:isnotnull"
     group-by="region, code_region" aggregate="gazole_prix:avg:prix_moyen" order-by="prix_moyen:desc">
   </dsfr-data-query>
+  <!-- Lot 11 : la moyenne client sort en flottant IEEE (2.2665920000000006) ;
+       `round` du normalize l'arrondit à 2 décimales avant la carte et le tableau
+       accessible (AM-033, réduit à « pas de localisation fr-FR »). -->
+  <dsfr-data-normalize id="pc-par-region" source="pc-par-region-brut" round="prix_moyen:2">
+  </dsfr-data-normalize>
 
   <dsfr-data-query id="pc-departements" source="pc-f" group-by="departement"
     aggregate="id:count:nb">
@@ -129,7 +134,7 @@
           <div class="fr-col-12 fr-col-lg-5">
             <div class="odv-chart-slot">
               <dsfr-data-chart id="g-carburant" source="pc-par-carburant" type="bar" horizontal
-                label-field="carburant" value-field="prix_moyen" name='["Prix moyen (€/L)"]'
+                label-field="carburant" value-field="prix_moyen" name="Prix moyen (€/L)"
                 unit-tooltip=" €/L"
                 databox databox-title="Prix moyen par carburant"
                 databox-source="DGCCRF — flux instantané, via data.economie.gouv.fr"
@@ -142,7 +147,7 @@
             <div class="odv-chart-slot">
               <dsfr-data-chart id="g-region-map" source="pc-par-region" type="map-reg"
                 code-field="code_region" value-field="prix_moyen"
-                name='["Prix moyen du gazole (€/L)"]' unit-tooltip=" €/L"
+                name="Prix moyen du gazole (€/L)" unit-tooltip=" €/L"
                 databox databox-title="Prix moyen du gazole par région"
                 databox-source="DGCCRF — flux instantané, via data.economie.gouv.fr"
                 databox-download>
@@ -158,7 +163,7 @@
              `where=not in_bbox(geom, …)`). Sans clip, `fit-bounds` recadre aussi
              sur une commune à station unique — c'est le recadrage automatique
              du portail (voir BUG-004 pour les jeux qui ont des DROM). -->
-        <dsfr-data-map name="Carte des stations-service et de leurs prix"
+        <dsfr-data-map class="odv-fond-attenue" name="Carte des stations-service et de leurs prix"
           center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan" fit-bounds>
           <dsfr-data-map-layer source="pc-f" type="circle" radius="4"
             geo-field="geom" color="#000091" tooltip-field="ville" cluster max-items="12000">
@@ -309,6 +314,22 @@
               graphique des prix par carburant, la choroplèthe et le tableau n'existent pas sur le
               portail, qui ne montre <em>aucune</em> statistique — c'est un localisateur, pas un
               comparateur. Ils sont conservés, et les compteurs étiquetés «&nbsp;(ajout)&nbsp;».</li>
+            <li><strong>Relecture par le projet dsfr-data (lot 11)&nbsp;: deux voies natives ratées ici.</strong>
+              <em>L'arrondi</em> (AM-033)&nbsp;: j'avais écrit qu'aucune fonction d'arrondi n'existait, et
+              le tableau accessible rendait «&nbsp;2.2665920000000006&nbsp;». <code>dsfr-data-normalize
+              round="prix_moyen:2"</code> existe (documenté sur l'attribut, pas sur la fiche)&nbsp;: le
+              tableau des régions rend «&nbsp;Grand Est | 44 | 2.31&nbsp;», celui des carburants
+              «&nbsp;Gazole | 2.294&nbsp;» avec <code>round="prix_moyen:3"</code>. Ce qui reste vrai&nbsp;:
+              le point décimal — pas de localisation fr-FR dans le tableau. <em>Le nom de série</em>
+              (AM-023)&nbsp;: j'avais écrit que les cartésiens exigeaient un tableau JSON. Faux&nbsp;:
+              <code>name="Prix moyen (€/L)"</code> en chaîne simple est accepté partout depuis 0.10.0 (la
+              bibliothèque l'enveloppe elle-même), et c'est la <em>carte</em> qui affichait
+              <code>["Prix moyen du gazole (€/L)"]</code> littéralement — vérifié avant/après sur les deux
+              graphiques. Le constat devient «&nbsp;les cartes ne déballent pas la forme tableau&nbsp;»,
+              contournement&nbsp;: chaîne simple partout. Enfin, une <em>région vide</em> ouvrait le tableau
+              des régions («&nbsp;| | 2.36&nbsp;», les stations sans région du flux)&nbsp;: un groupe
+              <code>null</code> côté client, le cas PG-015 (fusion de l'ex-PG-018), écarté par <code>where="region:isnotnull"</code>
+              sur la query elle-même — un attribut, pas de balise.</li>
           </ul>
         </div>
       </div>
@@ -345,7 +366,9 @@
         <p class="fr-text--sm fr-hint-text">
           Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-020
           (étiquettes après unpivot), AM-021 (fraîcheur des données), AV-012
-          (<code>map-reg</code> sans fond à charger), AV-013 (<code>unpivot</code> sans équivalent).
+          (<code>map-reg</code> sans fond à charger), AV-013 (<code>unpivot</code> sans équivalent)&nbsp;;
+          lot 11&nbsp;: AM-033 réduit (<code>round</code> existe), AM-023 réécrit (chaîne simple partout),
+          AM-031 (décimales du KPI, toujours vrai ici), PG-015 appliqué (groupe null client), PG-022 (grammaires d'attributs).
         </p>
       </div>
     </div>

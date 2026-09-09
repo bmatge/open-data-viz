@@ -76,8 +76,9 @@ Pour le régénérer après avoir traité une dataviz : éditer la table `STATUT
 
 ## Le rapport de cadrage des demandes
 
-`export/issues-dsfr-data.md` (généré) reprend les 54 demandes qui ont résisté à la vérification
-— 4 bugs, 43 améliorations, 6 pièges à désamorcer dans la bibliothèque — chacune avec son
+`export/issues-dsfr-data.md` (généré) reprend les 53 demandes qui ont résisté à la vérification
+— 5 bugs, 40 améliorations, 7 pièges à désamorcer dans la bibliothèque, après la relecture du lot 11
+(`docs/relecture-dsfr-data-2026-09.md`) — chacune avec son
 **impact**, son **objectif métier**, la **pérennité du besoin**, des **critères d'acceptation**
 testables, un **effort** estimé d'après le code lu et une **priorité** impact × faisabilité (P1 à P4).
 Le cadrage vit dans le champ `cadrage` de chaque entrée de `retours.json`.
@@ -146,6 +147,18 @@ Au total : **24 entrées reproduites, 5 analyses, 1 hors périmètre** sur 30.
 Trois chiffres faux et deux mauvais jeux de données ont été trouvés et corrigés ; douze pages ont été
 enrichies ; chaque analyse porte un bloc « Relecture face au relevé visuel du portail » qui dit ce qui a
 été ajouté et ce qui manque encore. Le registre passe à 114 constats, dont 9 faux problèmes.
+
+**Lot 10 — cadrage.** Les 54 demandes du registre reçoivent un bloc `cadrage` (impact, objectif,
+pérennité, critères d'acceptation, effort, priorité), d'où `export/issues-dsfr-data.md` est généré.
+
+**Lot 11 — relecture par le projet dsfr-data.** Le rapport de cadrage a été relu côté bibliothèque,
+chaque affirmation confrontée au source (`docs/relecture-dsfr-data-2026-09.md`) : 38 demandes tiennent,
+16 ne tenaient pas — 3 infondées, 11 voies natives ratées, 2 contournements faux. Les seize ont été
+rejouées ici au navigateur : trois faux problèmes de plus (FP-010 à FP-012), un bug trouvé en creusant
+une voie native (BUG-005, le refine d'une facette date), un piège transverse (PG-022, les grammaires
+d'attributs), dix pages corrigées (compteur de recherche, arrondi, format compact, select des facettes,
+fond de carte atténué par CSS, GeoJSON statique, palette des cartes, jointure sans `normalize`), cinq
+règles de lecture ajoutées au `CLAUDE.md`. Le registre passe à 116 constats, dont 12 faux problèmes.
 
 Les trois reconstitutions du lot 6 (Signal Conso, Rappel Conso, contrôle technique) ont une page
 officielle en 404 et un identifiant de jeu périmé, mais la donnée existe toujours — parfois mise à

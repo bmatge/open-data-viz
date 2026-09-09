@@ -70,8 +70,9 @@
     params='{"select":"code_unifie, libelle_unifie, chapitre, ordre_chapitre, presentation_2024, descriptif_de_question","order_by":"ordre_chapitre, code_unifie"}'
     api-key-ref="ods-mef">
   </dsfr-data-source>
-  <!-- code_unifie est un texte dans la table et un entier dans les scores (AM-025) -->
-  <dsfr-data-normalize id="bfn-corr-num" source="bfn-corr" numeric="code_unifie"></dsfr-data-normalize>
+  <!-- Lot 11 : le `normalize numeric="code_unifie"` qui était ici ne servait à rien —
+       la jointure convertit ses deux clés en chaîne (FP-012, ex-AM-025). Retiré,
+       1 065 / 1 065 lignes appariées, comme avant. -->
 
   <!-- Scores nationaux, toutes questions -->
   <dsfr-data-source id="bfn-scores"
@@ -79,13 +80,17 @@
     params='{"select":"max(score) as score","group_by":"code_unifie, libelle_reponse, year(annee) as an","where":"region = \"Toutes régions\" and secteur = \"Tous secteurs\" and taille = \"Toutes tailles\""}'
     api-key-ref="ods-mef">
   </dsfr-data-source>
-  <dsfr-data-join id="bfn-scores-lib" left="bfn-scores" right="bfn-corr-num" on="code_unifie" type="left"></dsfr-data-join>
+  <dsfr-data-join id="bfn-scores-lib" left="bfn-scores" right="bfn-corr" on="code_unifie" type="left"></dsfr-data-join>
 
   <dsfr-data-query id="bfn-questions" source="bfn-f" group-by="code_unifie"
     aggregate="score:count:nb">
   </dsfr-data-query>
 
-  <!-- La question choisie : vue nationale, vue filtrée, fiche -->
+  <!-- La question choisie : vue nationale, vue filtrée, fiche.
+       `group-by="libelle_reponse, annee"` + `year(annee)` dans le select : ce n'est
+       PAS un groupement par année (PG-014, relecture du lot 11), ça ne coïncide que
+       parce que `annee` n'a qu'une valeur par an dans ce jeu (vérifié à l'API :
+       `group_by=annee` → 6 dates distinctes pour 6 années). -->
   <dsfr-data-source id="bfn-q-nat" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses" api-key-ref="ods-mef"
     select="year(annee) as an, sum(score) as score"
@@ -445,8 +450,7 @@
               — suffit à alimenter toute la page. Le plus gros jeu du catalogue après la
               comptabilité générale tient dans une requête.</li>
             <li><strong>La table de correspondance fait tout le travail éditorial.</strong> Une
-              source de 119 lignes, un <code>dsfr-data-normalize numeric</code>, un
-              <code>dsfr-data-join</code>&nbsp;: l'explorateur affiche chapitre et libellé unifié
+              source de 119 lignes, un <code>dsfr-data-join</code>&nbsp;: l'explorateur affiche chapitre et libellé unifié
               pour chacun des 1&nbsp;065 couples question-réponse, et les facettes se font par
               chapitre. Les douze chapitres et les 119 questions ne sont pas codés en dur dans le
               tableau&nbsp;: ils sont lus, comme sur l'original.</li>
@@ -466,12 +470,16 @@
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Premier échec&nbsp;: les types de clé.</strong> <code>code_unifie</code> est
-              un <em>entier</em> dans <code>questions-reponses</code> et une <em>chaîne</em> dans
-              <code>bfn-2022-resultats-2022</code>. <code>dsfr-data-join</code> ne rapproche donc
-              rien — <strong>et ne le signale pas</strong>&nbsp;: en jointure gauche, le nombre de
-              lignes reste exact, seules les colonnes jointes sont vides. Corrigé par un
-              <code>dsfr-data-normalize numeric="code_unifie"</code> (registre&nbsp;: AM-025).</li>
+            <li><strong>Premier échec&nbsp;: les types de clé — faux diagnostic.</strong> J'avais
+              écrit que <code>code_unifie</code>, entier dans <code>questions-reponses</code> et chaîne
+              dans <code>bfn-2022-resultats-2022</code>, faisait échouer <code>dsfr-data-join</code> en
+              silence, et j'avais «&nbsp;corrigé&nbsp;» par un <code>normalize numeric</code>. La relecture
+              du lot 11 l'a infirmé&nbsp;: la jointure convertit déjà ses deux clés en chaîne. Rejouée sans
+              le <code>numeric</code>, elle apparie 1&nbsp;065 lignes sur 1&nbsp;065 et 119 codes sur 119 —
+              exactement comme avec. La vraie cause des 0 appariements était le jeu&nbsp;: dans
+              <code>bfn-2022-resultats-2022</code>, les codes sont «&nbsp;001&nbsp;», «&nbsp;002&nbsp;»… sur
+              trois chiffres, et 109&nbsp;441 lignes n'en ont pas du tout. Ce qui reste vrai&nbsp;: en
+              jointure gauche, rien ne signale un appariement nul (AM-026). Registre&nbsp;: FP-012.</li>
             <li><strong>Second échec&nbsp;: le référentiel de <code>bfn-2022-resultats-2022</code>
               n'est pas celui de la table de calcul.</strong> Une fois les types alignés, la
               jointure a fonctionné… et produit des libellés faux. Le code <code>201</code>
@@ -529,7 +537,7 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>questions lues dans <code>bfn-table-de-correspondance</code></td><td><code>dsfr-data-normalize numeric</code> + <code>dsfr-data-join</code></td><td>Équivalent (119 / 119) — sur le bon jeu</td></tr>
+            <tr><td>questions lues dans <code>bfn-table-de-correspondance</code></td><td><code>dsfr-data-join</code> seul</td><td>Équivalent (119 / 119) — sur le bon jeu</td></tr>
             <tr><td>3 <code>ods-select</code> région / secteur / taille, synchro URL</td><td><code>dsfr-data-context url-sync</code> + <code>url-param-map</code></td><td>Équivalent</td></tr>
             <tr><td>vue d'ensemble / vue filtrée par question</td><td>2 sources adaptateur + 2 <code>dsfr-data-chart stacked</code></td><td>Mêmes scores, un seul mode de rendu</td></tr>
             <tr><td>descriptif de question sous chaque H3</td><td><code>dsfr-data-display</code> + <code>&lt;template&gt;</code></td><td>Équivalent</td></tr>
@@ -561,8 +569,8 @@
           section par ligne d'une table, et choisir le type de graphique depuis une valeur de
           champ. Une question à la fois est le maximum déclaratif.</p>
         <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-025 (jointure
-          silencieuse sur clés de types différents), AM-026 (pas d'indicateur de couverture d'une
+          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: FP-012 (ex-AM-025&nbsp;: la jointure
+          convertit bien ses clés, faux problème corrigé au lot 11), AM-026 (pas d'indicateur de couverture d'une
           jointure), PG-008 (alias ODSQL déclaré deux fois), PG-009 (référentiels de codes homonymes
           entre deux jeux d'un même portail), LIM-004 (mise en page éditoriale hors périmètre).
         </p>
