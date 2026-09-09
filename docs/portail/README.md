@@ -31,27 +31,33 @@ facettes ont été vérifiées par l'API v2.1 le même jour ; les effectifs boug
 
 | Page du portail | Fiche | Statut registre | Jeux |
 |---|---|---|---|
-| Prix des carburants | [prix-des-carburants.md](prix-des-carburants.md) | à reproduire (lot 3 en cours) | `prix-des-carburants-en-france-flux-instantane-v2` |
-| Entreprises du patrimoine vivant | [entreprise-patrimoine-vivant.md](entreprise-patrimoine-vivant.md) | à reproduire | `entreprises-du-patrimoine-vivant-epv` + `georef-france-region@public` |
-| Comptabilité générale de l'État (4 pages) | [comptabilite-generale.md](comptabilite-generale.md) | à reproduire | `balances_des_comptes_etat` + 3 jeux *restricted* (clé dans le source) |
+| Prix des carburants | [prix-des-carburants.md](prix-des-carburants.md) | reproduite (lot 3) | `prix-des-carburants-en-france-flux-instantane-v2` |
+| Entreprises du patrimoine vivant | [entreprise-patrimoine-vivant.md](entreprise-patrimoine-vivant.md) | reproduite (lot 4) | `entreprises-du-patrimoine-vivant-epv` + `georef-france-region@public` |
+| Comptabilité générale de l'État (4 pages) | [comptabilite-generale.md](comptabilite-generale.md) | reproduite (lot 3, couverture partielle) | `balances_des_comptes_etat` + 3 jeux *restricted* (clé dans le source) |
 | Label Qualité tourisme (+ fiche établissement) | [qualite-tourisme.md](qualite-tourisme.md) | reproduite | `etablissements-labellises-qualite-tourisme` |
-| Annuaire des services DGFiP / Points d'accueil | [annuaire-des-services-dgfip.md](annuaire-des-services-dgfip.md) | à reproduire | `coordonnees-des-structures-dgfip` (21 761 l.) + `georef-france-departement-millesime` |
+| Annuaire des services DGFiP / Points d'accueil | [annuaire-des-services-dgfip.md](annuaire-des-services-dgfip.md) | reproduite (lot 5) | `coordonnees-des-structures-dgfip` (21 761 l.) + `georef-france-departement-millesime` |
 | Label Tourisme & Handicap (+ fiche) | [tourisme-et-handicap.md](tourisme-et-handicap.md) | reproduite | `etablissements-labellises-tourisme-et-handicap` |
 | Plan de relance | [plan-de-relance.md](plan-de-relance.md) | reproduite | `plan-de-relance` |
-| Calendrier des formations France Num | [accompagnements-actions-fnum.md](accompagnements-actions-fnum.md) | **vide en production** (jeu à 0 ligne) | `donnees-sessions-formations-france-num` |
+| Calendrier des formations France Num | [accompagnements-actions-fnum.md](accompagnements-actions-fnum.md) | analyse (jeu à 0 ligne, lot 5) | `donnees-sessions-formations-france-num` |
 | Rebâtir Notre-Dame | [entreprises-restauration-notre-dame.md](entreprises-restauration-notre-dame.md) | reproduite | `restauration-notre-dame` + `georef-france-region@public` |
-| Fiscalité locale particuliers + professionnels (2 pages) | [fiscalite-locale-particuliers.md](fiscalite-locale-particuliers.md) | à reproduire | `fiscalite-locale-des-particuliers-geo`, `fiscalite-locale-des-entreprises-copie` (174 668 l. chacun) |
-| Rappel Conso (page migrée `rappel-conso-v2`) | [rappel-conso.md](rappel-conso.md) | reproduite | `rappelconso-v2-gtin-espaces` |
+| Fiscalité locale particuliers + professionnels (2 pages) | [fiscalite-locale-particuliers.md](fiscalite-locale-particuliers.md) | reproduite (lot 4, couverture partielle) | `fiscalite-locale-des-particuliers-geo`, `fiscalite-locale-des-entreprises-copie` (174 668 l. chacun) |
+| Rappel Conso (page migrée `rappel-conso-v2`) | [rappel-conso.md](rappel-conso.md) | reproduite (lot 6 + variante fidèle lot 7) | `rappelconso-v2-gtin-espaces` |
 | DECP augmentées | [decp-augmente.md](decp-augmente.md) | reproduite | `decp_augmente` (994 123 l.) |
-| Baromètre France Num | [barometre-france-num.md](barometre-france-num.md) | à reproduire | `questions-reponses` (479 405 l.) + `bfn-table-de-correspondance` |
-| Compléments alimentaires | [complements-alimentaires.md](complements-alimentaires.md) | source disparue (page servie, KPI à 0) | — |
-| Pages 404, vues natives, cibles externes | [pages-404-et-hors-perimetre.md](pages-404-et-hors-perimetre.md) | — | — |
+| Baromètre France Num | [barometre-france-num.md](barometre-france-num.md) | reproduite (lot 5, couverture partielle) | `questions-reponses` (479 405 l.) + `bfn-table-de-correspondance` |
+| Compléments alimentaires | [complements-alimentaires.md](complements-alimentaires.md) | analyse (source disparue) | — |
+| Pages 404, vues natives, cibles externes | [pages-404-et-hors-perimetre.md](pages-404-et-hors-perimetre.md) | **révisé aux lots 6 à 8** : 3 reconstitutions, 6 « hors périmètre » reproduites, 1 analyse (OFGL), 1 hors périmètre (Charte) | — |
 
 Le catalogue lui-même (28 cartes, recherche, 6 pilules « Producteurs » DGFiP / DGFIP / DGE /
 DGCCRF / DAJ / Autre organisme public, vignettes, badge producteur, description, lien) est déjà
 reproduit dans `public/index.html`. Le texte des 28 cartes est dans le relevé du 2026-09-09
 (`get_page_text` de la page catalogue) ; deux entrées (« Annuaire des services DGFiP » et
 « Points d'accueil des finances publiques ») pointent vers la même page.
+
+> **Mise à jour du 2026-09-09 (lot 9)** : la colonne « Statut registre » ci-dessus a été réalignée sur
+> `public/data/registre.json` ; l'audit avait été rédigé pendant que les lots 3 à 8 avançaient sur une
+> autre machine. Les écarts listés ci-dessous ont été confrontés page par page au lot 9 : ce qui a pu
+> être mis à niveau l'a été, le reste est documenté dans la section `#analyse` de chaque page
+> (« Relecture face au relevé visuel du portail ») et dans le registre des retours.
 
 ## Écarts repérés entre les fiches et les reproductions existantes (`public/viz/`)
 

@@ -47,14 +47,22 @@
   </div>
 
   <!-- ==========================================================================
-       Un chargement (/exports/json + select : 1,9 s pour 9 805 stations), puis
-       tout se dérive côté client. `dsfr-data-unpivot` bascule les six colonnes
-       de prix en lignes, ce qui rend le prix moyen par carburant calculable.
+       Un chargement (/exports/json + select : environ 2 s pour 9 805 stations),
+       puis tout se dérive côté client. `dsfr-data-unpivot` bascule les six
+       colonnes de prix en lignes, ce qui rend le prix moyen par carburant
+       calculable.
+
+       Les dates de mise à jour par carburant (`gazole_maj`…) sont mises en forme
+       par le serveur Opendatasoft — `date_format(...)` en ODSQL, fuseau
+       `timezone=Europe/Paris` — parce que le moteur de template de dsfr-data ne
+       connaît que le format `:number`. Le littéral « € ( … ) » est produit dans
+       la même expression : un carburant absent donne null, et le template peut
+       alors afficher « Indisponible » sans conditionnelle.
        ========================================================================== -->
 
   <dsfr-data-source id="pc"
     url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/exports/json"
-    params='{"select":"id, ville, cp, adresse, geom, region, code_region, departement, gazole_prix, sp95_prix, sp98_prix, e10_prix, e85_prix, gplc_prix, carburants_disponibles, horaires_automate_24_24, services_service"}'
+    params='{"select":"id, ville, cp, adresse, geom, region, code_region, departement, gazole_prix, sp95_prix, sp98_prix, e10_prix, e85_prix, gplc_prix, date_format(gazole_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as gazole_maj_txt, date_format(sp95_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as sp95_maj_txt, date_format(sp98_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as sp98_maj_txt, date_format(e10_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as e10_maj_txt, date_format(e85_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as e85_maj_txt, date_format(gplc_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as gplc_maj_txt, carburants_disponibles, carburants_indisponibles, horaires_automate_24_24, services_service","timezone":"Europe/Paris"}'
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
@@ -96,20 +104,25 @@
         </dsfr-data-search>
 
         <dsfr-data-facets id="pc-f" source="pc-q"
-          fields="carburants_disponibles, region, departement, horaires_automate_24_24, services_service"
-          labels="carburants_disponibles:Carburant disponible | region:Région | departement:Département | horaires_automate_24_24:Automate 24/24 | services_service:Service proposé"
+          fields="carburants_disponibles, carburants_indisponibles, region, departement, horaires_automate_24_24, services_service"
+          labels="carburants_disponibles:Carburants disponibles | carburants_indisponibles:Carburants non disponibles | region:Région | departement:Département | horaires_automate_24_24:Automate 24/24 | services_service:Service proposé"
           searchable="departement, region, services_service" max-values="6">
         </dsfr-data-facets>
       </div>
 
       <div>
+        <!-- Les deux premiers compteurs sont le « n parmi N » du bandeau d'origine.
+             Les deux suivants n'existent pas sur le portail, qui n'affiche aucune
+             statistique de prix : ils sont un ajout de cette reproduction. -->
         <dsfr-data-kpi-group class="fr-mb-4w">
           <dsfr-data-kpi source="pc-f" value="count" format="nombre"
-            heading="Sélection courante" label="stations-service" col="4"></dsfr-data-kpi>
+            heading="Correspondent aux filtres" label="stations-service" col="3"></dsfr-data-kpi>
+          <dsfr-data-kpi source="pc" value="count" format="nombre"
+            heading="Au total" label="stations-service dans le flux" col="3"></dsfr-data-kpi>
           <dsfr-data-kpi source="pc-f" value="gazole_prix:avg" format="decimal"
-            heading="Prix moyen" label="€/L de gazole" col="4"></dsfr-data-kpi>
+            heading="Prix moyen (ajout)" label="€/L de gazole" col="3"></dsfr-data-kpi>
           <dsfr-data-kpi source="pc-departements" value="count" format="nombre"
-            heading="Couverture" label="départements" col="4"></dsfr-data-kpi>
+            heading="Couverture (ajout)" label="départements" col="3"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
 
         <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
@@ -140,23 +153,38 @@
         </div>
 
         <h2 class="fr-h4">Où sont les stations</h2>
+        <!-- Pas de `max-bounds` ni d'encarts DROM : le flux est purement
+             métropolitain (0 station hors de [41–51,5 ; −5,5–10], vérifié par
+             `where=not in_bbox(geom, …)`). Sans clip, `fit-bounds` recadre aussi
+             sur une commune à station unique — c'est le recadrage automatique
+             du portail (voir BUG-004 pour les jeux qui ont des DROM). -->
         <dsfr-data-map name="Carte des stations-service et de leurs prix"
-          center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
-          fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
+          center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan" fit-bounds>
           <dsfr-data-map-layer source="pc-f" type="circle" radius="4"
             geo-field="geom" color="#000091" tooltip-field="ville" cluster max-items="12000">
           </dsfr-data-map-layer>
+          <!-- Les onze champs de l'infobulle du portail, dans son ordre : adresse,
+               ville, code postal, six carburants (prix et date de relevé, ou
+               « Indisponible »), automate 24/24, services. -->
           <dsfr-data-map-popup mode="panel-right" title-field="ville" width="340px">
             <template>
-              <p class="fr-text--sm fr-mb-1v">{{adresse|}}</p>
-              <p class="fr-text--sm fr-mb-2v"><strong>{{cp}} {{ville}}</strong> — {{departement}}</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>Gazole</strong> {{gazole_prix|non proposé}} €/L</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>SP95</strong> {{sp95_prix|non proposé}} €/L
-                · <strong>SP98</strong> {{sp98_prix|non proposé}} €/L</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>E10</strong> {{e10_prix|non proposé}} €/L
-                · <strong>E85</strong> {{e85_prix|non proposé}} €/L
-                · <strong>GPLc</strong> {{gplc_prix|non proposé}} €/L</p>
-              <p class="fr-text--xs">Automate 24/24&nbsp;: {{horaires_automate_24_24|non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Adresse</strong> {{adresse|non renseignée}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Ville</strong> {{ville}} — {{departement}}</p>
+              <p class="fr-text--sm fr-mb-2v"><strong>Code postal</strong> {{cp}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Gazole</strong> <span class="fr-badge fr-badge--sm fr-badge--no-icon">B7</span>
+                {{gazole_prix:number|Indisponible}} {{gazole_maj_txt|}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>SP95-E10</strong> <span class="fr-badge fr-badge--sm fr-badge--no-icon">E10</span>
+                {{e10_prix:number|Indisponible}} {{e10_maj_txt|}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>E85</strong>
+                {{e85_prix:number|Indisponible}} {{e85_maj_txt|}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>SP98</strong>
+                {{sp98_prix:number|Indisponible}} {{sp98_maj_txt|}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>SP95</strong>
+                {{sp95_prix:number|Indisponible}} {{sp95_maj_txt|}}</p>
+              <p class="fr-text--sm fr-mb-2v"><strong>GPLc</strong>
+                {{gplc_prix:number|Indisponible}} {{gplc_maj_txt|}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Automate 24/24h</strong> {{horaires_automate_24_24|non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-0"><strong>Services</strong> {{services_service|aucun service renseigné}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
@@ -229,12 +257,14 @@
               en aval, avec <em>six règles</em> pour six carburants — une balise et six substitutions
               pour ce qui devrait être un dictionnaire d'étiquettes sur l'unpivot lui-même
               (registre&nbsp;: AM-020).</li>
-            <li><strong>Aucun repère de fraîcheur.</strong> Le jeu s'appelle «&nbsp;flux
+            <li><strong>Aucun repère de fraîcheur global.</strong> Le jeu s'appelle «&nbsp;flux
               instantané&nbsp;» et porte une date de mise à jour par carburant
-              (<code>gazole_maj</code>…), mais rien dans la bibliothèque ne permet d'afficher
-              «&nbsp;données à jour au …&nbsp;» sans écrire un KPI dédié sur un champ date.
-              <code>databox-date</code> attend une chaîne fixe, pas une valeur lue dans les
-              données (registre&nbsp;: AM-021).</li>
+              (<code>gazole_maj</code>…). Station par station, le panneau l'affiche désormais (voir
+              la relecture ci-dessous)&nbsp;; mais rien dans la bibliothèque ne permet d'afficher
+              «&nbsp;données à jour au …&nbsp;» pour l'ensemble&nbsp;: <code>dsfr-data-kpi</code> ne
+              connaît que des formats numériques (<code>nombre</code>, <code>pourcentage</code>,
+              <code>euro</code>, <code>decimal</code>), et <code>databox-date</code> attend une chaîne
+              fixe, pas une valeur lue dans les données (registre&nbsp;: AM-021).</li>
             <li><strong>Un prix moyen n'est pas un prix.</strong> Remarque éditoriale, pas
               technique&nbsp;: moyenner des prix par région sans pondérer par les volumes vendus
               produit un chiffre facile à mal lire. La page d'origine évite le sujet en n'affichant
@@ -245,8 +275,40 @@
               étaient triées par compte croissant, Gazole caché derrière «&nbsp;Voir plus&nbsp;»
               (PG-012)&nbsp;; les encarts ultramarins faisaient 50&nbsp;px de large (AM-032)&nbsp;; et
               chercher une commune à station unique ne zoome pas, <code>fit-bounds</code> ignorant un point
-              quand <code>max-bounds</code> est posé (BUG-004, huit pages). Les trois premiers sont corrigés
-              ici&nbsp;; le quatrième reste, le jeu étant traité comme les autres annuaires.</li>
+              quand <code>max-bounds</code> est posé (BUG-004, huit pages). Les trois premiers ont été
+              corrigés à ce moment-là&nbsp;; le quatrième l'est depuis la relecture ci-dessous.</li>
+            <li><strong>Relecture face au relevé visuel du portail.</strong> La confrontation à la
+              fiche d'audit (<code>docs/portail/prix-des-carburants.md</code>) a montré trois manques,
+              tous comblés en HTML déclaratif. <em>L'infobulle</em>&nbsp;: le portail affiche onze champs —
+              adresse, ville, code postal, six carburants avec «&nbsp;prix (date à heure)&nbsp;» ou
+              «&nbsp;Indisponible&nbsp;», automate 24/24, services&nbsp;; le panneau n'en montrait que le
+              prix, sans date. Le moteur de template ne connaît qu'un format (<code>:number</code>) et
+              aucune conditionnelle, donc pas de date lisible ni de «&nbsp;Indisponible&nbsp;» dérivé du
+              prix. La solution est côté requête, pas côté composant&nbsp;: ODSQL formate la date
+              (<code>date_format(gazole_maj, "'€ ('dd/MM/yyyy 'à' HH:mm')'")</code>, avec
+              <code>timezone=Europe/Paris</code> pour retrouver l'heure du portail), le littéral
+              «&nbsp;€ (…)&nbsp;» est produit dans la même expression, et un carburant absent donne
+              <code>null</code> — ce que <code>{{prix:number|Indisponible}}</code> sait rendre. Vérifié sur
+              Liernais&nbsp;: «&nbsp;2,43 € (03/09/2026 à 09:42)&nbsp;» contre «&nbsp;2,430 € (03/09/2026 à
+              09:42)&nbsp;» sur le portail. Coût&nbsp;: l'export passe de 6,1 à 8,8&nbsp;Mo, 1,4 → 2&nbsp;s.
+              <em>La facette «&nbsp;Carburants non disponibles&nbsp;»</em>, absente ici alors qu'elle est
+              un filtre à part entière du portail&nbsp;: ajoutée, six valeurs, Gazole indisponible → 107
+              stations, identique à <code>/facets</code>. <em>Le compteur «&nbsp;n parmi N&nbsp;»</em>&nbsp;:
+              un KPI ne lit qu'une source, donc deux KPI (sélection, total) au lieu d'une phrase&nbsp;;
+              667 / 126 / 1 pour Bourgogne-Franche-Comté / Côte-d'Or / Liernais, les chiffres de la fiche.
+              <em>Le recadrage automatique</em>&nbsp;: le flux est purement métropolitain (0 station hors
+              de la boîte métropole, vérifié par <code>not in_bbox(geom, …)</code>), donc
+              <code>max-bounds</code> et <code>insets="drom"</code> n'avaient rien à faire ici&nbsp;; retirés,
+              <code>fit-bounds</code> zoome sur une commune à station unique (zoom 5 → 7 → 9 → 18 en
+              enchaînant région, département, commune). Ce qui manque encore&nbsp;: l'autocomplétion
+              à dix suggestions (<code>dsfr-data-search</code> filtre, il ne suggère pas), les
+              sélecteurs région/département en liste déroulante (les facettes sont des cases à cocher avec
+              recherche, et leur tri est global — pas d'alphabétique pour les régions et de fréquence pour
+              les carburants à la fois), et le champ <code>services_service</code> rendu comme un tableau
+              joint par des virgules sans espace. Enfin, les compteurs de prix moyen et de couverture, le
+              graphique des prix par carburant, la choroplèthe et le tableau n'existent pas sur le
+              portail, qui ne montre <em>aucune</em> statistique — c'est un localisateur, pas un
+              comparateur. Ils sont conservés, et les compteurs étiquetés «&nbsp;(ajout)&nbsp;».</li>
           </ul>
         </div>
       </div>
@@ -263,6 +325,9 @@
             <tr><td>—</td><td><code>dsfr-data-unpivot</code></td><td>Sans équivalent&nbsp;: rend le prix par carburant calculable</td></tr>
             <tr><td>—</td><td><code>type="map-reg"</code></td><td>Choroplèthe régionale sans fond à charger</td></tr>
             <tr><td>—</td><td><code>dsfr-data-list</code> + export CSV</td><td>Sans équivalent</td></tr>
+            <tr><td>infobulle à 11 champs (template du jeu)</td><td><code>dsfr-data-map-popup</code> + <code>date_format()</code> ODSQL dans le <code>select</code></td><td>Équivalent — la mise en forme des dates est déléguée au serveur</td></tr>
+            <tr><td><code>ods-aggregation</code> ×2 «&nbsp;n parmi N&nbsp;»</td><td><code>dsfr-data-kpi</code> ×2</td><td>Équivalent, deux tuiles au lieu d'une phrase</td></tr>
+            <tr><td>recadrage automatique de la carte</td><td><code>fit-bounds</code> (sans <code>max-bounds</code>, jeu métropolitain)</td><td>Équivalent</td></tr>
             <tr><td>—</td><td>étiquettes de série lisibles</td><td><strong>Manquant&nbsp;: les noms de colonnes restent bruts</strong></td></tr>
           </tbody>
         </table>

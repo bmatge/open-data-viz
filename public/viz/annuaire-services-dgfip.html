@@ -50,11 +50,15 @@
   <!-- ==========================================================================
        Quatrième emploi du gabarit « annuaire cartographié ». 21 761 services,
        un chargement /exports/json, tout se dérive côté client.
+       Relecture face au relevé du portail (lot 9) : `type_de_demarche` et
+       `telephone_2` rejoignent le select (+137 Ko compressés, mesuré) pour
+       les six rubriques du panneau ; `public` et `service` arrivent en
+       tableaux (champs multivalués ODS).
        ========================================================================== -->
 
   <dsfr-data-source id="qt"
     url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/coordonnees-des-structures-dgfip/exports/json"
-    params='{"select":"nom_du_service, type_de_service, libelle_du_service, service, public, adresse, code_postal, commune, dep_name, reg_name, telephone_1, courriel, horaires_1, accueil_sur_rdv, geocodage"}'
+    params='{"select":"nom_du_service, type_de_service, libelle_du_service, service, public, type_de_demarche, adresse, code_postal, commune, com_name, dep_name, reg_name, telephone_1, telephone_2, courriel, horaires_1, accueil_sur_rdv, geocodage"}'
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
@@ -62,8 +66,16 @@
     aggregate="nom_du_service:count:nb" order-by="nb:desc" limit="12">
   </dsfr-data-query>
 
-  <dsfr-data-query id="qt-departements" source="qt-f" group-by="dep_name"
+  <!-- Sans `limit` pour le KPI : la requête limitée à 12 faisait afficher
+       « 12 natures de service » alors que le jeu en compte 29. -->
+  <dsfr-data-query id="qt-activites-toutes" source="qt-f" group-by="libelle_du_service"
     aggregate="nom_du_service:count:nb">
+  </dsfr-data-query>
+
+  <!-- `where` : la ligne sans département formait un groupe « null » compté
+       comme un département de plus. -->
+  <dsfr-data-query id="qt-departements" source="qt-f" group-by="dep_name"
+    where="dep_name:isnotnull" aggregate="nom_du_service:count:nb">
   </dsfr-data-query>
 
   <div class="fr-container fr-mb-8w">
@@ -77,10 +89,20 @@
           operator="words" count>
         </dsfr-data-search>
 
+        <!-- Les quatre entrées du portail (Public, Service, Département, Commune)
+             plus le type de lieu, qui porte la légende de la carte. Public et
+             Service en listes déroulantes comme sur le portail ; Commune en
+             facette classique avec recherche : ses valeurs se restreignent
+             d'elles-mêmes au département coché (chaque facette est calculée sur
+             les données filtrées par les autres). La facette porte sur
+             `com_name` (commune géoréférencée, 8 248 valeurs, comme le portail)
+             et non sur `commune` (saisie libre : 10 987 valeurs, « BEAUNE » et
+             « Beaune » séparés) ; 831 lignes non géoréférencées n'y figurent pas. -->
         <dsfr-data-facets id="qt-f" source="qt-q"
-          fields="type_de_service, service, public, accueil_sur_rdv, reg_name, dep_name"
-          labels="type_de_service:Type de service | service:Service | public:Public | accueil_sur_rdv:Accueil sur rendez-vous | reg_name:Région | dep_name:Département"
-          searchable="dep_name, reg_name" max-values="6">
+          fields="public, service, type_de_service, dep_name, com_name"
+          labels="public:Public | service:Service | type_de_service:Type de lieu | dep_name:Département | com_name:Commune"
+          display="public:select | service:select"
+          searchable="dep_name, com_name" max-values="6" url-params url-sync>
         </dsfr-data-facets>
       </div>
 
@@ -88,7 +110,7 @@
         <dsfr-data-kpi-group class="fr-mb-4w">
           <dsfr-data-kpi source="qt-f" value="count" format="nombre"
             heading="Sélection courante" label="services recensés" col="4"></dsfr-data-kpi>
-          <dsfr-data-kpi source="qt-activites" value="count" format="nombre"
+          <dsfr-data-kpi source="qt-activites-toutes" value="count" format="nombre"
             heading="Diversité" label="natures de service" col="4"></dsfr-data-kpi>
           <dsfr-data-kpi source="qt-departements" value="count" format="nombre"
             heading="Couverture" label="départements couverts" col="4"></dsfr-data-kpi>
@@ -98,22 +120,42 @@
         <dsfr-data-map name="Carte des services et points d'accueil de la DGFiP"
           center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
           fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
-          <dsfr-data-map-layer source="qt-f" type="circle" radius="5"
-            geo-field="geocodage" color="#000091"
+          <!-- Couleurs du portail par type de lieu (color-field / color-map) ;
+               `color` sert de repli pour les 104 directions. Les services
+               partageant une adresse (694 positions, jusqu'à 10 services) se
+               déploient en éventail au dernier niveau de zoom (spiderfy du
+               regroupement) : chacun devient cliquable. -->
+          <dsfr-data-map-layer source="qt-f" type="circle" radius="6"
+            geo-field="geocodage" color="#263892"
+            color-field="type_de_service"
+            color-map="Centre des Finances publiques:#004c6c,Permanences finances publiques:#5d8fa4,France Services:#f8b334,Buralistes:#6c5d53"
             tooltip-field="nom_du_service" cluster max-items="25000">
           </dsfr-data-map-layer>
-          <dsfr-data-map-popup mode="panel-right" title-field="nom_du_service" width="380px">
+          <dsfr-data-map-popup mode="panel-right" title-field="nom_du_service" width="400px">
             <template>
-              <p class="fr-badge fr-badge--sm fr-badge--blue-ecume fr-mb-2v">{{libelle_du_service|Service non précisé}}</p>
-              <p class="fr-text--sm fr-mb-1v">{{adresse|}}</p>
-              <p class="fr-text--sm fr-mb-2v"><strong>{{code_postal}} {{commune}}</strong> — {{dep_name}}, {{reg_name}}</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>Horaires&nbsp;:</strong> {{horaires_1|non renseignés}}</p>
-              <p class="fr-text--xs fr-mb-1v">Accueil sur rendez-vous&nbsp;: {{accueil_sur_rdv|non renseigné}}</p>
-              <p class="fr-text--xs fr-mb-1v">Téléphone&nbsp;: {{telephone_1|non renseigné}}</p>
-              <p class="fr-text--xs">Courriel&nbsp;: {{courriel|non renseigné}}</p>
+              <p class="fr-badge fr-badge--sm fr-badge--blue-ecume fr-mb-1v">{{type_de_service}}</p>
+              <p class="fr-text--xs fr-mb-2v">{{libelle_du_service|}}</p>
+              <p class="fr-text--sm fr-mb-1v odv-rubrique" data-intitule="Public">{{public|}}</p>
+              <p class="fr-text--sm fr-mb-1v odv-rubrique odv-prelignes" data-intitule="Démarches proposées">{{type_de_demarche|}}</p>
+              <p class="fr-text--sm fr-mb-1v odv-rubrique" data-intitule="Adresse">{{adresse|}}, {{code_postal}} {{commune}}</p>
+              <p class="fr-text--sm fr-mb-1v odv-rubrique" data-intitule="Téléphone">{{telephone_1|}}</p>
+              <p class="fr-text--sm fr-mb-1v odv-rubrique" data-intitule="Autre téléphone">{{telephone_2|}}</p>
+              <p class="fr-text--sm fr-mb-1v odv-rubrique" data-intitule="Courriel">{{courriel|}}</p>
+              <p class="fr-text--sm fr-mb-1v odv-rubrique" data-intitule="Horaires">{{horaires_1|}}</p>
+              <p class="fr-text--sm fr-mb-1v odv-rubrique" data-intitule="Accueil sur rendez-vous">{{accueil_sur_rdv|}}</p>
+              <p class="fr-text--xs fr-mb-0">{{dep_name|}}, {{reg_name|}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
+        <!-- Légende statique : aucun composant de légende dans dsfr-data-map
+             (vérifié dans le source, 0.20.0). Les couleurs recopient color-map. -->
+        <ul class="odv-legende fr-text--xs" aria-label="Légende de la carte">
+          <li><span class="odv-legende__pastille" style="background:#004c6c"></span>Centre des Finances publiques</li>
+          <li><span class="odv-legende__pastille" style="background:#5d8fa4"></span>Permanences finances publiques</li>
+          <li><span class="odv-legende__pastille" style="background:#f8b334"></span>France Services</li>
+          <li><span class="odv-legende__pastille" style="background:#6c5d53"></span>Buralistes partenaires agréés</li>
+          <li><span class="odv-legende__pastille" style="background:#263892"></span>Directions</li>
+        </ul>
 
         <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w fr-mb-4w">
           <div class="fr-col-12">
@@ -144,7 +186,8 @@
                     {{adresse|}}<br>{{code_postal}} {{commune}}
                   </p>
                   <div class="fr-card__end">
-                    <p class="fr-text--xs fr-mb-0">{{dep_name}} · RDV&nbsp;: {{accueil_sur_rdv|non renseigné}}</p>
+                    <p class="fr-text--xs fr-mb-1v">{{type_de_service}} · {{dep_name}}</p>
+                    <p class="fr-text--xs fr-mb-0 odv-rubrique" data-intitule="Horaires">{{horaires_1|}}</p>
                   </div>
                 </div>
               </div>
@@ -191,11 +234,63 @@
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Aucun constat inédit — le deuxième de suite.</strong> Comme EPV, cette page
-              n'a produit aucune friction nouvelle. Les seules rencontrées sont déjà consignées&nbsp;:
-              liens et champs optionnels sans conditionnelle (AM-007 — <code>courriel</code>,
-              <code>telephone_1</code> et <code>horaires_1</code> sont souvent vides), rendu de
-              l'interface des facettes (AM-013), absence de fond de carte neutre (AM-017).</li>
+            <li><strong>«&nbsp;Aucun constat inédit&nbsp;» — c'était avant de relire le portail.</strong>
+              La première version de cette page était une substitution de noms de champs dans le
+              gabarit, et son analyse concluait qu'il n'y avait rien à dire. Le relevé visuel du portail
+              a montré qu'elle ignorait la moitié de la page d'origine&nbsp;: les quatre listes
+              déroulantes, la légende à quatre couleurs, les six rubriques du panneau, les services
+              co-localisés. Les points ci-dessous en sont le résultat.</li>
+            <li><strong>Relecture face au relevé visuel du portail.</strong> Ajouté&nbsp;: les facettes
+              <strong>Public</strong> et <strong>Service</strong> en listes déroulantes
+              (<code>display="public:select | service:select"</code>), la facette
+              <strong>Commune</strong> avec recherche, la synchronisation d'URL
+              (<code>url-params url-sync</code>&nbsp;: <code>?dep_name=Côte-d'Or</code> observé) et le
+              bouton «&nbsp;Réinitialiser les filtres&nbsp;» que le composant affiche dès qu'un filtre
+              est actif — l'équivalent du «&nbsp;Supprimer tous les filtres&nbsp;». La dépendance
+              département → communes n'a rien coûté&nbsp;: chaque facette est calculée sur les données
+              filtrées par les autres, donc cocher Côte-d'Or ramène la facette Commune de 8&nbsp;248 à 74
+              valeurs, avec le compte de lieux («&nbsp;Beaune 8&nbsp;», le chiffre du portail). Les
+              <strong>couleurs par type de lieu</strong> reprennent celles du portail
+              (<code>color-field</code> / <code>color-map</code>, <code>color</code> en repli pour les
+              directions)&nbsp;; la <strong>légende</strong> est une liste HTML statique&nbsp;: il n'y a
+              aucun composant de légende dans <code>dsfr-data-map</code> (source 0.20.0 vérifié,
+              «&nbsp;legend&nbsp;» n'y apparaît pas). Le <strong>panneau</strong> porte les six
+              rubriques du portail (Public, Démarches proposées, Adresse, Téléphone, Courriel,
+              Horaires), chacune conditionnelle par CSS&nbsp;: <code>&lt;p class="odv-rubrique"
+              data-intitule="Courriel"&gt;{{courriel|}}&lt;/p&gt;</code>, l'intitulé posé en
+              <code>::before</code> et <code>:empty { display: none }</code> — vérifié sur le SIP de
+              Beaune (mêmes six lignes que le portail, rubrique Horaires absente des deux côtés) et sur
+              un buraliste (trois rubriques, cinq masquées). <code>type_de_demarche</code> et
+              <code>telephone_2</code> ont rejoint le <code>select</code>&nbsp;: +137&nbsp;Ko compressés
+              mesurés (1,46 → 1,59&nbsp;Mo). Corrigé&nbsp;: le KPI «&nbsp;natures de service&nbsp;»
+              affichait 12 (requête limitée) — 29 désormais&nbsp;; le KPI «&nbsp;départements&nbsp;»
+              comptait un groupe <code>null</code>. Vérifié&nbsp;: les cinq encarts DROM affichent
+              leurs grappes (Guadeloupe 109, Martinique 94, Guyane 56, La Réunion 170,
+              <strong>Mayotte 25</strong>)&nbsp;; la somme des grappes de la carte principale et des
+              encarts retrouve les 21&nbsp;619 lignes géocodées.</li>
+            <li><strong>Les services à la même adresse.</strong> 694 positions portent plusieurs
+              services (jusqu'à 10). Le portail les liste dans le panneau («&nbsp;3 services à cette
+              adresse&nbsp;»)&nbsp;; ici le panneau montre un enregistrement à la fois. La réponse native
+              est l'éventail du regroupement&nbsp;: au dernier niveau de zoom, la grappe «&nbsp;3&nbsp;»
+              du 1 rue Gaston-Roupnel à Beaune se déploie au clic en trois cercles, chacun cliquable —
+              vérifié, SIP puis SIE de Beaune ouverts tour à tour. Équivalent fonctionnel, mais la liste
+              nominative reste absente&nbsp;: rien dans <code>dsfr-data-map-popup</code> ne permet
+              d'afficher les enregistrements voisins.</li>
+            <li><strong>Ce qui reste hors de portée.</strong> Le <strong>titre dynamique</strong>
+              («&nbsp;Établissements pour payer vos impôts&nbsp;», six variantes)&nbsp;: aucun composant
+              ne reflète la valeur sélectionnée d'une facette dans un texte —
+              <code>dsfr-data-context-tags</code> le fait, mais pour <code>dsfr-data-context-filter</code>
+              (filtres serveur), pas pour <code>dsfr-data-facets</code>. Le <strong>marqueur
+              étoile</strong> de l'élément sélectionné&nbsp;: <code>dsfr-data-map-layer</code> n'a pas
+              d'état «&nbsp;sélectionné&nbsp;» (aucun attribut ni classe en ce sens dans le source). Les
+              <strong>tableaux dans les templates</strong>&nbsp;: <code>public</code> et
+              <code>service</code> arrivent en tableaux et <code>{{public}}</code> rend
+              «&nbsp;particuliers,professionnels&nbsp;» — <code>String(array)</code>, sans format de
+              jonction (<code>:number</code> est le seul format). La <strong>liste de services variable
+              selon le public</strong> (le portail retire «&nbsp;factures locales&nbsp;» aux
+              professionnels)&nbsp;: elle est codée en dur dans le portail et contredite par la donnée —
+              16&nbsp;173 lignes «&nbsp;professionnels&nbsp;» proposent ce service. Les facettes suivent
+              la donnée&nbsp;; ce n'est pas un manque.</li>
             <li><strong>Un jeu de données au périmètre discutable.</strong> Observation sur la
               donnée, pas sur l'outil&nbsp;: les 16&nbsp;163 buralistes agréés dominent un annuaire
               intitulé «&nbsp;coordonnées des structures DGFiP&nbsp;». Un usager cherchant un centre
@@ -206,13 +301,34 @@
         </div>
       </div>
 
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>4 <code>ods-select</code> (Public, Service codés en dur&nbsp;; Département sur un second jeu&nbsp;; Commune par analyse <code>COUNT(*)</code>)</td><td><code>dsfr-data-facets</code>, <code>display="…:select"</code>, <code>searchable</code></td><td>Une balise&nbsp;; la dépendance département → communes est native</td></tr>
+            <tr><td>«&nbsp;Supprimer tous les filtres&nbsp;» + <code>ctxurl-urlsync</code></td><td>bouton «&nbsp;Réinitialiser les filtres&nbsp;» + <code>url-sync</code></td><td>Équivalent</td></tr>
+            <tr><td>titre dynamique selon le service (6 variantes)</td><td>—</td><td>Sans équivalent pour les facettes</td></tr>
+            <tr><td>8 <code>ods-map-layer</code> colorés + légende fixe</td><td><code>color-field</code>/<code>color-map</code> + liste HTML</td><td>Couleurs équivalentes&nbsp;; légende à écrire à la main</td></tr>
+            <tr><td>sélection par <code>geofilter.distance</code> (services co-localisés), marqueur étoile</td><td>éventail du regroupement au zoom maximal</td><td>Fonctionnellement équivalent&nbsp;; pas de liste nominative ni d'état sélectionné</td></tr>
+            <tr><td>panneau à 6 rubriques conditionnelles (<code>ng-if</code>)</td><td><code>&lt;template&gt;</code> + <code>.odv-rubrique:empty</code></td><td>Équivalent, par convention CSS</td></tr>
+            <tr><td>21&nbsp;761 lignes, contextes multiples</td><td><code>/exports/json</code> + <code>max-items="25000"</code></td><td>Un chargement, 1,6&nbsp;Mo compressés</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction immédiate, sans découverte.</strong> C'est le deuxième résultat
-          négatif consécutif, et il confirme le lot&nbsp;4&nbsp;: le motif «&nbsp;annuaire
-          cartographié&nbsp;» est stabilisé. Quatre annuaires — tourisme, handicap, patrimoine
-          vivant, finances publiques — reproduits avec le même gabarit, sur des jeux allant de
-          1&nbsp;267 à 21&nbsp;761 lignes, sans qu'aucun n'exige d'adaptation structurelle.</p>
+        <p><strong>Reproduction complète après relecture — et la première version était
+          trompeuse.</strong> Le gabarit «&nbsp;annuaire cartographié&nbsp;» absorbe bien les
+          21&nbsp;761 lignes, mais la page d'origine n'est pas un annuaire de plus&nbsp;: c'est un guichet
+          d'orientation à quatre listes dépendantes, une légende, un panneau à rubriques
+          conditionnelles et des services empilés à la même adresse. Tout cela se reproduit en
+          déclaratif, à trois exceptions près — le titre qui reformule la demande, la liste nominative
+          des services co-localisés, l'état sélectionné d'un marqueur — et à deux conventions CSS près
+          (rubriques vides masquées, légende écrite à la main).</p>
         <p class="fr-text--sm fr-hint-text">
           Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AV-009 (quatrième
           confirmation), AM-007, AM-013, AM-017 (dataviz ajoutée).

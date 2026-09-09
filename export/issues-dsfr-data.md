@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 42 demandes — 4 bugs, 38 améliorations.
+> 47 demandes — 4 bugs, 43 améliorations.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## BUG-001 — Pagination arrêtée à la première page sur une requête agrégée Opendatasoft
@@ -80,7 +80,7 @@ Navigateur, page prix-des-carburants avec `fit-bounds max-bounds="41,-5.5,51.5,1
 
 ### Contournement actuel
 
-Vérifié sur une variante de la page Prix des carburants sans `max-bounds` ni `insets` (le jeu est purement métropolitain : 0 point hors [41–51.5, -6–10]) : Leaflet zoome alors au maximum sur le point. La page retenue garde `max-bounds` par cohérence avec le gabarit ; huit pages sont touchées.
+Vérifié sur une variante de la page Prix des carburants sans `max-bounds` ni `insets` (le jeu est purement métropolitain : 0 point hors [41–51.5, -6–10]) : Leaflet zoome alors au maximum sur le point. La page retenue garde `max-bounds` par cohérence avec le gabarit ; huit pages sont touchées. Au lot 9, la page Prix des carburants applique ce contournement (jeu 100 % métropolitain vérifié par `where=not in_bbox(geom,41,-5.5,51.5,10)` → 0 station) : zoom 18 sur une commune à station unique.
 
 ### Demande
 
@@ -128,7 +128,7 @@ Rencontré sur : decp-augmente, fiscalite-locale.
 
 ### Constat
 
-C'est le dernier obstacle réel pour un tableau de bord bâti sur plusieurs agrégations serveur. Les facettes émettent leur commande `where` vers leur source amont uniquement. `dsfr-data-context` sait diffuser à N sources, mais exige qu'on fournisse soi-même l'interface ET les valeurs : `dsfr-data-context-filter` lit un `<select>` ou un `<input>` (packages/core/src/components/dsfr-data-context-filter.ts:283), il ne sait pas s'abonner à un composant de facettes. Les deux mécanismes ne se composent pas. La page Fiscalité locale en donne la forme la plus visible : ses cartes s'appuient sur des agrégats départementaux et son tableau sur les 174 668 lignes brutes en pagination serveur ; filtrer le tableau sur un département ne recadre pas les cartes, et inversement. La page d'origine, elle, partage un contexte : tout se refiltre ensemble.
+C'est le dernier obstacle réel pour un tableau de bord bâti sur plusieurs agrégations serveur. Les facettes émettent leur commande `where` vers leur source amont uniquement. `dsfr-data-context` sait diffuser à N sources, mais exige qu'on fournisse soi-même l'interface ET les valeurs : `dsfr-data-context-filter` lit un `<select>` ou un `<input>` (packages/core/src/components/dsfr-data-context-filter.ts:283), il ne sait pas s'abonner à un composant de facettes. Les deux mécanismes ne se composent pas. La page Fiscalité locale en donne la forme la plus visible : ses cartes s'appuient sur des agrégats départementaux et son tableau sur les 174 668 lignes brutes en pagination serveur ; filtrer le tableau sur un département ne recadre pas les cartes, et inversement. La page d'origine, elle, partage un contexte : tout se refiltre ensemble. Précision du lot 9 : `dsfr-data-context-filter` n'a aucun opérateur de recherche textuelle (`OPERATORS` = eq, in, lt, gte, between, month-of, year-of, lt-day-after, last-n-days, current-year), donc une facette à des milliers de valeurs (nomAcheteur sur DECP) n'a d'équivalent qu'une liste écrite en dur des 20 premières.
 
 ### Observation
 
@@ -197,6 +197,34 @@ Chronométrage en navigateur sur la même page : 31 requêtes, concurrence maxim
 ### Demande
 
 Quand la source demande un chargement complet (pas de `server-side`, pas de pagination), utiliser `/exports/json` plutôt que la boucle sur `/records`. L'endpoint accepte AUSSI `group_by`, `select` et `where` : il couvre donc à la fois le chargement de lignes et les agrégations, et règle du même coup BUG-001. À défaut, paralléliser les pages une fois `total_count` connu : 8 requêtes concurrentes prennent 0,44 s contre 2,4 s en série.
+
+---
+
+## AM-043 — Pas de moyen déclaratif de remplir un `<select>` depuis une source, ni de cascade entre selects
+
+**Labels suggérés** : `enhancement`, `severity:haute`, `dsfr-data-context-filter`, `dsfr-data-facets`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : comptabilite-generale, fiscalite-locale, barometre-france-num, aide-publique-developpement, decp-augmente, rappel-conso-tableau-de-bord, prix-controle-technique.
+
+### Constat
+
+Les `<select>` qui pilotent un `dsfr-data-context` sont écrits en dur : 56 missions, 101 départements, 119 questions, 20 agences… générés hors ligne depuis l'API. Une cascade région → département reste du JavaScript. C'est la conséquence la plus coûteuse d'AM-001, et la friction la plus répétée du banc d'essai (sept pages).
+
+### Observation
+
+Trois pages du lot 9 avec options générées par script ; `dsfr-data-facets` ne pilote que sa propre source (source vérifié).
+
+### Contournement actuel
+
+Générer les options depuis un `group_by` de l'API au moment d'écrire la page (script de construction).
+
+### Demande
+
+—
 
 ---
 
@@ -492,7 +520,7 @@ Rencontré sur : fiscalite-locale.
 
 ### Constat
 
-`ods-color-gradient` expose le nombre de classes (`nb-classes`), les couleurs de début et de fin (`low`, `high`) et la méthode de discrétisation. `dsfr-data-chart type="map"` applique un dégradé continu qu'on ne paramètre pas : ni seuils, ni quantiles, ni nombre de paliers, ni palette. Sur des taux d'imposition dont la distribution est resserrée, un dégradé linéaire écrase les écarts que des quantiles feraient ressortir.
+`ods-color-gradient` expose le nombre de classes (`nb-classes`), les couleurs de début et de fin (`low`, `high`) et la méthode de discrétisation. `dsfr-data-chart type="map"` applique un dégradé continu qu'on ne paramètre pas : ni seuils, ni quantiles, ni nombre de paliers, ni palette. Sur des taux d'imposition dont la distribution est resserrée, un dégradé linéaire écrase les écarts que des quantiles feraient ressortir. Lot 9 : la choroplèthe communale de Fiscalité locale (698 contours en `geoshape fill-field`) confirme — quantiles imposés par `quantileBreaks(values, palette.length)`, aucune légende dans le DOM, là où l'original a 4 classes égales, une palette par taxe et une légende chiffrée.
 
 ### Observation
 
@@ -697,6 +725,62 @@ Page fermeture-reseau-cuivre : `records?…&limit=20`, la réponse porte `total_
 ### Contournement actuel
 
 Aucun déclaratif : la pagination est le seul indice du nombre de résultats. Une source agrégée `count(*)` séparée ne suit ni la recherche ni les facettes (elles ne relaient qu'à leur propre amont).
+
+### Demande
+
+—
+
+---
+
+## AM-039 — Conditionnelle par CSS faute de conditionnelle de template
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-display`, `dsfr-data-map-popup`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : qualite-tourisme, tourisme-et-handicap, annuaire-services-dgfip, entreprises-restauration-notre-dame, entreprise-patrimoine-vivant.
+
+### Constat
+
+Une valeur interpolée dans un attribut (`class="odv-picto--{{champ|absent}}"`, `href="{{champ|}}"`, `data-intitule` + `{{champ|}}`) et une règle CSS (`:empty`, `[href=""]`, `:has()`) font le travail d'un `ng-if`, sans JavaScript. Mais c'est une convention à connaître, et les intitulés passent en `::before`.
+
+### Observation
+
+Pictos handicap (Oui/Non/null → 3, 0 badges), rubriques DGFiP (SIP Beaune 5 visibles vs buraliste 3), lien vide de « BEST HOTEL » en `display:none`.
+
+### Contournement actuel
+
+Le motif ci-dessus, documenté dans `site.css` (bloc « Annuaires (lot 9) »).
+
+### Demande
+
+—
+
+---
+
+## AM-041 — Un ratio de deux agrégats coûte six balises
+
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-query`, `dsfr-data-join`, `dsfr-data-normalize`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : entreprise-patrimoine-vivant.
+
+### Constat
+
+Un KPI de proportion sur un champ multivalué (« 24 % proposent des produits à moins de 200 € » = count(contains) / total) exige trois `dsfr-data-query` groupées sur une clé constante, deux `dsfr-data-join` et un `compute` : aucun composant ne divise deux agrégats.
+
+### Observation
+
+EPV : 24,3 % et 15,9 % = 308/1 267 et 202/1 267 (API) ; suivent les filtres (Arts de la table : 49,2 % et 32,3 %).
+
+### Contournement actuel
+
+`compute="k = 1"` ; `group-by="k"` sur chaque agrégat ; `join on="k"` ; `compute="pct = a / b * 100"`.
 
 ### Demande
 
@@ -1116,7 +1200,7 @@ Cartes des communes du réseau cuivre : « Fermeture technique : 2028-01-31 ». 
 
 ### Contournement actuel
 
-Aucun déclaratif.
+Côté Opendatasoft : `date_format()` dans le `select` de l'export (voir FP-003). Côté client : aucun.
 
 ### Demande
 
@@ -1173,6 +1257,58 @@ Source `_parseReplaceFields` : `indexOf(':')` deux fois puis `normalizedValue ==
 ### Contournement actuel
 
 Aucun côté client ; côté serveur, `year()` est refusé par l'adaptateur (PG-014).
+
+### Demande
+
+—
+
+---
+
+## AM-040 — Pas de format de jonction pour les champs tableau dans les templates
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-display`, `dsfr-data-map-popup`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : annuaire-services-dgfip, prix-des-carburants, entreprise-patrimoine-vivant.
+
+### Constat
+
+`{{public}}` sur un tableau rend « particuliers,professionnels » (`String(array)`, sans espace) ; le portail affiche « Particuliers et Professionnels ».
+
+### Observation
+
+Panneau du buraliste « LE PARIS » (Noyon) : « particuliers,professionnels » ; `services_service` sur Prix des carburants idem.
+
+### Demande
+
+—
+
+---
+
+## AM-042 — `display="champ:radio"` rend une liste déroulante, pas des boutons radio
+
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-facets`
+
+### Contexte
+
+Constat issu du banc d'essai [open-data-viz](https://github.com/bmatge/open-data-viz) —
+reproduction du catalogue de visualisations de data.economie.gouv.fr.
+Rencontré sur : entreprises-restauration-notre-dame.
+
+### Constat
+
+Le mode « radio » de `dsfr-data-facets` est un dropdown à choix unique (`_renderRadioGroup`), pas deux boutons radio DSFR en ligne comme le Oui / Non du portail.
+
+### Observation
+
+DOM inspecté : aucun `input[type=radio]` hors panneau déplié.
+
+### Contournement actuel
+
+Cases à cocher.
 
 ### Demande
 

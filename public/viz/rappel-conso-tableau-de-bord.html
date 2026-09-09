@@ -71,6 +71,9 @@
   <!-- ==========================================================================
        Sept sources, une par agrégation, toutes déléguées au serveur Opendatasoft
        (select count(*) [+ group_by]). Aucune fiche ne descend dans le navigateur.
+       Les deux camemberts écartent le groupe des valeurs vides (2 001 fiches sans
+       nature juridique ni modalité) par un `where` statique, comme le portail ;
+       il se combine en AND avec les filtres des contextes.
 
        Deux <dsfr-data-context> diffusent les filtres à toutes (combinés en AND) :
          - ctx-periode : la date choisie, borne haute inclusive, sur les 7 sources ;
@@ -111,12 +114,14 @@
   <dsfr-data-source id="rc-nature" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
     api-key-ref="ods-mef"
+    where="nature_juridique_rappel is not null"
     select="nature_juridique_rappel, count(*) as nb" group-by="nature_juridique_rappel" order-by="nb:desc" limit="20">
   </dsfr-data-source>
 
   <dsfr-data-source id="rc-compensation" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
     api-key-ref="ods-mef"
+    where="modalites_de_compensation is not null"
     select="modalites_de_compensation, count(*) as nb" group-by="modalites_de_compensation" order-by="nb:desc" limit="20">
   </dsfr-data-source>
 
@@ -251,14 +256,16 @@
     <!-- ------------------------------ Compteurs ------------------------------ -->
     <h2 class="fr-h4">Nombre de rappels</h2>
     <dsfr-data-kpi-group class="fr-mb-6w">
+      <!-- Les en-têtes « Sur l'année … » et « Sur le mois de … » suivent la date
+           choisie, comme sur le portail : posés par le script en bas de page. -->
       <dsfr-data-kpi source="rc-total" value="nb:max" format="nombre" col="4"
-        heading="Toute la période" label="fiches publiées jusqu'à la date choisie"
+        heading="Sur toute la période" label="fiches publiées jusqu'à la date choisie — « depuis mars 2021 » selon le portail (ouverture de RappelConso), mais le jeu contient 251 fiches antérieures, depuis le 19 janvier 2018"
         icon="fr-icon-archive-line"></dsfr-data-kpi>
-      <dsfr-data-kpi source="rc-annee" value="nb:max" format="nombre" col="4"
-        heading="Année en cours" label="fiches publiées depuis le 1er janvier"
+      <dsfr-data-kpi id="kpi-annee" source="rc-annee" value="nb:max" format="nombre" col="4"
+        heading="Sur l'année" label="fiches publiées depuis le 1er janvier"
         icon="fr-icon-calendar-line"></dsfr-data-kpi>
-      <dsfr-data-kpi source="rc-mois" value="nb:max" format="nombre" col="4"
-        heading="Mois en cours" label="fiches publiées depuis le 1er du mois"
+      <dsfr-data-kpi id="kpi-mois" source="rc-mois" value="nb:max" format="nombre" col="4"
+        heading="Sur le mois" label="fiches publiées depuis le 1er du mois"
         icon="fr-icon-calendar-event-line"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
@@ -394,6 +401,29 @@
               <code>|</code> («&nbsp;remboursement|echange&nbsp;»). Le camembert compte donc des combinaisons,
               pas des modalités — exactement comme l'original. C'est le jeu de données, pas l'outil
               (LIM-003).</li>
+            <li><strong>Relecture face au relevé visuel du portail.</strong> La fiche d'audit
+              (<code>docs/portail/rappel-conso.md</code>) est couverte point par point&nbsp;: titre
+              dynamique, sélecteur de date à trois fenêtres, deux listes (10 catégories&nbsp;; 57
+              sous-catégories ici contre 55 relevées sur le portail — l'endpoint <code>/facets</code> en
+              renvoie 57 ce jour), trois compteurs, quatre graphiques dont le top 20 des
+              sous-catégories, bouton vers le jeu. Vérifié contre l'API au 15 mars 2024&nbsp;:
+              10&nbsp;687 / 528 / 98, puis 8&nbsp;141 avec la catégorie alimentation — chiffres identiques
+              à la requête directe. Trois retouches en sont sorties. Les deux camemberts comptaient un
+              groupe vide de 2&nbsp;001 fiches (sans nature juridique ni modalité) que le portail
+              n'affiche pas&nbsp;: écarté par un <code>where="… is not null"</code> statique sur la
+              source, combiné en AND avec les deux contextes&nbsp;; les parts sont maintenant
+              14&nbsp;402 / 2&nbsp;178 et 12&nbsp;401 / 1&nbsp;346 / 1&nbsp;317…, les valeurs de la fiche.
+              Les en-têtes des compteurs suivent la date choisie («&nbsp;Sur l'année 2024&nbsp;»,
+              «&nbsp;Sur le mois de mars 2024&nbsp;») comme sur le portail&nbsp;: deux lignes de plus dans
+              le script existant, <code>heading</code> étant une propriété réactive du KPI — il n'y a
+              pas de voie déclarative pour qu'un libellé lise la valeur d'un filtre. Et la mention
+              «&nbsp;depuis mars 2021&nbsp;» du portail est reprise, mais nuancée&nbsp;: le jeu contient
+              251 fiches antérieures, la plus ancienne du 19 janvier 2018 (<code>min(date_publication)</code>).
+              <em>Ce qui manque encore&nbsp;:</em> la borne haute reste inclusive (18&nbsp;581 au 9
+              septembre contre 18&nbsp;573 sur le portail, qui exclut le jour même — choix assumé,
+              voir l'encadré), les listes de catégories ne se restreignent pas l'une l'autre (AM-001),
+              et la carte «&nbsp;Filtres&nbsp;» n'est pas collante au défilement — c'est de la mise en
+              page, hors périmètre.</li>
           </ul>
         </div>
       </div>
@@ -407,7 +437,7 @@
           <tbody>
             <tr><td>4 contextes sur le même jeu, synchronisés à la main</td><td>2 <code>dsfr-data-context</code> (période, produit), filtres avec <code>apply-to</code></td><td>Nettement plus simple</td></tr>
             <tr><td>5 expressions <code>moment</code> calculant les bornes</td><td>opérateurs <code>lt-day-after</code>, <code>year-of</code>, <code>month-of</code></td><td>Équivalent, déclaratif — mais trois formats d'entrée</td></tr>
-            <tr><td><code>&lt;input type="date"&gt;</code> initialisé par <code>ods-datetime="now"</code></td><td>script de 10 lignes</td><td>Le seul JavaScript de la page</td></tr>
+            <tr><td><code>&lt;input type="date"&gt;</code> initialisé par <code>ods-datetime="now"</code></td><td>script d'une douzaine de lignes</td><td>Le seul JavaScript de la page (titre et en-têtes de compteurs compris)</td></tr>
             <tr><td><code>ods-facet-results</code> → <code>&lt;select ng-repeat&gt;</code></td><td><code>&lt;select&gt;</code> en dur + <code>dsfr-data-context-filter</code></td><td>Valeurs à écrire à la main (AM-001)</td></tr>
             <tr><td><code>{{ctx.nhits}}</code> ×3</td><td><code>dsfr-data-kpi value="nb:max"</code> ×3</td><td>Équivalent, mieux présenté</td></tr>
             <tr><td><code>ods-chart</code> / <code>-query</code> / <code>-serie</code> ×4</td><td><code>dsfr-data-chart</code> ×4</td><td>3 balises → 1</td></tr>
@@ -447,7 +477,8 @@
   // 1. ouvrir le tableau de bord à la date du jour ;
   // 2. dériver « AAAA » et « AAAA-MM » de la date choisie pour les opérateurs
   //    year-of et month-of, qui n'acceptent pas une date complète ;
-  // 3. refléter la période dans le titre.
+  // 3. refléter la période dans le titre et dans les en-têtes des compteurs
+  //    année / mois (« Sur l'année 2026 », « Sur le mois de septembre 2026 »).
   // Exécuté AVANT le chargement de dsfr-data : les filtres trouvent une UI
   // déjà remplie au montage et s'appliquent dès la première requête.
   (() => {
@@ -462,6 +493,8 @@
       titre.textContent = v
         ? new Date(`${v}T12:00:00`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
         : 'toute la période';
+      document.getElementById('kpi-annee').setAttribute('heading', v ? `Sur l'année ${annee.value}` : "Sur l'année");
+      document.getElementById('kpi-mois').setAttribute('heading', v ? `Sur le mois de ${titre.textContent}` : 'Sur le mois');
       for (const el of [annee, mois]) el.dispatchEvent(new Event('change', { bubbles: true }));
     };
     const aujourdhui = new Date();

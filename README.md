@@ -133,6 +133,12 @@ Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 
 Au total : **24 entrées reproduites, 5 analyses, 1 hors périmètre** sur 30.
 
+**Lot 9 — mise à niveau face à l'audit visuel.** Un relevé indépendant du portail
+(`docs/portail/`, 14 fiches lues au navigateur) a été confronté page par page aux reproductions.
+Trois chiffres faux et deux mauvais jeux de données ont été trouvés et corrigés ; douze pages ont été
+enrichies ; chaque analyse porte un bloc « Relecture face au relevé visuel du portail » qui dit ce qui a
+été ajouté et ce qui manque encore. Le registre passe à 114 constats, dont 9 faux problèmes.
+
 Les trois reconstitutions du lot 6 (Signal Conso, Rappel Conso, contrôle technique) ont une page
 officielle en 404 et un identifiant de jeu périmé, mais la donnée existe toujours — parfois mise à
 jour le jour même — sous un autre nom. Rappel Conso a en plus une variante fidèle à sa page vivante,

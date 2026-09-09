@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Baromètre France Num — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du Baromètre France Num de data.economie.gouv.fr, et pourquoi la jointure des libellés de questions produit des résultats faux.">
+  <meta name="description" content="Reproduction avec dsfr-data du Baromètre France Num de data.economie.gouv.fr : 119 questions lues dans la table de correspondance, vue nationale et vue filtrée région × secteur × taille.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -40,49 +40,347 @@
         <a href="https://data.economie.gouv.fr/explore/dataset/questions-reponses/" target="_blank" rel="noopener external"><code>questions-reponses</code></a>
         — 479&nbsp;405 lignes, la table de calcul des scores de l'enquête annuelle sur la
         numérisation des TPE et PME, de 2020 à 2025. Elle ne contient que des <em>codes</em> de
-        question. Un second jeu,
-        <a href="https://data.economie.gouv.fr/explore/dataset/bfn-2022-resultats-2022/" target="_blank" rel="noopener external"><code>bfn-2022-resultats-2022</code></a>,
-        porte des libellés — mais sur un référentiel de codes <strong>différent</strong>. Les joindre
-        produit des intitulés faux&nbsp;: c'est le constat central de cette page.
+        question. Les libellés, les chapitres et les descriptifs viennent de
+        <a href="https://data.economie.gouv.fr/explore/dataset/bfn-table-de-correspondance/" target="_blank" rel="noopener external"><code>bfn-table-de-correspondance</code></a>
+        — 119 questions, le jeu que la page d'origine lit elle-même. Une première version de cette
+        page avait joint un autre jeu, <code>bfn-2022-resultats-2022</code>, au référentiel de codes
+        différent&nbsp;: l'analyse en garde la trace.
       </p>
     </div>
   </div>
 
   <!-- ==========================================================================
-       Une seule source : les scores nationaux agrégés côté serveur
-       (1 065 lignes : question × réponse × année).
-
-       La jointure avec le jeu de libellés a été TENTÉE puis RETIRÉE : le même
-       `code_unifie` ne désigne pas la même question dans les deux jeux. Elle
-       produisait des libellés faux, d'apparence plausible. Voir l'analyse.
+       Trois régimes, à dessein :
+       1. L'EXPLORATEUR (bas de page) : les scores nationaux agrégés côté serveur
+          (1 065 lignes : question × réponse × année, /exports/json), JOINTS à la
+          table de correspondance du portail (119 questions) sur `code_unifie`.
+          La jointure est complète : 119 codes sur 119 sont communs aux deux jeux.
+       2. LA QUESTION (haut de page) : un <dsfr-data-context> pousse question,
+          région, secteur et taille dans trois sources en mode adaptateur —
+          vue nationale, vue filtrée, fiche de la question. Une question à la
+          fois = au plus 12 réponses × 6 années = 72 groupes, sous le plafond
+          de 100 groupes de /records (BUG-001).
+       3. Une première version joignait `bfn-2022-resultats-2022` : mauvais jeu,
+          référentiel de codes différent (PG-009). Voir l'analyse.
        ========================================================================== -->
 
+  <!-- Table de correspondance : la liste des questions, leurs chapitres, leurs descriptifs -->
+  <dsfr-data-source id="bfn-corr"
+    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/bfn-table-de-correspondance/exports/json"
+    params='{"select":"code_unifie, libelle_unifie, chapitre, ordre_chapitre, presentation_2024, descriptif_de_question","order_by":"ordre_chapitre, code_unifie"}'
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+  <!-- code_unifie est un texte dans la table et un entier dans les scores (AM-025) -->
+  <dsfr-data-normalize id="bfn-corr-num" source="bfn-corr" numeric="code_unifie"></dsfr-data-normalize>
+
+  <!-- Scores nationaux, toutes questions -->
   <dsfr-data-source id="bfn-scores"
     url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/questions-reponses/exports/json"
     params='{"select":"max(score) as score","group_by":"code_unifie, libelle_reponse, year(annee) as an","where":"region = \"Toutes régions\" and secteur = \"Tous secteurs\" and taille = \"Toutes tailles\""}'
     api-key-ref="ods-mef">
   </dsfr-data-source>
+  <dsfr-data-join id="bfn-scores-lib" left="bfn-scores" right="bfn-corr-num" on="code_unifie" type="left"></dsfr-data-join>
 
   <dsfr-data-query id="bfn-questions" source="bfn-f" group-by="code_unifie"
     aggregate="score:count:nb">
   </dsfr-data-query>
 
+  <!-- La question choisie : vue nationale, vue filtrée, fiche -->
+  <dsfr-data-source id="bfn-q-nat" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses" api-key-ref="ods-mef"
+    select="year(annee) as an, sum(score) as score"
+    group-by="libelle_reponse, annee"
+    where='region = "Toutes régions" AND secteur = "Tous secteurs" AND taille = "Toutes tailles" AND libelle_reponse != "Sans réponse"'
+    order-by="an, libelle_reponse">
+  </dsfr-data-source>
+  <dsfr-data-source id="bfn-q-filt" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses" api-key-ref="ods-mef"
+    select="year(annee) as an, sum(score) as score"
+    group-by="libelle_reponse, annee"
+    where='libelle_reponse != "Sans réponse"'
+    order-by="an, libelle_reponse">
+  </dsfr-data-source>
+  <dsfr-data-source id="bfn-q-corr" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bfn-table-de-correspondance" api-key-ref="ods-mef"
+    select="code_unifie, libelle_unifie, chapitre, presentation_2024, descriptif_de_question" limit="1">
+  </dsfr-data-source>
+
+  <dsfr-data-context sources="bfn-q-nat bfn-q-filt bfn-q-corr" url-sync
+    url-param-map="question:code_unifie | region:region | secteur:secteur | taille:taille">
+    <dsfr-data-context-filter field="code_unifie" operator="eq" ui="sel-question" label="Question"></dsfr-data-context-filter>
+    <dsfr-data-context-filter field="region"  operator="eq" ui="sel-region"  label="Région"  apply-to="bfn-q-filt"></dsfr-data-context-filter>
+    <dsfr-data-context-filter field="secteur" operator="eq" ui="sel-secteur" label="Secteur" apply-to="bfn-q-filt"></dsfr-data-context-filter>
+    <dsfr-data-context-filter field="taille"  operator="eq" ui="sel-taille"  label="Taille"  apply-to="bfn-q-filt"></dsfr-data-context-filter>
+  </dsfr-data-context>
+
   <div class="fr-container fr-mb-8w">
+
+    <h2 class="fr-h3" id="question">Une question, six éditions, une vue filtrée</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Le motif de chaque section de l'original&nbsp;: la question (lue dans la table de
+      correspondance), son descriptif, le score par année en vue nationale, et la même chose
+      pour la région × le secteur × la taille choisis. Les quatre sélecteurs sont repris dans
+      l'URL. Les réponses «&nbsp;Sans réponse&nbsp;» sont exclues, comme dans l'original.
+    </p>
+
+    <form class="fr-grid-row fr-grid-row--gutters fr-mb-4w" aria-label="Choisir une question et des filtres">
+      <div class="fr-col-12">
+        <div class="fr-select-group">
+          <label class="fr-label" for="sel-question">Question (119, par chapitre)</label>
+          <select class="fr-select" id="sel-question">
+          <optgroup label="TPE PME interrogées">
+            <option value="201">201 — Secteur d'activité de l'entreprise</option>
+            <option value="202">202 — Taille de l'entreprise</option>
+            <option value="203">203 — Région</option>
+            <option value="204">204 — Type de l’activité de l'entreprise</option>
+            <option value="205">205 — Durée de vie de l'entreprise au 01/01/N</option>
+            <option value="206">206 — Votre entreprise a-t-elle actuellement des projets en cours de réalisation ?</option>
+          </optgroup>
+          <optgroup label="Perception du numérique">
+            <option value="501" selected>501 — Dans l’ensemble, je trouve que le numérique aujourd’hui représente un bénéfice réel pour mon entreprise</option>
+            <option value="502">502 — Le numérique facilite la communication avec mes clients</option>
+            <option value="503">503 — Le numérique facilite la communication avec mes employés ou collaborateurs</option>
+            <option value="504">504 — Le numérique me fait perdre plus de temps qu’il ne m’en fait gagner</option>
+            <option value="505">505 — Le numérique me permet de faire des économies</option>
+            <option value="506">506 — Le numérique me permet de gagner de l’argent</option>
+            <option value="507">507 — Le numérique me permet d’augmenter mon chiffre d’affaires</option>
+            <option value="508">508 — Le numérique me permet d’augmenter mes bénéfices</option>
+            <option value="509">509 — Le numérique permet de me démarquer de la concurrence</option>
+            <option value="510">510 — J’ai peur de perdre ou de me faire pirater des données quand j’utilise le numérique</option>
+            <option value="511">511 — Je suis en retard sur le numérique par rapport aux autres entreprises du même secteur</option>
+            <option value="512">512 — Le numérique facilite l'externalisation de certaines fonctions</option>
+          </optgroup>
+          <optgroup label="Promotion et développement commercial sur internet">
+            <option value="601">601 — Site internet présentant l'activité de l'entreprise (hors réseaux sociaux) : taux d'équipement</option>
+            <option value="602">602 — Bénéfices d'avoir un site internet</option>
+            <option value="603">603 — Raisons conduisant à ne pas avoir de site internet</option>
+            <option value="604">604 — Compte(s) sur les réseaux sociaux : taux d'équipement</option>
+            <option value="605">605 — Sur quel(s) réseau(x) sociaux votre entreprise est-elle présente ?</option>
+            <option value="606">606 — Raisons conduisant à ne pas utiliser les réseaux sociaux</option>
+            <option value="607">607 — Annuaire gratuit sur internet : taux d'équipement</option>
+            <option value="608">608 — Annuaire payant sur internet : taux d'équipement</option>
+            <option value="611">611 — Solution de gestion de la relation client : taux d'équipement</option>
+            <option value="621">621 — Vente sur son propre site internet marchand : taux d'équipement</option>
+            <option value="622">622 — Vente sur les places de marché : taux d'équipement</option>
+            <option value="623">623 — Vente sur les réseaux sociaux : taux d'équipement</option>
+            <option value="624">624 — Solution de commande en ligne et retrait en magasin : taux d'équipement</option>
+            <option value="625">625 — Part des clients provenant d’internet</option>
+            <option value="626">626 — Part du chiffre d'affaires provenant d’internet</option>
+            <option value="627">627 — Bénéfices de vendre en ligne</option>
+            <option value="628">628 — Raisons conduisant à ne pas vendre en ligne</option>
+          </optgroup>
+          <optgroup label="Gestion et pilotage de l’entreprise avec le numérique">
+            <option value="701">701 — Messagerie instantanée : taux d'équipement</option>
+            <option value="702">702 — Solution de collaboration professionnelle : taux d'équipement</option>
+            <option value="703">703 — Plateforme d'échange de documents en ligne : taux d'équipement</option>
+            <option value="704">704 — Signature électronique : taux d'équipement</option>
+            <option value="705">705 — Intranet ou réseau social de l'entreprise : taux d'équipement</option>
+            <option value="711">711 — Solution de gestion comptable : taux d'équipement</option>
+            <option value="712">712 — Solution de facturation : taux d'équipement</option>
+            <option value="713">713 — Part des factures émises sous un format électronique structuré permettant leur traitement automatique</option>
+            <option value="714">714 — Logiciel de caisse : taux d'équipement</option>
+            <option value="715">715 — Solution de gestion liée au compte bancaire professionnel : taux d'équipement</option>
+            <option value="716">716 — Terminal de paiement classique (TPE) : taux d'équipement</option>
+            <option value="717">717 — Terminal de paiement associé à smartphone / tablette : taux d'équipement</option>
+            <option value="718">718 — Solution de paiement en ligne : taux d'équipement</option>
+            <option value="721">721 — Solution de gestion de production ou de maintenance : taux d'équipement</option>
+            <option value="722">722 — Solution d’automatisation de la production / robots : taux d'équipement</option>
+            <option value="723">723 — Solution de conception / modélisation / d’impression 3D : taux d'équipement</option>
+            <option value="724">724 — Solution de gestion des achats / de l'approvisionnement / des stocks : taux d'équipement</option>
+            <option value="725">725 — Solution de gestion de commandes clients et/ou des expéditions : taux d'équipement</option>
+            <option value="731">731 — ERP : taux d'équipement</option>
+            <option value="733">733 — Solution d’échange de données : taux d'équipement</option>
+            <option value="734">734 — Technologies immersives : taux d'équipement</option>
+            <option value="740">740 — Analyse des données : RH / paie</option>
+            <option value="741">741 — Analyse des données : comptabilité / finances</option>
+            <option value="742">742 — Analyse des données : catalogue de produits / services</option>
+            <option value="743">743 — Analyse des données : clients / ventes</option>
+            <option value="744">744 — Analyse des données : fournisseurs / achats</option>
+            <option value="745">745 — Analyse des données : gestion de production</option>
+            <option value="746">746 — Analyse des données : tableaux de bord transverse</option>
+            <option value="750">750 — Délégué ou responsable de la protection des données personnelles</option>
+            <option value="751">751 — Registre des activités de traitement</option>
+          </optgroup>
+          <optgroup label="Intelligence artificielle">
+            <option value="801">801 — Intelligence artificielle : taux d'utilisation global</option>
+            <option value="802">802 — IA générative : taux d'utilisation</option>
+            <option value="803">803 — Analyse / classification de documents : taux d'utilisation</option>
+            <option value="804">804 — Analyse de données / prévision / optimisation des ressources : taux d'utilisation</option>
+            <option value="805">805 — Chatbot / assistant / recherche d’informations : taux d'utilisation</option>
+            <option value="806">806 — Contrôle qualité / détection : taux d'utilisation</option>
+            <option value="807">807 — Automatisation des tâches : taux d'utilisation</option>
+          </optgroup>
+          <optgroup label="Cybersécurité">
+            <option value="901">901 — Incidents de cybersécurité : taux d'incidents</option>
+            <option value="911">911 — Mesures de cybersécurité : taux de mise en œuvre</option>
+            <option value="921">921 — Antivirus : taux de mise en œuvre</option>
+            <option value="922">922 — Authentification biométrique : taux de mise en œuvre</option>
+            <option value="923">923 — Authentification multi-facteurs : taux de mise en œuvre</option>
+            <option value="924">924 — Assurance : taux de mise en œuvre</option>
+            <option value="925">925 — Plan sécurité / reprise d'activité : taux de mise en œuvre</option>
+            <option value="926">926 — Sauvegarde extérieure : taux de mise en œuvre</option>
+            <option value="927">927 — Référent sécurité : taux de mise en œuvre</option>
+            <option value="928">928 — Formation / sensibilisation : taux de mise en œuvre</option>
+            <option value="929">929 — Protection locaux / matériels : taux de mise en œuvre</option>
+          </optgroup>
+          <optgroup label="Connectivité">
+            <option value="1001">1001 — ADSL/VDSL/SDSL : taux d'équipement</option>
+            <option value="1002">1002 — Fibre optique : taux d'équipement</option>
+            <option value="1003">1003 — 4G/5G mobile : taux d'équipement</option>
+            <option value="1004">1004 — 4G/5G fixe ou boucle locale radio : taux d'équipement</option>
+            <option value="1005">1005 — Satellite : taux d'équipement</option>
+            <option value="1006">1006 — Débit internet : taux de satisfaction</option>
+            <option value="1007">1007 — Fiabilité internet : taux de satisfaction</option>
+            <option value="1008">1008 — Prix internet : taux de satisfaction</option>
+          </optgroup>
+          <optgroup label="Sobriété numérique">
+            <option value="1101">1101 — Achat de matériel reconditionné : taux de mise en œuvre</option>
+            <option value="1102">1102 — Recyclage des équipements : taux de mise en œuvre</option>
+            <option value="1103">1103 — Réduction de la consommation énergétique : taux de mise en œuvre</option>
+            <option value="1104">1104 — Ecoconception des solutions numériques : taux de mise en œuvre</option>
+          </optgroup>
+          <optgroup label="Modes d’acquisition et d’installation">
+            <option value="1201">1201 — Mode d’acquisition majoritaire des solutions logicielles utilisées</option>
+            <option value="1202">1202 — Mode d'installation majoritaire des solutions logicielles utilisées</option>
+          </optgroup>
+          <optgroup label="Dépenses et projets numériques">
+            <option value="1301">1301 — Budget consacré au numérique l'année précédente</option>
+            <option value="1311">1311 — Priorités en matière de numérique dans les 2 prochaines années</option>
+            <option value="1321">1321 — Budget annuel prévu pour les projets numériques (hors recrutements)</option>
+            <option value="1331">1331 — Prêts bancaires : taux de prévision de recours</option>
+            <option value="1332">1332 — Financement participatif : taux de prévision de recours</option>
+            <option value="1333">1333 — Subventions publiques : taux de prévision de recours</option>
+            <option value="1334">1334 — Autres subventions : taux de prévision de recours</option>
+          </optgroup>
+          <optgroup label="Compétences numériques et accompagnement">
+            <option value="1401">1401 — Votre entreprise dispose-t-elle de compétences dans le numérique ?</option>
+            <option value="1411">1411 — Formation, au sein de l'entreprise, spécifiquement sur le numérique : taux de recours</option>
+            <option value="1412">1412 — Formation, au sein de l'entreprise, sur un autre sujet incluant la dimension numérique : taux de recours</option>
+            <option value="1413">1413 — Formation, au sein de l'entreprise, sur un autre sujet (hors numérique) : taux de recours</option>
+            <option value="1414">1414 — Pour les formations sur le numérique, grâce à qui avez-vous identifié la formation ?</option>
+            <option value="1415">1415 — Rencontrez-vous des difficultés à définir vos besoins de formation ?</option>
+            <option value="1416">1416 — Rencontrez-vous des difficultés à trouver une formation adéquate ?</option>
+            <option value="1417">1417 — Rencontrez-vous des difficultés à financer votre formation ?</option>
+            <option value="1418">1418 — Rencontrez-vous des difficultés à trouver le temps nécessaire ?</option>
+            <option value="1421">1421 — Rencontrez-vous des difficultés pour identifier un prestataire de services numériques répondant à vos attentes ?</option>
+            <option value="1422">1422 — Selon vous, qui serait mieux à même de vous conseiller dans votre transformation numérique ?</option>
+            <option value="1423">1423 — Connaissez-vous France Num ?</option>
+            <option value="1425">1425 — Connaissez-vous l'une des actions suivantes de France Num ?</option>
+            <option value="1426">1426 — Quel est votre avis sur ces actions ?</option>
+          </optgroup>
+          <optgroup label="Typologie des entreprises interrogées">
+            <option value="1501">1501 — Typologie des entreprises interrogées (réticentes, en potentiel, dynamiques, matures)</option>
+          </optgroup>
+          </select>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-4">
+        <div class="fr-select-group">
+          <label class="fr-label" for="sel-region">Région</label>
+          <select class="fr-select" id="sel-region">
+            <option>Auvergne-Rhône-Alpes</option>
+            <option>Bourgogne-Franche-Comté</option>
+            <option>Bretagne</option>
+            <option>Centre-Val de Loire</option>
+            <option>Grand Est</option>
+            <option>Hauts-de-France</option>
+            <option>Île-de-France</option>
+            <option>Normandie</option>
+            <option>Nouvelle-Aquitaine</option>
+            <option>Occitanie</option>
+            <option>Pays de la Loire</option>
+            <option>Provence Alpes Côte d’Azur + Corse</option>
+            <option>Provence-Alpes-Côte d'Azur</option>
+            <option selected>Toutes régions</option>
+          </select>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-4">
+        <div class="fr-select-group">
+          <label class="fr-label" for="sel-secteur">Secteur d'activité</label>
+          <select class="fr-select" id="sel-secteur">
+            <option>Activités financières - Assurances</option>
+            <option>Agriculture</option>
+            <option>Bâtiment - Construction</option>
+            <option>Commerce (détail et gros)</option>
+            <option>Hébergement - Restauration</option>
+            <option>Industrie</option>
+            <option>Nouvelles technologies - Information - Communication</option>
+            <option>Services à la personne</option>
+            <option>Services spécialisés - Techniques</option>
+            <option selected>Tous secteurs</option>
+            <option>Transport - Logistique</option>
+            <option>Z - Autre</option>
+          </select>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-4">
+        <div class="fr-select-group">
+          <label class="fr-label" for="sel-taille">Taille de l'entreprise</label>
+          <select class="fr-select" id="sel-taille">
+            <option>0 salarié</option>
+            <option>1 à 9 salariés</option>
+            <option>10 à 49 salariés</option>
+            <option>50 à 249 salariés</option>
+            <option selected>Toutes tailles</option>
+          </select>
+        </div>
+      </div>
+    </form>
+
+    <dsfr-data-display source="bfn-q-corr" cols="1" class="fr-mb-4w">
+      <template>
+        <div class="fr-callout fr-icon-question-line">
+          <p class="fr-callout__title fr-text--md">{{libelle_unifie}}</p>
+          <p class="fr-callout__text fr-text--sm">{{descriptif_de_question|Pas de descriptif dans la table de correspondance.}}</p>
+          <p class="fr-text--xs fr-hint-text fr-mb-0">Chapitre «&nbsp;{{chapitre}}&nbsp;» — mode de présentation de l'original&nbsp;: {{presentation_2024|non renseigné}}.</p>
+        </div>
+      </template>
+    </dsfr-data-display>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-q-nat" source="bfn-q-nat" type="bar" stacked
+            label-field="an" value-field="score" series-field="libelle_reponse"
+            unit-tooltip=" %" y-min="0" y-max="100"
+            databox databox-title="Vue d'ensemble — score par réponse et par année (%)"
+            databox-source="DGE — questions-reponses, via data.economie.gouv.fr"
+            databox-date="2020-2025" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-q-nat" source="bfn-q-nat" table download></dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-q-filt" source="bfn-q-filt" type="bar" stacked
+            label-field="an" value-field="score" series-field="libelle_reponse"
+            unit-tooltip=" %" y-min="0" y-max="100" selected-palette="sequentialDescending"
+            databox databox-title="Vue correspondant aux critères de filtre (%)"
+            databox-source="DGE — questions-reponses, via data.economie.gouv.fr"
+            databox-date="2020-2025" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-q-filt" source="bfn-q-filt" table download></dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="fr-h3" id="explorateur">Toutes les questions, vue nationale</h2>
     <div class="odv-dashboard">
 
       <div class="odv-filtres">
-        <h2 class="fr-h6">Rechercher et filtrer</h2>
+        <h3 class="fr-h6">Rechercher et filtrer</h3>
 
-        <dsfr-data-search id="bfn-q" source="bfn-scores"
-          fields="libelle_reponse"
-          label="Rechercher une réponse" placeholder="Site web, réseaux sociaux, cyber…"
+        <dsfr-data-search id="bfn-q" source="bfn-scores-lib"
+          fields="libelle_unifie, libelle_reponse"
+          label="Rechercher une question ou une réponse" placeholder="Site web, réseaux sociaux, cyber…"
           operator="words" count>
         </dsfr-data-search>
 
         <dsfr-data-facets id="bfn-f" source="bfn-q"
-          fields="code_unifie, an"
-          labels="code_unifie:Code de question | an:Année"
-          searchable="code_unifie" max-values="8">
+          fields="chapitre, an"
+          labels="chapitre:Chapitre | an:Année"
+          max-values="12">
         </dsfr-data-facets>
       </div>
 
@@ -96,24 +394,15 @@
             heading="Score moyen" label="% des répondants" col="4"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
 
-        <div class="fr-callout fr-icon-information-line fr-mb-4w">
-          <p class="fr-callout__text fr-text--sm">
-            Chaque ligne est une modalité de réponse à une question de l'enquête, et son
-            <strong>score</strong> est la part des répondants qui l'ont choisie, en pourcentage, au
-            niveau national. Filtrez sur un code de question dans la colonne de gauche pour voir la
-            distribution de ses réponses et son évolution année après année.
-            <br><br>
-            <strong>Les questions sont désignées par un code, pas par leur libellé</strong>, et c'est
-            volontaire&nbsp;: le jeu de libellés publié par le portail utilise la même colonne
-            <code>code_unifie</code> pour désigner d'<em>autres</em> questions. Les rapprocher
-            produirait des intitulés faux. Le détail est dans l'analyse, en bas de page&nbsp;: c'est
-            le constat le plus utile de cette reproduction.
-          </p>
-        </div>
+        <p class="fr-text--sm">
+          Chaque ligne est une modalité de réponse à une question de l'enquête, et son
+          <strong>score</strong> est la part des répondants qui l'ont choisie, en pourcentage, au
+          niveau national. Les libellés viennent de la table de correspondance publiée par le
+          portail — la même que celle qui pilote la page d'origine.
+        </p>
 
-        <h2 class="fr-h4">Les résultats</h2>
         <dsfr-data-list source="bfn-f"
-          columns="code_unifie:Code question, libelle_reponse:Réponse, an:Année, score:Score (%)"
+          columns="chapitre:Chapitre, libelle_unifie:Question, libelle_reponse:Réponse, an:Année, score:Score (%)"
           sort="an:desc" pagination="25" export="csv">
         </dsfr-data-list>
       </div>
@@ -135,11 +424,15 @@
       </p>
 
       <div class="fr-alert fr-alert--warning fr-mb-4w">
-        <h3 class="fr-alert__title">Le constat central&nbsp;: une jointure qui réussit et ment</h3>
+        <h3 class="fr-alert__title">Le constat central, requalifié&nbsp;: une jointure qui réussit et ment — sur le mauvais jeu</h3>
         <p class="fr-text--sm">
-          La table de calcul ne contient que des <em>codes</em> de question. Un second jeu porte des
-          libellés, sur une colonne du même nom. Les rapprocher paraissait évident — et le résultat
-          était <strong>faux</strong>, de façon indétectable à l'œil.
+          La table de calcul ne contient que des <em>codes</em> de question. La première version
+          de cette page les a joints à <code>bfn-2022-resultats-2022</code>, sur une colonne du
+          même nom&nbsp;: le résultat était faux, de façon indétectable à l'œil, et la page
+          concluait qu'aucun libellé n'était affichable. Le relevé du portail a montré que la page
+          d'origine lit <code>bfn-table-de-correspondance</code>&nbsp;: 119 codes sur 119 sont
+          communs, la jointure est exacte. Le constat sur la jointure reste vrai&nbsp;; la
+          conclusion qui en était tirée ne l'était pas.
         </p>
       </div>
 
@@ -151,10 +444,22 @@
               <code>group_by</code> sur question × réponse × année, filtrée sur les totaux nationaux
               — suffit à alimenter toute la page. Le plus gros jeu du catalogue après la
               comptabilité générale tient dans une requête.</li>
-            <li><strong>L'explorateur s'est écrit en dix lignes.</strong> Une source, une recherche,
-              deux facettes, trois KPI, un tableau exportable. Ce que la page d'origine fait en
-              seize graphiques figés, on le fait ici en une vue filtrable — sur les six millésimes
-              d'enquête, là où l'original s'arrête aux jeux qu'il a codés en dur.</li>
+            <li><strong>La table de correspondance fait tout le travail éditorial.</strong> Une
+              source de 119 lignes, un <code>dsfr-data-normalize numeric</code>, un
+              <code>dsfr-data-join</code>&nbsp;: l'explorateur affiche chapitre et libellé unifié
+              pour chacun des 1&nbsp;065 couples question-réponse, et les facettes se font par
+              chapitre. Les douze chapitres et les 119 questions ne sont pas codés en dur dans le
+              tableau&nbsp;: ils sont lus, comme sur l'original.</li>
+            <li><strong>Le motif de l'original tient dans un contexte.</strong> Question, région,
+              secteur, taille&nbsp;: quatre <code>select</code>, un <code>dsfr-data-context
+              url-sync</code>, trois sources en mode adaptateur. La vue nationale et la vue
+              filtrée sont deux graphiques empilés par réponse&nbsp;; la fiche de la question
+              (libellé, descriptif méthodologique, chapitre, mode de présentation) est un
+              <code>dsfr-data-display</code> sur la table de correspondance. Les scores sont ceux
+              de l'original&nbsp;: 68,1 → 77,9&nbsp;% pour «&nbsp;le numérique représente un
+              bénéfice réel&nbsp;» en national, 75,8&nbsp;% en Bretagne 2025, la répartition par
+              secteur à la décimale. Une question à la fois, c'est au plus 72 groupes&nbsp;: sous
+              le plafond de /records (BUG-001).</li>
           </ul>
         </div>
 
@@ -167,27 +472,52 @@
               rien — <strong>et ne le signale pas</strong>&nbsp;: en jointure gauche, le nombre de
               lignes reste exact, seules les colonnes jointes sont vides. Corrigé par un
               <code>dsfr-data-normalize numeric="code_unifie"</code> (registre&nbsp;: AM-025).</li>
-            <li><strong>Second échec, plus grave&nbsp;: le référentiel n'est pas partagé.</strong>
-              Une fois les types alignés, la jointure a fonctionné… et produit des libellés faux.
-              Le code <code>201</code> désigne la <em>question du secteur d'activité</em> dans la
-              table de calcul (ses réponses sont «&nbsp;Agriculture&nbsp;», «&nbsp;Industrie&nbsp;»…)
-              et la question «&nbsp;<em>Dans l'ensemble, je trouve que le numérique représente un
-              bénéfice réel pour mon entreprise</em>&nbsp;» dans le jeu de libellés. Deux
-              référentiels homonymes. <strong>La jointure a été retirée&nbsp;: la page affiche des
-              codes plutôt que des intitulés faux.</strong></li>
+            <li><strong>Second échec&nbsp;: le référentiel de <code>bfn-2022-resultats-2022</code>
+              n'est pas celui de la table de calcul.</strong> Une fois les types alignés, la
+              jointure a fonctionné… et produit des libellés faux. Le code <code>201</code>
+              désigne la <em>question du secteur d'activité</em> dans la table de calcul et
+              «&nbsp;<em>le numérique représente un bénéfice réel</em>&nbsp;» dans ce jeu
+              annuel. Deux référentiels homonymes (PG-009), c'est toujours vrai. Ce qui était
+              faux, c'est d'avoir choisi ce jeu&nbsp;: la page d'origine déclare
+              <code>bfn-table-de-correspondance</code> dans son source, où <code>201</code> est
+              bien «&nbsp;Secteur d'activité de l'entreprise&nbsp;» et <code>501</code> le
+              bénéfice réel. <strong>La jointure a été rétablie sur le bon jeu&nbsp;: 119 codes
+              sur 119 appariés</strong>, vérifié par différence d'ensembles sur l'API.</li>
             <li><strong>Aucun outil ne peut détecter ça.</strong> C'est le point à retenir. Une
               jointure ne vérifie que l'égalité des clés&nbsp;; elle ne sait pas si les clés
               <em>signifient</em> la même chose. Le taux de correspondance était pourtant un
               indice&nbsp;: 237 lignes appariées sur 1&nbsp;065, et 9 questions sur 119. Un
               indicateur de couverture affiché par le composant aurait mis la puce à l'oreille
               (registre&nbsp;: AM-026).</li>
-            <li><strong>Une page éditoriale n'est pas un tableau de bord.</strong> L'original est un
-              rapport&nbsp;: sommaire, sections dépliables, seize graphiques commentés, un texte
-              d'analyse entre chacun. <code>dsfr-data</code> fournit les vues, pas la mise en page
-              d'un rapport. Reproduire à l'identique reviendrait à écrire seize blocs de HTML
-              éditorial — travail légitime, mais qui n'apprend rien sur la bibliothèque. Cette page
-              propose donc <strong>l'explorateur que les données permettent</strong> plutôt que le
-              rapport qu'elles illustrent (registre&nbsp;: LIM-004).</li>
+            <li><strong>Une page pilotée par la donnée n'est pas un tableau de bord.</strong>
+              L'original génère, pour chacune des 119 questions, une section avec un à trois
+              graphiques dont le <em>mode</em> (barres verticales, horizontales groupées,
+              empilées, grille par réponse) est lu dans <code>presentation_2024</code>. Ici, le
+              rendu est unique — empilé par réponse et par année — et une question à la fois.
+              Générer N sections depuis N lignes, ou choisir un type de graphique depuis une
+              valeur de champ, n'a pas d'équivalent déclaratif&nbsp;: <code>dsfr-data-display</code>
+              répète un gabarit HTML, pas un composant de dataviz (registre&nbsp;: LIM-004,
+              requalifié).</li>
+            <li><strong>Relecture face au relevé visuel du portail.</strong> La première version
+              de cette page couvrait 0 libellé sur 119 (elle affichait des codes) et aucune des
+              trois dimensions de filtrage de l'original — son «&nbsp;constat central&nbsp;»
+              venait d'une jointure sur un jeu que la page d'origine n'utilise pas. Corrigé&nbsp;:
+              libellés, chapitres et descriptifs lus dans <code>bfn-table-de-correspondance</code>
+              (119 sur 119), les trois filtres région (14) × secteur (12) × taille (5) plus la
+              question, synchronisés dans l'URL (<code>?question=501&amp;region=Bretagne…</code>),
+              la vue nationale et la vue filtrée côte à côte, «&nbsp;Sans réponse&nbsp;» exclu.
+              Ce qui manque encore, et pourquoi&nbsp;: <em>(a)</em> les douze accordéons qui
+              déroulent les 119 questions d'un coup — ici une question à la fois, par un
+              <code>select</code> dont les 119 options sont générées depuis la table à la
+              construction de la page, faute d'un moyen déclaratif de remplir un
+              <code>select</code> depuis une source&nbsp;; <em>(b)</em> les quatre modes de
+              présentation et la «&nbsp;vue combinée&nbsp;» (barres nationale et filtrée
+              entrelacées par année) — deux graphiques côte à côte à la place&nbsp;;
+              <em>(c)</em> les seize liens vers les données brutes et les textes «&nbsp;En savoir
+              plus&nbsp;», éditoriaux, non recopiés&nbsp;; <em>(d)</em> les avertissements de
+              représentativité (régions avant 2023). Couverture estimée&nbsp;: questions 119
+              sur 119 (une à la fois), filtres 3 sur 3 dans l'URL, modes de rendu 1 sur 4, liens
+              0 sur 16.</li>
           </ul>
         </div>
       </div>
@@ -199,30 +529,37 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>libellés de questions recopiés dans le template</td><td><code>dsfr-data-join</code> — tenté, puis retiré</td><td>Le référentiel de codes n'est pas partagé</td></tr>
-            <tr><td>16 <code>ods-chart</code> figés</td><td>explorateur filtrable</td><td>Choix différent, assumé</td></tr>
-            <tr><td>4 contextes de données</td><td>2 sources + 1 jointure</td><td>Moins de plomberie</td></tr>
-            <tr><td>sommaire, sections dépliables, texte</td><td>—</td><td>Hors périmètre d'une bibliothèque de dataviz</td></tr>
+            <tr><td>questions lues dans <code>bfn-table-de-correspondance</code></td><td><code>dsfr-data-normalize numeric</code> + <code>dsfr-data-join</code></td><td>Équivalent (119 / 119) — sur le bon jeu</td></tr>
+            <tr><td>3 <code>ods-select</code> région / secteur / taille, synchro URL</td><td><code>dsfr-data-context url-sync</code> + <code>url-param-map</code></td><td>Équivalent</td></tr>
+            <tr><td>vue d'ensemble / vue filtrée par question</td><td>2 sources adaptateur + 2 <code>dsfr-data-chart stacked</code></td><td>Mêmes scores, un seul mode de rendu</td></tr>
+            <tr><td>descriptif de question sous chaque H3</td><td><code>dsfr-data-display</code> + <code>&lt;template&gt;</code></td><td>Équivalent</td></tr>
+            <tr><td>12 accordéons × N questions générés par <code>ng-repeat</code></td><td>un <code>select</code> de 119 options</td><td><strong>Une question à la fois</strong></td></tr>
+            <tr><td>4 modes de graphique selon <code>presentation_2024</code></td><td>—</td><td><strong>Sans équivalent déclaratif</strong></td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Le seul cas du banc d'essai où la reproduction fidèle n'a pas de sens</strong>&nbsp;:
-          la page d'origine est un rapport d'enquête mis en pages, et ce qu'elle demande n'est pas de
-          la dataviz mais de l'édition. L'explorateur proposé ici couvre en revanche les six
-          millésimes, là où l'original s'arrête aux jeux qu'il a codés en dur.</p>
-        <p>Mais l'essentiel est ailleurs, et c'est le constat le plus utile du banc d'essai à ce
-          jour&nbsp;: <strong>une jointure peut réussir et mentir.</strong> Deux échecs successifs,
-          de gravité croissante. D'abord des types de clé incompatibles — la jointure ne rapproche
-          rien et ne le dit pas. Puis, une fois corrigés, un référentiel de codes qui n'est pas
-          partagé entre les deux jeux&nbsp;: la jointure apparie, et attribue à chaque score le
-          libellé d'une autre question. Rien dans l'outil ne peut le détecter, parce que rien dans
-          l'outil ne sait ce qu'une clé <em>signifie</em>.</p>
-        <p>La seule défense est un <strong>indicateur de couverture</strong>&nbsp;: 237 lignes
-          appariées sur 1&nbsp;065, 9 questions sur 119. Ce chiffre, si le composant l'affichait,
-          aurait suffi à déclencher la vérification.</p>
+        <p><strong>Le verdict du premier passage était faux, et la raison est instructive.</strong>
+          La page concluait qu'une reproduction fidèle n'avait pas de sens et que les libellés
+          étaient inaccessibles. Elle avait joint le mauvais jeu. Le relevé visuel du portail —
+          et son source, qui nomme <code>bfn-table-de-correspondance</code> — a suffi à rétablir
+          la jointure&nbsp;: 119 questions sur 119, libellés, chapitres, descriptifs. Le motif
+          de l'original (une question, six éditions, vue nationale contre vue filtrée) se
+          reproduit ensuite avec un contexte et deux graphiques.</p>
+        <p>Ce qui reste vrai, et qui est le constat utile&nbsp;: <strong>une jointure peut réussir
+          et mentir.</strong> Des types de clé incompatibles — la jointure ne rapproche rien et ne
+          le dit pas. Puis un référentiel homonyme — elle apparie, et attribue à chaque score le
+          libellé d'une autre question. Rien dans l'outil ne peut le détecter&nbsp;; mais un
+          <strong>indicateur de couverture</strong> (237 lignes sur 1&nbsp;065, 9 questions sur
+          119) aurait dénoncé le mauvais jeu à la première lecture. Et la règle de méthode qui
+          en découle&nbsp;: <strong>avant de joindre, lire le source de la page d'origine</strong>
+          pour savoir quel jeu elle utilise, plutôt que de prendre le premier jeu qui porte une
+          colonne du bon nom.</p>
+        <p>Le manque qui subsiste est plus étroit que «&nbsp;l'édition&nbsp;»&nbsp;: générer une
+          section par ligne d'une table, et choisir le type de graphique depuis une valeur de
+          champ. Une question à la fois est le maximum déclaratif.</p>
         <p class="fr-text--sm fr-hint-text">
           Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-025 (jointure
           silencieuse sur clés de types différents), AM-026 (pas d'indicateur de couverture d'une
