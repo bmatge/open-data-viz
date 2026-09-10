@@ -178,8 +178,13 @@ const LIBELLE_PRIORITE = {
 };
 const LIBELLE_EFFORT = { S: 'S (moins d\'un jour)', M: 'M (un à trois jours)', L: 'L (conception + développement)' };
 
+// Le filtre ne regardait QUE `r.cadrage`, jamais le statut : un constat passé en
+// `corrige` ou `retire` gardait son cadrage et restait donc dans le rapport. C'est
+// ce qui a fait redéposer AM-067, livré en 0.27.0 et reconnu comme tel dans ma
+// propre passe de revérification (relevé par la relecture du mainteneur, épic #781).
+// Le statut fait désormais autorité : seul `a-deposer` part au rapport.
 const aDeposer = retours
-  .filter((r) => r.cadrage)
+  .filter((r) => r.cadrage && r.statut === 'a-deposer')
   .sort(
     (a, b) =>
       (POIDS_PRIORITE[a.cadrage.priorite] ?? 9) - (POIDS_PRIORITE[b.cadrage.priorite] ?? 9) ||
@@ -288,9 +293,9 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-\${retours.filter((r) => r.type === 'faux-probleme').length} critiques ont été **retirées** au fil du
+${retours.filter((r) => r.type === 'faux-probleme').length} critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
-\`faux-probleme\` du registre), et \${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length}
+\`faux-probleme\` du registre), et ${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length}
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
 registre, avec ce qui en demeure vrai). Ce rapport ne liste que ce qui a résisté à la vérification.
 
@@ -301,11 +306,10 @@ il faut donc chercher l'attribut dans le source, **puis vérifier dans quelle ve
 apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux constats antérieurs
 (AM-017, AM-039) en sont sortis.
 
-Le dépôt est désormais monté en \`dsfr-data@0.24.0\`, et le registre en tire les conséquences :
-les jalons 0.21.1, 0.22.0, 0.23.0 et 0.24.0 ont comblé ${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length} des constats déposés,
-passés au statut \`corrige\` et sortis de ce rapport. Ce qui reste ci-dessous n'est ni livré ni
-planifié — à deux exceptions près, signalées comme telles : \`fetch-mode="export"\` (#689) et
-\`require-where\` (#690), prévus au jalon v0.25.0.
+Le dépôt est désormais monté en \`dsfr-data@0.28.0\`, et le registre en tire les conséquences :
+les jalons 0.21.1 à 0.28.0 ont comblé ${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length} des constats déposés,
+passés au statut \`corrige\` et sortis de ce rapport. Chaque constat restant a été **rejoué contre
+la 0.28.0** avant d'entrer ici : ce qui suit n'est ni livré ni planifié à la date de ce rapport.
 
 ## Priorisation
 
