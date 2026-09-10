@@ -112,7 +112,7 @@
        -->
   <dsfr-data-normalize id="int-n" source="int"
     replace-fields="adresse:NA: | genre:NA:"
-    compute="lits_pre_txt = when is_null(nombre_de_lits_pre_bac) then 'non renseigné' else concat(nombre_de_lits_pre_bac, ' lits'); lits_post_txt = when is_null(nombre_de_lits_post_bac) then 'non renseigné' else concat(nombre_de_lits_post_bac, ' lits'); taux_pre = when is_null(nombre_de_lits_pre_bac) then null when nombre_de_lits_pre_bac = 0 then null else round(nombre_de_lits_pre_bac_occupes / nombre_de_lits_pre_bac * 100, 1); enquete_lits = when is_null(nombre_de_lits_pre_bac) then 'Lits non renseignés' else 'Lits renseignés (enquête 2022)'">
+    compute="lits_pre_txt = when is_null(nombre_de_lits_pre_bac) then 'non renseigné' else concat(nombre_de_lits_pre_bac, ' lits'); lits_post_txt = when is_null(nombre_de_lits_post_bac) then 'non renseigné' else concat(nombre_de_lits_post_bac, ' lits'); taux_pre = when is_null(nombre_de_lits_pre_bac) then null when nombre_de_lits_pre_bac = 0 then null else round(nombre_de_lits_pre_bac_occupes / nombre_de_lits_pre_bac * 100, 1); enquete_lits = when is_null(nombre_de_lits_pre_bac) then 'Lits non renseignés' else 'Lits renseignés (enquête 2022)'; occupation_seuil = when is_null(taux_pre) then 'occupation-non-mesuree' when taux_pre &gt;= 95 then 'occupation-saturee' when taux_pre &gt;= 70 then 'occupation-forte' else 'occupation-faible'">
   </dsfr-data-normalize>
 
   <!-- Le manque le plus lourd de l'original : pour un objet nommé « Annuaire »,
@@ -139,6 +139,7 @@
           display="statut:radio-inline | type:checkbox | genre:checkbox | enquete_lits:checkbox | academie:multiselect | departement:multiselect | commune:radio"
           searchable="academie, departement, commune"
           disjunctive="type, genre, academie, departement"
+          sort="academie:alpha:asc | departement:alpha:asc | commune:alpha:asc"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
       </div>
@@ -173,6 +174,7 @@
         <dsfr-data-map id="carte-int"
           name="Cartographie des internats de France"
           height="620px" tiles="ign-plan" tiles-style="muted"
+          tiles-switcher="ign-plan,ign-ortho,ign-cadastre"
           insets="drom,nouvelle-caledonie,polynesie-francaise,wallis-et-futuna"
           fit-bounds fit-max-zoom="13">
           <!-- `cluster` : l'original n'en a pas, et le clic sur un amas ouvre une
@@ -258,8 +260,18 @@
 
   <div class="fr-container fr-mb-8w">
     <h2 class="fr-h4">La liste</h2>
+    <!-- `cell-class` (#740, 0.27.0) : la colonne calculée `occupation_seuil` du
+         `dsfr-data-normalize` ci-dessus DEVIENT la classe CSS de la cellule de
+         taux. Jusqu'ici `threshold-*` n'existait que sur le KPI : un tableau ne
+         savait pas signaler un dépassement (AM-059). La colonne de classe n'est
+         pas affichée, donc sa valeur est restituée en `fr-sr-only` derrière le
+         taux — la couleur ne porte pas seule l'information (RGAA 1.4.1).
+         ⚠️ Conséquence de grammaire : la même chaîne doit être un identifiant
+         CSS ET la formulation lue par un lecteur d'écran. Pas d'espace admis,
+         d'où « occupation-saturee » là où on aurait écrit « occupation saturée ». -->
     <dsfr-data-list source="int-f"
-      columns="etablissement, statut, type, commune, departement, academie, nombre_de_lits_pre_bac, nombre_de_lits_post_bac"
+      columns="etablissement, statut, type, commune, departement, academie, nombre_de_lits_pre_bac, nombre_de_lits_post_bac, taux_pre:Occupation pré-bac (%)"
+      cell-class="taux_pre:occupation_seuil"
       search sort pagination="25">
     </dsfr-data-list>
   </div>
@@ -304,6 +316,19 @@
               dans le jeu et n'est affiché nulle part sur le portail. Une division et un
               <code>round</code>, avec un <code>when … = 0 then null</code> pour la division par
               zéro.</li>
+            <li><strong>Trois capacités du jour, posées au lot 18.</strong>
+              <code>tiles-switcher="ign-plan,ign-ortho,ign-cadastre"</code> (#744, 0.27.0) rend un
+              sélecteur «&nbsp;Fond de carte&nbsp;» en haut à droite&nbsp;: le choix du fond, que
+              l'application d'origine expose et que rien ne permettait d'offrir ici (AM-061), tient en
+              un attribut — <strong>vérifié au navigateur</strong>, trois options «&nbsp;Plan IGN /
+              Vue aérienne IGN / Cadastre IGN&nbsp;», et les encarts ultramarins suivent le choix.
+              <code>sort="academie:alpha:asc | departement:alpha:asc | commune:alpha:asc"</code>
+              (#741, 0.27.0) range les trois facettes géographiques de A à Z — «&nbsp;Abbeville,
+              Abondance, Agde, Agen…&nbsp;» — pendant que statut, type et mixité restent au défaut
+              <code>count:desc</code>&nbsp;: c'était l'un ou l'autre auparavant (PG-016). Enfin
+              <code>cell-class="taux_pre:occupation_seuil"</code> (#740, 0.27.0) fait de la colonne
+              calculée le style de la cellule de taux&nbsp;: le tableau signale enfin ses internats
+              saturés, sans second jeu de seuils.</li>
           </ul>
         </div>
 
@@ -343,6 +368,14 @@
               restreindre le dénominateur, mais encore faut-il avoir vérifié que les 1 895
               établissements privés n'ont aucune valeur. <strong>C'est du travail de lecture de
               données, pas de composant.</strong></li>
+            <li><strong>Le seuil de cellule demande une chaîne qui soit à la fois un identifiant CSS
+              et une phrase.</strong> <code>cell-class</code> (#740) prend la valeur d'une colonne
+              calculée et la pose telle quelle en classe&nbsp;; quand cette colonne n'est pas affichée,
+              la même valeur est restituée en <code>fr-sr-only</code> derrière la cellule — c'est ce qui
+              satisfait le RGAA 1.4.1 par construction, et c'est bien vu. Mais seuls les identifiants CSS
+              sont retenus&nbsp;: pas d'espace, pas d'accent utile. <strong>Relevé au navigateur&nbsp;:</strong>
+              la cellule rend «&nbsp;100 <em>(occupation-saturee)</em>&nbsp;» — un lecteur d'écran énonce
+              donc un slug. Il manque de quoi séparer la classe du libellé accessible.</li>
           </ul>
         </div>
       </div>
@@ -385,7 +418,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.27.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

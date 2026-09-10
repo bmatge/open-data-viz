@@ -72,11 +72,23 @@
   <!-- Source générique : l'adaptateur refuse year() dans group-by (PG-014), et
        replace-fields ne sait pas récrire une valeur ISO qui contient des
        deux-points (AM-038). Revers : une source générique ignore les commandes
-       du contexte — ce graphique ne suit pas les filtres (voir l'analyse). -->
-  <dsfr-data-source id="apd-annee"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/apd-france/records"
-    params='{"select":"sum(montant_verse_k_eur) as m","group_by":"year(annee_de_declaration) as annee","order_by":"annee","limit":"10"}'
-    transform="results" api-key-ref="ods-mef">
+       du contexte — ce graphique ne suit pas les filtres (voir l'analyse).
+
+       ✅ CORRIGÉ DEPUIS — #641 (0.23.0) : l'adaptateur ne backquote plus un
+       élément de `group-by` contenant une parenthèse ; `year(annee_de_declaration)
+       as annee` passe tel quel. La source est revenue au mode adaptateur au
+       lot 18, et le REVERS a disparu avec elle : elle est désormais dans les
+       sources du contexte, donc le graphique des années suit les filtres
+       « agence » et « région » — ce qu'il ne faisait pas.
+
+       ⚠️ Sauf le filtre d'ANNÉE, et c'est délibéré : un `apply-to` l'exclut de
+       ce graphique. Sans cela, choisir « 2019 » réduirait la série chronologique
+       à une seule barre. C'est la lecture d'un `apply-to` : ce n'est pas « le
+       filtre ne marche pas », c'est « cette vue est l'axe du filtre ». -->
+  <dsfr-data-source id="apd-annee" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
+    select="sum(montant_verse_k_eur) as m" group-by="year(annee_de_declaration) as annee"
+    order-by="annee" limit="10">
   </dsfr-data-source>
   <dsfr-data-source id="apd-secteur" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
@@ -107,8 +119,9 @@
     select="codes_iso, sum(montant_verse_k_eur) as m" group-by="codes_iso" order-by="m:desc" limit="100">
   </dsfr-data-source>
 
-  <dsfr-data-context id="ctx-apd" sources="apd-total apd-secteur apd-financement apd-canal apd-bimulti apd-sousregion apd-pays apd-monde">
-    <dsfr-data-context-filter field="annee_de_declaration" operator="year-of" ui="filtre-annee" label="Année"></dsfr-data-context-filter>
+  <dsfr-data-context id="ctx-apd" sources="apd-total apd-annee apd-secteur apd-financement apd-canal apd-bimulti apd-sousregion apd-pays apd-monde">
+    <dsfr-data-context-filter field="annee_de_declaration" operator="year-of" ui="filtre-annee" label="Année"
+      apply-to="apd-total apd-secteur apd-financement apd-canal apd-bimulti apd-sousregion apd-pays apd-monde"></dsfr-data-context-filter>
     <dsfr-data-context-filter field="agence" operator="eq" ui="filtre-agence" label="Agence"></dsfr-data-context-filter>
     <dsfr-data-context-filter field="region" operator="eq" ui="filtre-region" label="Région"></dsfr-data-context-filter>
   </dsfr-data-context>
@@ -335,7 +348,26 @@
               <code>dsfr-data-normalize</code> ne peut pas récrire, sa grammaire réservant les deux-points et
               ne comparant qu'à l'exact (AM-038). Reste la source générique, qui a le bon libellé mais
               n'écoute pas le contexte. Trois voies, aucune complète&nbsp;: c'est le trou le plus net de
-              cette page.</li>
+              cette page.
+              <br><strong>Suite (lot 18)&nbsp;:</strong> le trou est bouché. <strong>#641, 0.23.0</strong>&nbsp;:
+              l'adaptateur ne backquote plus un élément de <code>group-by</code> contenant une parenthèse, donc
+              <code>year(annee_de_declaration) as annee</code> passe tel quel — la première voie est ouverte, et
+              la source générique n'a plus de raison d'être. Elle est repassée en mode adaptateur et entrée dans
+              les sources du contexte, avec un <code>apply-to</code> qui exclut le seul filtre d'année (sans quoi
+              choisir «&nbsp;2019&nbsp;» réduirait la série à une barre). <strong>Vérifié au navigateur&nbsp;:</strong>
+              en choisissant «&nbsp;Agence française de développement&nbsp;», la série passe de
+              13,77 / 13,99 / 17,18&nbsp;Md&nbsp;k€ à 6,35 / 5,65 / 6,99, <em>en gardant ses trois années</em>, et
+              la requête part en
+              <code>where=agence = "…"&amp;group_by=year(annee_de_declaration) as annee</code>. Le constat
+              ci-dessus reste écrit tel qu'il a été rencontré.</li>
+            <li><strong>Ce que la carte tait, la bibliothèque le dit maintenant.</strong> Le deuxième constat
+              ci-dessus («&nbsp;rien ne le dit à sa place&nbsp;») visait les montants sans pays. Depuis
+              <strong>0.26.0</strong> (#727 et #729), la console et le volet Diagnostic annoncent
+              «&nbsp;<em>dsfr-data-chart[g-monde]&nbsp;: 6 ligne(s) sur 100 ignorée(s) — code géographique absent,
+              invalide ou hors référentiel dans "codes_iso" pour map-monde</em>&nbsp;» — relevé tel quel au
+              navigateur au lot 18. Ce qui <strong>reste vrai</strong>&nbsp;: c'est un message d'auteur, pas une
+              mention à l'écran&nbsp;; le lecteur de la page ne voit toujours rien, et la phrase sous la carte
+              reste à écrire à la main.</li>
             <li><strong>Les listes déroulantes sont écrites en dur</strong> (20 agences, 14 régions),
               toujours pour la même raison (AM-001).</li>
             <li><strong>La plage de dates libre</strong> (début, fin) de l'original devient un choix
@@ -344,9 +376,9 @@
           </ul>
 
           <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.24.0</h4>
+            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.22.0 à 0.26.0</h4>
             <p class="fr-text--sm">
-              3 des frictions décrites ci-dessus ont été comblées par la bibliothèque
+              5 des frictions décrites ci-dessus ont été comblées par la bibliothèque
               <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
               du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
               nécessaire. Détail et vérification au <a href="/retours#AM-031">registre des retours</a>.
@@ -355,6 +387,8 @@
               <li><strong>AM-031</strong> — <strong>0.22.0</strong> (#665)&nbsp;: <code>decimals</code> et <code>unit</code> sur <code>dsfr-data-kpi</code>&nbsp;; <code>compact</code> enfin documenté (#657, 0.21.1).</li>
               <li><strong>AM-043</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="ctx"</code> peuple ses valeurs et diffuse dans le contexte&nbsp;: plus de <code>&lt;select&gt;</code> généré hors ligne.</li>
               <li><strong>AM-038</strong> — <strong>0.24.0</strong> (#676)&nbsp;: échappement <code>%3A</code> dans <code>replace</code> et <code>replace-fields</code>&nbsp;: une valeur à deux-points est enfin ciblable (toujours pas de motif).</li>
+              <li><strong>PG-014</strong> — <strong>0.23.0</strong> (#641)&nbsp;: <code>group-by="year(champ) as annee"</code> n'est plus backquoté&nbsp;: <em>contournement par source générique retiré au lot 18</em>, et le graphique des années suit désormais les filtres du contexte.</li>
+              <li><strong>AM-048</strong> — <strong>0.26.0</strong> (#727, #729)&nbsp;: les lignes écartées d'une carte thématique sont comptées et nommées en console et au Diagnostic — 6 codes sur 100 ici. <em>Constaté au lot 18, rien à changer dans la page.</em></li>
             </ul>
           </div>
         </div>
@@ -395,7 +429,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.27.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

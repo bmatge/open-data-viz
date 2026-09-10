@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 37 demandes cadrées — 5 bugs,
-> 27 améliorations,
+> 47 demandes cadrées — 9 bugs,
+> 32 améliorations,
 > 5 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -70,31 +70,39 @@ planifié — à deux exceptions près, signalées comme telles : `fetch-mode="e
 | AM-052 | La fiche servie par le serveur MCP est en retard sur la documentation du dépôt | amelioration | S | 4 | Accepter |
 | AM-053 | Un attribut inconnu d'un composant est ignoré sans aucun avertissement | amelioration | S | 2 | Accepter |
 | AM-064 | En mode adaptateur, aucun moyen de passer un paramètre de requête qui n'est pas une clause (`timezone`) | amelioration | S | 1 | Accepter |
+| BUG-013 | Une facette `url-params` s'approprie le paramètre d'URL d'un contexte `url-sync` et vide le pipeline en silence | bug | S | 1 | Accepter |
+| BUG-014 | `normalizeDeptCode` sait ajouter un zéro de tête, jamais en retirer un : un code sur trois caractères vide la carte | bug | S | 1 | Accepter |
 | AM-045 | La sélection ne part que d'une carte : ni une liste, ni une fiche, ni un graphique ne peut filtrer un contexte | amelioration | M | 5 | Accepter |
 | AM-049 | Un ratio dont le numérateur et le dénominateur viennent de deux sources différentes | amelioration | M | 4 | Accepter |
 | AM-066 | `fill-field` et ses quatre attributs compagnons sont ignorés sans un mot sur une couche `type="circle"` | amelioration | M | 1 | Accepter |
 | BUG-009 | Une `dsfr-data-query group-by` branchée sur une source Opendatasoft réécrit la source pour tous ses autres consommateurs | bug | L | 2 | Accepter |
 
-_10 demandes — S 6, M 3, L 1._
+_12 demandes — S 8, M 3, L 1._
 
 ### P2 — prochain cycle : gain net, effort mesuré
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
+| AM-072 | Les blocs de gabarit ne s'imbriquent pas, et l'imbrication échoue en silence | amelioration | S | 6 | Accepter |
 | PG-022 | Les grammaires d'attributs multi-entrées diffèrent d'un attribut à l'autre : `|` ici, `,` là | piege | S | 3 | Accepter (documentation + avertissement) |
 | BUG-007 | `replace-fields` est silencieusement sans effet sur une valeur numérique | bug | S | 1 | Accepter |
 | AM-067 | Une facette bâtie sur une source pré-agrégée affiche « 1 » partout : aucun attribut ne lui désigne la colonne d'effectif | amelioration | S | 1 | Accepter |
 | BUG-010 | Un alias de `group-by` sans parenthèse est backquoté et vaut un HTTP 400 : le correctif #641 ne couvre que les expressions à fonction | bug | S | 1 | Accepter |
 | AM-068 | Le cumul est arrivé, son inverse manque : aucun moyen de retrouver le flux d'une série déjà cumulée | amelioration | S | 1 | Accepter |
+| AM-071 | `replace-fields` ignore silencieusement les champs multivalués — ceux qu'on a précisément besoin de nettoyer | amelioration | S | 2 | Accepter |
 | AM-044 | Le compteur `count` de `dsfr-data-search` rend « 35305 resultats » : ni séparateur de milliers, ni accent | amelioration | S | 3 | Accepter |
+| LIM-014 | Le résumé « en France » d'une choroplèthe DSFR Chart est une moyenne non pondérée des territoires, et il est faux | limite-dure | M | 3 | Accepter |
 | AM-046 | Le cumul existe, mais seulement dans un `_bucketDate` privé de la couche de carte | amelioration | M | 2 | Accepter |
 | BUG-006 | Un champ multivalué : `dsfr-data-facets` éclate les valeurs, un `group-by` client compte les combinaisons | bug | M | 2 | Accepter |
 | AM-047 | Pas de boucle dans un template : impossible d'émettre un élément par valeur d'un champ multivalué | amelioration | M | 2 | Accepter |
 | AM-051 | Les compteurs de facette n'ont pas de sens sur une table de mesures, et rien ne le dit | amelioration | M | 2 | Accepter |
 | AM-056 | Changer le champ d'un filtre selon la source, et vider un groupe de filtres exclusifs | amelioration | M | 1 | Accepter |
 | AM-070 | Le ratio d'un KPI sait filtrer un `count`, pas une `sum` : une part n'est pas calculable sur une source pré-agrégée | amelioration | M | 1 | Accepter |
+| BUG-011 | Une virgule à l'intérieur d'une fonction casse `group-by` : l'adaptateur découpe avant d'analyser les parenthèses | bug | M | 1 | Accepter |
+| AM-074 | Aucune union dans le pipeline : empiler quatre séries demande quatre pivots, trois jointures et un dépliage | amelioration | M | 2 | Accepter |
+| AM-075 | Un ratio dont le numérateur et le dénominateur viennent de deux jeux n'a aucune voie native | amelioration | L | 2 | Accepter |
 
-_12 demandes — S 6, M 6, L 0._
+_18 demandes — S 8, M 9, L 1._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -109,10 +117,11 @@ _12 demandes — S 6, M 6, L 0._
 | AM-060 | `color-map` n'existe que sur une couche de carte, pas sur `dsfr-data-chart` | amelioration | S | 2 | Accepter |
 | AM-065 | `dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé | amelioration | S | 1 | Accepter |
 | PG-027 | L'adaptateur Opendatasoft backquote `group-by` mais pas `select` : un champ au nom non standard vaut un HTTP 400 | piege | S | 1 | Accepter |
+| BUG-012 | La grammaire du ratio déclenche l'avertissement de dépréciation qu'elle ne devrait pas : `count:champ:valeur` est la forme recommandée | bug | S | 2 | Accepter |
 | AM-058 | Un filtre qui traverse un référentiel (académie → départements) | amelioration | M | 2 | Étudier |
 | AM-069 | Une couche dont tous les points sont confondus se comporte comme une couche qui marche : rien ne le signale | amelioration | M | 1 | Accepter |
 
-_11 demandes — S 9, M 2, L 0._
+_12 demandes — S 10, M 2, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -120,10 +129,11 @@ _11 demandes — S 9, M 2, L 0._
 |---|---|---|---|---|---|
 | AM-062 | Aucune position documentée sur l'encastrement en iframe | amelioration | S | 1 | Accepter |
 | PG-025 | Le `where` d'un `dsfr-data-context` ne peut pas porter sur un alias d'agrégat : il s'applique avant le `group_by` | piege | S | 1 | Accepter |
+| AM-073 | `cell-class` n'accepte qu'un identifiant CSS : le libellé restitué aux lecteurs d'écran est un slug | amelioration | S | 1 | Accepter |
 | AM-061 | Contrôles de carte : bascule du fond, plein écran, capture | amelioration | M | 2 | Étudier |
 | AM-037 | Pas de treemap | amelioration | L | 1 | Transférer à DSFR Chart |
 
-_4 demandes — S 2, M 1, L 1._
+_5 demandes — S 3, M 1, L 1._
 
 ## Les demandes
 
@@ -362,6 +372,92 @@ Un attribut `timezone` sur `dsfr-data-source` en mode adaptateur, ou plus géné
 
 ---
 
+## BUG-013 — Une facette `url-params` s'approprie le paramètre d'URL d'un contexte `url-sync` et vide le pipeline en silence
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-facets`, `dsfr-data-context`
+**Rencontré sur** 1 page(s) : edu/carto-pix-fiche-etablissement
+
+### Constat
+
+Sur une page où un `dsfr-data-context url-sync` écrit `?annee=2025` dans l'URL et où un `dsfr-data-facets url-params` lit cette URL sans déclarer `context`, la facette applique une sélection sur le champ `annee` — qui n'est pourtant PAS dans ses `fields`. La garde de #312 (« seuls les paramètres correspondant à des champs connus ») est trop large : les champs connus incluent toutes les colonnes des données reçues, pas seulement ceux que la facette expose. Cette sélection n'est appliquée qu'une fois, au premier chargement, et reste FIGÉE. Dès que le contexte fait recharger la source sur une autre année, la sélection ne correspond plus à aucune ligne et la facette rend zéro ligne — silencieusement, alors que la source a bien reçu ses données et que le composant de recherche en amont affiche le bon total. Deux composants prétendent posséder le même paramètre d'URL, et le plus discret gagne. La bibliothèque prévoit d'ailleurs la collision, mais seulement quand la facette déclare `context="…"`.
+
+### Impact de l'erreur ou du manque
+
+Page entièrement vide après un changement de filtre, sans le moindre message. Le motif — un contexte qui porte le filtre principal, des facettes qui affinent — est celui que la bibliothèque encourage depuis #678, et `url-params` est la façon documentée de rendre une page partageable. Les deux ensemble cassent la page.
+
+### Objectif métier de la correction
+
+Qu'une facette ne s'approprie pas un paramètre d'URL qui ne lui appartient pas.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : la coexistence contexte + facettes est le motif standard d'une page d'exploration.
+
+### Comment ça a été vérifié
+
+Reproduit isolément au navigateur le 2026-09-10 (dsfr-data 0.28.0) sur `fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil`. Page minimale : une source, un `dsfr-data-context url-sync` avec un filtre `annee` (défaut 2025), une `dsfr-data-facets url-sync url-params` déclarant `fields="secteur, academie_nom"`, un KPI `count` branché sur la facette. Au chargement : URL `?annee=2025`, KPI **10 331**, et **deux cases à cocher `annee` fantômes** présentes dans le DOM de la facette. Après bascule sur 2023 par le sélecteur : URL `?annee=2023`, la source recharge correctement (10 186 lignes confirmées à l'API), et le KPI tombe à **0**. Aucune erreur console, aucune erreur de configuration.
+
+### Contournement actuel
+
+Poser `url-param-map` sur la facette en nommant explicitement ses propres paramètres : la lecture bascule alors en liste blanche et la synchronisation d'URL des facettes est conservée. Ou retirer `url-params` de la facette, au prix de la restauration de ses sélections.
+
+### Demande
+
+Qu'une facette en `url-params` ne lise que les paramètres correspondant à ses propres `fields`, et non à toutes les colonnes des données. À défaut, signaler en erreur de configuration la collision entre un paramètre de facette et un paramètre de contexte de la même page.
+
+### Critères d'acceptation
+
+- [ ] Une facette en `url-params` ignore un paramètre dont le nom n'est pas dans ses `fields`.
+- [ ] Aucune case à cocher n'est créée pour un champ non déclaré.
+- [ ] Un changement de filtre du contexte n'annule pas les données de la facette.
+- [ ] Le cas `url-param-map` explicite continue de fonctionner à l'identique.
+
+---
+
+## BUG-014 — `normalizeDeptCode` sait ajouter un zéro de tête, jamais en retirer un : un code sur trois caractères vide la carte
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-chart`
+**Rencontré sur** 1 page(s) : edu/educajou-ecolemap
+
+### Constat
+
+La normalisation des codes de département de `dsfr-data-chart type="map"` complète à deux chiffres (`9` → `09`) mais ne traite pas le cas symétrique : un code déjà sur trois caractères est rendu tel quel. Or `fr-en-annuaire-education`, l'un des jeux les plus employés du portail Éducation, publie `code_departement` sur TROIS caractères (`059`, `075`). DSFR Chart attend `59` : 101 départements sur 107 sont donc ignorés et la carte sort presque entièrement grise, pour un seul avertissement en console. Le correctif tient en une ligne — retirer un zéro de tête quand le reste forme un code valide — et il est symétrique de celui qui existe déjà.
+
+### Impact de l'erreur ou du manque
+
+Carte quasi vide sur l'un des jeux les plus utilisés du portail Éducation, pour un seul avertissement console. Le format à trois caractères est courant : c'est celui du COG.
+
+### Objectif métier de la correction
+
+Qu'un code de département publié sur trois caractères soit reconnu.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : le zéro de tête est une convention répandue des référentiels administratifs.
+
+### Comment ça a été vérifié
+
+Lu au source le 2026-09-10 (dsfr-data 0.28.0), `packages/shared/src/utils/dept-codes.ts` : `if (/^\d+$/.test(code) && code.length < 3) return code.padStart(2, '0'); return code;` — la garde `length < 3` exclut explicitement les codes à trois caractères. Constaté en page sur la reproduction d'ÉcoleMap : 101 départements sur 107 ignorés, carte quasi grise, contourné par `compute="code_departement * 1"`.
+
+### Contournement actuel
+
+`compute` avec une multiplication par 1, qui force la conversion numérique et retire le zéro. Fonctionne, mais suppose d'avoir diagnostiqué que le problème vient du format du code et non de la donnée.
+
+### Demande
+
+Retirer le zéro de tête d'un code à trois caractères quand les deux derniers forment un code de département valide, symétriquement au `padStart` existant. Attention aux codes d'outre-mer à trois chiffres (971 à 976), qui doivent rester intacts.
+
+### Critères d'acceptation
+
+- [ ] `059` est reconnu comme `59`.
+- [ ] `9` reste complété en `09`.
+- [ ] `971` à `976` restent intacts.
+- [ ] Un test couvre les trois formes.
+
+---
+
 ## AM-045 — La sélection ne part que d'une carte : ni une liste, ni une fiche, ni un graphique ne peut filtrer un contexte
 
 **Priorité** P1 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
@@ -521,6 +617,48 @@ Que la délégation serveur d'une query ne modifie pas ce que la source publie �
 - [ ] Une source ayant plusieurs abonnés continue de publier ses lignes après l'ajout d'une query d'agrégat branchée sur elle.
 - [ ] La query reçoit bien son agrégat, délégué au serveur si l'adaptateur le permet.
 - [ ] Le cas est couvert par un test : une source, un KPI `count` et une query `group-by`, tous trois branchés directement sur la source.
+
+---
+
+## AM-072 — Les blocs de gabarit ne s'imbriquent pas, et l'imbrication échoue en silence
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:haute`, `dsfr-data-display`, `dsfr-data-map-popup`
+**Rencontré sur** 6 page(s) : edu/fei-projets-europeens-donnees, edu/annuaire-bureaux-des-entreprises, edu/cnr-education, edu/cactus-hameconnage, edu/generation-2024, prix-des-carburants
+
+### Constat
+
+Les gabarits acceptent `{{#if}}` / `{{#unless}}` (0.22.0) et `{{#each}}` (0.27.0), mais ces blocs ne s'imbriquent pas — la documentation de `{{#each}}` le dit d'ailleurs (« les blocs ne s'imbriquent pas »). Le problème n'est pas la limite, c'est son signalement : un `{{#each}}` placé à l'intérieur d'un `{{#if}}` ne rend RIEN, sans erreur ni avertissement. Or l'imbrication est le premier réflexe : on veut afficher un intitulé ET la liste, seulement si la liste existe. Le contournement — mettre les blocs à plat, en répétant la condition — fonctionne mais oblige à écrire deux fois la même garde, et rien n'indique qu'il le faut. — **Et le silence a effectivement mordu, sur ce dépôt même.** CINQ pages écrites au lot 17 portaient la forme imbriquée, toutes réputées vérifiées : leurs infobulles affichaient un intertitre (« Contacter le bureau », « Thèmes », « Effets observés », « Dispositifs », « Services ») suivi du vide, sur la totalité des enregistrements. Le défaut a échappé à la vérification parce que celle-ci portait sur les erreurs console, les erreurs de configuration et les valeurs des KPI — tous corrects — et non sur le CONTENU rendu dans l'infobulle. C'est ce qui rend ce constat plus grave qu'il n'en a l'air : il ne se voit ni dans le HTML source (le gabarit est syntaxiquement correct), ni en console, ni dans le volet Diagnostic, ni dans un harnais de non-régression qui compte des éléments. Il faut ouvrir une infobulle et la lire.
+
+### Impact de l'erreur ou du manque
+
+Cinq pages de ce dépôt ont été publiées avec des infobulles à moitié vides sans que personne ne le voie. Le défaut est invisible au HTML, à la console, au volet Diagnostic et à un harnais qui compte des éléments : il ne se constate qu'en ouvrant une infobulle. C'est la définition d'un échec muet coûteux.
+
+### Objectif métier de la correction
+
+Que la limite d'imbrication se signale au lieu de rendre du vide.
+
+### Pérennité et reproductibilité du besoin
+
+Durable tant que les blocs ne s'imbriquent pas.
+
+### Comment ça a été vérifié
+
+Vérifié au navigateur le 2026-09-10 (dsfr-data 0.27.0) sur `fr-en-carto-acc-sensoriel`, champ `langue` (tableau). Gabarit imbriqué `{{#if langue}}[DEBUT{{#each langue}}<i>{{.}}</i>{{/each}}FIN]{{/if}}` : rendu `[DEBUTFIN]` — la boucle intérieure est ignorée, le texte statique du bloc `if` est conservé. Le même contenu à plat, `{{#each langue}}<i>{{.}}</i>{{/each}}`, rend `LSF2`. Zéro message en console dans les deux cas. — Confirmé sur le dépôt le 2026-09-10 : `public/education/annuaire-bureaux-des-entreprises.html` rendait « Contacter le bureau » et « Diplômes préparés » sans aucun contenu sur les 1 932 établissements. Après désimbrication (le `<ul>` sort de la condition, le `{{#each}}` reste seul, un `ul:empty` masque le cas vide), l'infobulle du lycée Émile-Letournel rend « bde-lp-emile-letournel@ac-spm.fr », le téléphone, le lien du site et les huit diplômes préparés.
+
+### Contournement actuel
+
+Mettre les blocs à plat et répéter la garde : `{{#if champ}}intitulé{{/if}}` puis `{{#each champ}}…{{/each}}`. Fonctionne, mais duplique la condition et se remarque mal à la relecture.
+
+### Demande
+
+À défaut de supporter l'imbrication, la signaler : un `{{#each}}` ou un `{{#if}}` rencontré à l'intérieur d'un bloc doit produire un avertissement console nommant le gabarit et la construction non supportée. Le silence est ici plus coûteux que la limite.
+
+### Critères d'acceptation
+
+- [ ] Un bloc imbriqué produit un avertissement console, une fois par gabarit.
+- [ ] Le message nomme la construction et rappelle la forme à plat.
+- [ ] Un gabarit sans imbrication reste silencieux.
 
 ---
 
@@ -738,6 +876,49 @@ Un agrégat `diff` (ou `lag`) symétrique de `running_sum` sur `dsfr-data-query`
 
 ---
 
+## AM-071 — `replace-fields` ignore silencieusement les champs multivalués — ceux qu'on a précisément besoin de nettoyer
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-normalize`
+**Rencontré sur** 2 page(s) : edu/fei-projets-europeens-donnees, edu/accompagnement-deficience-sensorielle
+
+### Constat
+
+`replace` et `replace-fields` ont été étendus en 0.26.0 (#730) aux colonnes numériques et booléennes — la comparaison porte désormais sur la forme chaîne de la valeur. Les TABLEAUX restent hors du champ : une colonne multivaluée traverse l'attribut intacte, sans avertissement. Or c'est exactement sur ces champs-là que le besoin se pose : ce sont eux qui portent les nomenclatures saisies à la main, donc les doublons de casse, les graphies concurrentes et les valeurs d'erreur. Sur le jeu des projets européens de FEI, `pays`, `theme` et `public_cible` sont des tableaux qui comptent respectivement 36, 22 et 21 valeurs brutes pour 33 et 19 valeurs réelles après fusion des doublons — et aucune ne peut être corrigée à la source. Le contournement par `explode` puis second regroupement ne sauve que les agrégats : les FACETTES continuent d'afficher les valeurs non fusionnées, puisqu'elles lisent le champ d'origine.
+
+### Impact de l'erreur ou du manque
+
+Les champs multivalués portent les nomenclatures les plus sales des jeux rencontrés par ce banc. Ne pas pouvoir les nettoyer oblige à publier des facettes fausses — 36 pays affichés pour 33 réels — ou à renoncer à la facette.
+
+### Objectif métier de la correction
+
+Qu'un champ multivalué se nettoie comme les autres.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : le multivalué est la forme normale des nomenclatures en open data.
+
+### Comment ça a été vérifié
+
+Vérifié au navigateur le 2026-09-10 (dsfr-data 0.27.0) sur `fr-en-carto-acc-sensoriel`, dont le champ `langue` est un tableau. Avec `<dsfr-data-normalize replace-fields="langue:LSF2:Langue seconde">` : les 120 lignes portant une langue ressortent inchangées (`["LSF2"]`), aucun message en console, aucune erreur de configuration. Le remplacement est gardé au source par un test de type qui accepte string, number et boolean, jamais Array.
+
+### Contournement actuel
+
+`explode` puis `group-by` sur la valeur corrigée — ne vaut que pour les agrégats, pas pour les facettes. Sinon, corriger en amont côté producteur.
+
+### Demande
+
+Appliquer `replace` et `replace-fields` élément par élément quand la valeur est un tableau, en conservant le tableau. C'est le prolongement naturel de #730, sur le seul type de champ resté à l'écart — et celui qui en a le plus besoin.
+
+### Critères d'acceptation
+
+- [ ] `replace-fields="langue:LSF2:Langue seconde"` transforme `["LSF2"]` en `["Langue seconde"]`.
+- [ ] Un tableau reste un tableau, et sa longueur est inchangée.
+- [ ] Deux éléments devenant identiques après remplacement ne sont pas dédoublonnés silencieusement (ou le sont, mais c'est documenté).
+- [ ] Les types déjà couverts par #730 gardent leur comportement.
+
+---
+
 ## AM-044 — Le compteur `count` de `dsfr-data-search` rend « 35305 resultats » : ni séparateur de milliers, ni accent
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
@@ -780,6 +961,48 @@ Passer le nombre par le formateur fr-FR déjà utilisé par le KPI (`35 305`), �
 
 - [ ] `count` rend « 35 305 résultats ».
 - [ ] `count-label="communes"` rend « 35 305 communes ».
+
+---
+
+## LIM-014 — Le résumé « en France » d'une choroplèthe DSFR Chart est une moyenne non pondérée des territoires, et il est faux
+
+**Priorité** P2 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:haute`, `dsfr-data-chart`
+**Rencontré sur** 3 page(s) : edu/personnels-colleges, edu/personnels-lycees, edu/personnels-ecoles-primaires
+
+### Constat
+
+Une carte `type="map"` de DSFR Chart affiche sous le titre une valeur « en France » présentée comme le chiffre national. C'est la MOYENNE ARITHMÉTIQUE NON PONDÉRÉE des valeurs départementales : la Lozère y pèse autant que le Nord. Sur un taux, l'écart avec la vraie valeur nationale est immédiat et important. Aucun attribut de `dsfr-data-chart` ne permet de désactiver ce résumé ni d'en fournir la valeur juste. Le chiffre faux est affiché au même niveau visuel que le titre, donc lu en premier. **C'est une limite de DSFR Chart, pas de `dsfr-data`** : à remonter chez `GouvernementFR/dsfr-chart` (règle du dépôt, AM-022 et AM-016).
+
+### Impact de l'erreur ou du manque
+
+Un chiffre faux affiché au niveau du titre d'une carte publique, sans moyen de l'ôter. Sur un taux, l'erreur atteint 30 % en valeur relative.
+
+### Objectif métier de la correction
+
+Qu'une carte n'affiche pas un national qui n'en est pas un.
+
+### Pérennité et reproductibilité du besoin
+
+Durable, et hors du périmètre de dsfr-data : c'est un relais à assurer.
+
+### Comment ça a été vérifié
+
+Mesuré le 2026-09-10 sur les trois pages « personnels », en comparant l'affichage de la carte au calcul sur les sommes : collèges **4,27 % affiché contre 5,6 % réel**, lycées **14,96 contre 19,3**, écoles **85,53 contre 86,9**. Les valeurs réelles sont recoupées à l'API par un ratio de deux sommes sur `fr-en-indicateurs_personnels_etablissements2d`.
+
+### Contournement actuel
+
+Afficher la valeur juste dans un `dsfr-data-kpi` à côté de la carte, et le dire dans la page — ce que font les trois pages concernées. Le chiffre faux reste affiché par le composant.
+
+### Demande
+
+À porter chez GouvernementFR/dsfr-chart : rendre le résumé désactivable, ou permettre de lui fournir la valeur nationale, ou le pondérer.
+
+### Critères d'acceptation
+
+- [ ] Le résumé peut être masqué par un attribut.
+- [ ] Ou une valeur nationale peut lui être fournie.
+- [ ] Le comportement par défaut est documenté comme une moyenne non pondérée.
 
 ---
 
@@ -1017,6 +1240,133 @@ Aucun en un KPI. Il faut soit charger les lignes brutes (impossible ici : 809 22
 - [ ] L'autre côté reste non filtré, ou porte son propre filtre.
 - [ ] Le `where` global du KPI continue de s'appliquer aux deux côtés, sans ambiguïté avec la nouvelle forme.
 - [ ] Un test couvre le cas « source pré-agrégée, une ligne par modalité ».
+
+---
+
+## BUG-011 — Une virgule à l'intérieur d'une fonction casse `group-by` : l'adaptateur découpe avant d'analyser les parenthèses
+
+**Priorité** P2 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : edu/dnma-usages-ent
+
+### Constat
+
+`splitGroupBy` découpe la valeur de `group-by` sur la virgule AVANT toute analyse des parenthèses, puis applique l'échappement élément par élément. Une fonction ODSQL à plusieurs arguments — `date_format(champ, 'yyyy-MM-dd') as semaine`, `round(x, 2) as y`, `concat(a, b) as c` — est donc coupée en deux morceaux dont le second, ne contenant pas de parenthèse OUVRANTE, est pris pour un nom de champ et backquoté. C'est le troisième défaut de la même famille : BUG-010 backquote trop (alias sans parenthèse), PG-027 pas assez (`select`), et celui-ci découpe au mauvais endroit. Les trois viennent du même choix — traiter ces clauses comme des listes de noms de champs plutôt que comme des expressions — et se corrigeraient ensemble par un découpage qui respecte les parenthèses et les quotes.
+
+### Impact de l'erreur ou du manque
+
+Toute fonction ODSQL à plusieurs arguments est inutilisable dans `group-by`, ce qui écarte le formatage de date — le besoin le plus courant sur un jeu chronologique. L'échec est franc (400), mais le message d'API ne désigne pas la cause.
+
+### Objectif métier de la correction
+
+Qu'une expression ODSQL valide passe telle quelle, quelle que soit sa forme.
+
+### Pérennité et reproductibilité du besoin
+
+Durable, et à traiter avec BUG-010 et PG-027 : trois symptômes d'un même découpage.
+
+### Comment ça a été vérifié
+
+Rejoué au navigateur le 2026-09-10 (dsfr-data 0.27.0) sur `fr-en-dnma-usages-services`. Avec `group-by="date_format(debutsemaine, 'yyyy-MM-dd') as semaine"`, l'URL réellement émise — relevée au réseau — est `…&group_by=date_format(debutsemaine,`'yyyy-MM-dd') as semaine`&…` : la virgule a coupé l'expression et le second morceau est entouré d'accents graves. HTTP 400, source en erreur, zéro ligne. La même expression envoyée en curl sans découpage répond 200.
+
+### Contournement actuel
+
+Éviter toute fonction à plusieurs arguments dans `group-by`. Pour un regroupement de date, `year(champ) as a` passe (un seul argument, une parenthèse) ; au-delà, il faut préparer la clé en amont — par exemple `compute="semaine = replace(champ, 'T00:00:00+00:00', '')"` côté client. Ce contournement cesse de fonctionner dès qu'on veut un vrai regroupement calendaire (mois, trimestre) sur un gros jeu, puisqu'il suppose d'avoir chargé les lignes.
+
+### Demande
+
+Découper `group-by` (et `select`) en respectant les parenthèses et les chaînes entre quotes, au lieu d'un `split(',')` brut. Le même correctif règle BUG-010 et PG-027 si l'échappement est ensuite décidé sur la nature de l'élément (nom de champ contre expression) plutôt que sur la présence d'une parenthèse.
+
+### Critères d'acceptation
+
+- [ ] `group-by="date_format(d, 'yyyy-MM') as mois"` émet l'expression intacte et répond 200.
+- [ ] `group-by="a, b"` continue de produire deux éléments.
+- [ ] Une virgule à l'intérieur d'une chaîne entre quotes ne découpe pas non plus.
+- [ ] Un test couvre les trois formes, dans `group-by` comme dans `select`.
+
+---
+
+## AM-074 — Aucune union dans le pipeline : empiler quatre séries demande quatre pivots, trois jointures et un dépliage
+
+**Priorité** P2 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-join`, `dsfr-data-query`
+**Rencontré sur** 2 page(s) : edu/accessibilite-equipements-sportifs, edu/portrait-de-territoire-sports
+
+### Constat
+
+`dsfr-data-join` juxtapose des COLONNES : il apparie deux jeux sur une clé et élargit les lignes. Il n'existe rien pour l'opération inverse — empiler des LIGNES de même schéma, c'est-à-dire l'union. Or c'est ce que demande tout indicateur composé de plusieurs mesures parallèles : quatre taux d'accessibilité à mettre côte à côte dans un même graphique ont exigé quatre pivots, trois jointures et un dépliage, soit huit composants pour quatre nombres. La page d'accessibilité en porte une soixantaine pour ses quinze jauges. Le pipeline sait tout faire, mais le coût d'écriture croît de façon non linéaire avec le nombre de mesures.
+
+### Impact de l'erreur ou du manque
+
+Le motif « comparer N mesures parallèles » est le plus courant des tableaux de bord d'indicateurs. Aujourd'hui il coûte deux composants par mesure, ce qui décourage d'en afficher plus de trois.
+
+### Objectif métier de la correction
+
+Qu'empiler des lignes de même schéma coûte une balise.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : c'est l'opération symétrique d'une capacité déjà présente.
+
+### Comment ça a été vérifié
+
+Relevé en construisant /education/accessibilite-equipements-sportifs et /education/portrait-de-territoire-sports le 2026-09-10 (dsfr-data 0.28.0). Les deux pages rendent leurs chiffres exacts — les quinze jauges (52/23/26/45/32/22/42 · 4/2/4/4/24/2) sont contrôlées à l'API — mais au prix d'un empilement de composants sans rapport avec la simplicité de la question posée. Absence d'un composant ou d'un mode d'union vérifiée dans la liste des composants de la bibliothèque.
+
+### Contournement actuel
+
+Chaîne pivot → join → unpivot. Elle fonctionne et reste déclarative, mais devient illisible au-delà de trois mesures et se duplique à chaque indicateur.
+
+### Demande
+
+Un mode d'union — soit un attribut `type="union"` sur `dsfr-data-join` quand les schémas coïncident, soit un composant dédié acceptant plusieurs `sources` et concaténant leurs lignes, avec une colonne d'origine optionnelle.
+
+### Critères d'acceptation
+
+- [ ] Plusieurs sources de même schéma se concatènent en une seule.
+- [ ] Une colonne d'origine peut être ajoutée.
+- [ ] Un schéma divergent est signalé en erreur de configuration, jamais silencieusement tronqué.
+
+---
+
+## AM-075 — Un ratio dont le numérateur et le dénominateur viennent de deux jeux n'a aucune voie native
+
+**Priorité** P2 · **Effort estimé** L (conception + développement) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-kpi`, `dsfr-data-query`
+**Rencontré sur** 2 page(s) : edu/portrait-de-territoire-sports, edu/equipements-sportifs-milieu-scolaire
+
+### Constat
+
+« Des équipements pour 10 000 habitants », « des élèves par équipement » : l'indicateur territorial le plus courant rapporte une mesure d'un jeu à une population venue d'un autre. Le ratio de `dsfr-data-kpi` (#673) évalue ses deux membres sur UNE source ; `dsfr-data-join` peut apparier les deux jeux sur un code géographique, mais seulement si les deux ont la même maille et une clé commune — et le résultat n'est plus agrégeable simplement. Sur le portrait de territoire, 13 indicateurs sur 40 sont dans ce cas et n'ont pas pu être reproduits. Ce constat prolonge AM-049, écrit au lot 12 et confirmé après livraison de #673 : le ratio est bien mono-source.
+
+### Impact de l'erreur ou du manque
+
+L'indicateur territorial rapporté à la population est la forme la plus répandue de la statistique publique locale. Deux pages sur deux du portail Sports en ont besoin ; treize indicateurs sur quarante sont perdus.
+
+### Objectif métier de la correction
+
+Qu'un ratio puisse croiser deux jeux.
+
+### Pérennité et reproductibilité du besoin
+
+Durable et structurant : c'est la limite la plus citée du pipeline depuis le lot 12.
+
+### Comment ça a été vérifié
+
+Relevé en construisant /education/portrait-de-territoire-sports le 2026-09-10 (dsfr-data 0.28.0), sur quatre jeux dont `data-es` (équipements) et `insee-2020-geoapi-2023` (population). Les 27 indicateurs mono-jeu sont reproduits et exacts (333 611 installations, 68 029 342 habitants, 638 529 km², 1 584 QPV) ; les 13 indicateurs rapportant l'un à l'autre sont absents de la page, et le manque y est écrit.
+
+### Contournement actuel
+
+Joindre les deux jeux sur un code géographique puis calculer en `compute` — ne vaut que si les mailles coïncident exactement, et interdit toute agrégation ultérieure du ratio.
+
+### Demande
+
+Permettre à un `dsfr-data-kpi` de lire deux sources pour un ratio, ou fournir un composant de calcul inter-sources sur une clé commune.
+
+### Critères d'acceptation
+
+- [ ] Un KPI peut rapporter une mesure d'une source à une mesure d'une autre, sur une clé commune.
+- [ ] Les mailles divergentes sont signalées.
+- [ ] Le résultat suit les filtres des deux sources.
 
 ---
 
@@ -1382,6 +1732,44 @@ Backquoter le champ dans l'attribut `select` de la page. Fonctionne (vérifié),
 
 ---
 
+## BUG-012 — La grammaire du ratio déclenche l'avertissement de dépréciation qu'elle ne devrait pas : `count:champ:valeur` est la forme recommandée
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `bug`, `severity:basse`, `dsfr-data-kpi`
+**Rencontré sur** 2 page(s) : edu/cactus-hameconnage, edu/fei-projets-europeens-donnees
+
+### Constat
+
+La grammaire `count:champ:valeur` est celle du ratio livré en 0.24.0 (#673) : `value="count:statut:ouvert / count"` est l'exemple même du JSDoc. Mais le parseur la confond avec l'ancienne forme `fn:champ`, dépréciée en #303, et émet « la grammaire "count:type_etablissement" (fn:champ) est dépréciée — utilisez la grammaire commune du pipeline "champ:fn" ». Le résultat affiché est JUSTE ; seul l'avertissement est faux. Il pousse à « corriger » du code correct vers une forme qui, elle, ne saurait pas exprimer le filtre — et il pollue la console des pages qui suivent la documentation. Deux pages de ce dépôt déjà en ligne le déclenchent.
+
+### Impact de l'erreur ou du manque
+
+Faible techniquement — le chiffre est juste — mais l'avertissement dit à l'auteur que son code est obsolète alors qu'il suit la documentation. Sur un dépôt qui traque les messages de console, un faux positif coûte de l'attention à chaque relecture.
+
+### Objectif métier de la correction
+
+Que l'avertissement ne vise que la forme réellement dépréciée.
+
+### Pérennité et reproductibilité du besoin
+
+Durable tant que les deux grammaires cohabitent.
+
+### Comment ça a été vérifié
+
+Vérifié au navigateur le 2026-09-10 (dsfr-data 0.27.0). `<dsfr-data-kpi source="…" value="count:type_etablissement:Ecole / count" format="pourcentage">` sur `fr-en-ulis-tfv` affiche **44,2 %**, valeur exacte (23 écoles sur 52), et émet en console l'avertissement de dépréciation cité ci-dessus. La forme suggérée par le message (`champ:fn`) ne permet pas d'exprimer un filtre par valeur.
+
+### Demande
+
+Ne pas déclencher l'avertissement `fn:champ` quand l'expression est un `count:champ:valeur` — reconnaissable à son premier segment `count` et à ses trois parties. La forme à trois parties n'a jamais existé dans la grammaire dépréciée.
+
+### Critères d'acceptation
+
+- [ ] `value="count:champ:valeur"` n'émet aucun avertissement de dépréciation.
+- [ ] `value="count:champ:valeur / count"` non plus.
+- [ ] `value="sum:population"` (forme réellement dépréciée) continue de l'émettre.
+
+---
+
 ## AM-058 — Un filtre qui traverse un référentiel (académie → départements)
 
 **Priorité** P3 · **Effort estimé** M (un à trois jours) · **Décision proposée** Étudier
@@ -1539,6 +1927,44 @@ Rien à demander sur le comportement, qui est celui d'ODSQL. En revanche, le men
 - [ ] Le JSDoc de `dsfr-data-context-filter` précise que le filtre est diffusé en `where` et ne peut donc pas porter sur un alias de `group-by`.
 - [ ] Le JSDoc de `group-by` renvoie à ce point.
 - [ ] Le motif « plusieurs filtres, un seul `ui`, `apply-to` par source » est donné en exemple.
+
+---
+
+## AM-073 — `cell-class` n'accepte qu'un identifiant CSS : le libellé restitué aux lecteurs d'écran est un slug
+
+**Priorité** P4 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-list`
+**Rencontré sur** 1 page(s) : edu/annuaire-des-internats
+
+### Constat
+
+`cell-class` (#740, 0.27.0) fait d'une colonne calculée la classe CSS d'une cellule, et satisfait le RGAA 1.4.1 par construction : quand la colonne de classe n'est pas affichée, sa valeur est restituée en `fr-sr-only` — l'information ne passe donc pas par la seule couleur. Mais la valeur retenue doit être un identifiant CSS valide, donc sans espace : impossible d'y mettre une phrase. La cellule rend « 100 (occupation-saturee) », et un lecteur d'écran énonce le slug tel quel. Le mécanisme est juste, sa restitution ne l'est pas tout à fait.
+
+### Impact de l'erreur ou du manque
+
+Faible : l'information passe, mais sous une forme technique. Sur un tableau destiné au grand public, un slug énoncé à voix haute est une gêne réelle.
+
+### Objectif métier de la correction
+
+Que le texte restitué soit rédigé, pas dérivé d'un nom de classe.
+
+### Pérennité et reproductibilité du besoin
+
+Durable tant que `cell-class` sert à signaler des seuils.
+
+### Comment ça a été vérifié
+
+Relevé au navigateur le 2026-09-10 (dsfr-data 0.27.0) sur /education/annuaire-des-internats, colonne « Occupation pré-bac (%) » classée par une colonne `occupation_seuil` produite en `compute`. Le DOM rend `<td class="occupation-saturee">100 <span class="fr-sr-only">(occupation-saturee)</span></td>`.
+
+### Demande
+
+Séparer la classe du libellé accessible — par exemple `cell-class="taux:classe:libellé"`, ou accepter une seconde colonne portant le texte à restituer.
+
+### Critères d'acceptation
+
+- [ ] Un libellé rédigé peut être associé à une classe.
+- [ ] En son absence, le comportement actuel est conservé.
+- [ ] Le texte reste rendu en `fr-sr-only` quand la colonne de classe n'est pas affichée.
 
 ---
 
