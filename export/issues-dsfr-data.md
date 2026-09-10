@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 35 demandes cadrées — 5 bugs,
-> 25 améliorations,
+> 36 demandes cadrées — 5 bugs,
+> 26 améliorations,
 > 5 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -109,8 +109,9 @@ _11 demandes — S 6, M 5, L 0._
 | AM-065 | `dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé | amelioration | S | 1 | Accepter |
 | PG-027 | L'adaptateur Opendatasoft backquote `group-by` mais pas `select` : un champ au nom non standard vaut un HTTP 400 | piege | S | 1 | Accepter |
 | AM-058 | Un filtre qui traverse un référentiel (académie → départements) | amelioration | M | 2 | Étudier |
+| AM-069 | Une couche dont tous les points sont confondus se comporte comme une couche qui marche : rien ne le signale | amelioration | M | 1 | Accepter |
 
-_10 demandes — S 9, M 1, L 0._
+_11 demandes — S 9, M 2, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -1372,6 +1373,49 @@ Résolution d'un filtre à travers une table de correspondance déclarée (le fi
 - [ ] Un filtre « académie » restreint un jeu qui n'a qu'un champ « département ».
 - [ ] La table de correspondance est déclarée une fois, pas rechargée par filtre.
 - [ ] Le tag affiche l'académie choisie, pas la liste des départements.
+
+---
+
+## AM-069 — Une couche dont tous les points sont confondus se comporte comme une couche qui marche : rien ne le signale
+
+**Priorité** P3 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-map-layer`
+**Rencontré sur** 1 page(s) : edu/carto-pix-fiche-etablissement
+
+### Constat
+
+Le jeu que la page Pix du portail cartographie porte 43 479 lignes et 11 113 établissements distincts pour UNE SEULE coordonnée : toutes ses lignes ont hérité de la position de la première (45,97497 / 5,35024 — le lycée Alexandre-Bérard à Ambérieu-en-Bugey). La carte se comporte pourtant normalement : les coordonnées sont valides, `getSkippedCount()` vaut 0, aucun avertissement n'est émis, le cluster s'affiche et annonce 43 479. Il ne se disperse simplement jamais, y compris au zoom 19 — et c'est le SEUL signe visible : il ne se passe rien. Une carte dont tous les points sont confondus est visuellement indiscernable d'une carte dont le clustering fonctionne mal, ou dont le fit est mal réglé. Le diagnostic a demandé d'exporter le jeu et de dédoublonner les coordonnées en dehors de la page. Or la bibliothèque tient déjà les données : elle est le seul acteur de la chaîne en position de compter les positions distinctes d'une couche, et de dire « 43 479 éléments, 1 position distincte » — ce qui aurait fait gagner une heure et, surtout, aurait empêché de publier une carte inopérante.
+
+### Impact de l'erreur ou du manque
+
+Le défaut est rare mais total : la dataviz d'origine est entièrement inopérante et personne ne s'en est aperçu. C'est aussi le genre de défaut qu'une reprise de jeu introduit sans bruit — un géocodage qui échoue et retombe sur une valeur par défaut. La bibliothèque est le seul maillon qui puisse le voir.
+
+### Objectif métier de la correction
+
+Qu'une carte dont les points sont tous confondus le dise, au lieu de ressembler à une carte qui fonctionne.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : c'est une mesure sur les données rendues, indépendante du portail et de l'adaptateur.
+
+### Comment ça a été vérifié
+
+Établi le 2026-09-10 en construisant /education/carto-pix-fiche-etablissement (dsfr-data 0.27.0). Export complet de `fr-en-pix_certification_pix_inscription_et_passation_par_eple` (`/exports/json?select=position,uai`, 43 479 lignes, 3,7 Mo) puis dédoublonnage des coordonnées arrondies à 5 décimales : **1 position distincte pour 11 113 UAI distincts**. Recoupé par l'API elle-même, dont l'emprise du jeu entier est un point : `/records/1.0/boundingbox/` renvoie `bbox` aux quatre coordonnées identiques. Les trois jeux frères du même producteur ont de vraies positions — `…_sans_collecte_de_profil` rend 10 095 coordonnées distinctes pour 41 422 lignes, mesuré de la même façon. La page a été bâtie sur ce jeu-là.
+
+### Contournement actuel
+
+Compter soi-même les positions distinctes, hors de la page, avant de faire confiance à une carte. Aucun moyen de le faire depuis la page.
+
+### Demande
+
+Que `dsfr-data-map-layer` expose le nombre de positions distinctes de ce qu'elle a rendu (par exemple `getDistinctPositionCount()`, à côté de `getSkippedCount()` et `getRenderedCount()`), et avertisse en console quand ce nombre est très inférieur au nombre d'éléments — par exemple une position pour plus de dix éléments. Le seuil doit rester silencieux sur les cas légitimes : plusieurs services à une même adresse, plusieurs millésimes d'un même établissement.
+
+### Critères d'acceptation
+
+- [ ] La couche expose le nombre de positions distinctes rendues.
+- [ ] Un avertissement console est émis quand ce nombre est très inférieur au nombre d'éléments, avec les deux chiffres.
+- [ ] Le seuil ne se déclenche pas sur un jeu où quelques éléments partagent une adresse.
+- [ ] L'information apparaît dans le volet Diagnostic.
 
 ---
 

@@ -90,6 +90,9 @@ const STATUTS = {
   'Appel à projet Socle Numérique dans les Ecoles Elémentaires': ['reproduite', '/education/aap-socle-numerique-ecoles',
     'Jumeau de l’hybridation à la maille communale : le même taux, coloré par un autre chemin', 'vue'],
 
+  'Cartographie PIX fiche établissement': ['reproduite', '/education/carto-pix-fiche-etablissement',
+    'Les 43 479 lignes de la carte d’origine ont UNE seule position : reproduite en changeant de source', 'angular'],
+
   // --- Les trois galeries editoriales : aucune dataviz a reproduire.
   'Challenge wikidata en classe': ['analyse', '/education/non-reproduites',
     'Galerie éditoriale de liens : aucune directive ods-*, aucun iframe, aucune requête /api/', 'angular'],
