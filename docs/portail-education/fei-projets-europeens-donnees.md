@@ -398,17 +398,19 @@ version d'API, pas en changeant de bibliothèque.
 | `<input type="search">` + `parameters['q']` | `<dsfr-data-search id="q" source="ini" fields="initiative_projet, descriptif_fr, insititution_s, financement" count context="ctx">` — `fields` **restreint l'index** : c'est ce qui empêche la recherche de retomber sur `personne_en_charge` (défaut n° 11) |
 | bouton **Réinitialiser** | `<dsfr-data-context-tags context="ctx" clear-all>` (tags supprimables + « Tout effacer »), et `no-reset` sur la facette pour ne pas doubler le bouton |
 | `{{initiatives.nhits}} projet(s)` ×2 | `count` sur `dsfr-data-search` (un seul compteur), ou `<dsfr-data-kpi source="f" value="count" label="projets">` |
-| **la carte d'Europe** (SVG inline 66 paths + table ISO à la main + `ods-color-gradient`) | `<dsfr-data-chart type="map-monde" code-field="code_iso" value-field="nb" name="Projets">` — DSFR Chart 2.1 fournit le découpage `monde` et attend un **code ISO 3166-1 alpha-2**, exactement la clé que le template fabriquait à la main. Voir § Limites pour ce que ça coûte et ce que ça ne rend pas |
-| la table « nom français → ISO2 » écrite dans le template | `<dsfr-data-join>` sur une table statique `public/data/pays-iso.json` (36 lignes), `on="pays"`. **Voie native pour le nettoyage en amont** : `<dsfr-data-normalize replace-fields="pays:slovénie:Slovénie \| pays:Royaume-Uni / Angleterre:Royaume-Uni \| pays:Royaume-Uni / Ecosse:Royaume-Uni">` — comparaison stricte, pas de regex, et **aucun `:` dans les valeurs** ici, donc la grammaire passe (AM-038). Cela corrige d'emblée les défauts 2 et 9 |
-| `ods-color-gradient-nb-classes="4"`, intervalles égaux | pas d'équivalent déclaratif : `map-chart` gère ses propres classes via `selected-palette="sequentialAscending"`. Écart assumé, voir § Limites |
-| `<title>` SVG « Malte (1 projet(s)) » | infobulle native de `map-chart` + `unit-tooltip="projet(s)"` |
-| `ng-click` sur un `<path>` → `refine.pays` | **pas d'équivalent** : `map-chart` n'émet pas de sélection. Voir § Limites |
-| absence de légende de choroplèthe | `map-chart` en pose une nativement — le défaut n° 3 tombe sans rien écrire |
+| **la carte d'Europe** (SVG inline 66 paths + table ISO à la main + `ods-color-gradient`) | `<dsfr-data-map>` + une couche `<dsfr-data-map-layer type="geoshape" fill-field="nb" classes="4" method="equal">` sur un **GeoJSON d'Europe statique** (`transform="features"`, motif documenté du fond administratif). Voir § Limites : c'est **entièrement natif depuis 0.22.0/0.23.0**, sauf la géométrie elle-même |
+| la table « nom français → ISO2 » écrite dans le template | plus nécessaire **si** le GeoJSON porte le nom français en propriété : la jointure se fait sur le nom. Sinon `<dsfr-data-join on="pays">` sur `public/data/pays-iso.json`. **Voie native pour le nettoyage en amont** : `<dsfr-data-normalize replace-fields="pays:slovénie:Slovénie \| pays:Royaume-Uni / Angleterre:Royaume-Uni \| pays:Royaume-Uni / Ecosse:Royaume-Uni">` — comparaison stricte, pas de regex, aucun `:` dans les valeurs, donc la grammaire passe. Corrige d'emblée les défauts 2 et 9. Bonus 0.22.0 (#660) : `dsfr-data-join` publie son **taux d'appariement** (« 34 / 36 lignes gauche appariées »), qui aurait fait voir la Slovénie manquante |
+| `ods-color-gradient-nb-classes="4"`, intervalles égaux | `classes="4" method="equal"` sur la couche — **exactement les deux paramètres de l'original** (#685, 0.22.0). `method` accepte aussi `quantile` (défaut) et `manual` + `breaks="…"` |
+| `<title>` SVG « Malte (1 projet(s)) » | `tooltip-field` sur la couche, ou `<dsfr-data-map-popup>` avec un `<template>` |
+| `ng-click` sur un `<path>` → `refine.pays` | `refine-on-click="pays" context="ctx" label="Pays"` sur la couche (#681, 0.23.0) — **et mieux que l'original** : second clic = retrait, tag dans `context-tags`, état porté par l'URL. Émet aussi `dsfr-data-map-select` |
+| absence de légende de choroplèthe | `<dsfr-data-map-legend for="couche-europe" label="Projets par pays">` (#685) — une entrée par classe **avec ses bornes**. Le défaut n° 3 tombe sans rien calculer |
+| fond de carte trop chargé sous une choroplèthe | `tiles-style="muted"` sur `dsfr-data-map` (#686, 0.22.0) — **plus besoin de la classe CSS `odv-fond-attenue`** du dépôt |
 | `ods-results="projets" ods-results-max="46"` + 44 `<article>` | `<dsfr-data-display source="f" cols="2" uid-field="recordid">` + `<template>`. **`dsfr-data-cards` n'existe pas.** Pas de plafond en dur : `pagination="0"` affiche tout |
-| tags pays / thèmes / publics dans la fiche | interpolation directe : un tableau se rend tel quel dans `{{pays}}`. Pour un tag DSFR par valeur, c'est **la limite de template** décrite au § Limites |
-| `ng-if="item.fields.financement"` (masquer un bloc vide) | **aucune conditionnelle dans un template `dsfr-data`** (AM-039). Voie native : `{{financement|—}}`, ou interpoler dans un attribut (`data-v="{{financement}}"`) et masquer en CSS `[data-v=""]` / `:empty` |
-| filet vert/orange selon le type | `class="odv-fiche odv-{{type_de_projet_national_europeen}}"` + deux règles CSS. L'interpolation dans un attribut est la voie native (AM-039) |
-| `ng-click="state.selectedProject = item"` + `<aside>` | voir § Limites, point 2 — pas de maître-détail natif ; l'équivalent natif est un `<select>` + `dsfr-data-context-filter`, qui est **URL-partageable** contrairement à l'original |
+| tags pays / thèmes / publics dans la fiche | un tableau est rendu **joint par « , »** depuis 0.22.0 (#663), et `{{pays:join: · }}` choisit le séparateur. Pour **un tag DSFR par valeur**, il n'y a pas de boucle : voir § Limites |
+| `ng-if="item.fields.financement"` (masquer un bloc vide) | **`{{#if financement}}…{{/if}}` et `{{#unless}}` existent** depuis 0.22.0 (#664), non imbriqués, résolus avant substitution. ⚠️ Le piège AM-039 du `CLAUDE.md` (« aucune conditionnelle dans un template ») **est périmé** : il décrit 0.20.0, la version épinglée par le dépôt |
+| `ng-href="{{item.fields.source}}"` | **`href="{{source:url}}"`**, pas `href="{{source}}"` : le pipe `:url` filtre les schémas par liste blanche (#664). Sans lui, une donnée `javascript:…` passerait telle quelle — et ce jeu est alimenté par saisie manuelle |
+| filet vert/orange selon le type | `class="odv-fiche odv-{{type_de_projet_national_europeen}}"` + deux règles CSS ; ou `{{#if}}` autour de deux variantes de balise |
+| `ng-click="state.selectedProject = item"` + `<aside>` | **voir § Limites, manque réel n° 3** : `refine-on-click` et `dsfr-data-map-select` n'existent que sur la carte ; aucun événement de sélection sur `dsfr-data-display`. Substitut : `<select>` + `dsfr-data-context-filter`, **URL-partageable** contrairement à l'original |
 | `<a>` « Voir » vers `source` | `<a class="fr-link" href="{{source}}" target="_blank" rel="noopener">Voir le projet (nouvelle fenêtre)</a>` — libellé explicite (RGAA 13.x) |
 | rien dans l'original | `<dsfr-data-list>` sous la grille pour la vue tableau + `databox-download` : l'export CSV que la page n'a pas |
 
@@ -426,9 +428,11 @@ version d'API, pas en changeant de bibliothèque.
   replace-fields="pays:slovénie:Slovénie | pays:Royaume-Uni / Angleterre:Royaume-Uni | pays:Royaume-Uni / Ecosse:Royaume-Uni | public_cible:citoyens /grand public:citoyens / grand public | public_cible:cadres educatifs:cadres éducatifs">
 </dsfr-data-normalize>
 
-<!-- Table statique nom → ISO2 (36 lignes), l'équivalent versionné des 66 lignes
-     d'affectation du template ODS. -->
-<dsfr-data-source id="iso" url="/data/pays-iso.json"></dsfr-data-source>
+<!-- Géométrie : GeoJSON d'Europe simplifié, hébergé avec la page.
+     Le paquet npm livre `dsfr-data/geo/regions.json` et `…/departements.json` (#688),
+     mais RIEN hors France : cette ressource est à produire (voir § Limites, point 1). -->
+<dsfr-data-source id="geo-eu" url="/data/geo/europe-simplifiee.geojson"
+  transform="features"></dsfr-data-source>
 
 <!-- ============ Un contexte, une URL ============ -->
 <dsfr-data-context id="ctx" sources="ini-raw" url-sync></dsfr-data-context>
@@ -458,16 +462,23 @@ version d'API, pas en changeant de bibliothèque.
   <dsfr-data-query id="par-pays" source="f"
     group-by="pays" aggregate="pays:count" order-by="pays__count:desc"
     where="pays:isnotnull"></dsfr-data-query>
-  <dsfr-data-join id="par-pays-iso" source="par-pays" with="iso" on="pays"></dsfr-data-join>
+  <!-- Géométrie à gauche, comptage à droite. getJoinStats() dira combien de pays
+       du jeu n'ont pas trouvé leur polygone (le « slovénie » minuscule s'y verrait). -->
+  <dsfr-data-join id="eu" source="geo-eu" with="par-pays"
+    on="properties.nom_fr=pays"></dsfr-data-join>
 
   <div class="odv-carte-themes">
-    <dsfr-data-chart id="c-europe" source="par-pays-iso" type="map-monde"
-      code-field="code_iso" value-field="pays__count" name="Projets"
-      unit-tooltip="projet(s)" selected-palette="sequentialAscending"
-      databox databox-title="Projets par pays"
-      databox-source="France Éducation international / IIPE-UNESCO — fr-en-initiatives_donnees_europe"
-      databox-download></dsfr-data-chart>
-    <dsfr-data-a11y for="c-europe" source="par-pays-iso" table download></dsfr-data-a11y>
+    <dsfr-data-map center="54,15" zoom="3" height="520px"
+      tiles="osm-fr" tiles-style="muted">
+      <dsfr-data-map-layer id="couche-europe" source="eu" type="geoshape"
+        fill-field="pays__count" classes="4" method="equal"
+        selected-palette="sequentialAscending" fill-opacity="0.85"
+        tooltip-field="properties.nom_fr"
+        refine-on-click="properties.nom_fr" context="ctx" label="Pays">
+      </dsfr-data-map-layer>
+      <dsfr-data-map-legend for="couche-europe" label="Projets par pays"></dsfr-data-map-legend>
+    </dsfr-data-map>
+    <dsfr-data-a11y for="couche-europe" source="par-pays" table download></dsfr-data-a11y>
   </div>
 
   <!-- ============ Fiches + détail ============ -->
@@ -477,13 +488,13 @@ version d'API, pas en changeant de bibliothèque.
         <article class="odv-fiche odv-type-{{type_de_projet_national_europeen}}">
           <p class="fr-badge fr-badge--sm">{{type_de_projet_national_europeen}}</p>
           <h3 class="fr-h6"><a href="#{{$uid}}">{{initiative_projet}}</a></h3>
-          <p class="fr-text--xs odv-pays">{{pays}}</p>
-          <p class="fr-text--xs odv-themes">{{theme}}</p>
-          <p class="fr-text--xs odv-publics">{{public_cible}}</p>
+          <p class="fr-text--xs odv-pays">{{pays:join: · }}</p>
+          <p class="fr-text--xs odv-themes">{{theme:join: · }}</p>
+          <p class="fr-text--xs odv-publics">{{public_cible:join: · }}</p>
           <p class="fr-text--sm">{{descriptif_fr}}</p>
-          <p class="fr-text--xs" data-v="{{financement}}">{{financement|Financement non renseigné}}</p>
-          <p><a class="fr-link fr-link--sm" href="{{source}}" target="_blank" rel="noopener">
-            Voir le projet (nouvelle fenêtre)</a></p>
+          {{#if financement}}<p class="fr-text--xs">{{financement}}</p>{{/if}}
+          {{#if source}}<p><a class="fr-link fr-link--sm" href="{{source:url}}"
+            target="_blank" rel="noopener">Voir le projet (nouvelle fenêtre)</a></p>{{/if}}
         </article>
       </template>
     </dsfr-data-display>
@@ -498,15 +509,17 @@ version d'API, pas en changeant de bibliothèque.
           label="Projet"></dsfr-data-context-filter>
       </dsfr-data-context>
       <dsfr-data-display source="detail" cols="1">
+        <!-- Les {{#if}} reproduisent exactement les ng-if de l'original :
+             un champ vide fait disparaître son bloc, titre compris. -->
         <template>
           <p class="fr-badge fr-badge--sm">{{type_de_projet_national_europeen}}</p>
           <h3 class="fr-h6">{{initiative_projet}}</h3>
-          <h4 class="fr-text--xs">Thèmes</h4>       <p>{{theme}}</p>
-          <h4 class="fr-text--xs">Public cible</h4> <p>{{public_cible}}</p>
-          <h4 class="fr-text--xs">Description</h4>  <p class="fr-text--sm">{{descriptif_fr}}</p>
-          <h4 class="fr-text--xs">Institution(s)</h4><p class="fr-text--sm">{{insititution_s}}</p>
-          <h4 class="fr-text--xs">Financement</h4>  <p class="fr-text--sm">{{financement|Non renseigné}}</p>
-          <p><a class="fr-btn" href="{{source}}" target="_blank" rel="noopener">Voir le projet</a></p>
+          {{#if theme}}<h4 class="fr-text--xs">Thèmes</h4><p>{{theme:join: · }}</p>{{/if}}
+          {{#if public_cible}}<h4 class="fr-text--xs">Public cible</h4><p>{{public_cible:join: · }}</p>{{/if}}
+          {{#if descriptif_fr}}<h4 class="fr-text--xs">Description</h4><p class="fr-text--sm">{{descriptif_fr}}</p>{{/if}}
+          {{#if insititution_s}}<h4 class="fr-text--xs">Institution(s)</h4><p class="fr-text--sm">{{insititution_s}}</p>{{/if}}
+          {{#if financement}}<h4 class="fr-text--xs">Financement</h4><p class="fr-text--sm">{{financement}}</p>{{/if}}
+          {{#if source}}<p><a class="fr-btn" href="{{source:url}}" target="_blank" rel="noopener">Voir le projet</a></p>{{/if}}
         </template>
       </dsfr-data-display>
     </aside>
@@ -525,77 +538,130 @@ version d'API, pas en changeant de bibliothèque.
 
 ## Limites et points durs identifiés
 
-1. **La carte d'Europe : `map-monde` fait le travail, mais ce n'est pas une carte d'Europe.**
-   *Ce qu'il faut* : `dsfr-data-chart type="map-monde" code-field="…"`, alimenté par des codes
-   **ISO 3166-1 alpha-2** — la référence de `dsfr-data-chart` le dit explicitement
-   (« code-field : … code pays ISO a2/a3/num (map-monde) »). Le jeu n'ayant pas de code pays, il
-   faut fabriquer la correspondance : **une table statique de 36 lignes** (`pays-iso.json`) jointe
-   par `dsfr-data-join on="pays"`. C'est exactement le travail que le template ODS fait en 66 lignes
-   d'affectation à effet de bord, mais versionné, testable et réutilisable.
-   *Ce que ça coûte* : `map-chart level="monde"` **rend le planisphère entier**. Aucun attribut de
-   cadrage, de `bbox` ou de zoom n'existe dans la référence — l'Europe occupera une fraction de la
-   surface, là où le SVG de l'original est cadré au millimètre sur la zone utile.
-   *La voie testée avant de conclure* : `dsfr-data-map` + une couche `geoshape` sur un GeoJSON
-   statique de l'Europe (`transform="features"`), qui est le motif documenté pour un fond
-   administratif. Elle donne le cadrage (`center`/`zoom`/`fit-bounds`) et la géométrie, mais
-   `dsfr-data-map-layer` colorie par `color-field`/`color-map` — une classification en n classes
-   demande un champ pré-calculé.
-   *Verdict* : **deux voies natives, un arbitrage, pas un manque.** `map-monde` pour la simplicité
-   (une balise, la légende gratuite, l'export gratuit) ; `dsfr-data-map` + GeoJSON Europe pour le
-   cadrage. La seule chose qui manque réellement est **le cadrage d'un `map-monde`** — à remonter
-   chez `GouvernementFR/dsfr-chart`, pas ici (règle 4 du lot 11 : une limite de `map-chart` n'est
-   pas une limite de `dsfr-data`).
-2. **Cliquer un pays pour filtrer.**
-   *Obstacle* : `dsfr-data-chart` est une **feuille du pipeline** (`SourceSubscriberMixin`) — il
-   consomme, il n'émet rien. Aucun événement de sélection n'est documenté ; `map-chart` n'expose
-   pas de `click`.
-   *Voie native essayée* : la facette `pays` en `multiselect` fait le même travail (et **mieux** :
-   elle est cumulative, alors que le clic-carte de l'original **écrase** la sélection et ne se
-   désélectionne pas).
-   *Verdict* : **perte réelle de geste, pas de fonction.** Ce que la carte cliquable apporte est
-   l'exploration « je vois le pays foncé, je clique dessus » ; le substitut est de lire la valeur
-   dans l'infobulle puis de cocher le pays dans le menu. À remonter comme demande — mais chez
-   `dsfr-chart`, la sélection devant naître du composant de carte.
-3. **Le panneau maître-détail.**
-   *Obstacle* : `dsfr-data-display` n'émet pas d'événement de sélection, et il n'y a **aucune
-   conditionnelle dans un template** (AM-039) pour montrer/cacher un panneau selon l'item cliqué.
-   *Voies natives essayées* : (a) `uid-field` + `<a href="#{{$uid}}">` et un bloc de détail rendu
-   dans le même template, révélé par CSS `:target` — pur CSS, mais le panneau se retrouve dans le
-   flux de la fiche, pas dans la colonne de droite ; (b) **un `<select>` de projets +
-   `dsfr-data-context-filter operator="eq" ui="sel-projet"` + un second `dsfr-data-display`** —
-   c'est la voie recommandée par la fiche `dsfr-data-context-filter` (« Id de l'élément d'UI
-   écouté »), et elle rend l'état **partageable par URL** (`url-sync`), ce que l'original ne sait
-   pas faire.
-   *Verdict* : **différence d'ergonomie, pas de capacité** — avec un gain net (URL) et une perte
-   nette (le clic direct sur la fiche). Le « clic sur la fiche » se rétablit en 5 lignes de page
-   qui écrivent dans le `<select>` ; c'est du câblage d'UI, pas un contournement de la
-   bibliothèque.
-4. **Un tag DSFR par valeur d'un champ multivalué, dans un template.**
-   *Obstacle* : `{{pays}}` interpole le tableau entier (« Danemark,Norvège,… »). Le template n'a
-   pas de boucle.
-   *Voie native* : aucune dans `dsfr-data-display`. `dsfr-data-facets` sait, lui, itérer un champ
-   multivalué — mais c'est un filtre, pas un affichage.
-   *Contournement* : rendre la chaîne dans un conteneur et la découper en CSS
-   (impossible proprement), ou accepter la liste séparée par des virgules avec un style de
-   « puces textuelles ».
-   *Verdict* : **petit manque réel, à remonter** : une boucle `{{#each champ}}` (ou un modificateur
-   `{{champ:tags}}`) dans le template de `dsfr-data-display`. C'est le seul point de cette page où
-   la voie native manque vraiment. **Sur quel type de jeu le contournement cesse de marcher** :
-   dès qu'un pays contient une virgule dans son libellé, ou dès que le nombre de valeurs dépasse
-   ce qu'une ligne peut porter (ici jusqu'à 10 pays pour MILES).
-5. **Quatre classes à intervalles égaux.**
-   *Obstacle* : `ods-color-gradient nb-classes="4"` n'a pas d'équivalent déclaratif ;
-   `map-chart` applique sa propre discrétisation via `selected-palette`.
-   *Verdict* : **écart de rendu assumé.** Et l'original a tort sur le fond : quatre classes à
-   intervalles égaux sur une distribution où 24 pays sur 32 valent 1, 2 ou 3 écrase presque tout
-   dans la classe basse. Reproduire ce choix serait reproduire une erreur.
-6. **Ce que la transposition gagne**, à dire honnêtement : la carte suit enfin les filtres ; la
-   Slovénie est comptée juste ; une légende apparaît ; les doublons de libellés sont fusionnés ;
-   l'état est dans l'URL ; la recherche n'indexe plus le suivi éditorial interne ; il y a un tableau
-   accessible et un export CSV ; le panneau de détail se ferme ; le nombre de fiches n'est plus
-   plafonné à 46. **Douze des dix-sept défauts relevés tombent d'eux-mêmes.**
-   Ce que la transposition perd : le cadrage serré sur l'Europe, le clic direct sur un pays, le
-   clic direct sur une fiche.
+> **Cible : `dsfr-data` 0.25.0** (`_CIBLE-0.25.md`), pas le `dsfr-data@0.20.0` épinglé par le
+> dépôt. Quatre verdicts : **natif** / **natif mais postérieur à 0.20.0** (montée de version ici)
+> / **prévu à un jalon** (numéro d'issue) / **manque réel**.
+> **Vérifications faites au source** (`~/Developer/GitHub/dsfr-data`, HEAD = release 0.23.0) et
+> non à la fiche MCP, qui est en retard : `get_skill(dsfrDataMap, "reference")` ne liste ni
+> `refine-on-click`, ni `context`, ni `label`, ni `dsfr-data-map-select`, et
+> `get_skill(dsfrDataDisplay, …)` ne mentionne ni les blocs `{{#if}}` ni les pipes `:join` /
+> `:url`. **Cinq de mes six « limites » de première rédaction tombaient à cause de cette fiche
+> périmée.**
+
+### Ce qui n'en est pas — corrections après lecture du source
+
+- **`{{#if champ}}…{{/if}}` et `{{#unless}}` existent** dans le moteur de templates partagé par
+  `dsfr-data-display` et `dsfr-data-map-popup` (`utils/template-expression.ts`, #664, **0.22.0**),
+  non imbriqués, résolus en pré-passe avant la substitution. Avec les pipes `{{champ:number:2}}`,
+  `{{champ:date}}`, `{{champ:join: / }}` (#662, #663) et `{{lien:url}}` (liste blanche de schémas).
+  → **Le piège AM-039 du `CLAUDE.md` (« aucune conditionnelle dans un template ») est périmé.**
+  Les `ng-if` du panneau de détail se transposent un pour un. *Natif, postérieur à 0.20.0.*
+- **La choroplèthe à classes paramétrables existe** : `dsfr-data-map-layer type="geoshape"` +
+  `fill-field` + `classes="4"` + `method="quantile|equal|manual"` + `breaks` (#685, **0.22.0**),
+  avec `<dsfr-data-map-legend>` qui rend **une entrée par classe avec ses bornes**.
+  `method="equal"` reproduit à l'identique les intervalles égaux d'`ods-color-gradient`.
+  *Natif, postérieur à 0.20.0.*
+- **Le clic sur un pays qui filtre la page existe** : `refine-on-click="champ"` + `context="id"` +
+  `label` sur la couche, et l'événement `dsfr-data-map-select` (#681, ADR-104, **0.23.0**).
+  Second clic = retrait, tag dans `dsfr-data-context-tags`, état porté par l'URL du contexte.
+  **C'est plus que ce que fait l'original**, qui écrase la sélection et ne sait pas la retirer.
+  *Natif, postérieur à 0.20.0.*
+- **Le fond de carte atténué** : `tiles-style="muted"` (#686, 0.22.0) — la classe CSS
+  `odv-fond-attenue` du dépôt (AM-017) n'est plus nécessaire.
+- **Le taux d'appariement d'une jointure** est publié (#660, 0.22.0) : `getJoinStats()` et le volet
+  Diagnostic rendent « 34 / 36 lignes gauche appariées (94 %) », avec alerte sous 50 %. C'est
+  l'outil qui aurait fait voir le `slovénie` minuscule sans polygone — l'original, lui, l'a perdu
+  en silence pendant toute la vie de la page.
+- **Un « KPI texte »** (le nom du projet, d'un service…) : `dsfr-data-display` interpole n'importe
+  quel champ, y compris textuel. Voie native, dans un autre composant que celui qu'on cherchait.
+
+### Ce qui est prévu à un jalon
+
+- **Discrétiser sur une valeur calculée / une part** : `compute` v2 avec `when … then … else`
+  (**#671**, v0.24.0) et le ratio de deux agrégats (**#673**, v0.24.0). Pas nécessaire ici (le
+  comptage suffit), mais c'est la brique si l'on veut une carte « part des projets européens ».
+- **`replace-fields` et les valeurs à deux-points** : échappement `%3A` (**#676**, v0.24.0).
+  Sans objet sur ce jeu — aucun libellé de pays ne contient de `:` — mais à ne pas reclasser en
+  limite dure ailleurs.
+
+### Manques réels — le résidu de cette page
+
+1. **Aucune maille géographique non française n'est livrée ni documentée.**
+   *Établi* : le paquet npm livre `dsfr-data/geo/regions.json` (18 régions) et
+   `dsfr-data/geo/departements.json` (101 départements) — vérifié, le dossier `packages/core/geo/`
+   ne contient que ces deux fichiers et un README (#688, 0.22.0). Rien pour l'Europe, rien pour le
+   monde, et le motif « fond administratif » de la documentation ne parle que de contours
+   français. Le seul recours hors France est `dsfr-data-chart type="map-monde"`, c'est-à-dire
+   **le planisphère entier** : aucun attribut de cadrage, de `bbox` ou de zoom sur `map-chart`
+   (vérifié dans la référence et dans `dsfr-data-chart.ts`).
+   *Conséquence sur cette page* : la seule carte non française du portail Éducation demande à
+   l'auteur de produire, simplifier, héberger et maintenir un GeoJSON d'Europe — le travail que le
+   dépôt a déjà dû faire pour les régions françaises (`public/data/geo/regions-simplifiees.geojson`,
+   AM-016) et que `dsfr-data` a ensuite internalisé pour la France seulement.
+   *Demande* : livrer un `geo/europe.json` (ou `geo/monde.json`) sur le modèle de #688, avec le
+   **nom français** en propriété pour que la jointure se fasse sans table intermédiaire.
+   *Rien au source, rien au backlog v0.24/v0.25 au 2026-09-10.* **Manque réel.**
+2. **Aucun référentiel de correspondance « nom de pays en français → ISO 3166-1 alpha-2 ».**
+   *Établi* : `map-monde` convertit alpha-3 et numérique vers alpha-2 (`toIsoA2`, vérifié dans
+   `dsfr-data-chart.ts`) mais **ne connaît aucun nom de pays**. Or aucun jeu open data français
+   ne stocke des codes ISO : il stocke « Allemagne », « Royaume-Uni / Angleterre », « slovénie ».
+   La table de 66 lignes écrite à la main dans le template ODS n'est pas un caprice de l'auteur,
+   c'est la conséquence directe de ce manque.
+   *Voie native essayée* : `dsfr-data-join` sur une table statique — elle marche, mais chaque page
+   qui cartographie l'étranger doit refaire la même table, avec les mêmes pièges de casse et
+   d'accents.
+   *Demande* : un `geo/pays-iso.json` livré avec le paquet (nom fr, nom officiel, alpha-2,
+   alpha-3), ou un `code-field-lookup="nom-fr"` sur `dsfr-data-chart type="map-monde"`.
+   **Manque réel** — et un manque que Bercy ne pouvait pas révéler : tous ses jeux étaient français.
+3. **Aucun événement de sélection sur `dsfr-data-display` ni `dsfr-data-list`.**
+   *Établi au source* : sur l'ensemble de `packages/core/src`, **un seul** événement de sélection
+   existe, `dsfr-data-map-select`, et **un seul** composant porte `refine-on-click`,
+   `dsfr-data-map-layer`. `dsfr-data-display` et `dsfr-data-list` n'ont aucun `@fires`.
+   *Conséquence* : le motif **maître-détail piloté par une grille de fiches** — le motif central de
+   cette page, et le second du portail Éducation — n'a pas d'équivalent. Cliquer une carte pour
+   filtrer : natif. Cliquer une **fiche** pour la détailler : rien.
+   *Voies natives essayées, toutes deux réelles mais dégradées* :
+   (a) `uid-field` + `<a href="#{{$uid}}">` et un bloc de détail rendu **dans le même template**,
+   révélé par `:target` en CSS — le détail se retrouve alors dans le flux de la fiche, pas dans une
+   colonne latérale collante. **Cesse de marcher** dès que le panneau doit être ailleurs dans la
+   page, ce qui est précisément la mise en page de l'original ;
+   (b) un `<select>` de projets + `dsfr-data-context-filter operator="eq" ui="sel-projet"` + un
+   second `dsfr-data-display` : fonctionne, **et gagne l'URL partageable**, mais remplace le geste
+   « je clique la fiche que je lis » par « je retrouve son titre dans une liste de 44 ».
+   *Demande, symétrique de #681* : `refine-on-click="champ"` + `context` sur
+   `dsfr-data-display` (et sur une ligne de `dsfr-data-list`), avec un événement
+   `dsfr-data-display-select`. **Manque réel.**
+4. **Pas de boucle dans un template : un tag DSFR par valeur d'un champ multivalué.**
+   *Établi au source* : `template-expression.ts` implémente `{{#if}}` et `{{#unless}}` — et rien
+   d'autre (`BLOCK_RE = /\{\{#(if|unless)…/`). Aucun `#each`, `#for` ni `#repeat`.
+   *Voie native* : `{{pays:join: · }}` (#663) rend le texte, bien, avec le séparateur voulu.
+   Il n'y a aucun moyen d'émettre `<p class="fr-tag">` par valeur.
+   *Ce que ça coûte ici* : les pays, les thèmes et les publics sont **les trois** multivalués, et
+   ce sont les trois éléments visuellement structurants de la fiche et du panneau. Le rendu passe
+   de trois rangées de pastilles à trois lignes de texte.
+   *Sur quel type de jeu le contournement cesse d'être acceptable* : dès que le nombre de valeurs
+   dépasse ce qu'une ligne porte (ici 10 pays pour MILES, 7 pour AIDL), et dès que chaque valeur
+   doit être cliquable (un tag de thème qui filtrerait la grille — ce que l'original ne fait pas
+   non plus, mais qui est l'usage attendu d'une pastille).
+   *Demande* : `{{#each champ}}…{{/each}}` non imbriqué, ou un pipe `{{champ:tags}}` rendant des
+   `<p class="fr-tag fr-tag--sm">`. **Manque réel.**
+5. **Le cadrage de `dsfr-data-chart type="map-monde"`** — pas d'attribut de zone d'intérêt, donc
+   planisphère obligatoire. **À remonter chez `GouvernementFR/dsfr-chart`, pas ici** (règle 4 du
+   lot 11 ; le JSDoc de `dsfr-data-map-legend` note déjà une issue amont ouverte sur `nb-classes`).
+   Contourné dans cette fiche par la voie `dsfr-data-map` + GeoJSON, qui est meilleure sur tous
+   les plans **sauf** qu'elle demande la géométrie du point 1.
+
+### Ce que la transposition gagne
+
+La carte suit enfin les filtres ; la Slovénie est comptée juste, et un taux d'appariement le
+signalerait sinon ; une légende à quatre classes bornées apparaît ; le clic sur un pays filtre
+**et** se retire au second clic ; les doublons de libellés sont fusionnés ; l'état complet est
+dans l'URL ; la recherche n'indexe plus le suivi éditorial interne ; le panneau de détail garde
+ses sections conditionnelles ; il y a un tableau accessible et un export CSV ; le nombre de fiches
+n'est plus plafonné à 46 ; les `href` sont filtrés par liste blanche de schémas.
+**Treize des dix-sept défauts relevés tombent d'eux-mêmes.**
+Ce que la transposition perd, et rien d'autre : **le clic direct sur une fiche** (point 3) et
+**les pastilles par valeur** (point 4).
 
 ## Données à reproduire fidèlement
 

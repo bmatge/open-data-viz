@@ -364,9 +364,13 @@ Chaque KPI, graphique et carte porte un kebab. Pied de page DSFR : bloc-marque *
 
 ## Transposition vers `dsfr-data`
 
-Attributs vérifiés dans le source (`~/Developer/GitHub/dsfr-data`, version des paquets **0.23.0**) :
-`packages/core/src/components/dsfr-data-{map,map-layer,map-popup,search,source,display}.ts`.
-Tout attribut non vérifié est signalé comme tel.
+**Version de référence : `dsfr-data` 0.25.0** (`docs/portail-education/_CIBLE-0.25.md`). Le dépôt
+épingle encore 0.20.0 sur ses pages, npm sert **0.23.0**, les jalons v0.24.0 (neuf issues) et
+v0.25.0 (quatre issues) sont cadrés. Attributs vérifiés dans le source local
+(`~/Developer/GitHub/dsfr-data`, paquets **0.23.0**) :
+`packages/core/src/components/dsfr-data-{map,map-layer,map-popup,search,source,display,chart,query,podium,normalize,unpivot,facets,context}.ts`,
+`packages/core/src/utils/template-expression.ts`. Liste des issues ouvertes relevée le 2026-09-10
+(`gh issue list`, 22 ouvertes). Tout attribut non vérifié est signalé comme tel.
 
 ### Architecture retenue et pourquoi
 
@@ -393,7 +397,9 @@ l'État. C'est le seul changement d'adresse que la transposition opère, et il e
 | `sum(nombre_d_equipes_a_inscrire)` | `value="nombre_d_equipes_a_inscrire:sum"` |
 | les deux KPI côte à côte + pictogramme | `<dsfr-data-kpi-group>` + `col="6"`. **Ne pas** poser `display:block` sur le groupe, qui est `grid` (PG-011). Le pictogramme n'a pas d'attribut dédié : voir § Limites, point 1 |
 | **manque** : le compte de lignes et d'établissements | `value="count"` sur une query sans `limit` (PG-017) ; le nombre d'UAI distincts passe par un `dsfr-data-query group-by="identifiant_etablissement"` puis `value="count"` (piège « pas d'agrégat `distinct` ») |
-| `comparison.columns` `axisAssemblage: percentage` sur `type_etablissement` | **on ne reproduit pas le champ** : `<dsfr-data-query id="pth-mixite" source="pth-f" group-by="libelle_academie" aggregate="nb_filles:sum:filles, nb_garcons:sum:garcons" order-by="filles:desc" where="libelle_academie:isnotnull">` + `<dsfr-data-chart type="bar" stacked label-field="libelle_academie" value-field="filles, garcons" name="Élèves inscrits">`. **`stacked` et la forme `value-field="a, b"` sont à vérifier** (voir § Limites, point 3) |
+| `comparison.columns` `axisAssemblage: percentage` sur `type_etablissement` | **on ne reproduit pas le champ** : `<dsfr-data-query id="pth-mixite" source="pth-f" group-by="libelle_academie" aggregate="nb_filles:sum:filles, nb_garcons:sum:garcons" order-by="filles:desc" where="libelle_academie:isnotnull">` + `<dsfr-data-chart type="bar" stacked horizontal value-field="filles:Filles" value-fields="garcons:Garçons" label-field="libelle_academie">`. **`stacked` est natif** (`dsfr-data-chart.ts:201`) ; le multi-séries passe par **`value-fields`** avec alias inline `champ:Libellé` (#668, `dsfr-data-chart.ts:157-161`) — **pas** par une liste dans `value-field` |
+| **manque** : aucun classement lisible des académies | `<dsfr-data-podium source="pth-aca" label-field="libelle_academie" value-field="e" value-unit="élèves" max-items="10" selected-palette="sequentialDescending">` — **composant natif**, rang + barre proportionnelle + valeur (`dsfr-data-podium.ts`). C'est le rendu qu'appelle une page de pilotage, et l'original ne l'a pas |
+| **manque** : mise à jour quotidienne, aucun rafraîchissement | `refresh="600"` sur `dsfr-data-source` (secondes, `dsfr-data-source.ts:81-83`) — **natif** |
 | `where (… IS NOT NULL)` | `where="libelle_academie:isnotnull"` **sur la balise `dsfr-data-query` déjà présente**, pas un composant de plus (PG-015) |
 | `composition.doughnut` sur `challenge` (multivalué) | `<dsfr-data-query id="pth-chal" source="pth-f" group-by="challenge" aggregate="identifiant_etablissement:count:nb" order-by="nb:desc">` + `<dsfr-data-chart type="pie" label-field="challenge" value-field="nb">`. **Le comportement d'un `group-by` client sur un champ tableau est à vérifier** (§ Limites, point 4) |
 | `limit: "10"` sur le graphique académies | `order-by="e:desc" limit="10"` sur la `dsfr-data-query` — **et le titre le dit** : « Les dix premières académies » |
@@ -421,8 +427,10 @@ l'État. C'est le seul changement d'adresse que la transposition opère, et il e
 > `{{#unless chemin}}…{{/unless}}` (blocs **non imbriqués**), et
 > `packages/core/src/components/dsfr-data-map-popup.ts:161-164` déclare explicitement utiliser
 > « le même moteur que `<dsfr-data-display>` (#426, #694) : blocs `{{#if}}` ». Le contournement CSS
-> (`:empty`, `[href=""]`, `:has()`) n'est donc plus nécessaire. **À reporter au registre** — ce
-> n'est pas le périmètre de cette fiche, mais l'entrée doit être requalifiée.
+> (`:empty`, `[href=""]`, `:has()`) n'est donc plus nécessaire.
+> **Verdict : natif, mais postérieur à la version épinglée** (0.22.0 > 0.20.0) → c'est une montée
+> de version dans ce dépôt, pas une demande. **À requalifier au registre** — hors périmètre de
+> cette fiche.
 
 ### Esquisse de code
 
@@ -430,7 +438,8 @@ l'État. C'est le seul changement d'adresse que la transposition opère, et il e
 <!-- 557 lignes, 30 champs, 103 Ko gzip en 0,13 s mesuré : un seul aller-retour, tout en client.
      Portail visé : data.education.gouv.fr, pas l'alias de l'éditeur. -->
 <dsfr-data-source id="pth"
-  url="https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/challenge-cyber-passe-ton-hack-d-abord/exports/json?limit=-1">
+  url="https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/challenge-cyber-passe-ton-hack-d-abord/exports/json?limit=-1"
+  refresh="600">
 </dsfr-data-source>
 
 <!-- Les dix premières académies, dit par le titre et par la requête. -->
@@ -497,14 +506,22 @@ l'État. C'est le seul changement d'adresse que la transposition opère, et il e
 
       <h2 class="fr-h4">Mixité, par académie</h2>
       <div class="odv-chart-slot">
+        <!-- Multi-séries : value-field + value-fields avec alias inline (#668).
+             Une liste dans value-field ne fait PAS deux séries. -->
         <dsfr-data-chart id="g-mixite" source="pth-mixite" type="bar" stacked horizontal
-          label-field="libelle_academie" value-field="filles, garcons"
-          name="Élèves inscrits"
+          label-field="libelle_academie"
+          value-field="filles:Filles" value-fields="garcons:Garçons"
           databox databox-title="Filles et garçons inscrits, par académie"
           databox-source="DGESCO — challenge-cyber-passe-ton-hack-d-abord"
           databox-download databox-screenshot></dsfr-data-chart>
         <dsfr-data-a11y for="g-mixite" source="pth-mixite" table download></dsfr-data-a11y>
       </div>
+
+      <h2 class="fr-h4 fr-mt-6w">Les dix premières académies</h2>
+      <dsfr-data-podium source="pth-aca"
+        label-field="libelle_academie" value-field="e"
+        value-unit="élèves" max-items="10"
+        selected-palette="sequentialDescending"></dsfr-data-podium>
 
       <h2 class="fr-h4 fr-mt-6w">Répartition territoriale</h2>
       <div class="fr-grid-row fr-grid-row--gutters">
@@ -563,62 +580,121 @@ l'État. C'est le seul changement d'adresse que la transposition opère, et il e
 
 ## Limites et points durs identifiés
 
-1. **Pictogramme dans un KPI** (`layout_context_and_image`, `imgUrl: /assets/theme_image/students.png`).
-   *Obstacle* : `dsfr-data-kpi` expose `value`, `format`, `decimals`, `heading`, `label`, `col` —
-   **aucun attribut d'image**.
-   *Voie native* : les KPI DSFR se composent avec un `<img>` posé dans la page à côté de la balise,
-   ou une classe de page qui pose un `background-image` sur `dsfr-data-kpi`.
-   *Verdict* : **cosmétique**, et discutable : les deux pictogrammes de l'original (`students.png`,
-   `partners.png`) sont décoratifs et n'apportent rien à la lecture du chiffre. **Ne pas remonter.**
-2. **Le champ `challenge` est multivalué (tableau JSON).**
-   *Obstacle* : l'anneau de l'original compte 654 pour 557 lignes ; une transposition naïve ferait
-   pire, en groupant sur la chaîne `["Challenge lycéen","Equipe enseignante"]` et en produisant
-   **8 secteurs** au lieu de 3.
-   *Voie native à essayer d'abord* : `dsfr-data-unpivot` (composant existant,
-   `packages/core/src/components/dsfr-data-unpivot.ts`) — **non vérifié** sur un champ tableau ;
-   sa vocation est le dépivotement de colonnes, pas l'éclatement d'un tableau de valeurs.
-   L'autre voie native est **serveur** : `group_by=challenge` côté ODS éclate correctement le
-   multivalué (vérifié : 3 groupes, 424/161/69), donc une **source d'agrégation dédiée**
-   (`api-type="opendatasoft"` + `group-by="challenge"` + `aggregate`) rend le bon anneau — au prix
-   d'un contexte qui n'écoute pas les facettes.
-   *Verdict* : **point dur réel, à trancher par un essai.** Ce n'est pas une limite de la
-   bibliothèque tant que `dsfr-data-unpivot` n'a pas été essayé : c'est une case non couverte par
-   la présente vérification.
-3. **Barres empilées à deux séries** (`filles` / `garcons`).
-   *Obstacle* : la correspondance ci-dessus suppose `stacked` et `value-field="filles, garcons"` sur
-   `dsfr-data-chart`. **Ni l'un ni l'autre n'a été vérifié dans le source** pour ce composant.
-   *Voie de repli* : deux `dsfr-data-chart type="bar"` côte à côte, ou un graphique de la part de
-   filles (`aggregate` + champ calculé), ce qui est de toute façon plus lisible qu'un empilement.
-   *Verdict* : **non vérifié**, à confirmer avant d'écrire l'esquisse en dur.
-4. **`group-by` sur `cree_a` pour la série temporelle promise par la page.**
-   *Obstacle* : le piège maison PG-014 est explicite — un `group-by` avec une fonction ODSQL
-   (`year(…)`, `month(…)`) est entouré d'accents graves par l'adaptateur et renvoie 400 ; et grouper
-   sur la date brute donne une barre par jour. Ici la source est **générique** (`/exports/json`),
-   donc le `group-by` est **client** et la question ODSQL ne se pose pas — mais le groupement se fait
-   alors sur la chaîne `2025-09-04`, soit **~150 points**.
-   *Voie native* : `dsfr-data-normalize` pour dériver un champ mois — **non vérifié** qu'il sache
-   tronquer une date.
-   *Verdict* : **non vérifié.** À mesurer avant d'annoncer la courbe comme acquise. C'est le seul
-   ajout de l'esquisse qui n'est pas garanti.
-5. **Les cinq vignettes DROM de la carte des régions** (`navigationMaps`).
-   *Constat* : `dsfr-data-chart type="map-reg"` / `map-dep` s'appuie sur **DSFR Chart** (SVG), dont
-   les tracés régionaux et départementaux **intègrent déjà les DROM**. Il n'y a donc rien à
-   transposer : la carte départementale gagne l'outre-mer que l'original perd.
-   *Rappel de périmètre* : toute limite de `map-dep` / `map-reg` se remonte chez
-   `GouvernementFR/dsfr-chart`, **pas** chez `dsfr-data` (règle 4 du lot 11).
-6. **Plein écran de la carte de points.**
-   *Obstacle* : `dsfr-data-map` n'expose pas de bouton plein écran ; `no-controls` ne fait que
-   masquer le zoom. `databox-fullscreen` existe sur `dsfr-data-chart`, **pas** sur la carte.
-   *Contournement* : `element.requestFullscreen()` sur le conteneur, deux lignes de page.
-   *Verdict* : **petit manque réel** — déjà relevé sur la fiche « Annuaire des internats », donc
-   **à fusionner avec cette entrée du registre, pas à en créer une nouvelle**.
-7. **Le domaine.** C'est le point propre à cette cible, et il ne relève d'aucune capacité technique :
-   une reproduction `dsfr-data` est un fichier HTML statique qu'on héberge où l'on veut. Le sujet
-   n'est pas « `dsfr-data` sait-il faire ? » mais « qui sert la page ». **À dire tel quel dans
-   l'analyse de la page : l'argument de la transposition ici n'est pas fonctionnel, il est
-   institutionnel.** Une balise, un CDN, un fichier statique — et la page revient sous
-   `.gouv.fr` avec les mentions légales de l'État.
-8. **Ce que la transposition gagne**, honnêtement : cinq filtres avec compteurs et cascade, une
+Chaque point est classé selon les quatre verdicts de `_CIBLE-0.25.md` :
+**natif** · **natif mais postérieur à la 0.20.0 épinglée** · **prévu à un jalon** (n° d'issue) ·
+**manque réel** (le seul cas à consigner au registre).
+
+### Manques réels — le résidu de cette page
+
+1. **Aucune agrégation temporelle dans `dsfr-data-query`, alors qu'elle existe déjà dans
+   `dsfr-data-map-layer`.** ⭐ *C'est le résidu principal de cette cible, et il est propre au genre
+   « pilotage » que Bercy n'avait pas.*
+   *Le besoin* : la page **promet** de « suivre l'évolution » des inscriptions (trois fois : au
+   catalogue, sur l'actif, dans le chapô) et ne la montre nulle part. Le jeu porte `cree_a`, du
+   2025-09-03 au 2026-04-22.
+   *Ce qui existe* : `dsfr-data-map-layer` déclare **`time-field`**, **`time-bucket`** (`none`,
+   `hour`, `day`, `month`, `year`) et **`time-mode`** (`snapshot`, `cumulative`), pilotés par
+   `<dsfr-data-map-timeline>` (`dsfr-data-map-layer.ts:344-354`). Le regroupement par mois **est
+   donc déjà implémenté dans la bibliothèque** — mais dans une méthode **privée** de la couche
+   carte (`_bucketDate`), non partagée.
+   *Ce qui n'existe pas* : rien d'équivalent sur `dsfr-data-query` (`group-by` construit sa clé par
+   `String(getByPath(item, f))`, `dsfr-data-query.ts:863`) ni sur `dsfr-data-chart`. `compute` de
+   `dsfr-data-normalize` est explicitement borné à « arithmétique, concaténation, parenthèses —
+   hors périmètre : conditions, fonctions » (`dsfr-data-normalize.ts:90-97`).
+   *Conséquence mesurée* : un `group-by="cree_a"` client produit **une catégorie par jour** sur
+   ~150 jours calendaires ; côté serveur, PG-014 interdit `group_by=month(cree_a)` (accents graves
+   ajoutés par l'adaptateur → 400).
+   *Est-ce prévu ?* **Non.** Les 22 issues ouvertes au 2026-09-10 ne mentionnent aucune
+   granularité temporelle ; #671 (`compute` v2, v0.24.0) annonce « fonctions en liste blanche »
+   mais **la liste n'est pas connue**, et #671 est explicitement borné « par ligne uniquement — ni
+   fenêtre, ni cumul, ni ligne précédente ». La troncature de date est bien un calcul par ligne :
+   **si la liste blanche de #671 comporte une fonction de date, ce point devient « prévu » ; sinon,
+   c'est un manque.** À trancher avec le porteur de #671 — mais **la demande doit être écrite**,
+   parce que le résidu n° 1 de `_CIBLE-0.25.md` (le cumul) et celui-ci pointent le même trou :
+   la dimension temps n'existe que sur la carte.
+   *Demande à formuler* : `time-bucket` (ou `group-by="champ:month"`) sur `dsfr-data-query`, en
+   réutilisant `_bucketDate` de la couche carte.
+2. **`group-by` client sur un champ multivalué compte les combinaisons, pas les valeurs —
+   alors que `dsfr-data-facets` fait l'inverse.** ⭐
+   *Observation* : `challenge` est un `text` multivalué (tableau JSON). Côté serveur ODS,
+   `group_by=challenge` éclate correctement : **3 groupes (424 / 161 / 69)**, vérifié à l'API.
+   Côté client, la clé de groupe est `String(getByPath(item, f))` (`dsfr-data-query.ts:863`) :
+   un tableau devient `"Challenge lycéen,Equipe enseignante"` et l'anneau rendrait
+   **8 secteurs** (les 8 combinaisons observées dans le jeu) au lieu de 3.
+   *Ce qui est troublant* : `dsfr-data-facets` **sait** traiter le multivalué — deux
+   `Array.isArray(val)` explicites (`dsfr-data-facets.ts:757` et `:792`) éclatent les valeurs et
+   comptent chacune séparément. **Asymétrie entre deux composants du même pipeline sur la même
+   donnée** : la facette dit 3, la query dit 8.
+   *Voie native écartée après vérification* : `dsfr-data-unpivot` ne convient pas — il déplie des
+   **noms de colonnes** wide → long (`value-cols-pattern="c{YYYY}_{MM}"`), pas le contenu d'une
+   cellule tableau (`dsfr-data-unpivot.ts:12-34`).
+   *Contournement* : une source d'agrégation dédiée en mode ODS (`api-type="opendatasoft"` +
+   `group-by="challenge"`), qui délègue au serveur — au prix d'un contexte qui n'écoute plus les
+   facettes de la page.
+   *Est-ce prévu ?* **Non** — aucune des 22 issues ouvertes. **Manque réel**, et il n'est pas
+   propre à ce jeu : le multivalué est une convention Opendatasoft courante.
+   *Demande à formuler* : aligner la clé de `group-by` de `dsfr-data-query` sur le traitement
+   du multivalué déjà fait par `dsfr-data-facets`.
+3. **Plein écran d'une carte.** `dsfr-data-map` n'a pas de bouton plein écran (`no-controls` ne
+   fait que masquer le zoom) ; `databox-fullscreen` existe sur `dsfr-data-chart`, pas sur la carte.
+   L'original en a un. Aucune issue ouverte.
+   *Verdict* : **manque réel**, mais déjà relevé par la fiche « Annuaire des internats » →
+   **fusionner** avec l'entrée existante, ne pas en créer une seconde (règle « fusionner avant
+   d'ajouter »).
+
+### Natif — rien à demander
+
+4. **Le classement des académies.** `<dsfr-data-podium>` existe et fait exactement le rendu
+   qu'appelle une page de pilotage : rang, libellé, sous-titre (`subtitle-field`), barre
+   proportionnelle, valeur + unité (`value-unit`), `max-items`, `bar-max`, `no-sort`,
+   `selected-palette` (`dsfr-data-podium.ts`). **L'original n'a pas de podium** : il a un
+   histogramme tronqué à dix sans le dire. **Faux problème si on avait écrit « pas de classement ».**
+5. **Le rafraîchissement périodique.** Une page de pilotage sur une donnée quotidienne appelle un
+   rafraîchissement : `refresh` (secondes, `dsfr-data-source.ts:81-83`) est **natif**. Le « temps
+   réel » au sens strict (WebSocket, SSE) n'a pas d'équivalent, mais **la donnée est mise à jour
+   une fois par jour** : le besoin n'existe pas ici, et il ne faut pas l'inventer.
+6. **Barres empilées à deux séries.** `stacked` est natif (`dsfr-data-chart.ts:201`) et le
+   multi-séries passe par `value-fields` avec alias inline `champ:Libellé` (#668,
+   `dsfr-data-chart.ts:157-161`). **Attention à la grammaire** : une liste dans `value-field`
+   (`value-field="filles, garcons"`) ne fait **pas** deux séries — c'est le genre d'erreur
+   silencieuse que PG-022 décrit.
+7. **Les facettes sur un champ multivalué** (`challenge`) : natif, voir le point 2.
+
+### Natif, mais postérieur à la version épinglée (0.20.0)
+
+8. **Les blocs `{{#if}}` / `{{#unless}}` dans les templates de popup et de `dsfr-data-display`**
+   (0.22.0, #694). Voir la note plus haut : **montée de version ici, pas une demande.**
+   AM-039 (« aucune conditionnelle dans un template ») est à requalifier au registre.
+9. **`refine-on-click`, `context`, `label` et l'événement `dsfr-data-map-select`** sur
+   `dsfr-data-map-layer` (0.23.0, #681) — vérifiés au source
+   (`dsfr-data-map-layer.ts:135-136, 188, 209, 213, 529`). Ils restent **absents de la fiche
+   servie par `get_skill(dsfrDataMap, "reference")`** : c'est déjà le résidu n° 3 de
+   `_CIBLE-0.25.md`, cette fiche le **confirme**, ne pas le redéposer.
+
+### Cosmétique ou hors périmètre — ne pas remonter
+
+10. **Pictogramme dans un KPI** (`layout_context_and_image`, `imgUrl`).
+    `dsfr-data-kpi` expose `value`, `format`, `decimals`, `heading`, `label`, `col` — pas d'image.
+    Les deux pictogrammes de l'original (`students.png`, `partners.png`) sont **décoratifs** ;
+    un `<img>` posé à côté de la balise ou un `background-image` de page suffit.
+    *Verdict* : **cosmétique. Ne pas remonter.**
+11. **Le domaine.** Une reproduction `dsfr-data` est un fichier HTML statique : le sujet n'est pas
+    « `dsfr-data` sait-il faire ? » mais « qui sert la page ». **À dire dans l'analyse de la page :
+    l'argument de la transposition est ici institutionnel, pas fonctionnel.**
+12. **Les cinq vignettes DROM de la carte des régions** (`navigationMaps`).
+    *Constat* : `dsfr-data-chart type="map-reg"` / `map-dep` s'appuie sur **DSFR Chart** (SVG),
+    dont les tracés régionaux et départementaux **intègrent déjà les DROM**. Il n'y a donc rien à
+    transposer : la carte départementale gagne l'outre-mer que l'original perd.
+    *Rappel de périmètre* : toute limite de `map-dep` / `map-reg` se remonte chez
+    `GouvernementFR/dsfr-chart`, **pas** chez `dsfr-data` (règle 4 du lot 11).
+    ⚠️ Le résidu n° 4 de `_CIBLE-0.25.md` prévient que `map-reg` **attend des codes ISO 3166-2, pas
+    l'INSEE**, et rend une carte grise sans erreur. Le jeu porte `code_region` en **INSEE**
+    (`11`, `76`, `93`, `52`…). **Non rejoué au navigateur ici** — c'est le point à vérifier en
+    premier si la carte régionale sort vide.
+
+### Ce que la transposition gagne
+
+13. **Honnêtement** : cinq filtres avec compteurs et cascade, une
    recherche par nom de lycée, une URL partageable, un graphique de mixité lisible (sur l'académie,
    pas sur un identifiant Grist), un axe qui dit ce qu'il mesure, les DROM sur les deux cartes, une
    légende qui nomme le secteur au lieu de l'identifiant du jeu, une infobulle à huit champs au lieu

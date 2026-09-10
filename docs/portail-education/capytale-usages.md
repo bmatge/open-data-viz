@@ -357,7 +357,9 @@ d'académie — ce que l'original ne fait pas.
 | « Top académies — visites cumulées » (10 lignes en dur) | `<dsfr-data-podium source="paraca" label-field="academie" value-field="data_nb_visits__sum" max-items="10" value-unit="visites">` — **le composant existe** : rang, barre proportionnelle, couleur. Une balise pour dix `<div>` |
 | « Classement détaillé » (tableau 15 lignes en dur) | `<dsfr-data-list source="paraca" columns="academie, data_nb_visits__sum, actions_par_visite" sort pagination="15">` — attributs **anglais** (`colonnes`/`tri` sont dépréciés) |
 | colonne « Act./visite » (ratio) | `<dsfr-data-normalize compute="actions_par_visite = data_nb_actions__sum / data_nb_visits__sum" round="actions_par_visite:1">` — `compute` fait l'arithmétique, `round` la décimale. Le point décimal reste un point : `round` en amont d'un tableau accessible est le motif du dépôt (AM-033) |
-| pastilles de seuil vert/bleu/orange | `threshold-green` / `threshold-orange` existent sur `dsfr-data-kpi`, **pas** sur une cellule de `dsfr-data-list`. Voir § Limites |
+| pastilles de seuil vert/bleu/orange | `threshold-green` / `threshold-orange` existent sur `dsfr-data-kpi`, **pas** sur une cellule de `dsfr-data-list`. **Prévu** : `compute` v2 `when … then … else` (#671, v0.24.0) dérive une colonne de classe, interpolée dans un `class=` d'un template `dsfr-data-display`. Voir § Limites |
+| colonne « Act./visite » : décimales du tableau | depuis 0.22.0 (#666), `dsfr-data-list` et `dsfr-data-a11y` rendent les nombres en français (`7.6` → « 7,6 ») avec un attribut `decimals`. **Le `round` en amont n'est donc plus obligatoire** pour la seule lisibilité (il reste utile pour l'export CSV, qui sort brut) — le piège AM-033 est à relire à l'aune de 0.22.0 |
+| tableau sans intitulé | `caption="Classement des académies"` sur `dsfr-data-list` (#669, 0.22.0, RGAA 5.4) |
 | « Intensité d'usage » (19 colonnes en dur, échelle tronquée) | `<dsfr-data-chart type="bar" horizontal source="paraca" label-field="academie" value-field="actions_par_visite" y-min="0">` — **`y-min="0"` corrige l'échelle tronquée de l'original** |
 | pied de page « Données : … » sans lien | `databox-source="DNE — Académie de Paris, Licence Ouverte 2.0"` + `databox-download` sur chaque graphique |
 | — (rien dans l'original) | `<dsfr-data-a11y for="…" table download>` sous chaque graphique |
@@ -470,16 +472,70 @@ d'académie — ce que l'original ne fait pas.
 
 ## Limites et points durs identifiés
 
-1. **`type="map-aca"` accepte-t-il les 32 valeurs du jeu ?**
-   *Obstacle* : la référence dit « noms d'académie majuscules » et donne `{"PARIS": 95, "LYON": 78}`.
-   Le jeu contient **AEFE** (447 visites, 13 mois) et **POLYNESIE**, qui ne sont pas des académies
-   métropolitaines du découpage DSFR Chart, et **NORMANDIE** / **NANCY-METZ**, dont l'orthographe
-   exacte attendue est à confirmer.
-   *Voie native de diagnostic* : `dsfr-data-chart.getSkippedCount()` retourne « le nombre de lignes
-   ignorées par la dernière carte rendue : code géographique absent, vide ou invalide ». C'est
-   exactement l'outil pour le savoir.
-   *Statut* : **non vérifié au navigateur.** À faire avant de conclure quoi que ce soit — et si des
-   lignes tombent, le juger contre l'original, qui en oublie 14 sur 32 sans le dire.
+> **Cible : `dsfr-data` 0.25.0** (`_CIBLE-0.25.md`), pas le `dsfr-data@0.20.0` épinglé par le
+> dépôt. Quatre verdicts : **natif** / **natif mais postérieur à 0.20.0** / **prévu à un jalon**
+> (numéro d'issue) / **manque réel**. Vérifications faites au source
+> (`~/Developer/GitHub/dsfr-data`, HEAD = release 0.23.0) et dans le bundle DSFR Chart livré,
+> pas à la fiche MCP.
+
+### Corrections après lecture du source (natif, postérieur à 0.20.0)
+
+- **`max-records` ne tronque plus en silence** : depuis 0.22.0 (#658), la source pose
+  `truncated: true` dans sa meta et le volet Diagnostic rend « tronqué à N / total lignes
+  (plafond max-records) ». Le piège du `CLAUDE.md` reste vrai sur 0.20.0 ; il est **instrumenté**
+  à partir de 0.22.0. Poser `max-records="2000"` reste nécessaire, mais l'oubli devient visible.
+- **`dsfr-data-list` / `dsfr-data-a11y` formatent les nombres en français** (#666) et acceptent
+  `caption` (#669, RGAA 5.4).
+- **Une fonction d'agrégat mal orthographiée n'est plus silencieuse** (#649, 0.21.1) : erreur de
+  configuration au lieu d'un 0 plausible.
+- **Blocs `{{#if}}` / `{{#unless}}` et pipes `:number:2`, `:date`, `:join`, `:url`** dans les
+  templates de `dsfr-data-display` (#662, #663, #664, 0.22.0). Le piège AM-039 du `CLAUDE.md`
+  (« aucune conditionnelle dans un template ») décrit 0.20.0 et **est périmé**.
+
+### Prévu à un jalon
+
+- **Pastille de seuil sur une valeur de tableau** (vert > 8 / bleu 7–8 / orange < 7) :
+  `compute` v2 avec `when … then … else` (**#671**, v0.24.0) produit une colonne
+  `classe_intensite`, qu'un template de `dsfr-data-display` interpole dans un `class=`.
+  Aujourd'hui impossible — `compute` v1 ne fait ni condition ni fonction, et `{{#if}}` ne teste
+  qu'une vérité, pas une comparaison. **Ce n'est donc pas une limite dure, c'est un calendrier.**
+  *Résidu mineur associé* : même après #671, `dsfr-data-list` n'aura pas de formatage par cellule ;
+  il faudra passer par `dsfr-data-display`. À signaler, sans en faire une demande séparée.
+
+### Manques réels
+
+1. **`type="map-aca"` : trois académies du jeu tombent, et `getSkippedCount()` renvoie 0.**
+   *Établi par lecture du code, pas au navigateur.* Deux constats se combinent :
+   - Dans `dsfr-data-chart.ts` (`_processMapData`), la branche `map-aca` fait **uniquement**
+     `code = code.toUpperCase()` et n'incrémente `_skippedGeoCount` **que si la chaîne est vide**.
+     Une clé non reconnue par DSFR Chart est donc transmise telle quelle, sans avertissement.
+   - Les clés du découpage `aca` extraites du bundle livré
+     (`node_modules/@gouvfr/dsfr-chart/dist/MapChart/MapChart.js`) sont **30, en majuscules non
+     accentuées** : AIX-MARSEILLE, AMIENS, BESANCON, BORDEAUX, CLERMONT-FERRAND, CORSE, CRETEIL,
+     DIJON, GRENOBLE, LILLE, LIMOGES, LYON, MONTPELLIER, NANCY-METZ, NANTES, NICE, NORMANDIE,
+     ORLEANS-TOURS, PARIS, POITIERS, REIMS, RENNES, STRASBOURG, TOULOUSE, VERSAILLES,
+     GUADELOUPE, MARTINIQUE, GUYANE, **REUNION**, MAYOTTE.
+
+   *Conséquence chiffrée sur ce jeu* : 29 des 32 académies s'apparient. Tombent
+   **`LA REUNION`** (la clé est `REUNION`, sans l'article — 166 454 visites), **`POLYNESIE`**
+   (57 430) et **`AEFE`** (447), soit **224 331 visites, 2,0 % du total**, muettes sur la carte,
+   sans warning console et avec `getSkippedCount() = 0`.
+   *Rapport avec `_CIBLE-0.25.md` point 4* : c'est la **confirmation par les clés du bundle** de ce
+   qui y est noté « établi par lecture du code, non rejoué » — à fusionner avec ce constat plutôt
+   qu'à redéposer. Ce que cette page ajoute : la liste exacte des 30 clés, et le cas `LA REUNION`
+   / `REUNION`, qui n'est ni un accent ni une casse mais **un article**.
+   *Deux demandes distinctes* : (a) chez `dsfr-data`, normaliser la clé `aca` (désaccentuer,
+   retirer l'article) **et compter comme ignorée** toute clé hors découpage — un
+   `getSkippedCount()` à 0 sur une carte partiellement grise est pire que pas de compteur du tout ;
+   (b) chez `GouvernementFR/dsfr-chart`, le découpage `aca` ignore **AEFE, la Polynésie française,
+   la Nouvelle-Calédonie, Wallis-et-Futuna, Saint-Pierre-et-Miquelon** — cinq territoires qui sont
+   des académies de plein exercice dans la donnée du ministère (règle 4 du lot 11 : ce point-là
+   se remonte là-bas, pas ici).
+   *À faire avant dépôt* : rejouer au navigateur pour confirmer que DSFR Chart ne fait pas
+   lui-même une normalisation de clé — la lecture du bundle ne le montre pas, mais elle ne
+   l'exclut pas formellement.
+   *À juger contre l'original* : il oublie **14 académies sur 32** sans le dire. Trois valent
+   mieux que quatorze — mais un manque silencieux reste un manque.
 2. **Mettre en évidence les mois d'été dans une série glissante.**
    *Obstacle* : `highlight-index='[1,2,13,14,…]'` est **positionnel** ; sur une fenêtre de 36 mois
    qui glisse, les index changent tous les mois.
@@ -490,28 +546,17 @@ d'académie — ce que l'original ne fait pas.
    *Verdict* : **`reference-lines` est le bon équivalent, pas `highlight-index`.** L'intention de
    l'original (« les creux sont saisonniers ») est mieux servie par un repère de rentrée que par
    six barres grises invisibles.
-3. **Colorer une cellule de tableau selon un seuil.**
-   *Obstacle* : `threshold-green` / `threshold-orange` existent sur `dsfr-data-kpi` mais pas sur
-   `dsfr-data-list`, dont la référence ne propose aucun formatage conditionnel par cellule.
-   *Voie native* : aucune. Il n'y a **pas de conditionnelle dans un template** (AM-039), et
-   `dsfr-data-list` n'a pas de template.
-   *Contournement* : passer par `dsfr-data-display` (qui, lui, a un `<template>`) et interpoler la
-   valeur dans un attribut — `<span class="odv-pill" data-v="{{actions_par_visite}}">` — puis
-   sélectionner en CSS par plage. **Sur quoi ce contournement cesse de marcher** : CSS ne compare
-   pas des nombres ; il faudrait une classe pré-calculée, or `compute` ne fait pas de condition.
-   *Verdict* : **manque réel, à remonter** — soit une classe conditionnelle dans le template de
-   `dsfr-data-display`, soit `threshold-*` par colonne sur `dsfr-data-list`. C'est le seul point de
-   cette page où aucune voie native n'aboutit.
-4. **Les trois liens « Nombre de visites / Répartition / Usages académiques ».**
+3. **Les trois liens « Nombre de visites / Répartition / Usages académiques ».**
    *Constat* : ce sont des liens vers des pages d'actif du portail — du **chrome de plateforme**.
    Un site institutionnel les remplace par un lien vers le jeu et une mention de licence.
    **Ne pas les compter comme un manque de `dsfr-data`.**
-5. **Ce que la transposition gagne** : chaque chiffre est recalculé (donc juste, et juste
+4. **Ce que la transposition gagne** : chaque chiffre est recalculé (donc juste, et juste
    demain) ; le filtre académie pilote la page entière ; la carte est une vraie carte académique
    avec légende et infobulles ; le classement et le podium sont des composants ; les échelles
    partent de zéro ; l'URL est partageable ; chaque graphique a un tableau accessible et un export.
    **Quatorze des vingt défauts relevés tombent d'eux-mêmes.** Ce qu'elle perd : la maîtrise
-   pixel du GIF et le cadrage éditorial des 18 académies choisies.
+   pixel du GIF, le cadrage éditorial des 18 académies choisies, et — tant que le point 1 n'est
+   pas traité — La Réunion, la Polynésie et l'AEFE sur la carte.
 
 ## Données à reproduire fidèlement
 

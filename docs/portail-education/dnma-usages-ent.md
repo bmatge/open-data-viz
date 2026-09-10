@@ -508,7 +508,104 @@ Plus **une cinquième source pour la série temporelle** que l'original n'a pas 
 
 ## Limites et points durs identifiés
 
-1. **Dériver l'« année scolaire » depuis une date, sans script.**
+> **Cible : `dsfr-data` 0.25.0** (`_CIBLE-0.25.md`), pas le `dsfr-data@0.20.0` épinglé par le
+> dépôt. Quatre verdicts : **natif** / **natif mais postérieur à 0.20.0** / **prévu à un jalon**
+> (numéro d'issue) / **manque réel**. Vérifications faites au source
+> (`~/Developer/GitHub/dsfr-data`, HEAD = release 0.23.0) et dans le bundle DSFR Chart livré.
+
+### Corrections après lecture du source (natif, postérieur à 0.20.0)
+
+- **`meta.truncated`** (#658, 0.22.0) : une source qui ne livre qu'un sous-ensemble le dit, et le
+  volet Diagnostic rend « tronqué à N / total lignes ». Sur des jeux de 3,9 M lignes, c'est le
+  garde-fou qui manquait.
+- **`value="meta:total"`** sur un KPI (#659, 0.22.0) : le total serveur, là où `count` ne compte
+  que les lignes reçues. Directement utile au KPI « Enregistrements » de la carte Territoires.
+- **Alias inline `col:Libellé` sur `value-cols` d'`unpivot`** (#668, 0.22.0) — c'est ce qui rend
+  le repli des 24 colonnes de services lisible sans table de correspondance.
+- **Une fonction d'agrégat inconnue lève une erreur de configuration** (#649, 0.21.1) au lieu de
+  produire un 0 plausible. Sur une page à 39 agrégats, ce n'est pas un détail.
+- **Blocs `{{#if}}` / `{{#unless}}` et pipes `:number:2`, `:date`, `:join`, `:url`** dans les
+  templates de `dsfr-data-display` (#662, #663, #664, 0.22.0) : le piège AM-039 du `CLAUDE.md`
+  décrit 0.20.0 et **est périmé**.
+
+### Prévu à un jalon
+
+- **Les parts (« 40,2 % des visites »)** que la page calcule à la main en divisant quatre
+  agrégats : **#673** (ratio de deux agrégats, `value="<expr> / <expr>"`) et **#674** (`where` sur
+  le KPI), v0.24.0. Aujourd'hui il faut passer par `compute` sur un résultat agrégé.
+- **« Combien d'UAI distincts ? »** — la question qu'on se pose immédiatement sur un jeu
+  UAI × semaine, et qu'aucun bloc de la page ne pose : **#672** (`count(distinct)`, v0.24.0).
+- **Une colonne dérivée conditionnelle** (période scolaire / été, seuil d'intensité) : **#671**
+  (`compute` v2 `when … then … else`, v0.24.0).
+- **Le mur des 10 000 offsets** : sans objet ici, parce que **rien n'est chargé côté client** —
+  les quatre sources n'exposent que des agrégats serveur. **#689** (`fetch-mode="export"`,
+  v0.25.0) ne concerne pas cette page, et c'est en soi un enseignement : sur 12,35 M lignes,
+  le bon réflexe n'est pas de mieux charger, c'est de ne pas charger.
+
+### Manques réels
+
+1. **Aucun opérateur d'« année scolaire ».**
+   *Établi* : les opérateurs de `dsfr-data-context-filter` sont `eq, in, lt, gte, between,
+   contains, month-of, year-of, lt-day-after, last-n-days, current-year, current-month`
+   (référence + source). Tous raisonnent en **année civile** ou en fenêtre glissante.
+   L'année scolaire (1ᵉʳ août → 31 juillet) n'existe nulle part, et `year-of` est **activement
+   trompeur** ici : il tronque à l'année civile et couperait chaque année scolaire en deux, en
+   silence.
+   *Voie native retenue* : `operator="between"` avec deux contrôles d'UI, et un `<select>` dont
+   chaque `<option value>` porte la borne basse — ce que fait l'original en substance, mais avec
+   trois années écrites en dur au lieu des sept que contient le jeu.
+   *Pourquoi c'est un constat et pas un caprice* : l'année scolaire est **l'unité de temps du
+   portail Éducation**, comme l'exercice budgétaire l'est ailleurs. Elle apparaîtra sur toutes les
+   pages de ce portail qui portent une date. Bercy n'avait ni ce besoin ni ce découpage — c'est
+   exactement le type de résidu que l'extension à un second portail devait faire apparaître.
+   *Demande* : `operator="school-year"` (ou un `year-of` avec un mois de bascule paramétrable,
+   `year-start-month="8"`), qui produirait la plage `[1er août N, 1er août N+1)`.
+   *Rien au source, rien au backlog v0.24/v0.25 au 2026-09-10.* **Manque réel.**
+2. **Les compteurs de facette sur une table de mesures ne veulent rien dire.**
+   *Établi à l'écran* : la facette `academie` de cette page compte des **lignes UAI × semaine** —
+   « Lille 326 879 », « Versailles 303 524 ». Un lecteur y lit spontanément un volume d'usage ;
+   c'est un nombre de lignes techniques, et il classe Lille devant Versailles alors que Versailles
+   a plus de visites. `dsfr-data-facets` (en local comme en `server-facets`) ne sait compter que
+   des lignes : aucun attribut ne permet de pondérer une facette par une mesure.
+   *Voie native essayée* : `hide-counts` — masquer plutôt que tromper. C'est le bon réflexe ici,
+   et c'est une régression d'information.
+   *Pourquoi c'est propre à ce portail* : les jeux de Bercy sont très majoritairement « une ligne =
+   un objet » (un établissement, une commune), où le compte de lignes **est** l'information. Les
+   quatre jeux DNMA sont des tables de faits hebdomadaires : le compte de lignes n'y a aucun sens
+   métier. Trois des jeux du portail Éducation dépassent 3 M de lignes sur ce modèle.
+   *Demande* : `weight-field="visites_globales"` sur `dsfr-data-facets` (compteur = somme d'une
+   mesure au lieu d'un nombre de lignes), au moins en mode local ; en `server-facets`, ODS ne le
+   sait pas faire non plus, donc l'alternative honnête serait un `hide-counts` **automatique**
+   assorti d'un avertissement.
+   *Rien au source, rien au backlog.* **Manque réel.**
+3. **`type="map-aca"` : neuf des 35 académies de ce jeu tombent, et `getSkippedCount()` renvoie 0.**
+   *Établi par lecture du code, pas au navigateur.*
+   Dans `dsfr-data-chart.ts` (`_processMapData`), la branche `map-aca` fait **uniquement**
+   `code.toUpperCase()` et ne compte comme ignorée qu'une chaîne **vide**. Les clés du découpage
+   `aca` extraites du bundle livré (`@gouvfr/dsfr-chart/dist/MapChart/MapChart.js`) sont **30, en
+   majuscules non accentuées** (AIX-MARSEILLE, AMIENS, BESANCON, … ORLEANS-TOURS, …, GUADELOUPE,
+   MARTINIQUE, GUYANE, **REUNION**, MAYOTTE).
+   *Conséquence chiffrée sur ce jeu* : `academie` y est stocké **en casse normale accentuée**
+   (« Orléans-Tours », « Besançon », « Créteil »). Après `toUpperCase()` on obtient
+   `ORLÉANS-TOURS`, `BESANÇON`, `CRÉTEIL` — qui ne sont **pas** les clés. S'y ajoutent
+   `LA RÉUNION` (la clé est `REUNION`, sans article ni accent), `POLYNÉSIE FRANÇAISE`,
+   `NOUVELLE-CALÉDONIE`, `ETRANGER`, `SAINT-PIERRE-ET-MIQUELON`, `WALLIS-ET-FUTUNA`.
+   **Neuf académies sur 35 muettes, sans warning, avec `getSkippedCount() = 0`.**
+   *Le point qui fait la démonstration* : le jeu Capytale du **même portail** stocke ces mêmes
+   académies en `MAJUSCULES SANS ACCENTS` et n'en perd que trois. **Deux jeux du même producteur,
+   deux normalisations opposées, aucune des deux détectée.** Une désaccentuation dans
+   `_processMapData` réglerait les six accents d'un coup.
+   *Rapport avec `_CIBLE-0.25.md` point 4* : à **fusionner** avec ce constat, qui y est noté
+   « établi par lecture du code, non rejoué ». Ce que cette page ajoute : les 30 clés exactes du
+   bundle, le cas `LA RÉUNION` / `REUNION` (article **et** accent), et la contradiction entre deux
+   jeux du même portail.
+   *Deux demandes distinctes* : (a) chez `dsfr-data`, désaccentuer et normaliser la clé `aca`,
+   **et compter comme ignorée** toute clé hors découpage ; (b) chez `GouvernementFR/dsfr-chart`,
+   le découpage `aca` ignore AEFE, la Polynésie française, la Nouvelle-Calédonie,
+   Wallis-et-Futuna et Saint-Pierre-et-Miquelon (règle 4 du lot 11).
+   *À faire avant dépôt* : rejouer au navigateur pour confirmer que DSFR Chart ne normalise pas
+   la clé de son côté.
+4. **Dériver l'« année scolaire » depuis une date, sans script — le détail technique.**
    *Obstacle* : l'année scolaire (1ᵉʳ août → 31 juillet) n'est ni `year-of` ni `current-year` ;
    `dsfr-data-normalize compute` gère l'arithmétique et la concaténation, **pas les conditions ni
    les fonctions de date** (sa référence le dit : « Hors périmètre : conditions, fonctions »).
