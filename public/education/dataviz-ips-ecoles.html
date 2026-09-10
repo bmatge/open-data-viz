@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPS des écoles — open-data-viz</title>
+  <meta name="description" content="Reproduction avec dsfr-data de la dataviz « IPS Ecoles » de data.education.gouv.fr : 32 625 écoles, chargement à la demande.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/education">Portail Éducation</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">IPS Écoles</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Indice de position sociale des écoles — rentrée 2023-2024</h1>
+
+    <p class="fr-text--lead">
+      <strong>32 625 écoles</strong> pour la seule rentrée 2023-2024, sur un jeu qui en compte
+      279 318 toutes rentrées confondues. C'est le plus gros volume rencontré par ce banc
+      d'essai, et c'est ce qui rend cette page intéressante : <strong>on ne charge rien tant
+      que vous n'avez pas choisi un département.</strong>
+    </p>
+
+    <div class="fr-callout fr-icon-database-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/donnees-ips-ecoles/"
+           target="_blank" rel="noopener external"><code>donnees-ips-ecoles</code></a>
+        — 279 318 lignes sur 9 rentrées, produit par la DEPP, jeu technique
+        <em>hors catalogue</em>, lu sans clé. Contrairement au jeu des collèges, il porte les
+        <strong>IPS de référence</strong> — national, académique et départemental — ce qui
+        permet de situer chaque école, et qu'aucune des quatre pages IPS du portail ne fait.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        <strong>304 écoles sont écartées</strong> : elles n'ont ni position, ni commune, ni
+        département. La carte en montre donc <strong>32 321</strong> sur 32 625.
+      </p>
+    </div>
+
+    <div class="fr-callout fr-icon-timer-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Pourquoi cette page attend votre choix</h2>
+      <p class="fr-callout__text fr-text--sm">
+        Trois mesures, prises à l'API avant d'écrire la page :
+      </p>
+      <ul class="fr-text--sm">
+        <li>tout charger d'un coup — <code>/exports/json</code> sur la rentrée entière :
+          <strong>28,9 Mo en 5,2 s</strong> ;</li>
+        <li>en restreignant les colonnes par <code>select</code> :
+          <strong>12,0 Mo en 2,6 s</strong> — toujours trop pour une page ;</li>
+        <li>un seul département (le Nord, le plus fourni) :
+          <strong>1,1 Mo en 0,22 s</strong>.</li>
+      </ul>
+      <p class="fr-callout__text fr-text--sm">
+        Vingt-cinq fois plus léger. La page ne fait donc <strong>aucune requête au
+        chargement</strong> — vérifiable dans l'onglet réseau — hors la liste des
+        104 départements, qui coûte une requête agrégée de 93 ms.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       L'architecture de cette page est son sujet.
+
+       L'original charge sa page, puis n'affiche rien : sa couche de carte est
+       conditionnée à un refine département OU commune, si bien qu'au chargement
+       la carte est vide — et qu'elle le reste si l'on choisit une académie.
+       Il fait donc le pire des deux mondes : il demande de la donnée et ne la
+       montre pas.
+
+       Ici, `require-where` (#690) tient la promesse que l'original suggère :
+       tant qu'aucun filtre n'est arrivé PAR COMMANDE, la source n'émet aucune
+       requête, publie `dsfr-data-idle`, et les afficheurs rendent leur message
+       d'attente au lieu d'un chiffre faux.
+
+       Ce qui compte comme « filtre par commande » (JSDoc) : facettes serveur,
+       recherche serveur, contexte, délégation d'une query. PAS une facette en
+       mode client, qui filtre l'aval sans rien commander. D'où le montage :
+
+         source-departements ──> facette ──(context)──> contexte ──> source ips
+              (1 requête               (104 valeurs)      commande       (export
+               agrégée, 93 ms)                            `where`         filtré)
+
+       Le `where` posé en ATTRIBUT sur la source (rentrée, position non nulle)
+       ne compte pas comme filtre : il n'arrive pas par commande. C'est ce qui
+       permet de cadrer le jeu sans déclencher le chargement.
+       ========================================================================== -->
+
+  <!-- La liste des 104 départements, en UNE requête agrégée (93 ms mesuré).
+       C'est le pendant de l'`ods-adv-analysis` de l'original, qui calcule
+       `count(*) as tot` et n'affiche jamais le compte. Le `count(*) as n`
+       ci-dessous n'est pas affiché non plus — voir le commentaire de la facette
+       qui le consomme : elle ne sait pas lire un effectif pré-agrégé (AM-067). -->
+  <dsfr-data-source id="ecoles-deps" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
+    group-by="libelle_departement"
+    select="libelle_departement, count(*) as n"
+    where="rentree_scolaire = '2023-2024' and libelle_departement is not null"
+    max-records="200">
+  </dsfr-data-source>
+
+  <!-- `require-where` : aucune requête tant que le contexte n'a rien commandé.
+       `select` : on écarte les doublons du schéma (`departement` et
+       `libelle_departement`, `academie` et `libelle_academie`, `region`,
+       `num_ligne`, les six IPS de référence public/privé) — 12,0 Mo au lieu de
+       28,9 sur la rentrée entière, et proportionnellement sur un département. -->
+  <dsfr-data-source id="ecoles" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
+    fetch-mode="export" require-where max-records="40000"
+    where="rentree_scolaire = '2023-2024' and position is not null"
+    select="uai, appellation_officielle, ips, secteur, libelle_commune, libelle_departement, libelle_academie, position, ips_national, ips_departemental, ips_academique">
+  </dsfr-data-source>
+
+  <dsfr-data-context id="ecoles-ctx" sources="ecoles" url-sync></dsfr-data-context>
+
+  <!-- L'écart à la référence départementale : la comparaison que le jeu rend
+       possible et qu'aucune des quatre pages IPS du portail n'affiche. -->
+  <dsfr-data-normalize id="ecoles-n" source="ecoles"
+    compute="ecart_dep = round(ips - ips_departemental, 1); tranche_ips = when ips &lt; 90 then 'Moins de 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 125 then '110 à 125' else '125 et plus'">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+
+      <div class="fr-col-12 fr-col-md-3">
+        <h2 class="fr-h6">Choisir un département</h2>
+        <!-- Cette facette-ci lit la source AGRÉGÉE (104 départements avec leur
+             compte) et s'enregistre dans le contexte : c'est elle qui commande
+             le chargement. `url-sync` et `url-params` sont ignorés en mode
+             contexte — c'est le contexte qui porte l'URL. -->
+        <!-- ⚠️ `hide-counts` n'est pas un choix de style, c'est une correction.
+             Cette facette est bâtie sur une source PRÉ-AGRÉGÉE : une ligne par
+             département, avec l'effectif dans la colonne `n`. La facette, elle,
+             recompte ses lignes — et affiche donc « Nord 1 » là où il y a
+             1 268 écoles. Elle n'a aucun attribut pour lire une colonne de poids
+             (vérifié au source : ni `count-field`, ni équivalent). Faute de quoi
+             on masque un compteur faux plutôt que de l'afficher. L'effectif réel
+             est calculé et transite dans la réponse — comme dans l'original, qui
+             calcule `count(*) as tot` et ne l'affiche pas davantage. Constat AM-067. -->
+        <dsfr-data-facets id="ecoles-dep" source="ecoles-deps"
+          context="ecoles-ctx"
+          fields="libelle_departement"
+          labels="libelle_departement:Département"
+          display="libelle_departement:radio"
+          sort="alpha:asc" max-values="12" hide-counts>
+        </dsfr-data-facets>
+
+        <h2 class="fr-h6 fr-mt-4w">Affiner</h2>
+        <!-- Celles-ci sont des facettes CLIENT sur les données déjà chargées :
+             elles ne commandent rien, elles filtrent l'aval. -->
+        <dsfr-data-facets id="ecoles-f" source="ecoles-n"
+          fields="secteur, tranche_ips, libelle_commune"
+          labels="secteur:Secteur | tranche_ips:Tranche d'IPS | libelle_commune:Commune"
+          display="secteur:radio-inline | tranche_ips:checkbox | libelle_commune:radio"
+          sort="alpha:asc">
+        </dsfr-data-facets>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-9">
+
+        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+          <dsfr-data-kpi source="ecoles-f" value="count" format="nombre"
+            heading="Écoles" label="dans la sélection"
+            idle-message="—"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ecoles-f" value="ips:avg" format="decimal" decimals="1"
+            heading="IPS moyen" label="de la sélection"
+            idle-message="—"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ecoles-f" value="ips_departemental:max" format="decimal" decimals="1"
+            heading="IPS départemental" label="référence du département"
+            idle-message="—"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ecoles-f" value="libelle_commune:distinct" format="nombre"
+            heading="Communes" label="concernées"
+            idle-message="—"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <dsfr-data-map id="carte-ecoles"
+          name="Écoles de France et leur indice de position sociale, rentrée 2023-2024"
+          height="620px" tiles="ign-plan" tiles-style="muted"
+          insets="drom" fit-bounds fit-max-zoom="14">
+          <!-- `cluster` : sur un département fourni (le Nord en compte 1 268),
+               les écoles sont très denses en zone urbaine. Le regroupement garde
+               la carte lisible ET le DOM léger. -->
+          <dsfr-data-map-layer id="couche-ecoles" source="ecoles-f" type="circle"
+            geo-field="position" radius="5" fill-opacity="0.9"
+            color-field="tranche_ips"
+            color-map="Moins de 90:#c9191e,90 à 100:#e4794a,100 à 110:#929292,110 à 125:#7ab1e8,125 et plus:#000091"
+            tooltip-field="appellation_officielle"
+            max-items="40000">
+          </dsfr-data-map-layer>
+          <dsfr-data-map-legend for="couche-ecoles" label="Indice de position sociale"></dsfr-data-map-legend>
+          <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="380px">
+            <template>
+              <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur|secteur non renseigné}}</p>
+              <p class="fr-display--xs fr-mb-1v">{{ips:number:1|—}}</p>
+              <p class="fr-text--sm fr-mb-3v">Indice de position sociale, rentrée 2023-2024</p>
+
+              <!-- Les trois références sont dans le jeu et ne sont affichées nulle
+                   part sur le portail. L'écart est calculé par `compute`. -->
+              <ul class="fr-text--sm fr-mb-3v">
+                <li>Écart au département : <strong>{{ecart_dep:number:1|—}}</strong></li>
+                <li>IPS départemental : {{ips_departemental:number:1|—}}</li>
+                <li>IPS académique : {{ips_academique:number:1|—}}</li>
+                <li>IPS national : {{ips_national:number:1|—}}</li>
+              </ul>
+
+              <p class="fr-text--sm fr-mb-1v">
+                <strong>{{libelle_commune|commune non renseignée}}</strong><br>
+                {{libelle_departement|}} — académie de {{libelle_academie|}}
+              </p>
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+
+        <dsfr-data-a11y source="ecoles-f" for="carte-ecoles" table download
+          filename="ips-ecoles-2023-2024.csv"
+          label="Données de la carte"
+          description="Une école par ligne : appellation, IPS, écart au département, commune, secteur."
+          label-field="appellation_officielle"
+          value-field="ips, ecart_dep, libelle_commune, libelle_departement, secteur">
+        </dsfr-data-a11y>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">Les communes du département sélectionné</h2>
+    <p class="fr-text--sm fr-mb-3w">
+      Tiré du même chargement, sans requête supplémentaire. L'original n'a ni graphique, ni
+      tableau, ni total.
+    </p>
+    <dsfr-data-chart id="g-communes" source="ecoles-communes" type="bar" horizontal
+      label-field="libelle_commune" value-field="ips_moyen" name='["IPS moyen"]'
+      databox databox-title="IPS moyen par commune (15 communes les mieux dotées de la sélection)"
+      databox-source="DEPP — donnees-ips-ecoles, via data.education.gouv.fr"
+      databox-download>
+    </dsfr-data-chart>
+    <dsfr-data-a11y for="g-communes" source="ecoles-communes" table download></dsfr-data-a11y>
+  </div>
+
+  <!-- Branché sur la facette, jamais sur la source : une query d'agrégat posée
+       directement sur une source Opendatasoft délègue au serveur et réécrit la
+       source pour tous ses consommateurs (BUG-009). -->
+  <dsfr-data-query id="ecoles-communes" source="ecoles-f" group-by="libelle_commune"
+    aggregate="ips:avg:ips_moyen, uai:count:nb" order-by="ips_moyen:desc" limit="15">
+  </dsfr-data-query>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — IPS Écoles</h2>
+
+      <p class="fr-text--sm fr-mb-4w">
+        Page d'origine :
+        <a href="https://data.education.gouv.fr/pages/dataviz-ips-ecoles/" target="_blank" rel="noopener external">/pages/dataviz-ips-ecoles/</a>.
+        Fiche d'audit : <code>docs/portail-education/dataviz-ips-ecoles.md</code>.
+        C'est le <strong>même fichier</strong> que la page
+        <a href="/education/dataviz-ips-colleges">IPS Collèges</a> — même contexte
+        <code>frenipslyceesdataviz</code>, même centrage sur la Suisse, même CSS de quatre
+        règles — appliqué à un jeu <strong>quatre fois et demie plus gros</strong>. C'est
+        précisément là que le gabarit unique cesse d'être tenable, et c'est le sujet de cette
+        analyse.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le chargement à la demande, en un attribut booléen.</strong>
+              <code>require-where</code> (#690) : tant qu'aucun filtre n'est arrivé par
+              commande, la source ne fait aucune requête, publie <code>dsfr-data-idle</code>,
+              et chaque afficheur rend son <code>idle-message</code> au lieu d'un chiffre faux.
+              C'est exactement la promesse que l'original suggère sans la tenir — lui charge,
+              puis n'affiche rien.</li>
+            <li><strong>Le montage « une facette commande, les autres affinent ».</strong>
+              Une facette avec <code>context="…"</code> devient un filtre du contexte, qui
+              diffuse une clause <code>where</code> à ses sources cibles (#678). La liste des
+              104 départements vient d'une seconde source, agrégée côté serveur en une requête
+              de 93 ms ; les facettes d'affinage restent en mode client sur les données
+              chargées. Deux régimes de filtrage sur la même page, sans une ligne de
+              JavaScript.</li>
+            <li><strong>L'écart à la référence.</strong> Le jeu des écoles porte
+              <code>ips_national</code>, <code>ips_academique</code> et
+              <code>ips_departemental</code> — que le jeu des collèges n'a pas. Une expression
+              <code>compute</code> (<code>round(ips - ips_departemental, 1)</code>) donne
+              l'écart, et l'infobulle situe enfin chaque école. <strong>Aucune des quatre
+              pages IPS du portail ne le fait</strong>, alors que deux d'entre elles en ont
+              la donnée.</li>
+            <li><strong>Deux expressions dans un seul <code>compute</code>.</strong>
+              L'écart et la tranche, séparés par <code>;</code> — et la seconde peut relire
+              la première. Une balise, deux colonnes calculées.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>« Filtre » ne veut pas dire la même chose selon le composant.</strong>
+              <code>require-where</code> ne compte que les clauses arrivées <em>par commande</em> :
+              facette serveur, recherche serveur, contexte, délégation d'une query. Une facette
+              en mode client n'en est pas une — elle filtre l'aval sans rien commander — et le
+              <code>where</code> posé en attribut sur la source n'en est pas une non plus.
+              Trois choses appelées « filtre » dans la même page, dont une seule déclenche le
+              chargement. Le JSDoc le dit, mais il faut l'avoir lu : monter la page avec une
+              facette client aurait donné une page qui n'affiche jamais rien, sans erreur.</li>
+            <li><strong>Le <code>select</code> est indispensable, et c'est un piège connu à
+              l'envers.</strong> Le schéma de ce jeu porte 29 champs, dont plusieurs doublons
+              (<code>departement</code> et <code>libelle_departement</code>,
+              <code>academie</code> et <code>libelle_academie</code>) et six IPS de référence
+              public/privé inutilisés ici. Sans <code>select</code>, la rentrée entière pèse
+              <strong>28,9 Mo</strong> ; avec, <strong>12,0 Mo</strong>. La règle maison dit
+              qu'un <code>select</code> sur un champ texte long est plus lent que l'export
+              complet — elle vaut toujours, mais elle ne dit pas quoi faire d'un jeu large
+              sans texte long, où le <code>select</code> divise le poids par deux.</li>
+            <li><strong>Le plafond de <code>max-items</code> et celui de
+              <code>max-records</code> ne se lisent pas au même endroit.</strong> Le premier
+              (5 000, sur la couche) tronque avec un bandeau « zoomez » qui ne charge rien ;
+              le second (1 000, sur la source) tronque sans un mot. Deux plafonds, deux
+              composants, deux comportements en cas de dépassement — et sur un jeu de cet
+              ordre il faut penser aux deux avant d'écrire la première balise.</li>
+            <li><strong>Une facette ne sait pas lire un effectif pré-agrégé.</strong>
+              La liste des départements vient d'une requête agrégée : une ligne par
+              département, l'effectif dans une colonne. La facette recompte ses lignes et
+              affiche « Nord <strong>1</strong> » au lieu de « Nord 1 268 ». Aucun attribut
+              ne permet de lui désigner la colonne de poids — vérifié au source. Il a fallu
+              poser <code>hide-counts</code> : masquer un compteur faux plutôt que le montrer.
+              Le motif « liste de valeurs avec leur effectif en une requête agrégée » est
+              pourtant exactement celui que l'original implémente à la main — et lui non plus
+              n'affiche pas le compte, qu'il calcule pourtant. Constat AM-067.</li>
+            <li><strong>Ce que la page ne peut pas faire, et l'original non plus.</strong>
+              Une vue nationale des 32 321 écoles n'est pas raisonnable — 28,9 Mo, et
+              32 000 cercles. La bonne réponse serait une agrégation cartographique côté
+              serveur (une valeur par commune ou par département, puis une choroplèthe), que
+              le portail sait produire en une requête de 93 ms. Rien dans la bibliothèque ne
+              relie ces deux moitiés : il faut écrire une seconde source et une seconde carte.
+              Ce n'est pas un manque criant, c'est une <em>marche</em> — le passage du
+              « quelques milliers de points » au « quelques centaines de milliers » se
+              franchit à la main.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>couche conditionnée par <code>show-if</code> (carte vide au chargement)</td><td><code>require-where</code> sur la source</td><td>Meilleur : l'original ne charge pas <em>rien</em>, il charge puis n'affiche rien</td></tr>
+            <tr><td>liste maison <code>ods-adv-analysis</code> des départements, sans compte</td><td>source agrégée + <code>dsfr-data-facets context="…"</code> + <code>hide-counts</code></td><td>Équivalent — et le compte reste invisible ici aussi, faute d'attribut pour lire un effectif pré-agrégé</td></tr>
+            <tr><td><code>ods-facet</code> académie / commune</td><td><code>dsfr-data-facets</code> client, en aval</td><td>Équivalent</td></tr>
+            <tr><td><code>ods-map location="5,47.35371,8.98682"</code></td><td><code>dsfr-data-map insets="drom" fit-bounds</code></td><td>Meilleur : l'original s'ouvre sur la Suisse</td></tr>
+            <tr><td>épingles rouges uniformes</td><td><code>color-field</code> + <code>color-map</code>, tranche par <code>compute</code></td><td>Meilleur : l'IPS est représenté</td></tr>
+            <tr><td>infobulle à 5 champs, sans référence</td><td><code>dsfr-data-map-popup</code> + écart calculé</td><td>Meilleur : le jeu porte les références, l'original ne les montre pas</td></tr>
+            <tr><td><code>getDownloadURL('csv')</code></td><td><code>dsfr-data-a11y table download</code></td><td>Meilleur : tableau accessible en plus</td></tr>
+            <tr><td>—</td><td>agrégation cartographique nationale</td><td><strong>Marche non franchie</strong> : à écrire à la main, en seconde source</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p>Reproduction <strong>immédiate</strong>, et c'est la page qui justifie le mieux le
+          jalon 0.25.0 : <code>require-where</code> et <code>fetch-mode="export"</code> ont été
+          demandés par ce banc d'essai à cause de ce jeu précis, et ils règlent le problème
+          qu'ils visaient. Le mur des 10 000 offsets, qui rendait le chargement complet
+          impossible par l'adaptateur au moment de l'audit, <strong>n'existe plus</strong>.
+          Ce qui reste est d'un autre ordre : <strong>trois choses s'appellent « filtre » dans
+          cette page et une seule déclenche le chargement</strong>. Ce n'est pas un défaut de
+          capacité, c'est un défaut de vocabulaire — et sur ce banc, les défauts de vocabulaire
+          se paient en échecs muets.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.25.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Établissements Euroscol — open-data-viz</title>
+  <meta name="description" content="Reproduction avec dsfr-data de la carte des établissements labellisés Euroscol de data.education.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/education">Portail Éducation</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Établissements Euroscol</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Les établissements labellisés Euroscol</h1>
+
+    <p class="fr-text--lead">
+      Le label « Euroscol » reconnaît la mobilisation des écoles et des établissements scolaires
+      publics ou privés sous contrat s'inscrivant dans une dynamique européenne. Il est
+      massivement <strong>secondaire</strong> — 782 lycées et 466 collèges contre 410 écoles —
+      très inégalement réparti — <strong>Lille 149, Mayotte 1</strong> — et il se superpose le
+      plus souvent à une <strong>section européenne ou de langues orientales</strong>
+      (573 des 1 672, soit 34 %), bien plus rarement à une section internationale (92) ou
+      binationale (78).
+    </p>
+
+    <div class="fr-callout fr-icon-database-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-etablissements-labellises-euroscol/"
+           target="_blank" rel="noopener external"><code>fr-en-etablissements-labellises-euroscol</code></a>
+        — 1 672 établissements, 22 champs, produit par la DREIC. Les
+        <strong>1 672 points sont cartographiables</strong> : aucune position manquante.
+        185 Ko en 0,20 s, lus sans clé.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        La cible d'origine n'est ni une page <code>/pages/</code> ni une page Studio, mais une
+        <strong>vue de jeu héritée</strong> — une « custom view » rangée dans les métadonnées du
+        jeu, dont le slug est <code>carte-personnalisee</code>. C'est la deuxième des quatre
+        générations de pages que superpose ce portail.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       Le pipeline. Le nœud de cette page tient dans les SIX DRAPEAUX : six
+       colonnes `int` valant 0 ou 1 — section binationale, section européenne ou
+       orientale, section internationale, lycée des métiers, REP, REP+.
+
+       L'original en fait six facettes affichant « 0 » et « 1 » sans libellé, et
+       six lignes d'infobulle dont le « non » du cas banal est peint en rouge —
+       un établissement ordinaire y ressemble à un bilan d'échec.
+
+       Deux voies natives, toutes deux arrivées avec la 0.24.0, remplacent ici
+       deux contournements que l'audit avait cru nécessaires :
+
+       1. `fold` (#677) replie les six colonnes en UN champ multivalué, donc UNE
+          facette au lieu de six, avec les vrais libellés. `toBoolean` sait lire
+          des 1/0 numériques : c'est précisément ce que `replace-fields` ne sait
+          pas faire (il ne visite que les valeurs `string`, d'où l'échec muet que
+          l'audit avait relevé).
+       2. `compute` v2 (#671) traduit chaque drapeau en « Oui »/« Non » par
+          `when … then … else`. L'audit avait conclu à un point dur en lisant le
+          JSDoc d'avant la 0.24.0, qui excluait les conditions ; elles existent.
+          Le contournement `data-v` + CSS (AM-039) n'a plus lieu d'être.
+
+       ⚠️ Deux séparateurs différents sur le MÊME composant : `rename` sépare ses
+       entrées par `|`, `fold` par `,`. Se tromper ne produit AUCUNE erreur —
+       simplement rien. C'est PG-022, payé une fois de plus ici.
+       ========================================================================== -->
+
+  <dsfr-data-source id="euro" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-etablissements-labellises-euroscol"
+    fetch-mode="export" max-records="3000">
+  </dsfr-data-source>
+
+  <!-- `rename` s'exécute AVANT `fold`, et les noms renommés servent d'étiquettes
+       aux valeurs repliées : c'est ce qui donne « Section internationale » plutôt
+       que « section_internationale » dans la facette et dans l'infobulle. -->
+  <dsfr-data-normalize id="euro-n" source="euro"
+    rename="section_binationale:Section binationale | section_europeenne_orientale:Section européenne ou orientale | section_internationale:Section internationale | lycee_metiers:Lycée des métiers | rep:REP | rep_plus:REP+"
+    fold="Section binationale:caracteristiques, Section européenne ou orientale:caracteristiques, Section internationale:caracteristiques, Lycée des métiers:caracteristiques, REP:caracteristiques, REP+:caracteristiques">
+  </dsfr-data-normalize>
+
+  <!-- La facette `rne` de l'original a 1 672 valeurs uniques, chacune comptant 1 :
+       ce n'est pas un filtre, c'est un annuaire déguisé, et elle occupe la deuxième
+       place de la colonne. Remplacée par ce qu'elle voulait être. -->
+  <dsfr-data-search id="euro-q" source="euro-n"
+    fields="nom_etablissement, ville, rne"
+    label="Rechercher un établissement" placeholder="Nom, commune, code UAI…"
+    operator="words" count url-sync>
+  </dsfr-data-search>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+
+      <div class="fr-col-12 fr-col-md-3">
+        <h2 class="fr-h6">Filtrer</h2>
+        <dsfr-data-facets id="euro-f" source="euro-q"
+          fields="niveau_etablissement_simplifie, caracteristiques, libelle_region_2016, academie, ville, niveau_etablissement"
+          labels="niveau_etablissement_simplifie:Niveau | caracteristiques:Autres caractéristiques | libelle_region_2016:Région | academie:Académie | ville:Commune | niveau_etablissement:Niveau détaillé"
+          display="niveau_etablissement_simplifie:radio-inline | libelle_region_2016:select | academie:multiselect | ville:multiselect | niveau_etablissement:multiselect"
+          searchable="academie, ville, niveau_etablissement"
+          disjunctive="academie, ville, niveau_etablissement, caracteristiques"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-9">
+
+        <!-- Le compteur de l'original affiche « 1672 records » et ne bouge JAMAIS,
+             quel que soit le filtre — à côté d'un « No active filters » qui reste
+             affiché alors que le bloc des filtres actifs est visible trois lignes
+             plus bas. Celui-ci suit la sélection. -->
+        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+          <dsfr-data-kpi source="euro-f" value="count" format="nombre"
+            heading="Établissements" label="labellisés dans la sélection"></dsfr-data-kpi>
+          <dsfr-data-kpi source="euro-f" value="ville:distinct" format="nombre"
+            heading="Communes" label="concernées"></dsfr-data-kpi>
+          <dsfr-data-kpi source="euro-f" value="academie:distinct" format="nombre"
+            heading="Académies" label="représentées"></dsfr-data-kpi>
+          <dsfr-data-kpi source="euro-f" value="count:caracteristiques:Section européenne ou orientale"
+            format="nombre"
+            heading="Section européenne" label="ou de langues orientales"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <dsfr-data-map id="carte-euro"
+          name="Localisation des établissements labellisés Euroscol"
+          height="600px" tiles="ign-plan" tiles-style="muted"
+          insets="drom" fit-bounds fit-max-zoom="12">
+          <!-- `color` sert de repli quand `color-map` ne matche pas : c'est de là
+               que sort la 5ᵉ entrée de légende, comme le `color-categories-other`
+               d'ODS. Mais ici elle est libellée « Autres valeurs » et non « Autres »
+               en italique — le lecteur peut au moins la filtrer pour voir ce qu'il
+               y a dedans (7 établissements, dont 2 « Service administratif »). -->
+          <dsfr-data-map-layer id="couche-euro" source="euro-f" type="circle"
+            geo-field="position" radius="6" fill-opacity="0.9"
+            color-field="niveau_etablissement_simplifie"
+            color-map="Lycée:#ba022a,Collège:#19630a,Ecole:#0b72b5,EREA:#f8b334"
+            color="#3a3a3a"
+            tooltip-field="nom_etablissement"
+            max-items="3000">
+          </dsfr-data-map-layer>
+          <!-- Le sous-titre de la légende d'origine affiche le nom brut du champ,
+               « Niveau_etablissement_simplifie ». Ici c'est le `label` qu'on écrit. -->
+          <dsfr-data-map-legend for="couche-euro" label="Niveau de l'établissement"></dsfr-data-map-legend>
+
+          <!-- `mode="panel-right"` : l'infobulle d'origine est plus haute que sa
+               popup et défile en interne, si bien que les six drapeaux — l'apport
+               de la page — sont sous la ligne de flottaison. -->
+          <dsfr-data-map-popup mode="panel-right" title-field="nom_etablissement" width="400px">
+            <template>
+              <p class="fr-badge fr-badge--sm fr-mb-2v">{{niveau_etablissement}}</p>
+              <p class="fr-text--sm fr-mb-1v">
+                <strong>{{ville}}</strong> ({{code_postal}}) — académie de {{academie}}
+              </p>
+              <p class="fr-text--sm fr-mb-3v">{{adresse|Adresse non renseignée}}</p>
+
+              <!-- Contact : mail (1 658), telephone (1 657) et adresse (1 652) sont
+                   dans le jeu et ne sont JAMAIS affichés par l'original. Pour un objet
+                   dont l'usage naturel est « monter un projet avec eux », c'est son
+                   manque le plus coûteux. `{{#if}}` (0.22.0) évite le lien mort. -->
+              <p class="fr-text--sm fr-mb-1v">
+                {{#if mail}}<a href="mailto:{{mail}}">{{mail}}</a>{{/if}}
+                {{#unless mail}}Courriel non communiqué{{/unless}}
+              </p>
+              <p class="fr-text--sm fr-mb-3v">
+                {{#if telephone}}<a href="tel:{{telephone}}">{{telephone}}</a>{{/if}}
+                {{#unless telephone}}Téléphone non communiqué{{/unless}}
+              </p>
+
+              <p class="fr-text--sm fr-mb-1v"><strong>Autres caractéristiques</strong></p>
+              <p class="fr-text--sm fr-mb-3v">
+                {{#if caracteristiques}}{{caracteristiques:join: · }}{{/if}}
+                {{#unless caracteristiques}}Aucune des six caractéristiques suivies.{{/unless}}
+              </p>
+
+              <p class="fr-text--xs fr-mb-0">Code UAI {{rne}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+
+        <dsfr-data-a11y source="euro-f" for="carte-euro" table download
+          filename="etablissements-euroscol.csv"
+          label="Données de la carte"
+          description="Un établissement labellisé par ligne : nom, niveau, commune, académie, contact."
+          label-field="nom_etablissement"
+          value-field="niveau_etablissement, ville, code_postal, academie, libelle_region_2016, mail, telephone">
+        </dsfr-data-a11y>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">Ce que la page d'origine ne montre pas</h2>
+    <p class="fr-text--sm fr-mb-3w">
+      L'original n'a ni graphique, ni tableau, ni total juste. Ces deux blocs sortent du même
+      chargement, sans requête supplémentaire, et suivent les filtres.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Répartition par académie</h3>
+        <dsfr-data-chart id="g-aca" source="euro-aca" type="bar" horizontal
+          label-field="academie" value-field="nb" name='["Établissements labellisés"]'
+          databox databox-title="Établissements labellisés Euroscol par académie"
+          databox-source="DREIC — fr-en-etablissements-labellises-euroscol, via data.education.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-aca" source="euro-aca" table download></dsfr-data-a11y>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Les six caractéristiques suivies</h3>
+        <dsfr-data-chart id="g-carac" source="euro-carac" type="bar" horizontal
+          label-field="caracteristiques" value-field="nb" name='["Établissements"]'
+          databox databox-title="Établissements par caractéristique"
+          databox-source="DREIC — fr-en-etablissements-labellises-euroscol, via data.education.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-carac" source="euro-carac" table download></dsfr-data-a11y>
+        <p class="fr-text--xs fr-mt-1w">
+          Ce graphique n'existerait pas sans <code>fold</code> : les six colonnes 0/1
+          repliées en un champ multivalué se regroupent comme n'importe quel autre champ.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Les deux agrégats sont branchés sur la FACETTE, jamais sur la source : une
+       `dsfr-data-query group-by` posée directement sur une source Opendatasoft
+       délègue son agrégation au serveur et réécrit la source pour tous ses autres
+       consommateurs, silencieusement (BUG-009, payé sur la page IPS Collèges). -->
+  <dsfr-data-query id="euro-aca" source="euro-f" group-by="academie"
+    aggregate="rne:count:nb" order-by="nb:desc" limit="15"></dsfr-data-query>
+  <dsfr-data-query id="euro-carac" source="euro-f" group-by="caracteristiques"
+    aggregate="rne:count:nb" order-by="nb:desc"></dsfr-data-query>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">La liste des établissements</h2>
+    <dsfr-data-list source="euro-f"
+      columns="nom_etablissement, niveau_etablissement, ville, code_postal, academie, mail, telephone"
+      search sort pagination="25">
+    </dsfr-data-list>
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — Établissements Euroscol</h2>
+
+      <p class="fr-text--sm fr-mb-4w">
+        Cible d'origine :
+        <a href="https://data.education.gouv.fr/explore/assets/visualisation-fr-en-etablissements-labellises-euroscol/view/" target="_blank" rel="noopener external">une vue de jeu héritée</a>
+        (« custom view », slug <code>carte-personnalisee</code>) — le lien du catalogue, lui,
+        fait un 302. Fiche d'audit : <code>docs/portail-education/etablissements-euroscol.md</code>,
+        vingt défauts relevés.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong><code>fold</code> a réglé le point dur de cette page en un attribut.</strong>
+              Six colonnes <code>int</code> 0/1 parallèles — le motif open data « une colonne
+              Oui/Non par modalité » — repliées en un champ multivalué. Résultat : <strong>une</strong>
+              facette lisible au lieu des six facettes « 0 / 1 » sans libellé de l'original,
+              un graphique qui n'était pas faisable, et des comptes exacts au premier essai
+              (573, 219, 110, 92, 78, 65). <code>toBoolean</code> lit les 1/0 numériques —
+              c'est exactement ce que <code>replace-fields</code> ne sait pas faire.</li>
+            <li><strong>La légende et le repli.</strong> <code>color-map</code> reprend les
+              quatre couleurs de l'original, et <code>color</code> sert de repli — c'est de là
+              que sort la cinquième entrée, comme le <code>color-categories-other</code> d'ODS.
+              Différence : elle est libellée et filtrable, là où l'original écrit
+              « <em>Autres</em> » en italique sans dire ce qu'il y a dedans.</li>
+            <li><strong>Le compteur qui suit.</strong> Quatre KPI dont un
+              <code>count:caracteristiques:valeur</code> et deux <code>distinct</code> — trois
+              agrégats arrivés en 0.24.0 (#672, #673). L'original affiche « 1672 records »
+              et ne le met jamais à jour.</li>
+            <li><strong>Le contact, en trois lignes de template.</strong>
+              <code>mail</code> (1 658), <code>telephone</code> (1 657) et <code>adresse</code>
+              (1 652) sont dans le jeu et ne sont jamais affichés par l'original. Les blocs
+              <code>{{#if}}</code> / <code>{{#unless}}</code> (0.22.0) évitent le lien mort sur
+              les quelques valeurs absentes, sans une ligne de CSS.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Deux séparateurs sur le même composant.</strong>
+              <code>rename</code> sépare ses entrées par <code>|</code>,
+              <code>fold</code> par <code>,</code> — sur la même balise
+              <code>dsfr-data-normalize</code>, à deux lignes d'écart. Le premier essai a été
+              écrit en virgules partout : <strong>zéro renommage, zéro repli, zéro erreur</strong>.
+              Il a fallu relire les JSDoc attribut par attribut pour voir la différence. C'est
+              PG-022, et cette page en est la démonstration la plus nette du dépôt : un même
+              composant, deux grammaires, deux échecs muets.</li>
+            <li><strong>Deux constats de l'audit étaient périmés — et rien ne le disait.</strong>
+              L'audit avait conclu à un point dur réel, JSDoc en main : <code>replace-fields</code>
+              ne visite que les <code>string</code> (vrai, toujours), et <code>compute</code>
+              excluait les conditions (« hors périmètre : conditions, fonctions »). Cette seconde
+              phrase n'est plus vraie depuis la 0.24.0 : <code>when … then … else</code> existe.
+              L'audit avait donc raison en le lisant et tort quatre heures plus tard. Le
+              contournement prévu — interpoler la valeur brute dans un attribut
+              <code>data-v</code> et écrire le libellé en CSS (AM-039) — a pu être abandonné.
+              <strong>C'est le troisième constat du dépôt invalidé par une montée de version
+              qu'il avait lui-même demandée</strong>, et le banc n'a toujours aucun moyen de
+              l'apprendre autrement qu'en relisant le source.</li>
+            <li><strong>La leçon BUG-009, appliquée d'emblée.</strong> Les deux
+              <code>dsfr-data-query</code> de cette page sont branchées sur la facette et non sur
+              la source, parce que la page IPS Collèges avait montré qu'une query d'agrégat posée
+              directement sur une source Opendatasoft délègue au serveur et réécrit la source
+              pour tous ses autres consommateurs. Écrit ici sans être repayé — mais c'est une
+              règle qu'il faut connaître, et rien dans la page ne la rend visible.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Vue de jeu d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>contexte du visualiseur d'actif</td><td><code>dsfr-data-source fetch-mode="export"</code></td><td>Équivalent</td></tr>
+            <tr><td>six facettes « 0 / 1 » sans libellé</td><td><code>dsfr-data-normalize rename</code> + <code>fold</code> → une facette</td><td>Nettement meilleur : six filtres deviennent un, avec les vrais libellés</td></tr>
+            <tr><td>facette <code>rne</code> (1 672 valeurs uniques, compteur 1)</td><td><code>dsfr-data-search</code></td><td>Meilleur : une facette dont chaque valeur sélectionne une ligne n'est pas un filtre</td></tr>
+            <tr><td>libellés bruts du schéma (<code>Academie</code>, <code>REP_plus</code>…)</td><td><code>labels="…"</code></td><td>Équivalent, et lisible</td></tr>
+            <tr><td>« 1672 records » figé + « No active filters »</td><td><code>dsfr-data-kpi</code> + bouton de réinitialisation natif</td><td>Meilleur : les compteurs suivent l'état réel</td></tr>
+            <tr><td><code>ods-map location="5,47.89,-1.98" no-refit</code></td><td><code>dsfr-data-map insets="drom" fit-bounds</code></td><td>Meilleur : l'original s'ouvre sur l'océan et cache 54 établissements ultramarins</td></tr>
+            <tr><td><code>display="categories"</code> + <code>color-by-field</code> + <code>color-categories</code></td><td><code>color-field</code> + <code>color-map</code> + <code>color</code></td><td>Équivalent, attribut pour attribut</td></tr>
+            <tr><td><code>caption="true"</code> (sous-titre = nom brut du champ)</td><td><code>dsfr-data-map-legend label="…"</code></td><td>Équivalent, et le sous-titre est écrit</td></tr>
+            <tr><td>infobulle qui défile en interne, six « non » en rouge</td><td><code>dsfr-data-map-popup mode="panel-right"</code> + <code>{{#if}}</code></td><td>Meilleur : rien n'est coupé, et le cas banal n'est plus peint comme un échec</td></tr>
+            <tr><td>bandeau « affichées partiellement… Essayez de zoomer »</td><td>—</td><td>Sans objet : les 1 672 points sont affichés. <strong>L'original tronque, pas nous</strong></td></tr>
+            <tr><td>outils de dessin, sélecteur de fond, géolocalisation</td><td>—</td><td><strong>Écart assumé</strong> : chrome du visualiseur d'actif ODS</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-chart</code>, <code>dsfr-data-list</code>, <code>dsfr-data-a11y</code>, <code>url-sync</code></td><td>Sans équivalent côté Opendatasoft</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="fr-callout fr-icon-error-warning-line fr-mt-4w">
+        <h3 class="fr-callout__title fr-text--md">Ce que la reproduction a appris sur la page d'origine</h3>
+        <p class="fr-callout__text fr-text--sm">
+          Le défaut le plus net n'est pas cartographique : <strong>le compteur ment en
+          permanence</strong>. « 1672 records » reste affiché avec un filtre à 149
+          établissements, et « No active filters » reste écrit trois lignes au-dessus du bloc
+          « Filtres actifs : Academie Lille ». Le second est que <strong>l'original tronque
+          sa propre carte</strong> — le bandeau « Certaines couches sont affichées partiellement
+          pour des raisons de performance. Essayez de zoomer » s'affiche sur 1 672 points, et
+          zoomer ne charge rien de plus. Le troisième est un manque : le jeu porte
+          <strong>1 658 courriels et 1 657 téléphones</strong> que la page n'affiche jamais.
+        </p>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p>Reproduction <strong>immédiate</strong>, et c'est la page où la bibliothèque a le
+          plus clairement <em>mieux fait</em> que l'original : six facettes illisibles
+          deviennent une, un compteur faux devient juste, une carte tronquée devient complète,
+          et le contact absent apparaît. <strong>Le seul obstacle a été de langue, pas de
+          capacité</strong> : deux séparateurs différents sur le même composant, et un JSDoc
+          que l'audit avait lu quatre heures trop tôt. Les deux échecs ont été muets — c'est,
+          page après page, le constat qui revient le plus.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.25.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

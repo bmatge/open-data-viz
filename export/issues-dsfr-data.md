@@ -1,9 +1,9 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 27 demandes cadrées — 3 bugs,
-> 22 améliorations,
-> 2 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
+> 31 demandes cadrées — 4 bugs,
+> 24 améliorations,
+> 3 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## Comment lire ce rapport
@@ -72,8 +72,10 @@ planifié — à deux exceptions près, signalées comme telles : `fetch-mode="e
 | AM-064 | En mode adaptateur, aucun moyen de passer un paramètre de requête qui n'est pas une clause (`timezone`) | amelioration | S | 1 | Accepter |
 | AM-045 | La sélection ne part que d'une carte : ni une liste, ni une fiche, ni un graphique ne peut filtrer un contexte | amelioration | M | 5 | Accepter |
 | AM-049 | Un ratio dont le numérateur et le dénominateur viennent de deux sources différentes | amelioration | M | 4 | Accepter |
+| AM-066 | `fill-field` et ses quatre attributs compagnons sont ignorés sans un mot sur une couche `type="circle"` | amelioration | M | 1 | Accepter |
+| BUG-009 | Une `dsfr-data-query group-by` branchée sur une source Opendatasoft réécrit la source pour tous ses autres consommateurs | bug | L | 1 | Accepter |
 
-_8 demandes — S 6, M 2, L 0._
+_10 demandes — S 6, M 3, L 1._
 
 ### P2 — prochain cycle : gain net, effort mesuré
 
@@ -81,6 +83,7 @@ _8 demandes — S 6, M 2, L 0._
 |---|---|---|---|---|---|
 | PG-022 | Les grammaires d'attributs multi-entrées diffèrent d'un attribut à l'autre : `|` ici, `,` là | piege | S | 3 | Accepter (documentation + avertissement) |
 | BUG-007 | `replace-fields` est silencieusement sans effet sur une valeur numérique | bug | S | 1 | Accepter |
+| AM-067 | Une facette bâtie sur une source pré-agrégée affiche « 1 » partout : aucun attribut ne lui désigne la colonne d'effectif | amelioration | S | 1 | Accepter |
 | AM-044 | Le compteur `count` de `dsfr-data-search` rend « 35305 resultats » : ni séparateur de milliers, ni accent | amelioration | S | 3 | Accepter |
 | AM-046 | Le cumul existe, mais seulement dans un `_bucketDate` privé de la couche de carte | amelioration | M | 2 | Accepter |
 | BUG-006 | Un champ multivalué : `dsfr-data-facets` éclate les valeurs, un `group-by` client compte les combinaisons | bug | M | 2 | Accepter |
@@ -88,13 +91,14 @@ _8 demandes — S 6, M 2, L 0._
 | AM-051 | Les compteurs de facette n'ont pas de sens sur une table de mesures, et rien ne le dit | amelioration | M | 2 | Accepter |
 | AM-056 | Changer le champ d'un filtre selon la source, et vider un groupe de filtres exclusifs | amelioration | M | 1 | Accepter |
 
-_8 demandes — S 3, M 5, L 0._
+_9 demandes — S 4, M 5, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
 | AM-054 | Aucune maille géographique non française, ni référentiel de noms de pays en français | amelioration | S | 1 | Accepter |
+| PG-024 | Deux `for` voisins de la même carte désignent deux choses différentes : la couche pour la légende, la carte pour l'a11y | piege | S | 1 | Accepter |
 | PG-016 | Le tri des facettes est global, pas par champ | piege | S | 2 | Accepter |
 | LIM-011 | `color-map` sépare ses paires par une virgule, que des valeurs métier contiennent | amelioration | S | 3 | Accepter |
 | AM-057 | La valeur courante d'un filtre n'est pas interpolable dans du texte | amelioration | S | 1 | Accepter |
@@ -103,7 +107,7 @@ _8 demandes — S 3, M 5, L 0._
 | AM-065 | `dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé | amelioration | S | 1 | Accepter |
 | AM-058 | Un filtre qui traverse un référentiel (académie → départements) | amelioration | M | 2 | Étudier |
 
-_8 demandes — S 7, M 1, L 0._
+_9 demandes — S 8, M 1, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -433,6 +437,87 @@ Aucun côté client. Côté serveur, seulement si les deux mesures vivent dans l
 
 ---
 
+## AM-066 — `fill-field` et ses quatre attributs compagnons sont ignorés sans un mot sur une couche `type="circle"`
+
+**Priorité** P1 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:haute`, `dsfr-data-map-layer`, `dsfr-data-map-legend`
+**Rencontré sur** 1 page(s) : edu/dataviz-ips-colleges
+
+### Constat
+
+Colorer des points par une valeur numérique est le besoin élémentaire d'une carte de mesures — ici l'IPS de 6 971 collèges, qui est le sujet annoncé par le titre de la page. Le chemin évident est `fill-field` + `classes` / `method` / `breaks` / `selected-palette`, et c'est ce que décrivent leurs JSDoc : « champ numérique utilisé pour le remplissage en choroplèthe », « nombre de classes de la choroplèthe (`fill-field`) ». Rien n'y dit « polygones seulement ». Sur `type="circle"`, les cinq attributs sont acceptés puis ignorés : la condition au source est `this.fillField && this.type === 'geoshape'`, aux deux endroits qui comptent — le calcul des classes (`classifyValues`) et la construction de la légende (`_buildLegendEntries`). L'échec est total et muet : tous les cercles sortent en `color` (bleu France), `getLegendEntries()` renvoie une entrée unique sans libellé, ce qui fait rendre la légende `hidden`, et `getSkippedCount()` vaut 0. Voie native existante, trouvée après coup : discrétiser soi-même en `dsfr-data-normalize compute`, puis colorer par `color-field` + `color-map`, catégoriels et fonctionnels sur les points. Elle produit un bon résultat — et même un bénéfice, la tranche devient une facette — mais elle n'est suggérée nulle part à cet endroit, et elle oblige à écrire à la main la discrétisation que `method` / `breaks` savent faire.
+
+### Impact de l'erreur ou du manque
+
+Une carte de points colorée par une mesure est le motif le plus courant de la dataviz territoriale, et le chemin que la documentation désigne ne marche pas. L'échec est silencieux : la carte s'affiche, elle est simplement fausse de sens — la variable annoncée n'est pas représentée. Cinq attributs écrits pour rien, sans un mot.
+
+### Objectif métier de la correction
+
+Qu'une carte de points puisse encoder une valeur numérique par le même vocabulaire qu'une choroplèthe de polygones.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : les jeux d'établissements, d'équipements et de points de service portent presque tous une mesure à représenter.
+
+### Comment ça a été vérifié
+
+Rejoué au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges (dsfr-data 0.25.0). Avec `type="circle" fill-field="ips" breaks="90,100,110,125" selected-palette="divergentAscending"` : 6 971 chemins Leaflet rendus, `getLegendEntries()` = [{color:'#000091',label:''}], légende rendue avec l'attribut `hidden`, zéro erreur console, `getSkippedCount()` = 0. Après passage à `color-field="tranche_ips"` + `color-map` (tranche produite par `compute`) : `getLegendEntries()` renvoie les cinq classes attendues et la légende s'affiche. Condition lue au source, packages/core/src/components/dsfr-data-map-layer.ts lignes 658, 1101 et 1339.
+
+### Demande
+
+Faire agir `fill-field` et ses compagnons (`classes`, `method`, `breaks`, `selected-palette`) sur `type="circle"` — la valeur pilotant la couleur de remplissage du cercle, la légende étant construite comme pour un `geoshape`. À défaut, refuser explicitement la combinaison en erreur de configuration plutôt que de l'ignorer, et le dire dans les cinq JSDoc concernés.
+
+### Critères d'acceptation
+
+- [ ] `type="circle"` + `fill-field` colore les cercles selon les classes calculées.
+- [ ] `classes`, `method`, `breaks` et `selected-palette` agissent comme sur `geoshape`.
+- [ ] `dsfr-data-map-legend` reçoit les classes et s'affiche.
+- [ ] Si la combinaison reste refusée, elle lève une erreur de configuration visible (console + `data-dsfr-config-error`) au lieu d'être ignorée.
+
+---
+
+## BUG-009 — Une `dsfr-data-query group-by` branchée sur une source Opendatasoft réécrit la source pour tous ses autres consommateurs
+
+**Priorité** P1 · **Effort estimé** L (conception + développement) · **Décision proposée** Accepter
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-query`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : edu/dataviz-ips-colleges
+
+### Constat
+
+`dsfr-data-query` négocie à l'initialisation la délégation de `group-by` / `aggregate` / `order-by` au serveur quand l'adaptateur le supporte : c'est documenté, voulu, et c'est même l'exemple du JSDoc de la classe, qui montre une query branchée directement sur la source. Ce que la délégation fait en pratique, c'est envoyer une commande à la source, qui repart chercher un agrégat — et la source ré-émet alors cet agrégat à TOUS ses abonnés. Une page qui branche une query d'agrégat sur la même source qu'une carte, un KPI ou une facette voit donc ses données remplacées par les quelques lignes de l'agrégat, sans aucun message. Le motif « une source, plusieurs vues » — un compteur, une carte et un graphique d'agrégat sur le même jeu — est pourtant le plus banal qui soit ; c'est celui de presque toutes les pages de ce banc, et il n'échouait pas jusqu'ici seulement parce qu'elles branchent leurs queries sur la facette et non sur la source.
+
+### Impact de l'erreur ou du manque
+
+Chiffres faux et carte vide sur le motif le plus courant de la bibliothèque — une source, plusieurs vues — dans la configuration exacte que le JSDoc donne en exemple. L'échec est entièrement silencieux : la page s'affiche, tout paraît fonctionner, seuls les nombres sont faux.
+
+### Objectif métier de la correction
+
+Qu'ajouter un graphique d'agrégat à une page ne change pas ce que ses autres composants affichent.
+
+### Pérennité et reproductibilité du besoin
+
+Durable, et structurel : c'est le contrat du data-bridge entre une source et ses abonnés multiples.
+
+### Comment ça a été vérifié
+
+Rencontré au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges (dsfr-data 0.25.0), source `donnees-ips-colleges` en `fetch-mode="export"`. Avec `<dsfr-data-query id="ips-par-secteur" source="ips" group-by="secteur" aggregate="ips:avg:ips_moyen">` : `document.getElementById('ips').getData().length` = 2 au lieu de 6 971, le KPI « Collèges » affichait 2, et la couche avertissait « 2 ligne(s) sur 2 sans coordonnées exploitables ». Aucune erreur console, aucune erreur de configuration. La seule modification `source="ips"` → `source="ips-f"` (la facette en aval) ramène la source à 6 971 lignes et tous les afficheurs à leurs valeurs justes ; les deux mesures ont été prises dans la même session, sur la même page, sans autre changement.
+
+### Contournement actuel
+
+Ne jamais brancher une `dsfr-data-query` d'agrégat directement sur une `dsfr-data-source` qui a d'autres consommateurs : l'intercaler derrière un transformateur (facette, normalize), ou déclarer une seconde `dsfr-data-source` dédiée à l'agrégat. Le contournement cesse d'être satisfaisant dès qu'on veut un agrégat NON filtré à côté d'une vue filtrée : il faut alors payer une source de plus, donc une requête de plus.
+
+### Demande
+
+Que la délégation serveur d'une query ne modifie pas ce que la source publie à ses autres abonnés — soit en réservant la réponse agrégée à la query qui l'a demandée, soit en refusant la délégation dès que la source a plusieurs consommateurs, soit à tout le moins en avertissant en console que la source est réécrite.
+
+### Critères d'acceptation
+
+- [ ] Une source ayant plusieurs abonnés continue de publier ses lignes après l'ajout d'une query d'agrégat branchée sur elle.
+- [ ] La query reçoit bien son agrégat, délégué au serveur si l'adaptateur le permet.
+- [ ] Le cas est couvert par un test : une source, un KPI `count` et une query `group-by`, tous trois branchés directement sur la source.
+
+---
+
 ## PG-022 — Les grammaires d'attributs multi-entrées diffèrent d'un attribut à l'autre : `|` ici, `,` là
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter (documentation + avertissement)
@@ -513,6 +598,49 @@ Appliquer `replace` / `replace-fields` aux valeurs numériques et booléennes, e
 - [ ] `replace-fields="drapeau:1:Oui | drapeau:0:Non"` sur une colonne `int` produit « Oui » / « Non ».
 - [ ] Une facette sur cette colonne affiche les libellés, pas les codes.
 - [ ] Le CSV exporté conserve la valeur d'origine.
+
+---
+
+## AM-067 — Une facette bâtie sur une source pré-agrégée affiche « 1 » partout : aucun attribut ne lui désigne la colonne d'effectif
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-facets`
+**Rencontré sur** 1 page(s) : edu/dataviz-ips-ecoles
+
+### Constat
+
+Le motif « proposer une liste de valeurs avec leur effectif, obtenue en une seule requête agrégée » est la bonne architecture dès qu'on ne veut pas charger les lignes : c'est ce que fait cette page pour ses 104 départements (une requête de 93 ms au lieu de 28,9 Mo), et c'est aussi ce que l'original implémente à la main. La source renvoie alors une ligne par valeur, avec l'effectif dans une colonne (`count(*) as n`). `dsfr-data-facets` compte ses propres lignes : chaque département n'en ayant qu'une, la facette affiche « Nord 1 » là où il y a 1 268 écoles. Aucun attribut ne permet de lui désigner la colonne de poids — ni `count-field`, ni équivalent. Il ne reste qu'à poser `hide-counts`, c'est-à-dire à masquer une information qui a été calculée, transmise, et qui est dans la ligne. Le compteur est par ailleurs l'un des arguments de la facette face à un `select` nu.
+
+### Impact de l'erreur ou du manque
+
+Sur les jeux à gros volume, l'agrégation serveur est la seule architecture tenable pour proposer une liste de valeurs — et c'est justement là que la facette perd son compteur. Soit on affiche un chiffre faux, soit on masque un chiffre qu'on possède.
+
+### Objectif métier de la correction
+
+Qu'une facette alimentée par un agrégat serveur affiche les vrais effectifs.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : le motif « choisir d'abord, charger ensuite » est celui que `require-where` encourage, et il suppose des listes de valeurs pré-agrégées.
+
+### Comment ça a été vérifié
+
+Relevé au navigateur le 2026-09-10 sur /education/dataviz-ips-ecoles. Source `donnees-ips-ecoles` agrégée par `group-by="libelle_departement"` + `select="libelle_departement, count(*) as n"` (104 lignes, une par département, `n` renseigné — vérifié dans la réponse API). La facette rend « Nord1, 1 resultat » ; l'export du même département renvoie 1 268 lignes, et le KPI branché en aval affiche bien 1 268. Absence de `count-field` vérifiée au source, packages/core/src/components/dsfr-data-facets.ts.
+
+### Contournement actuel
+
+`hide-counts`, qui masque le compteur au lieu de le corriger. Le contournement cesse d'être acceptable dès que le compteur est l'information utile — choisir un département en sachant combien d'établissements il porte, par exemple.
+
+### Demande
+
+Un attribut désignant la colonne d'effectif d'une source pré-agrégée (par exemple `count-field="champ"`, ou `count-fields="champ_facette:colonne"` pour en viser plusieurs), pour que la facette affiche l'effectif porté par la donnée plutôt que son propre nombre de lignes.
+
+### Critères d'acceptation
+
+- [ ] Un attribut permet de désigner la colonne portant l'effectif de chaque valeur.
+- [ ] La facette affiche cet effectif au lieu de son nombre de lignes.
+- [ ] Sans cet attribut, le comportement actuel est inchangé.
+- [ ] Le tri `count:desc` s'appuie sur l'effectif désigné.
 
 ---
 
@@ -790,6 +918,47 @@ Relevé sur la seule carte non française du portail (44 projets européens). La
 - [ ] `geo/europe.json` est livré hors bundle, comme les régions et départements (#688).
 - [ ] Un champ « Allemagne » se résout en `DE` sans table écrite à la main.
 - [ ] Les noms sont en français et couvrent au moins l'Union et l'Espace économique européen.
+
+---
+
+## PG-024 — Deux `for` voisins de la même carte désignent deux choses différentes : la couche pour la légende, la carte pour l'a11y
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement, dx`, `severity:moyenne`, `dsfr-data-map-legend`, `dsfr-data-a11y`
+**Rencontré sur** 1 page(s) : edu/dataviz-ips-colleges
+
+### Constat
+
+Dans le bloc d'une même carte, `dsfr-data-map-legend for="…"` attend l'id d'un `dsfr-data-map-layer` (ou la valeur de son attribut `source`), tandis que `dsfr-data-a11y for="…"`, écrit six lignes plus bas, attend l'id de la `dsfr-data-map`. Les deux balises sont enfants ou voisines de la carte, portent le même nom d'attribut, et l'id de la carte est celui qu'on a sous les yeux. Y mettre l'id de la carte dans la légende ne produit ni erreur ni avertissement : `_targetLayers()` renvoie un tableau vide, `getEntries()` aussi, et la légende se rend avec l'attribut `hidden` — visuellement identique à une page où l'on n'aurait pas mis de légende du tout.
+
+### Impact de l'erreur ou du manque
+
+La légende disparaît sans un mot, et l'auteur croit que le composant ne marche pas. Le diagnostic a demandé de lire le source du composant.
+
+### Objectif métier de la correction
+
+Qu'un `for` mal ciblé se signale au lieu de rendre une légende vide.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : toute carte avec légende pose les deux `for` côte à côte.
+
+### Comment ça a été vérifié
+
+Rencontré et corrigé au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges. Avec `for="carte-ips"` (l'id de la `dsfr-data-map`) : `getLegendEntries()` de la couche renvoyait pourtant ses cinq classes, mais la légende était rendue `<div class="dsfr-data-map-legend" … hidden="">`, sans message. Après avoir donné un id à la couche et pointé `for="couche-ips"` : les cinq entrées s'affichent. Comportement lu au source, packages/core/src/components/dsfr-data-map-legend.ts, `_targetLayers()`.
+
+### Contournement actuel
+
+Donner systématiquement un `id` à la couche et le reprendre dans le `for` de la légende ; à défaut, laisser `for` vide, qui décrit toutes les couches directes de la carte hôte.
+
+### Demande
+
+Avertir en console quand le `for` d'une légende désigne un élément existant qui n'est pas une couche (typiquement la carte elle-même) — le cas est distinguable d'un id absent, et c'est la confusion la plus probable.
+
+### Critères d'acceptation
+
+- [ ] Un `for` pointant un élément qui n'est pas un `dsfr-data-map-layer` produit un avertissement console nommant l'attribut et l'élément trouvé.
+- [ ] Le cas `for` vide (toutes les couches de la carte) reste silencieux.
 
 ---
 
