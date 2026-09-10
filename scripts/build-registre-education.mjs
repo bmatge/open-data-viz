@@ -60,6 +60,19 @@ const STATUTS = {
   'Territoires numériques éducatifs': ['reproduite', '/education/tne-dashboard',
     'Tableau de bord multi-sources : pivot natif, et le cumul qui reste au résidu', 'angular'],
 
+  // --- Lot 15 : les deux dernieres pages IPS (le gabarit etait deja ecrit) et
+  // trois cartographies AngularJS.
+  'IPS Lycées': ['reproduite', '/education/dataviz-ips-lycees',
+    'Deux IPS par lycée, sur deux échelles séparées de 24,8 points ; la colonne de synthèse est vide', 'angular'],
+  'IPS EREA': ['reproduite', '/education/dataviz-ips-erea',
+    'Quatrième emploi du gabarit IPS, écrit d’un trait ; les trois références enfin affichées', 'angular'],
+  'Cartographie des labellisations Egalité fille-garçon': ['reproduite', '/education/label-egalite-fille-garcon',
+    '1 678 labellisations, trois niveaux ; une campagne existait en deux graphies', 'angular'],
+  'Cartographie de l’accompagnement de la déficience sensorielle': ['reproduite', '/education/accompagnement-deficience-sensorielle',
+    'Trois drapeaux repliés par fold ; la moitié du jeu ne dit pas quel accompagnement il propose', 'angular'],
+  'Cartographie des ULIS-TFV': ['reproduite', '/education/implantation-ulis-tfv',
+    '52 dispositifs, 25 départements sur 101 ; le seul jeu du banc sans aucun trou', 'angular'],
+
   // --- Les trois galeries editoriales : aucune dataviz a reproduire.
   'Challenge wikidata en classe': ['analyse', '/education/non-reproduites',
     'Galerie éditoriale de liens : aucune directive ods-*, aucun iframe, aucune requête /api/', 'angular'],
