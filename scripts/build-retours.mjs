@@ -295,10 +295,17 @@ autres sont marquées **corrigées** parce que la bibliothèque les a résolues 
 registre, avec ce qui en demeure vrai). Ce rapport ne liste que ce qui a résisté à la vérification.
 
 Un rappel de méthode issu du lot 12, qui vaut avertissement : une capacité peut être **native, publiée,
-et malgré tout absente du bundle chargé** par un site — les 26 pages de ce dépôt épinglent encore
-\`dsfr-data@0.20.0\` alors que npm sert 0.23.0. Avant de conclure à un manque, il faut donc chercher
-l'attribut dans le source, **puis vérifier dans quelle version publiée il apparaît**. Trois demandes de
-ce rapport sont nées de ce piège, et deux constats antérieurs (AM-017, AM-039) en sont sortis.
+et malgré tout absente du bundle chargé** par un site — les 26 pages de ce dépôt ont épinglé
+\`dsfr-data@0.20.0\` pendant que npm servait déjà 0.23.0, puis 0.24.0. Avant de conclure à un manque,
+il faut donc chercher l'attribut dans le source, **puis vérifier dans quelle version publiée il
+apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux constats antérieurs
+(AM-017, AM-039) en sont sortis.
+
+Le dépôt est désormais monté en \`dsfr-data@0.24.0\`, et le registre en tire les conséquences :
+les jalons 0.21.1, 0.22.0, 0.23.0 et 0.24.0 ont comblé ${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length} des constats déposés,
+passés au statut \`corrige\` et sortis de ce rapport. Ce qui reste ci-dessous n'est ni livré ni
+planifié — à deux exceptions près, signalées comme telles : \`fetch-mode="export"\` (#689) et
+\`require-where\` (#690), prévus au jalon v0.25.0.
 
 ## Priorisation
 
