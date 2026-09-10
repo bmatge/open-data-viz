@@ -73,6 +73,10 @@ const STATUTS = {
   'Cartographie des ULIS-TFV': ['reproduite', '/education/implantation-ulis-tfv',
     '52 dispositifs, 25 départements sur 101 ; le seul jeu du banc sans aucun trou', 'angular'],
 
+  // --- Lot 16 : premiere page ecrite APRES la montee en 0.27.0.
+  'Offre de langues dans les collèges et lycées': ['reproduite', '/education/offre-formation-langues',
+    '39 858 offres en format long ; require-where + weight-field, livré le jour même par la bibliothèque', 'angular'],
+
   // --- Les trois galeries editoriales : aucune dataviz a reproduire.
   'Challenge wikidata en classe': ['analyse', '/education/non-reproduites',
     'Galerie éditoriale de liens : aucune directive ods-*, aucun iframe, aucune requête /api/', 'angular'],
