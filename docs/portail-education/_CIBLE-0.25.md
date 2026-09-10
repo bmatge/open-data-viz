@@ -41,7 +41,26 @@ neuf au jalon v0.24.0 et quatre au jalon v0.25.0.
 Un attribut d'une version non chargée est **ignoré sans erreur console** : l'échec est
 silencieux, comme `display="a:select, b:select"` (PG-022) ou `max-records` qui tronque.
 
-## Ce que le jalon v0.24.0 apporte (épic #696 « expressions et conditions »)
+## ⚠️ Mise à jour du 2026-09-10, 10 h — **v0.24.0 est sortie pendant la rédaction de ce lot**
+
+Le jalon v0.24.0 a été **entièrement fermé à 09 h 48** (#671 à #677, #255, épic #696) et publié :
+`packages/core` est en **0.24.0**, commit `c14c762` « expressions et conditions, agrégats étendus,
+fold et pivot ». Le jalon v0.23.0 (#678 à #684, épic #697) avait été fermé à 08 h 52.
+
+**Le tableau ci-dessous décrit donc du livré, plus du prévu.** Il reste au jalon v0.25.0 :
+#689 (`fetch-mode="export"`), #690 (`require-where`), les épics #699 et #700, le cadrage #705 et
+la recette #625.
+
+Une vérification a été refaite contre le code livré, parce qu'elle conditionnait une demande
+classée P1 : **le ratio de #673 est bien mono-source** — `dsfr-data-kpi` l'évalue sur
+`this._filteredData()`, les données d'une source unique. La demande AM-049 (ratio dont le
+numérateur et le dénominateur viennent de deux jeux) reste donc valide après livraison.
+
+**Leçon de méthode** : ce document a eu tort en moins d'une heure. Ne pas se fier à un état du
+backlog daté — le revérifier (`gh issue list`, version de `packages/core`) avant de classer quoi
+que ce soit en « prévu ».
+
+## Ce que le jalon v0.24.0 apporte — **livré le 2026-09-10** (épic #696 « expressions et conditions »)
 
 | Issue | Apport | Ce que ça débloque dans nos fiches |
 |---|---|---|

@@ -737,7 +737,7 @@ Structurel : la population, les effectifs et les surfaces vivent toujours dans u
 
 ### Comment ça a été vérifié
 
-Relevé sur « Portrait de territoire » : **13 indicateurs sur 40** sont de cette forme, numérateur `count`/`sum` sur `data-es`, dénominateur `SUM(population)` sur `insee-2020-geoapi-2023`. Le motif se répète sur la seconde page Sports, et sur les pages « personnels » où 15 des 18 blocs sont des ratios (là mono-source, réalisables par `select` ODSQL). Le corps de #673 a été lu pour vérifier qu'il ne s'applique pas.
+Relevé sur « Portrait de territoire » : **13 indicateurs sur 40** sont de cette forme, numérateur `count`/`sum` sur `data-es`, dénominateur `SUM(population)` sur `insee-2020-geoapi-2023`. Le motif se répète sur la seconde page Sports, et sur les pages « personnels » où 15 des 18 blocs sont des ratios (là mono-source, réalisables par `select` ODSQL). Le corps de #673 a été lu pour vérifier qu'il ne s'applique pas. — Revérifié le 2026-09-10 APRÈS la livraison de #673 en 0.24.0 (commit c14c762) : `dsfr-data-kpi` évalue son expression sur `this._filteredData()`, c'est-à-dire les données d'une source unique. Le ratio livré est donc bien mono-source et ne couvre pas ce besoin.
 
 ### Contournement actuel
 
