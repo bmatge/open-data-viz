@@ -3422,5 +3422,37 @@
         "Cumulable avec `running_sum` sur la même query sans interférence."
       ]
     }
+  },
+  {
+    "id": "PG-027",
+    "titre": "L'adaptateur Opendatasoft backquote `group-by` mais pas `select` : un champ au nom non standard vaut un HTTP 400",
+    "type": "piege",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-source"
+    ],
+    "dataviz": [
+      "edu/cnr-education"
+    ],
+    "constat": "Le jeu du CNR Éducation publie un champ nommé littéralement `1_uai`. Ce n'est pas un identifiant ODSQL valide — il commence par un chiffre — et l'API le refuse s'il n'est pas entouré d'accents graves : « ODSQL syntax exception: unexpected _uai at position 1 ». Or l'adaptateur transmet le `select` tel quel, alors qu'il échappe les éléments du `group-by`. Un champ que le portail publie est donc inutilisable dans un `select` sans le backquoter à la main, geste que rien ne suggère. C'est le MIROIR de BUG-010 : dans `group-by`, l'adaptateur backquote TROP (un alias `x as y` est protégé comme un nom de champ et vaut un 400) ; dans `select`, il ne backquote PAS ASSEZ. Deux clauses voisines, deux traitements opposés, deux échecs symétriques — et l'auteur d'une page n'a aucun moyen de deviner lequel s'applique où.",
+    "verifie": "Rencontré au navigateur le 2026-09-10 sur /education/cnr-education (dsfr-data 0.27.0). Avec `select=\"1_uai, etab_verif, …\"` : HTTP 400 sur `/exports/json`, repli automatique sur `/records` qui échoue de même, source en erreur et les quatre KPI affichant « Erreur de chargement ». Recoupé à l'API en curl : `select=1_uai,etab_verif` → 400 avec le message ci-dessus ; `select=%601_uai%60,etab_verif` (backquoté) → 200. Contournement appliqué dans l'attribut : `select=\"`1_uai`, etab_verif, …\"` → HTTP 200 et 6 024 lignes.",
+    "contournement": "Backquoter le champ dans l'attribut `select` de la page. Fonctionne (vérifié), mais suppose de savoir que l'échec vient de là : le message d'API parle de « position 1 », pas du nom du champ.",
+    "demande": "Échapper les éléments du `select` comme ceux du `group-by` — un élément qui est un simple nom de champ (sans parenthèse, sans ` as `, sans opérateur) est backquoté ; les expressions passent telles quelles. La règle serait alors la même dans les deux clauses, ce qui réglerait aussi BUG-010 par symétrie.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Faible en fréquence — peu de jeux nomment un champ avec un chiffre en tête — mais total quand il survient : la page ne charge rien. L'échec est franc, donc diagnosticable ; le coût est le temps de comprendre que le nom du champ est en cause.",
+      "objectif": "Qu'un champ publié par le portail soit utilisable dans un `select` sans échappement manuel.",
+      "perennite": "Durable, et à traiter avec BUG-010 : c'est la même règle d'échappement, appliquée de façon cohérente aux deux clauses.",
+      "acceptation": [
+        "`select=\"1_uai, etab_verif\"` émet `select=`1_uai`,etab_verif` et répond 200.",
+        "Une expression (`sum(x) as v`, `year(d) as a`) continue de passer telle quelle.",
+        "Un nom de champ ordinaire n'est pas altéré au point de changer le nom de la colonne reçue.",
+        "Un test couvre les trois formes, dans `select` comme dans `group-by`."
+      ]
+    }
   }
 ]

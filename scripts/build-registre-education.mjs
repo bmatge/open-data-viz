@@ -77,6 +77,11 @@ const STATUTS = {
   'Offre de langues dans les collèges et lycées': ['reproduite', '/education/offre-formation-langues',
     '39 858 offres en format long ; require-where + weight-field, livré le jour même par la bibliothèque', 'angular'],
 
+  'Génération 2024': ['reproduite', '/education/generation-2024',
+    '44 colonnes vides sur 79 ; six dispositifs repliés par fold, {{#each}} dans l’infobulle', 'angular'],
+  'Cartographie Conseil National de la Refondation - CNR Education': ['reproduite', '/education/cnr-education',
+    '178 thèmes mais 1 814 combinaisons : premier emploi d’explode ; un champ email qui contient des académies', 'angular'],
+
   // --- Les trois galeries editoriales : aucune dataviz a reproduire.
   'Challenge wikidata en classe': ['analyse', '/education/non-reproduites',
     'Galerie éditoriale de liens : aucune directive ods-*, aucun iframe, aucune requête /api/', 'angular'],

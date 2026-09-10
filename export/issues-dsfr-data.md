@@ -1,9 +1,9 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 34 demandes cadrées — 5 bugs,
+> 35 demandes cadrées — 5 bugs,
 > 25 améliorations,
-> 4 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
+> 5 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## Comment lire ce rapport
@@ -107,9 +107,10 @@ _11 demandes — S 6, M 5, L 0._
 | AM-059 | Colorer une cellule selon un seuil dans un tableau | amelioration | S | 2 | Étudier |
 | AM-060 | `color-map` n'existe que sur une couche de carte, pas sur `dsfr-data-chart` | amelioration | S | 2 | Accepter |
 | AM-065 | `dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé | amelioration | S | 1 | Accepter |
+| PG-027 | L'adaptateur Opendatasoft backquote `group-by` mais pas `select` : un champ au nom non standard vaut un HTTP 400 | piege | S | 1 | Accepter |
 | AM-058 | Un filtre qui traverse un référentiel (académie → départements) | amelioration | M | 2 | Étudier |
 
-_9 demandes — S 8, M 1, L 0._
+_10 demandes — S 9, M 1, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -1290,6 +1291,49 @@ Propager l'état `idle` au compteur de `dsfr-data-search`, avec un libellé para
 - [ ] Sous `require-where` et sans filtre, le compteur n'affiche pas « 0 résultats ».
 - [ ] Le libellé de l'état d'attente est paramétrable, comme celui des autres afficheurs.
 - [ ] Poser un filtre rétablit le compteur normal.
+
+---
+
+## PG-027 — L'adaptateur Opendatasoft backquote `group-by` mais pas `select` : un champ au nom non standard vaut un HTTP 400
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement, dx`, `severity:basse`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : edu/cnr-education
+
+### Constat
+
+Le jeu du CNR Éducation publie un champ nommé littéralement `1_uai`. Ce n'est pas un identifiant ODSQL valide — il commence par un chiffre — et l'API le refuse s'il n'est pas entouré d'accents graves : « ODSQL syntax exception: unexpected _uai at position 1 ». Or l'adaptateur transmet le `select` tel quel, alors qu'il échappe les éléments du `group-by`. Un champ que le portail publie est donc inutilisable dans un `select` sans le backquoter à la main, geste que rien ne suggère. C'est le MIROIR de BUG-010 : dans `group-by`, l'adaptateur backquote TROP (un alias `x as y` est protégé comme un nom de champ et vaut un 400) ; dans `select`, il ne backquote PAS ASSEZ. Deux clauses voisines, deux traitements opposés, deux échecs symétriques — et l'auteur d'une page n'a aucun moyen de deviner lequel s'applique où.
+
+### Impact de l'erreur ou du manque
+
+Faible en fréquence — peu de jeux nomment un champ avec un chiffre en tête — mais total quand il survient : la page ne charge rien. L'échec est franc, donc diagnosticable ; le coût est le temps de comprendre que le nom du champ est en cause.
+
+### Objectif métier de la correction
+
+Qu'un champ publié par le portail soit utilisable dans un `select` sans échappement manuel.
+
+### Pérennité et reproductibilité du besoin
+
+Durable, et à traiter avec BUG-010 : c'est la même règle d'échappement, appliquée de façon cohérente aux deux clauses.
+
+### Comment ça a été vérifié
+
+Rencontré au navigateur le 2026-09-10 sur /education/cnr-education (dsfr-data 0.27.0). Avec `select="1_uai, etab_verif, …"` : HTTP 400 sur `/exports/json`, repli automatique sur `/records` qui échoue de même, source en erreur et les quatre KPI affichant « Erreur de chargement ». Recoupé à l'API en curl : `select=1_uai,etab_verif` → 400 avec le message ci-dessus ; `select=%601_uai%60,etab_verif` (backquoté) → 200. Contournement appliqué dans l'attribut : `select="`1_uai`, etab_verif, …"` → HTTP 200 et 6 024 lignes.
+
+### Contournement actuel
+
+Backquoter le champ dans l'attribut `select` de la page. Fonctionne (vérifié), mais suppose de savoir que l'échec vient de là : le message d'API parle de « position 1 », pas du nom du champ.
+
+### Demande
+
+Échapper les éléments du `select` comme ceux du `group-by` — un élément qui est un simple nom de champ (sans parenthèse, sans ` as `, sans opérateur) est backquoté ; les expressions passent telles quelles. La règle serait alors la même dans les deux clauses, ce qui réglerait aussi BUG-010 par symétrie.
+
+### Critères d'acceptation
+
+- [ ] `select="1_uai, etab_verif"` émet `select=`1_uai`,etab_verif` et répond 200.
+- [ ] Une expression (`sum(x) as v`, `year(d) as a`) continue de passer telle quelle.
+- [ ] Un nom de champ ordinaire n'est pas altéré au point de changer le nom de la colonne reçue.
+- [ ] Un test couvre les trois formes, dans `select` comme dans `group-by`.
 
 ---
 

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Les projets CNR Éducation — open-data-viz</title>
+  <meta name="description" content="Reproduction avec dsfr-data de la cartographie du CNR Éducation : 6 024 projets, 178 thèmes, et le premier emploi d'explode.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/education">Portail Éducation</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">CNR Éducation</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Les projets du CNR Éducation</h1>
+
+    <p class="fr-text--lead">
+      Dans le cadre du Conseil national de la refondation, les écoles et établissements ont été
+      invités à bâtir des projets répondant à leurs besoins propres.
+      <strong>6 024 projets</strong> ont été déposés et validés — <strong>3 595 en école</strong>,
+      1 648 en collège, 756 en lycée et 25 en EREA — au bénéfice déclaré de plus de
+      <strong>1,4 million d'élèves</strong>. Les porteurs ont retenu
+      <strong>178 thèmes différents</strong>, combinés de <strong>1 814 façons</strong> :
+      c'est une politique dont la diversité est le fait principal.
+    </p>
+
+    <div class="fr-callout fr-icon-database-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-cnr-base-nefle/"
+           target="_blank" rel="noopener external"><code>fr-en-cnr-base-nefle</code></a>
+        — 6 024 lignes, 40 champs, lu sans clé. <strong>Aucune ligne sans position</strong> :
+        les 6 024 projets sont cartographiables. Le champ <code>themes_projets</code> est
+        <strong>multivalué</strong> — un projet porte de un à plusieurs thèmes.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        <strong>Le champ <code>email_etabl</code> ne contient aucune adresse électronique.</strong>
+        Vérifié sur les 6 024 lignes : <strong>pas un seul caractère « @ »</strong>. Il porte en
+        réalité le nom de l'académie — « Créteil » 559 fois, « Lille » 417, « Aix-Marseille »
+        344 — soit exactement les 32 valeurs du champ <code>libelle_academie</code> qui existe
+        déjà à côté. Un utilisateur qui construirait une liste de diffusion sur ce champ
+        n'obtiendrait rien. Il n'est donc pas exposé sur cette page.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       ✅ PREMIER EMPLOI D'`explode` (#736, dsfr-data 0.27.0), et ce jeu en est le
+       cas d'école.
+
+       `themes_projets` est un tableau. Un `group-by` classique compte les
+       COMBINAISONS : ce jeu porte 178 thèmes distincts, mais 1 814 combinaisons
+       — de sorte qu'un graphique « par thème » sans `explode` produirait
+       1 814 barres dont la plupart à 1, et qu'aucune ne dirait combien de projets
+       portent « Bien-être ». C'est le constat BUG-006 du registre, écrit sur le
+       portail de Bercy et corrigé en 0.27.0.
+
+       Avec `explode="themes_projets"`, une ligne portant N thèmes compte dans
+       N groupes, et les modalités du `group-by` deviennent exactement celles de
+       la facette du même champ. Vérifié ici : 178 barres, « Aménagements des
+       espaces » à 1 006 projets.
+       ========================================================================== -->
+
+  <!-- ⚠️ `` `1_uai` `` est backquoté À LA MAIN dans le `select`, et il le faut :
+       le champ s'appelle littéralement `1_uai`, ce qui n'est pas un identifiant
+       ODSQL valide (il commence par un chiffre). L'API répond « ODSQL syntax
+       exception: unexpected _uai at position 1 » — HTTP 400, source en erreur,
+       les quatre KPI affichant « Erreur de chargement ».
+
+       C'est le MIROIR exact de BUG-010 : dans `group-by`, l'adaptateur backquote
+       TROP (un alias `x as y` devient `` `x as y` `` et vaut un 400) ; dans
+       `select`, il ne backquote PAS ASSEZ (un identifiant non standard passe nu
+       et vaut un 400). Deux clauses voisines, deux traitements opposés, deux
+       échecs symétriques. Constat PG-027.
+
+       L'échec est franc, au moins : 400, message d'API explicite, KPI en erreur. -->
+  <dsfr-data-source id="cnr" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-cnr-base-nefle"
+    fetch-mode="export" max-records="8000"
+    select="`1_uai`, etab_verif, type_etablissement, adresse_1, code_postal, nom_commune_verif, code_departement, libelle_academie, libelle_region, nom_projet, objectifs_detailles, eleves_benef, debut_proj, date_validation, partenaires_du_projet, themes_projets, themes_dgesco, type_de_prestation, validation_du_projet, position">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="cnr-n" source="cnr"
+    compute="ampleur = when is_null(eleves_benef) then 'Non renseigné' when eleves_benef &lt; 50 then 'Moins de 50 élèves' when eleves_benef &lt; 150 then '50 à 150' when eleves_benef &lt; 400 then '150 à 400' else '400 et plus'">
+  </dsfr-data-normalize>
+
+  <dsfr-data-search id="cnr-q" source="cnr-n"
+    fields="nom_projet, etab_verif, nom_commune_verif, objectifs_detailles"
+    label="Rechercher un projet" placeholder="Intitulé, établissement, commune, objectif…"
+    operator="words" count url-sync>
+  </dsfr-data-search>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+
+      <div class="fr-col-12 fr-col-md-3">
+        <h2 class="fr-h6">Filtrer</h2>
+        <dsfr-data-facets id="cnr-f" source="cnr-q"
+          fields="type_etablissement, themes_projets, ampleur, type_de_prestation, validation_du_projet, libelle_academie, libelle_region"
+          labels="type_etablissement:Type d'établissement | themes_projets:Thème du projet | ampleur:Élèves bénéficiaires | type_de_prestation:Type de prestation | validation_du_projet:Validation | libelle_academie:Académie | libelle_region:Région"
+          display="type_etablissement:checkbox | themes_projets:multiselect | ampleur:checkbox | type_de_prestation:multiselect | validation_du_projet:checkbox | libelle_academie:multiselect | libelle_region:radio"
+          searchable="themes_projets, type_de_prestation, libelle_academie"
+          disjunctive="type_etablissement, themes_projets, libelle_academie"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-9">
+
+        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+          <dsfr-data-kpi source="cnr-f" value="count" format="nombre"
+            heading="Projets" label="dans la sélection"></dsfr-data-kpi>
+          <dsfr-data-kpi source="cnr-f" value="eleves_benef:sum" format="nombre"
+            where="eleves_benef:isnotnull"
+            heading="Élèves bénéficiaires" label="déclarés par les porteurs"></dsfr-data-kpi>
+          <dsfr-data-kpi source="cnr-f" value="eleves_benef:avg" format="nombre" decimals="0"
+            where="eleves_benef:isnotnull"
+            heading="Par projet" label="moyenne des bénéficiaires"></dsfr-data-kpi>
+          <dsfr-data-kpi source="cnr-f" value="nom_commune_verif:distinct" format="nombre"
+            heading="Communes" label="porteuses d'un projet"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <dsfr-data-map id="carte-cnr"
+          name="Écoles et établissements engagés dans la démarche du CNR Éducation"
+          height="600px" tiles="ign-plan" tiles-style="muted"
+          insets="drom" fit-bounds fit-max-zoom="13">
+          <dsfr-data-map-layer id="couche-cnr" source="cnr-f" type="circle"
+            geo-field="position" radius="5" fill-opacity="0.9"
+            color-field="type_etablissement"
+            color-map="Ecole:#0b72b5,Collège:#19630a,Lycée:#ba022a,EREA:#f8b334"
+            color="#6a6a6a"
+            tooltip-field="nom_projet"
+            max-items="8000" cluster cluster-radius="45">
+          </dsfr-data-map-layer>
+          <dsfr-data-map-legend for="couche-cnr" label="Type d'établissement"></dsfr-data-map-legend>
+          <dsfr-data-map-popup mode="panel-right" title-field="nom_projet" width="400px">
+            <template>
+              <p class="fr-badge fr-badge--sm fr-mb-2v">{{type_etablissement}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>{{etab_verif}}</strong></p>
+              <p class="fr-text--sm fr-mb-3v">
+                {{adresse_1|}}<br>
+                {{code_postal|}} {{nom_commune_verif}}<br>
+                académie de {{libelle_academie}} · {{libelle_region}}
+              </p>
+
+              <p class="fr-text--sm fr-mb-1v">
+                <strong>{{eleves_benef:number|—}}</strong> élèves bénéficiaires ·
+                projet {{validation_du_projet}}
+              </p>
+              <p class="fr-text--sm fr-mb-3v">Démarré le {{debut_proj:date|—}}</p>
+
+              <!-- `{{#each}}` (0.27.0) : les thèmes en vraie liste. Certains
+                   projets en portent plus de dix. -->
+              <p class="fr-text--sm fr-mb-1v"><strong>Thèmes</strong></p>
+              {{#if themes_projets}}<ul class="fr-text--sm fr-mb-3v">{{#each themes_projets}}<li>{{.}}</li>{{/each}}</ul>{{/if}}
+              {{#unless themes_projets}}<p class="fr-text--sm fr-mb-3v">Aucun thème déclaré.</p>{{/unless}}
+
+              {{#if partenaires_du_projet}}<p class="fr-text--sm fr-mb-1v"><strong>Partenaires</strong></p>
+              <p class="fr-text--sm fr-mb-3v">{{partenaires_du_projet}}</p>{{/if}}
+
+              <p class="fr-text--xs fr-mb-0">UAI {{1_uai}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+
+        <dsfr-data-a11y source="cnr-f" for="carte-cnr" table download
+          filename="cnr-education.csv"
+          label="Données de la carte"
+          description="Un projet par ligne : intitulé, établissement, type, thèmes, bénéficiaires, commune, académie."
+          label-field="nom_projet"
+          value-field="etab_verif, type_etablissement, themes_projets, eleves_benef, nom_commune_verif, libelle_academie, validation_du_projet">
+        </dsfr-data-a11y>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">Les thèmes les plus retenus</h2>
+    <p class="fr-text--sm fr-mb-3w">
+      Ce graphique n'aurait pas été possible avant la version publiée aujourd'hui : un
+      regroupement classique aurait compté les <strong>1 814 combinaisons</strong> de thèmes au
+      lieu des <strong>178 thèmes</strong>. Il suit les filtres de la colonne de gauche.
+    </p>
+    <dsfr-data-chart id="g-cnr-themes" source="cnr-themes" type="bar" horizontal
+      label-field="themes_projets" value-field="n" name='["Projets"]'
+      databox databox-title="Thèmes les plus retenus par les projets CNR Éducation"
+      databox-source="Ministère de l'éducation nationale — fr-en-cnr-base-nefle"
+      databox-download>
+    </dsfr-data-chart>
+    <dsfr-data-a11y for="g-cnr-themes" source="cnr-themes" table download></dsfr-data-a11y>
+    <p class="fr-text--xs fr-mt-1w">
+      « Non mentionné » arrive en tête, avec 1 345 projets : plus d'un projet sur cinq n'a pas
+      de thème déclaré. C'est la valeur la plus fréquente du champ, et l'original ne la montre pas.
+    </p>
+  </div>
+
+  <!-- ✅ `explode` : une ligne portant N thèmes compte dans N groupes.
+       Branchée sur la facette, jamais sur la source (BUG-009). -->
+  <dsfr-data-query id="cnr-themes" source="cnr-f" explode="themes_projets"
+    group-by="themes_projets" aggregate="1_uai:count:n"
+    order-by="n:desc" limit="20"></dsfr-data-query>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">Les projets</h2>
+    <dsfr-data-list source="cnr-f"
+      columns="nom_projet, etab_verif, type_etablissement, nom_commune_verif, libelle_academie, eleves_benef, validation_du_projet"
+      search sort pagination="25">
+    </dsfr-data-list>
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — CNR Éducation</h2>
+
+      <p class="fr-text--sm fr-mb-4w">
+        Page d'origine :
+        <a href="https://data.education.gouv.fr/pages/cnr/" target="_blank" rel="noopener external">/pages/cnr/</a>.
+        Fiche d'audit : <code>docs/portail-education/cnr-education.md</code>.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong><code>explode</code>, premier emploi — et ce jeu en est le cas
+              d'école.</strong> <code>themes_projets</code> est un tableau : 178 thèmes distincts,
+              mais <strong>1 814 combinaisons</strong>. Un <code>group-by</code> classique compte
+              les combinaisons, donc produit 1 814 barres dont la plupart à 1, et ne dit jamais
+              combien de projets portent « Bien-être ». <code>explode="themes_projets"</code>
+              (#736, 0.27.0) fait compter une ligne dans autant de groupes qu'elle a de valeurs :
+              178 modalités, exactement celles de la facette du même champ. <strong>C'est le
+              constat BUG-006, écrit sur le portail de Bercy et corrigé aujourd'hui</strong>, et
+              c'est le premier jeu qui en avait vraiment besoin.</li>
+            <li><strong><code>{{#each}}</code> sur des tableaux longs.</strong> Certains projets
+              portent plus de dix thèmes ; la liste structurée les rend lisibles là où un
+              <code>join</code> aurait produit une phrase interminable.</li>
+            <li><strong>Le reste est le gabarit.</strong> Source, recherche plein texte sur les
+              objectifs, facettes, carte, tableau, liste : écrit d'un trait. Sixième page du
+              portail sans difficulté technique.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Un champ nommé <code>email_etabl</code> qui ne contient pas d'adresses.</strong>
+              Zéro caractère « @ » sur 6 024 lignes : le champ porte le nom de l'académie, en
+              doublon d'un <code>libelle_academie</code> qui existe à côté. Ce n'est pas un
+              champ vide — qu'on repère vite — ni un champ mal orthographié : c'est un champ
+              <em>plein</em>, de valeurs plausibles, et fausses au regard de son nom. Aucun outil
+              ne peut le détecter&nbsp;; il faut lire les valeurs. <strong>C'est le défaut de
+              données le plus difficile à voir rencontré par ce banc</strong>, tous portails
+              confondus : les colonnes vides se comptent, les nomenclatures à deux graphies se
+              comptent, mais un champ qui ment sur son contenu ne se voit qu'à l'œil.</li>
+            <li><strong>« Non mentionné » est le thème le plus fréquent.</strong> 1 345 projets
+              sur 6 024 — plus d'un sur cinq — n'ont pas de thème déclaré, et cette valeur arrive
+              en tête du classement. La montrer était un choix : l'écarter aurait donné un
+              graphique plus flatteur et moins vrai.</li>
+            <li><strong>Un champ nommé <code>1_uai</code> casse le <code>select</code>.</strong>
+              Le jeu publie un champ dont le nom commence par un chiffre — ce qui n'est pas un
+              identifiant ODSQL valide. Transmis nu, il vaut « <em>unexpected _uai at position
+              1</em> », HTTP 400, et les quatre KPI en erreur. Il faut le backquoter à la main
+              dans l'attribut. <strong>C'est le miroir exact de BUG-010</strong> : dans
+              <code>group-by</code>, l'adaptateur backquote <em>trop</em> — un alias
+              <code>x as y</code> devient <code>`x as y`</code> et vaut un 400 ; dans
+              <code>select</code>, il ne backquote <em>pas assez</em>. Deux clauses voisines,
+              deux traitements opposés, deux échecs symétriques. Constat PG-027.</li>
+            <li><strong>BUG-009, toujours.</strong> La query d'agrégat est branchée sur la
+              facette, jamais sur la source. Quatrième page à porter cette contrainte.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ods-dataset-context</code></td><td><code>dsfr-data-source</code> + <code>select</code></td><td>Équivalent</td></tr>
+            <tr><td>facette sur un champ multivalué</td><td><code>dsfr-data-facets</code></td><td>Équivalent (la facette éclatait déjà les valeurs)</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-query explode</code></td><td><strong>Sans équivalent, et impossible avant aujourd'hui</strong> : 178 thèmes au lieu de 1 814 combinaisons</td></tr>
+            <tr><td>thèmes dans l'infobulle</td><td><code>{{#each}}</code></td><td>Meilleur : une liste, pas une phrase</td></tr>
+            <tr><td>recherche</td><td><code>dsfr-data-search</code> sur les objectifs détaillés</td><td>Meilleur : le texte du projet devient cherchable</td></tr>
+            <tr><td><code>email_etabl</code></td><td>—</td><td><strong>Écarté</strong> : le champ ne contient pas d'adresses</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p>Reproduction <strong>immédiate</strong>, et troisième page consécutive à employer une
+          capacité livrée le jour même — cette fois <code>explode</code>, sur le jeu qui en avait
+          le plus besoin de tout le banc. Ce que la page apprend n'est pourtant pas là&nbsp;:
+          c'est qu'un champ peut être <strong>plein, plausible et faux</strong>. Les colonnes
+          vides se comptent, les doubles graphies se comptent, les valeurs manquantes se
+          comptent — mais un <code>email_etabl</code> rempli de noms d'académies ne se repère
+          qu'en lisant. C'est la limite de tout outillage, y compris de celui qu'on éprouve ici.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.27.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
