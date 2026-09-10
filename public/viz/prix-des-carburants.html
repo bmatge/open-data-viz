@@ -76,11 +76,27 @@
        à l'API le 2026-09-10, `metas.default.records_count`) : si elle passait un
        jour en mode adaptateur, il lui faudrait aussi un `max-records` au-dessus
        de 9 807, le plafond par défaut étant de 1 000.
+
+       ✅ CORRIGÉ DEPUIS — dsfr-data 0.26.0 (#726). `params` vit désormais en mode
+       adaptateur : ses paires sont ajoutées à l'URL construite par l'adaptateur
+       Opendatasoft, en pagination comme en `fetch-mode="export"`. La source est
+       donc revenue au mode adaptateur au lot 18 : `api-type` + `dataset-id` +
+       `select` en attribut délégué + `fetch-mode="export"` + le seul `timezone`
+       resté dans `params`. Les clés que la bibliothèque construit elle-même
+       (`select`, `where`, `group_by`, `order_by`, `limit`, `offset`, `facet`)
+       sont réservées et refusées avec une erreur de configuration : c'est bien
+       pour cela que `select` a quitté `params` pour son attribut.
+       ⚠️ Le piège du dépôt s'applique de nouveau : repasser en adaptateur
+       ré-active `max-records`, dont le plafond par défaut de 1 000 tronque en
+       SILENCE. D'où `max-records="12000"` au-dessus des 9 807 stations du jeu.
        ========================================================================== -->
 
-  <dsfr-data-source id="pc"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/exports/json"
-    params='{"select":"id, ville, cp, adresse, geom, region, code_region, departement, gazole_prix, sp95_prix, sp98_prix, e10_prix, e85_prix, gplc_prix, date_format(gazole_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as gazole_maj_txt, date_format(sp95_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as sp95_maj_txt, date_format(sp98_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as sp98_maj_txt, date_format(e10_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as e10_maj_txt, date_format(e85_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as e85_maj_txt, date_format(gplc_maj, \"&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;\") as gplc_maj_txt, carburants_disponibles, carburants_indisponibles, horaires_automate_24_24, services_service","timezone":"Europe/Paris"}'
+  <dsfr-data-source id="pc" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr"
+    dataset-id="prix-des-carburants-en-france-flux-instantane-v2"
+    fetch-mode="export" max-records="12000"
+    select='id, ville, cp, adresse, geom, region, code_region, departement, gazole_prix, sp95_prix, sp98_prix, e10_prix, e85_prix, gplc_prix, date_format(gazole_maj, "&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;") as gazole_maj_txt, date_format(sp95_maj, "&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;") as sp95_maj_txt, date_format(sp98_maj, "&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;") as sp98_maj_txt, date_format(e10_maj, "&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;") as e10_maj_txt, date_format(e85_maj, "&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;") as e85_maj_txt, date_format(gplc_maj, "&apos;€ (&apos;dd/MM/yyyy &apos;à&apos; HH:mm&apos;)&apos;") as gplc_maj_txt, carburants_disponibles, carburants_indisponibles, horaires_automate_24_24, services_service'
+    params='{"timezone":"Europe/Paris"}'
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
@@ -126,9 +142,17 @@
           operator="words" count>
         </dsfr-data-search>
 
+        <!-- Tri PAR CHAMP (#741, 0.27.0) : le portail d'origine range régions et
+             départements en alphanumérique et les carburants par effectif, dans
+             la même barre de filtres. Jusqu'ici `sort` était global : il fallait
+             choisir le tri dominant, ou dupliquer le composant (PG-016). La
+             grammaire à barre verticale — la même que `labels` et `display`,
+             PG-022 — permet enfin les deux à la fois. Les champs non nommés
+             gardent le défaut `count:desc`. -->
         <dsfr-data-facets id="pc-f" source="pc-q"
           fields="carburants_disponibles, carburants_indisponibles, region, departement, horaires_automate_24_24, services_service"
           labels="carburants_disponibles:Carburants disponibles | carburants_indisponibles:Carburants non disponibles | region:Région | departement:Département | horaires_automate_24_24:Automate 24/24 | services_service:Service proposé"
+          sort="region:alpha:asc | departement:alpha:asc | services_service:alpha:asc"
           searchable="departement, region, services_service" max-values="6">
         </dsfr-data-facets>
       </div>
@@ -181,8 +205,9 @@
              `where=not in_bbox(geom, …)`). Sans clip, `fit-bounds` recadre aussi
              sur une commune à station unique — c'est le recadrage automatique
              du portail (voir BUG-004 pour les jeux qui ont des DROM). -->
-        <dsfr-data-map class="odv-fond-attenue" name="Carte des stations-service et de leurs prix"
-          center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan" fit-bounds>
+        <dsfr-data-map tiles-style="muted" name="Carte des stations-service et de leurs prix"
+          center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
+          tiles-switcher="ign-plan,ign-ortho" fit-bounds>
           <dsfr-data-map-layer source="pc-f" type="circle" radius="4"
             geo-field="geom" color="#000091" tooltip-field="ville" cluster max-items="12000">
           </dsfr-data-map-layer>
@@ -207,7 +232,13 @@
               <p class="fr-text--sm fr-mb-2v"><strong>GPLc</strong>
                 {{gplc_prix:number|Indisponible}} {{gplc_maj_txt|}}</p>
               <p class="fr-text--sm fr-mb-1v"><strong>Automate 24/24h</strong> {{horaires_automate_24_24|non renseigné}}</p>
-              <p class="fr-text--sm fr-mb-0"><strong>Services</strong> {{services_service|aucun service renseigné}}</p>
+              <!-- `{{#each}}` (#737, 0.27.0) : `services_service` est multivalué, et
+                   le portail comme la première version de cette page le rendaient
+                   en une phrase jointe par des virgules — jusqu'à quinze services
+                   à la file. Une pastille DSFR par service, c'est le rendu canonique
+                   d'un champ multivalué, et il n'y avait pas de boucle avant (AM-047). -->
+              <p class="fr-text--sm fr-mb-1v"><strong>Services</strong></p>
+              <ul class="fr-tags-group fr-mb-0">{{#each services_service}}<li><span class="fr-tag fr-tag--sm">{{.}}</span></li>{{/each}}</ul>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
@@ -362,13 +393,40 @@
               «&nbsp;08/09/2026 à 11:23&nbsp;» avec le paramètre, «&nbsp;09:23&nbsp;» sans — deux heures de
               décalage <em>silencieux</em> sur 9 807 stations. Migrer sans le fuseau aurait donc échangé un
               gain d'architecture contre une donnée fausse&nbsp;; la source reste générique, et le manque
-              est un attribut de fuseau côté adaptateur.</li>
+              est un attribut de fuseau côté adaptateur.
+              <br><strong>Suite (lot 18)&nbsp;:</strong> ce manque a été comblé en <strong>0.26.0</strong>
+              (#726) — <code>params</code> vit désormais en mode adaptateur. La source est repassée en
+              <code>api-type="opendatasoft"</code> + <code>fetch-mode="export"</code>, le <code>select</code>
+              en attribut délégué et <code>params='{"timezone":"Europe/Paris"}'</code> pour le seul fuseau.
+              <strong>Vérifié au réseau&nbsp;:</strong> une requête,
+              <code>…/exports/json?timezone=Europe/Paris&amp;select=…</code>, et les quatre compteurs
+              inchangés (9&nbsp;807 stations, 2,3&nbsp;€/L, 97 départements). Le constat ci-dessus reste
+              écrit tel qu'il a été rencontré&nbsp;: c'était vrai jusqu'en 0.25.0.</li>
+            <li><strong>Le tri des facettes est enfin par champ (PG-016).</strong> Le portail range régions
+              et départements en alphanumérique et les carburants par effectif, dans la même barre&nbsp;;
+              <code>sort</code> était global, il fallait choisir. Depuis <strong>0.27.0</strong> (#741),
+              <code>sort="region:alpha:asc | departement:alpha:asc | services_service:alpha:asc"</code>
+              range ces trois facettes de A à Z pendant que les deux facettes de carburants restent au
+              défaut <code>count:desc</code>. <strong>Vérifié au navigateur&nbsp;:</strong> «&nbsp;Ain,
+              Aisne, Allier, Alpes-de-Haute-Provence…&nbsp;» d'un côté, «&nbsp;Gazole 9 536, E10 7 219,
+              SP98 7 214…&nbsp;» de l'autre, dans le même composant.</li>
+                      <li><strong>Les blocs de template ne s'imbriquent pas, et le silence coûte cher (lot 18).</strong>
+              L'écriture naturelle d'une liste optionnelle est
+              <code>{{#if champ}}&lt;ul&gt;{{#each champ}}…{{/each}}&lt;/ul&gt;{{/if}}</code>. Elle ne
+              rend <strong>rien du tout</strong>&nbsp;: ni les items, ni le repli
+              <code>{{#unless}}</code>, ni un message en console. Le changelog de 0.27.0 le dit — «&nbsp;les
+              blocs ne s'imbriquent pas&nbsp;» — mais rien à l'exécution ne le rappelle, et l'infobulle
+              affichait un intertitre suivi du vide. <strong>Relevé au navigateur puis corrigé&nbsp;:</strong>
+              le <code>&lt;ul&gt;</code> sort de la condition, le <code>{{#each}}</code> reste seul (un tableau
+              vide ne rend rien), et le cas vide est masqué par une règle <code>ul:empty</code> de
+              <code>site.css</code>. C'est la famille de défauts la plus coûteuse du dépôt&nbsp;: une
+              grammaire fausse qui ne dit rien (PG-022).</li>
           </ul>
 
           <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.22.0</h4>
+            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.22.0 à 0.27.0</h4>
             <p class="fr-text--sm">
-              14 des frictions décrites ci-dessus ont été comblées par la bibliothèque
+              16 des frictions décrites ci-dessus ont été comblées par la bibliothèque
               <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
               du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
               nécessaire. Détail et vérification au <a href="/retours#AM-012">registre des retours</a>.
@@ -388,6 +446,8 @@
               <li><strong>AM-031</strong> — <strong>0.22.0</strong> (#665)&nbsp;: <code>decimals</code> et <code>unit</code> sur <code>dsfr-data-kpi</code>&nbsp;; <code>compact</code> enfin documenté (#657, 0.21.1).</li>
               <li><strong>AM-033</strong> — <strong>0.22.0</strong> (#666)&nbsp;: nombres formatés fr-FR dans <code>dsfr-data-a11y</code> et <code>dsfr-data-list</code>, CSV inchangé.</li>
               <li><strong>AM-040</strong> — <strong>0.22.0</strong> (#663)&nbsp;: un champ multivalué est joint par «&nbsp;,&nbsp;» par défaut, et le pipe <code>{{champ:join: / }}</code> choisit le séparateur.</li>
+              <li><strong>AM-064</strong> — <strong>0.26.0</strong> (#726)&nbsp;: <code>params</code> vit en mode adaptateur&nbsp;: la dernière source générique du dépôt est revenue à l'adaptateur avec <code>fetch-mode="export"</code>, sans perdre <code>timezone=Europe/Paris</code>. <em>Contournement retiré au lot 18.</em></li>
+              <li><strong>PG-016</strong> — <strong>0.27.0</strong> (#741)&nbsp;: <code>sort</code> accepte la grammaire par champ (<code>champ:critère:sens</code>, séparateur <code>|</code>)&nbsp;: régions et départements en A→Z, carburants par effectif, dans une seule barre de facettes. <em>Appliqué au lot 18.</em></li>
             </ul>
           </div>
         </div>
@@ -439,7 +499,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.27.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

@@ -104,6 +104,11 @@
     compute="ampleur = when is_null(eleves_benef) then 'Non renseigné' when eleves_benef &lt; 50 then 'Moins de 50 élèves' when eleves_benef &lt; 150 then '50 à 150' when eleves_benef &lt; 400 then '150 à 400' else '400 et plus'">
   </dsfr-data-normalize>
 
+  <dsfr-data-context id="cnr-ctx" sources="cnr">
+    <dsfr-data-context-filter field="debut_proj" operator="year-of" year-start-month="9"
+      ui="cnr-annee" label="Rentrée"></dsfr-data-context-filter>
+  </dsfr-data-context>
+
   <dsfr-data-search id="cnr-q" source="cnr-n"
     fields="nom_projet, etab_verif, nom_commune_verif, objectifs_detailles"
     label="Rechercher un projet" placeholder="Intitulé, établissement, commune, objectif…"
@@ -115,6 +120,35 @@
 
       <div class="fr-col-12 fr-col-md-3">
         <h2 class="fr-h6">Filtrer</h2>
+
+        <!-- ✅ `year-start-month` (#735, dsfr-data 0.27.0). L'unité de temps de tout
+             ce portail est l'ANNÉE SCOLAIRE, et aucun opérateur ne la connaissait :
+             `year-of` découpait en année civile, donc coupait l'année scolaire en
+             son milieu, en silence (AM-050). C'est mesurable sur ce jeu : les
+             4 637 projets « 2023 » au sens civil mélangent deux rentrées, et les
+             274 démarrages de septembre 2023 appartiennent à la même année scolaire
+             que les 335 de janvier 2024.
+
+             `year-start-month="9"` fait de « 2023 » la plage
+             [2023-09-01, 2024-09-01). La clause reste un `gte` + `lt` : elle se
+             délègue au serveur comme n'importe quelle autre, et le tag affiche
+             « 2023-2024 ».
+
+             ⚠️ Le filtre écarte les 85 projets sans date de démarrage — c'est le
+             propre d'une plage, et c'est dit dans l'analyse. -->
+        <div class="fr-select-group fr-mb-3w">
+          <label class="fr-label" for="cnr-annee">Année scolaire de démarrage</label>
+          <select class="fr-select" id="cnr-annee">
+            <option value="">Toutes</option>
+            <option value="2024">2024-2025</option>
+            <option value="2023">2023-2024</option>
+            <option value="2022">2022-2023</option>
+            <option value="2021">2021-2022</option>
+          </select>
+          <p class="fr-hint-text">Septembre à août, et non l'année civile.</p>
+          <dsfr-data-context-tags for="cnr-ctx" clear-all></dsfr-data-context-tags>
+        </div>
+
         <dsfr-data-facets id="cnr-f" source="cnr-q"
           fields="type_etablissement, themes_projets, ampleur, type_de_prestation, validation_du_projet, libelle_academie, libelle_region"
           labels="type_etablissement:Type d'établissement | themes_projets:Thème du projet | ampleur:Élèves bénéficiaires | type_de_prestation:Type de prestation | validation_du_projet:Validation | libelle_academie:Académie | libelle_region:Région"
@@ -172,7 +206,7 @@
               <!-- `{{#each}}` (0.27.0) : les thèmes en vraie liste. Certains
                    projets en portent plus de dix. -->
               <p class="fr-text--sm fr-mb-1v"><strong>Thèmes</strong></p>
-              {{#if themes_projets}}<ul class="fr-text--sm fr-mb-3v">{{#each themes_projets}}<li>{{.}}</li>{{/each}}</ul>{{/if}}
+              <ul class="fr-text--sm fr-mb-3v">{{#each themes_projets}}<li>{{.}}</li>{{/each}}</ul>
               {{#unless themes_projets}}<p class="fr-text--sm fr-mb-3v">Aucun thème déclaré.</p>{{/unless}}
 
               {{#if partenaires_du_projet}}<p class="fr-text--sm fr-mb-1v"><strong>Partenaires</strong></p>
@@ -256,6 +290,21 @@
             <li><strong><code>{{#each}}</code> sur des tableaux longs.</strong> Certains projets
               portent plus de dix thèmes ; la liste structurée les rend lisibles là où un
               <code>join</code> aurait produit une phrase interminable.</li>
+            <li><strong>L'année scolaire, enfin un opérateur (lot 18).</strong> L'unité de temps de
+              tout le portail Éducation est la <em>rentrée</em>, et aucun opérateur de
+              <code>dsfr-data-context-filter</code> ne la connaissait&nbsp;: <code>year-of</code>
+              raisonnait en année civile, donc coupait l'année scolaire en son milieu sans le dire
+              (AM-050). Ce jeu le rend mesurable&nbsp;: ses 4 637 projets «&nbsp;2023&nbsp;» au sens
+              civil mélangent deux rentrées, et les 274 démarrages de septembre 2023 appartiennent à
+              la même année scolaire que les 335 de janvier 2024.
+              <code>year-start-month="9"</code> (#735, <strong>0.27.0</strong>) fait de
+              «&nbsp;2023&nbsp;» la plage [2023-09-01, 2024-09-01).
+              <strong>Vérifié au navigateur&nbsp;:</strong> la requête part en
+              <code>where=debut_proj &gt;= "2023-09-01" AND debut_proj &lt; "2024-09-01"</code> —
+              donc <em>déléguée au serveur</em> comme n'importe quelle autre clause — le tag affiche
+              «&nbsp;Rentrée&nbsp;: 2023-2024&nbsp;», et le compteur tombe à <strong>1 313 projets</strong>,
+              chiffre recoupé à l'API par la somme mois par mois (567 de septembre à décembre 2023,
+              746 de janvier à août 2024).</li>
             <li><strong>Le reste est le gabarit.</strong> Source, recherche plein texte sur les
               objectifs, facettes, carte, tableau, liste : écrit d'un trait. Sixième page du
               portail sans difficulté technique.</li>
@@ -289,6 +338,24 @@
               deux traitements opposés, deux échecs symétriques. Constat PG-027.</li>
             <li><strong>BUG-009, toujours.</strong> La query d'agrégat est branchée sur la
               facette, jamais sur la source. Quatrième page à porter cette contrainte.</li>
+            <li><strong>Une plage d'année scolaire écarte ce qui n'a pas de date.</strong>
+              <code>year-start-month</code> produit un <code>gte</code> + <code>lt</code>&nbsp;: les
+              <strong>85 projets sans <code>debut_proj</code></strong> sortent de la sélection dès
+              qu'une rentrée est choisie, comme ils sortiraient de n'importe quelle plage. Ce n'est pas
+              un défaut de l'opérateur — c'est la conséquence exacte de sa définition — mais l'écart
+              entre «&nbsp;toutes rentrées&nbsp;» (6 024) et la somme des quatre rentrées proposées
+              n'est explicable qu'en le sachant, et rien à l'écran ne le dit.</li>
+                      <li><strong>Les blocs de template ne s'imbriquent pas, et le silence coûte cher (lot 18).</strong>
+              L'écriture naturelle d'une liste optionnelle est
+              <code>{{#if champ}}&lt;ul&gt;{{#each champ}}…{{/each}}&lt;/ul&gt;{{/if}}</code>. Elle ne
+              rend <strong>rien du tout</strong>&nbsp;: ni les items, ni le repli
+              <code>{{#unless}}</code>, ni un message en console. Le changelog de 0.27.0 le dit — «&nbsp;les
+              blocs ne s'imbriquent pas&nbsp;» — mais rien à l'exécution ne le rappelle, et l'infobulle
+              affichait un intertitre suivi du vide. <strong>Relevé au navigateur puis corrigé&nbsp;:</strong>
+              le <code>&lt;ul&gt;</code> sort de la condition, le <code>{{#each}}</code> reste seul (un tableau
+              vide ne rend rien), et le cas vide est masqué par une règle <code>ul:empty</code> de
+              <code>site.css</code>. C'est la famille de défauts la plus coûteuse du dépôt&nbsp;: une
+              grammaire fausse qui ne dit rien (PG-022).</li>
           </ul>
         </div>
       </div>
@@ -329,7 +396,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.27.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ted-i — robots de téléprésence — open-data-viz</title>
+  <meta name="description" content="Reproduction avec dsfr-data du tableau de bord Ted-i : 3 734 déploiements de robots de téléprésence, un cumul mensuel natif, et 175 lignes entièrement vides.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/education">Portail Éducation</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Ted-i</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Ted-i : les robots de téléprésence pour élèves empêchés</h1>
+
+    <p class="fr-text--lead">
+      Dans le cadre du programme Ted-i, un enfant hospitalisé ou maintenu durablement à domicile
+      peut disposer gratuitement d'un système de téléprésence pour suivre sa classe.
+      Le jeu recense <strong>3 734 déploiements</strong> depuis août 2024, dans
+      <strong>2 497 établissements distincts</strong>, <strong>27 académies</strong> et
+      <strong>97 départements</strong>. Au 10 septembre 2026, <strong>208 robots</strong> sont
+      en service — c'est-à-dire sans date de fin d'utilisation.
+    </p>
+
+    <div class="fr-callout fr-icon-database-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-deploiemement_tedi/" target="_blank" rel="noopener external"><code>fr-en-deploiemement_tedi</code></a>
+        — 3 734 lignes, 9 champs, mis à jour <strong>quotidiennement à 6 h UTC</strong>, lu sans
+        clé. Une ligne = un robot posé dans un établissement, avec sa date de début et,
+        éventuellement, sa date de fin d'utilisation. Le mot « temps réel » qu'emploie la page
+        d'origine désigne donc <em>l'état du jeu à sa dernière mise à jour quotidienne</em>.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        <strong>Le défaut de données le plus net du lot : 175 lignes sont entièrement
+        vides.</strong> Vérifié sur l'export complet — ce sont exactement les
+        <em>mêmes</em> 175 lignes qui n'ont ni <code>nom_etablissement</code>, ni
+        <code>type_etablissement</code>, ni <code>nom_commune</code>, ni <code>position</code>,
+        ni <code>libelle_departement</code>, ni <code>libelle_academie</code>. Il ne leur reste
+        que l'UAI et les dates : l'appariement au référentiel des établissements n'a pas eu lieu.
+        La page d'origine, elle, présente le symptôme trois fois séparément — une barre 1er/2nd
+        degré qui perd des lignes, une carte qui perd des points, un classement d'académies
+        incomplet — sans jamais dire que c'est le même trou.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       3 734 lignes, 282 Ko : `fetch-mode="export"` charge tout en un aller-retour,
+       sans quitter le mode adaptateur. L'original émet DIX-NEUF requêtes, dont
+       quatre en 503 parce qu'une variable de période est encore vide au premier
+       cycle de digest et produit l'expression ODSQL `debut_utilisation>=-09-01`.
+
+       `max-records="5000"` explicite : le plafond par défaut de 1 000 tronquerait
+       2 734 lignes en silence.
+       ========================================================================== -->
+
+  <dsfr-data-source id="tedi" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-deploiemement_tedi"
+    fetch-mode="export" max-records="5000">
+  </dsfr-data-source>
+
+  <!-- Quatre colonnes dérivées que le jeu n'a pas :
+       - `statut`     : en service (fin_utilisation nulle) ou restitué ;
+       - `an_debut`   : l'année scolaire de pose, calculée avec la bascule de septembre ;
+       - `annee_scolaire` : son libellé « 2025-2026 » ;
+       - `mois`       : la clé de mois zéro-remplie, pour un axe chronologique correct ;
+       - `degre`      : le regroupement 1er / 2nd degré de l'original, groupe nul NOMMÉ. -->
+  <dsfr-data-normalize id="tedi-n" source="tedi"
+    compute="statut = when is_null(fin_utilisation) then 'En service' else 'Restitué'; an_debut = when month(debut_utilisation) &gt;= 9 then year(debut_utilisation) else year(debut_utilisation) - 1; annee_scolaire = concat(an_debut, '-', an_debut + 1); mois = when month(debut_utilisation) &lt; 10 then concat(year(debut_utilisation), '-0', month(debut_utilisation)) else concat(year(debut_utilisation), '-', month(debut_utilisation)); degre = when type_etablissement = 'Ecole' then '1er degré' when type_etablissement = 'Collège' then '2nd degré' when type_etablissement = 'Lycée' then '2nd degré' when type_etablissement = 'EREA' then '2nd degré' when is_null(type_etablissement) then 'Établissement non identifié' else 'Autres structures'">
+  </dsfr-data-normalize>
+
+  <dsfr-data-search id="tedi-q" source="tedi-n"
+    fields="nom_etablissement, nom_commune, uai, libelle_departement"
+    label="Rechercher un établissement" placeholder="Nom, commune, UAI, département…"
+    operator="words" count url-sync>
+  </dsfr-data-search>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-3">
+        <h2 class="fr-h6">Filtrer</h2>
+        <dsfr-data-facets id="tedi-f" source="tedi-q"
+          fields="statut, annee_scolaire, degre, type_etablissement, libelle_academie, libelle_departement"
+          labels="statut:Statut du robot | annee_scolaire:Année scolaire de pose | degre:Degré | type_etablissement:Type d'établissement | libelle_academie:Académie | libelle_departement:Département"
+          display="statut:radio-inline | annee_scolaire:radio-inline | degre:checkbox | type_etablissement:checkbox | libelle_academie:multiselect | libelle_departement:multiselect"
+          searchable="libelle_academie, libelle_departement"
+          disjunctive="degre, type_etablissement, libelle_academie, libelle_departement"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+        <p class="fr-hint-text">
+          La page d'origine n'a <strong>aucun filtre</strong> : ni académie, ni département, ni
+          type, ni recherche. Son seul contrôle est un sélecteur de période — dupliqué à
+          l'identique à 900 pixels d'écart.
+        </p>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-9">
+        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+          <dsfr-data-kpi source="tedi-f" value="count" format="nombre"
+            heading="Déploiements" label="dans la sélection"></dsfr-data-kpi>
+          <dsfr-data-kpi source="tedi-f" value="uai:distinct" format="nombre"
+            heading="Établissements" label="accompagnés (UAI distincts)"></dsfr-data-kpi>
+          <dsfr-data-kpi source="tedi-f" value="libelle_academie:distinct" format="nombre"
+            heading="Académies" label="couvertes sur 30"></dsfr-data-kpi>
+          <dsfr-data-kpi source="tedi-f" value="libelle_departement:distinct" format="nombre"
+            heading="Départements" label="couverts sur 101"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <dsfr-data-map id="carte-tedi" name="Déploiement des robots Ted-i"
+          height="580px" tiles="ign-plan" tiles-style="muted"
+          fit-bounds fit-max-zoom="12" insets="la-reunion,martinique">
+          <dsfr-data-map-layer id="couche-tedi" source="tedi-f" type="circle"
+            geo-field="position" radius="6" fill-opacity="0.9"
+            color-field="statut" color-map="En service:#18753c,Restitué:#3558a2"
+            color="#929292" tooltip-field="nom_etablissement"
+            cluster cluster-radius="50" max-items="10000">
+          </dsfr-data-map-layer>
+          <dsfr-data-map-legend for="couche-tedi" label="Statut du robot"></dsfr-data-map-legend>
+          <dsfr-data-map-popup mode="panel-right" title-field="nom_etablissement" width="380px">
+            <template>
+              <p class="fr-badge fr-badge--sm fr-mb-2v">{{type_etablissement|Type non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-3v">
+                <strong>{{nom_commune|Commune non renseignée}}</strong> — {{libelle_departement|département non renseigné}},
+                académie de {{libelle_academie|non renseignée}}
+              </p>
+              <ul class="fr-text--sm fr-mb-3v">
+                <li>Posé le <strong>{{debut_utilisation:date}}</strong></li>
+                {{#if fin_utilisation}}<li>Restitué le <strong>{{fin_utilisation:date}}</strong></li>{{/if}}
+                {{#unless fin_utilisation}}<li><strong>Robot encore en service</strong></li>{{/unless}}
+              </ul>
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}} · année scolaire de pose {{annee_scolaire}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+        <p class="fr-hint-text">
+          <strong>175 déploiements sur 3 734 n'ont aucune coordonnée</strong> et ne peuvent donc
+          pas figurer sur la carte : ce sont les 175 lignes non appariées au référentiel des
+          établissements. Le portail perd les mêmes points sans le signaler — au premier écran,
+          ses trois bulles de regroupement totalisent 2 030 robots pour une période qui en
+          compte 2 160.
+        </p>
+        <dsfr-data-a11y source="tedi-f" for="carte-tedi" table download
+          filename="tedi-deploiements.csv" label="Données de la carte"
+          description="Un déploiement par ligne : établissement, commune, département, académie, type, statut et année scolaire de pose."
+          label-field="nom_etablissement"
+          value-field="uai, type_etablissement, nom_commune, libelle_departement, libelle_academie, statut, annee_scolaire">
+        </dsfr-data-a11y>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transformateur d'isolement (BUG-009) avant les regroupements. -->
+  <dsfr-data-normalize id="tedi-fn" source="tedi-f"></dsfr-data-normalize>
+
+  <dsfr-data-query id="tedi-aca" source="tedi-fn" group-by="libelle_academie"
+    aggregate="uai:count:robots" where="libelle_academie:isnotnull"
+    order-by="robots:desc"></dsfr-data-query>
+
+  <dsfr-data-query id="tedi-degre" source="tedi-fn" group-by="degre"
+    aggregate="uai:count:robots" order-by="robots:desc"></dsfr-data-query>
+
+  <!-- Le cumul mensuel. L'original le calcule en douze expressions de template
+       en cascade, sur un ordre de mois écrit en dur. `running_sum` le fait en un
+       mot — et il n'invente PAS de mois futurs. -->
+  <dsfr-data-query id="tedi-mois" source="tedi-fn" group-by="mois"
+    aggregate="uai:count:poses, poses:running_sum:cumul"
+    order-by="mois:asc"></dsfr-data-query>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-7">
+        <h2 class="fr-h5">Où sont les robots</h2>
+        <dsfr-data-podium source="tedi-aca" label-field="libelle_academie" value-field="robots"
+          value-unit="robots" max-items="10"></dsfr-data-podium>
+        <p class="fr-text--xs fr-mt-1w">
+          Le portail rend ce classement à la main, dans un conteneur de 220 pixels de haut qui
+          n'en montre que sept lignes sur vingt-sept — et qui <strong>capture la molette</strong> :
+          faire défiler la page en le survolant fait défiler le classement à la place.
+        </p>
+      </div>
+      <div class="fr-col-12 fr-col-md-5">
+        <h2 class="fr-h5">Premier ou second degré</h2>
+        <dsfr-data-chart id="g-tedi-degre" source="tedi-degre" type="bar" horizontal
+          label-field="degre" value-field="robots" name="Robots"
+          empty-label="Établissement non identifié"
+          databox databox-title="Déploiements Ted-i par degré d'enseignement"
+          databox-source="DNE — fr-en-deploiemement_tedi, Licence Ouverte 2.0"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-tedi-degre" source="tedi-degre" table download
+          label-field="degre" value-field="robots"></dsfr-data-a11y>
+        <p class="fr-text--xs fr-mt-1w">
+          La barre à trois segments du portail — 1er degré / 2nd degré / Autres — <strong>ne
+          totalise jamais son propre KPI</strong> : jusqu'à 96 robots sur 1 740 disparaissent,
+          parce que les lignes sans type d'établissement ne tombent dans aucun des trois groupes.
+          Ici, elles ont une barre et un nom.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h5">Le déploiement mois par mois</h2>
+    <p class="fr-text--sm">
+      Deux lectures d'une même donnée : les poses de chaque mois, et leur cumul. Sur l'année
+      2025-2026, le cumul passe de <strong>301</strong> en septembre à <strong>1 740</strong> en
+      août. Sur le portail, ce cumul est calculé par douze expressions de template en cascade,
+      sur une liste de mois écrite en dur — et en mode « temps réel », <strong>les douze barres
+      affichent la même valeur, dont onze pour des mois qui n'ont pas encore eu lieu</strong>.
+    </p>
+    <dsfr-data-chart id="g-tedi-mois" source="tedi-mois" type="bar-line"
+      label-field="mois" value-field="poses:Poses du mois" value-field-2="cumul:Cumul"
+      databox databox-title="Déploiements Ted-i, poses mensuelles et cumul"
+      databox-source="DNE — fr-en-deploiemement_tedi, Licence Ouverte 2.0"
+      databox-download databox-screenshot>
+    </dsfr-data-chart>
+    <dsfr-data-a11y for="g-tedi-mois" source="tedi-mois" table download
+      label-field="mois" value-field="poses, cumul"></dsfr-data-a11y>
+    <p class="fr-text--xs fr-mt-1w">
+      <strong>Le cumul ne dépasse jamais le dernier mois observé.</strong> C'est une conséquence
+      directe du fait qu'il est calculé sur les lignes présentes, et non projeté sur une année
+      civile écrite d'avance. Filtrer sur une année scolaire dans le panneau de gauche recalcule
+      les deux séries.
+    </p>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h5">Les déploiements en détail</h2>
+    <dsfr-data-list source="tedi-f"
+      columns="nom_etablissement, type_etablissement, nom_commune, libelle_departement, libelle_academie, statut, annee_scolaire"
+      caption="Déploiements de robots de téléprésence Ted-i"
+      sort pagination="15">
+    </dsfr-data-list>
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — Ted-i</h2>
+
+      <p class="fr-text--sm fr-mb-4w">
+        Cible d'origine : une <strong>« custom view » AngularJS</strong> — pas une page Studio —
+        servie sous
+        <a href="https://data.education.gouv.fr/explore/assets/visualisation-fr-en-deploiemement_tedi/view/" target="_blank" rel="noopener external">/explore/assets/visualisation-fr-en-deploiemement_tedi/view/</a>.
+        Fiche d'audit : <code>docs/portail-education/tedi-robots-telepresence.md</code>.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le cumul mensuel est natif — et la fiche d'audit le donnait pour un
+              manque réel.</strong> Elle écrivait : « ni <code>dsfr-data-query</code> ni
+              <code>dsfr-data-chart</code> ne calculent une somme cumulée […] manque réel, à
+              remonter », et proposait de le faire en JavaScript sur l'événement de chargement.
+              <code>aggregate="uai:count:poses, poses:running_sum:cumul"</code> suffit
+              aujourd'hui. Le cumul se calcule après <code>order-by</code>, côté client, et
+              suit les filtres.</li>
+            <li><strong>Les dénombrements distincts en un mot.</strong>
+              <code>value="uai:distinct"</code>, <code>libelle_academie:distinct</code>,
+              <code>libelle_departement:distinct</code> : trois KPI, pas de
+              <code>group-by</code> intermédiaire. Le piège historique du dépôt — « pas
+              d'agrégat <code>distinct</code>, intercaler une query » — ne s'applique plus.
+              <strong>Et le chiffre est exact</strong>, ce que
+              <code>count(distinct)</code> de l'API Opendatasoft ne garantit pas : il donne
+              2 524 UAI là où le décompte des lignes de l'export en donne
+              <strong>2 497</strong>.</li>
+            <li><strong>Les colonnes dérivées font tout le travail éditorial.</strong> Un seul
+              <code>compute</code> produit le statut, l'année scolaire, la clé de mois
+              zéro-remplie et le regroupement 1er/2nd degré — c'est-à-dire, à lui seul, les
+              quatre calculs que l'original éparpille entre une double boucle
+              <code>ng-repeat</code>, un filtre AngularJS et douze expressions de template.</li>
+            <li><strong>Une requête au lieu de dix-neuf.</strong>
+              <code>fetch-mode="export"</code> ramène les 3 734 lignes en un aller-retour ; tout
+              le reste se recalcule sans réseau. L'original en émet dix-neuf, dont quatre
+              en 503 systématique.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>La clé de mois doit être zéro-remplie à la main.</strong>
+              <code>compute</code> a <code>year()</code> et <code>month()</code>, mais
+              <code>month()</code> rend <code>9</code> et non <code>09</code> : concaténés tels
+              quels, les mois se trient <code>2025-10</code> avant <code>2025-9</code>, et la
+              série cumulée devient fausse — silencieusement, puisque <code>running_sum</code>
+              se calcule après le tri. Il faut écrire un <code>when month(…) &lt; 10 then
+              concat(…, '-0', …) else concat(…, '-', …)</code>. Ça marche, mais c'est le genre
+              de détail qui produit un graphique plausible et faux si on l'oublie. Un
+              <code>month(d, 2)</code> ou un pipe de formatage de date manquent.</li>
+            <li><strong>« Robot posé pendant l'année » et « robot en service pendant l'année »
+              ne sont pas la même chose.</strong> L'original compte un robot dans une année
+              scolaire s'il l'a <em>chevauchée</em> (deux conditions sur deux champs) ; la
+              colonne <code>annee_scolaire</code> dérivée ici le compte dans son année de
+              <em>pose</em>. Sur ce jeu les deux coïncident presque, parce que la première pose
+              date du 22 août 2024 et que les locations sont courtes — mais
+              <strong>sur un jeu où les prêts durent plus d'un an, elles divergeraient</strong>,
+              et aucun composant ne signalerait l'écart. C'est une différence de modèle, pas de
+              capacité, et elle doit être dite plutôt que masquée.</li>
+            <li><strong>L'anneau de progression « 23 / 30 » n'a pas d'équivalent.</strong>
+              <code>dsfr-data-kpi</code> n'a pas de rendu circulaire, et
+              <code>type="gauge"</code> prend un <code>gauge-value</code> numérique littéral,
+              pas un champ de source. Le dénominateur passe donc dans le libellé
+              (« couvertes sur 30 »), comme dans l'original — qui l'écrit aussi en dur, jusque
+              dans son <code>aria-label</code>. Cosmétique, mais un <code>gauge-field</code> +
+              <code>gauge-max</code> manque au catalogue.</li>
+            <li><strong>Une carte qui capture la molette reste sans réglage.</strong>
+              <code>dsfr-data-map</code> n'expose pas d'attribut de neutralisation du zoom
+              molette ; <code>locked</code> désactive <em>toute</em> interaction. Sur une page
+              longue c'est un piège d'ergonomie — les pages Studio du même portail affichent
+              d'ailleurs « Utilisez ⌘ + molette pour zoomer ». Manque mineur, déjà relevé.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Directive AngularJS d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>5 <code>ods-dataset-context</code> sur le même jeu, 19 requêtes dont 4 en 503</td><td>1 <code>dsfr-data-source fetch-mode="export"</code></td><td>Meilleur : un aller-retour</td></tr>
+            <tr><td><code>count(distinct …)</code> ×3 (académies, départements, UAI)</td><td><code>value="champ:distinct"</code> ×3</td><td>Meilleur : exact, là où l'API approxime</td></tr>
+            <tr><td>anneaux <code>conic-gradient</code> « 23 / 30 »</td><td>KPI + dénominateur dans le libellé</td><td><strong>Partiel</strong> : pas de jauge branchée sur une source</td></tr>
+            <tr><td>classement rendu à la main, 7 lignes visibles sur 27</td><td><code>dsfr-data-podium</code></td><td>Meilleur</td></tr>
+            <tr><td>barre 1er/2nd degré perdant les types nuls</td><td><code>compute</code> + <code>empty-label</code></td><td>Meilleur : le groupe non identifié est nommé</td></tr>
+            <tr><td>cumul en 12 expressions de template, mois futurs compris</td><td><code>running_sum</code></td><td>Meilleur : natif, et sans mois inventés</td></tr>
+            <tr><td><code>ods-map location="2,18.54,-2.64"</code> (planisphère)</td><td><code>fit-bounds</code> + <code>insets="la-reunion,martinique"</code></td><td>Meilleur</td></tr>
+            <tr><td>infobulle en noms de colonnes techniques</td><td><code>dsfr-data-map-popup</code> + template français</td><td>Meilleur</td></tr>
+            <tr><td>aucun filtre, aucune recherche, aucune URL partageable</td><td>6 facettes + recherche + <code>url-sync</code></td><td>Sans équivalent sur le portail</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p>Reproduction <strong>immédiate</strong>, et la page qui solde le plus de dette
+          d'analyse : <strong>les deux « manques réels » que la fiche d'audit voulait remonter à
+          la bibliothèque — la somme cumulée et l'agrégat <code>distinct</code> — sont
+          aujourd'hui natifs</strong> (<code>running_sum</code>, <code>champ:distinct</code>).
+          Ce qui reste tient en une ligne de vigilance : <code>month()</code> ne remplit pas de
+          zéro, et une clé de mois mal formée produit un cumul faux <em>sans erreur</em>. Mais
+          le vrai apport de la transposition est un défaut de données que le portail éparpille
+          en trois symptômes : <strong>175 des 3 734 lignes n'ont que leur UAI et leurs
+          dates</strong> — pas de nom, pas de commune, pas de coordonnées, pas d'académie. Ce
+          n'est pas « des types manquants » ni « des points hors carte » : c'est un
+          appariement au référentiel des établissements qui n'a pas eu lieu, sur 4,7 % du jeu.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
