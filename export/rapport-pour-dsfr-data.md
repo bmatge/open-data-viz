@@ -4,7 +4,7 @@
 > Opendatasoft de l'État** confrontés à `dsfr-data` — data.economie.gouv.fr (30 entrées, 24
 > reproduites, lots 1 à 11) et data.education.gouv.fr (36 entrées auditées et transposées, lot 12),
 > plus la montée en 0.24.0 puis 0.25.0 et la migration des pages (lot 13).
-> Registre complet : `public/data/retours.json`, **142 constats**, chacun avec le champ `verifie`
+> Registre complet : `public/data/retours.json`, **144 constats**, chacun avec le champ `verifie`
 > qui dit l'observation qui l'établit. Rapport rédigé le 2026-09-10.
 
 Ce rapport contient deux choses, indépendantes l'une de l'autre :
@@ -47,13 +47,12 @@ de carte atténué, #686). Cela dit quelque chose du canal de retour : *le banc 
 spontanément quand une de ses demandes est satisfaite.* Une ligne « résout le constat X du banc
 d'essai » dans les notes de version suffirait.
 
-## 1.2 Ce qui reste — 25 demandes cadrées
+## 1.2 Ce qui reste — 27 demandes cadrées
 
 Toutes sont dans `export/issues-dsfr-data.md`, rédigées pour être collées telles quelles, avec
-impact, objectif métier, pérennité, critères d'acceptation, effort et priorité. **19 des 25
-viennent du portail Éducation** — c'est le rendement de l'exercice sur un second portail.
+impact, objectif métier, pérennité, critères d'acceptation, effort et priorité. **19 des 27 viennent du portail Éducation** — c'est le rendement de l'exercice sur un second portail.
 
-### P1 — sept demandes
+### P1 — huit demandes
 
 | Id | Effort | Origine | Demande |
 |---|---|---|---|
@@ -63,7 +62,15 @@ viennent du portail Éducation** — c'est le rendement de l'exercice sur un sec
 | **AM-050** | S | Éducation | **Aucun opérateur d'année scolaire.** Tous les opérateurs raisonnent en année civile ; `year-of` coupe l'année scolaire en son milieu, en silence. C'est l'unité de temps de tout un portail. |
 | **AM-045** | M | Éducation | **La sélection ne part que d'une carte.** `refine-on-click` existe sur `dsfr-data-map-layer` depuis 0.23.0 ; ni `dsfr-data-list`, ni `dsfr-data-display`, ni `dsfr-data-chart` n'ont d'équivalent, alors que le bus de contexte est ouvert. |
 | **AM-049** | M | Éducation | **Ratio dont les deux membres viennent de deux sources.** #673 est explicitement mono-source (corps de l'issue lu). C'est le motif de tout indicateur « par habitant », donc de toute comparaison entre territoires de tailles différentes. 13 indicateurs sur 40 d'une seule page. |
+| **AM-064** | S | Bercy | **`fetch-mode="export"` ne peut pas remplacer le contournement sur une page qui a besoin d'un paramètre de requête non-clause.** Le mode adaptateur ne transmet que des clauses ; `timezone` n'a pas d'attribut et `params` n'est lu que sur le chemin générique. **Trouvé en migrant** : une page sur quinze n'a pas pu l'être, et la migrer sans le voir aurait décalé six dates de deux heures sur 9 807 stations, sans un mot. |
 | **BUG-005** | S | Bercy | Le refine d'une facette serveur sur un champ date est typé texte → HTTP 400 silencieux. |
+
+> **Trouvé en appliquant #689, et c'est le genre de retour qu'une migration réelle produit seule.**
+> `fetch-mode="export"` a retiré le contournement sur **14 pages sur 15**. La quinzième
+> (`prix-des-carburants`) est restée en mode générique, parce que son `params` porte
+> `timezone=Europe/Paris` et que le mode adaptateur ne transmet pas ce genre de paramètre.
+> C'est AM-064, et c'est la seule limite connue de la fonctionnalité : elle mérite d'être connue
+> avant que `fetch-mode="export"` ne devienne le défaut (ce que #689 prévoit après recette).
 
 ### P2 — huit demandes
 `AM-046` (le cumul existe, mais seulement dans un `_bucketDate` privé de la couche carte, et
@@ -74,7 +81,7 @@ viennent du portail Éducation** — c'est le rendement de l'exercice sur un sec
 `AM-044` · `PG-022`.
 
 ### P3 — sept · P4 — trois
-`PG-016`, `LIM-011`, `AM-054`, `AM-057`, `AM-058`, `AM-059`, `AM-060` · `AM-037`, `AM-061`, `AM-062`.
+`PG-016`, `LIM-011`, `AM-054`, `AM-057`, `AM-058`, `AM-059`, `AM-060`, **`AM-065`** (le compteur de `dsfr-data-search` n'a pas d'état idle : il affiche « 0 résultats » quand rien n'a été demandé — angle mort de #690, relevé en le mettant en œuvre) · `AM-037`, `AM-061`, `AM-062`.
 
 ## 1.3 Trois réserves, à ne pas déposer en l'état
 
@@ -100,7 +107,7 @@ contestés au lot 11, **onze visaient une capacité qui existait**.
 
 ## 2.1 Le constat qui organise tout : les échecs sont muets
 
-Deux portails, treize lots, 142 constats. En les relisant, **la famille la plus nombreuse et la
+Deux portails, treize lots, 144 constats. En les relisant, **la famille la plus nombreuse et la
 plus coûteuse n'est pas celle des fonctions manquantes** : c'est celle des comportements qui ne
 produisent **aucun signal**. Une page écrite de travers rend un résultat plausible, et rien ne
 distingue « il n'y a pas de donnée » de « votre attribut ne fait rien ».
@@ -241,7 +248,7 @@ Deux sections, et la seconde est celle qui manque le plus :
   stabilisation du DOM, relève erreurs console, erreurs de configuration, valeurs de KPI et
   comptes de rendu, et compare deux états.
 
-> **Une remarque de fond pour finir.** Sur les 142 constats, ceux qui ont le plus coûté ne sont
+> **Une remarque de fond pour finir.** Sur les 144 constats, ceux qui ont le plus coûté ne sont
 > presque jamais des fonctions absentes — ce sont des **asymétries** (une capacité présente sur un
 > composant et pas sur son voisin) et des **silences**. Une bibliothèque déclarative est jugée sur
 > sa prévisibilité autant que sur son étendue : un attribut qui n'existe pas se découvre en une

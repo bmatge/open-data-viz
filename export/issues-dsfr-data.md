@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 25 demandes cadrées — 3 bugs,
-> 20 améliorations,
+> 27 demandes cadrées — 3 bugs,
+> 22 améliorations,
 > 2 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -69,10 +69,11 @@ planifié — à deux exceptions près, signalées comme telles : `fetch-mode="e
 | AM-050 | Aucun opérateur d'année scolaire : `year-of` coupe l'année scolaire en deux, en silence | amelioration | S | 4 | Accepter |
 | AM-052 | La fiche servie par le serveur MCP est en retard sur la documentation du dépôt | amelioration | S | 3 | Accepter |
 | AM-053 | Un attribut inconnu d'un composant est ignoré sans aucun avertissement | amelioration | S | 2 | Accepter |
+| AM-064 | En mode adaptateur, aucun moyen de passer un paramètre de requête qui n'est pas une clause (`timezone`) | amelioration | S | 1 | Accepter |
 | AM-045 | La sélection ne part que d'une carte : ni une liste, ni une fiche, ni un graphique ne peut filtrer un contexte | amelioration | M | 5 | Accepter |
 | AM-049 | Un ratio dont le numérateur et le dénominateur viennent de deux sources différentes | amelioration | M | 4 | Accepter |
 
-_7 demandes — S 5, M 2, L 0._
+_8 demandes — S 6, M 2, L 0._
 
 ### P2 — prochain cycle : gain net, effort mesuré
 
@@ -99,9 +100,10 @@ _8 demandes — S 3, M 5, L 0._
 | AM-057 | La valeur courante d'un filtre n'est pas interpolable dans du texte | amelioration | S | 1 | Accepter |
 | AM-059 | Colorer une cellule selon un seuil dans un tableau | amelioration | S | 2 | Étudier |
 | AM-060 | `color-map` n'existe que sur une couche de carte, pas sur `dsfr-data-chart` | amelioration | S | 2 | Accepter |
+| AM-065 | `dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé | amelioration | S | 1 | Accepter |
 | AM-058 | Un filtre qui traverse un référentiel (académie → départements) | amelioration | M | 2 | Étudier |
 
-_7 demandes — S 6, M 1, L 0._
+_8 demandes — S 7, M 1, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -305,6 +307,48 @@ Un avertissement de développement lorsqu'un composant `dsfr-data` reçoit un at
 - [ ] Un attribut inconnu produit un avertissement console nommant le composant, l'attribut et la version.
 - [ ] Le volet Diagnostic récapitule les attributs ignorés de la page.
 - [ ] Aucun bruit en production (avertissement de développement seulement).
+
+---
+
+## AM-064 — En mode adaptateur, aucun moyen de passer un paramètre de requête qui n'est pas une clause (`timezone`)
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:haute`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : prix-des-carburants
+
+### Constat
+
+`fetch-mode="export"` (#689) doit permettre de retirer les contournements par source générique. Il ne le permet pas partout : le mode adaptateur ne transmet que des **clauses** (`select`, `where`, `group-by`, `order-by`, `limit`), et `this.params` n'est lu que sur le chemin URL générique. Or l'API Opendatasoft accepte des **paramètres de requête** qui ne sont pas des clauses, dont `timezone`, indispensable dès qu'un `date_format` ODSQL rend une heure. Une page qui en a besoin ne peut donc pas être migrée — et si on la migre sans s'en apercevoir, elle affiche des heures **justes en apparence et fausses de deux heures**.
+
+### Impact de l'erreur ou du manque
+
+Le seul cas connu où `fetch-mode="export"` ne peut pas remplacer le contournement qu'il vient supprimer. Et le mode d'échec est le pire : migrer sans le voir donne des heures fausses sans aucun message.
+
+### Objectif métier de la correction
+
+Qu'une page ayant besoin d'un paramètre de requête non-clause puisse quand même passer en mode adaptateur.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : `timezone` concerne tout jeu horodaté rendu avec `date_format`, c'est-à-dire une grande partie des jeux temps réel des portails.
+
+### Comment ça a été vérifié
+
+Établi au source le 2026-09-10 : `AdapterParams` (`dsfr-data-source.ts`, `getAdapterParams()` l. 923) ne porte ni `timezone` ni passe-plat ; `this.params` n'apparaît qu'aux lignes 988, 1034 et 1057, toutes sur le chemin générique ; aucune occurrence de `timezone` dans `dsfr-data-source.ts` ni dans `opendatasoft-adapter.ts`. Contournement par la clause écarté par test à l'API : `date_format(champ, "…", "Europe/Paris")` renvoie une ODSQLSyntaxError. Conséquence mesurée sur la page des prix des carburants : sans `timezone=Europe/Paris`, une même station rend « 09:23 » au lieu de « 11:23 », sur les six dates de mise à jour et 9 807 stations. La page est donc **restée en mode générique** au lot 13, seule des quinze.
+
+### Contournement actuel
+
+Rester en source générique (`url=` + `params`) — c'est-à-dire renoncer au mode adaptateur, ce que #689 était censé rendre inutile.
+
+### Demande
+
+Un attribut `timezone` sur `dsfr-data-source` en mode adaptateur, ou plus généralement un passe-plat de paramètres de requête pour ce que le portail accepte hors clauses.
+
+### Critères d'acceptation
+
+- [ ] Une source en `fetch-mode="export"` avec `timezone="Europe/Paris"` rend les mêmes heures que la source générique équivalente.
+- [ ] Le paramètre est transmis aussi bien en mode `records` qu'en mode `export`.
+- [ ] Un paramètre non reconnu par le portail produit un message, pas un silence.
 
 ---
 
@@ -948,6 +992,44 @@ Relevé sur « Portrait de territoire », dont l'original code la même modalit�
 - [ ] `color-map` est accepté par `dsfr-data-chart` avec la même grammaire que sur la couche.
 - [ ] Une valeur contenant une virgule est cartographiable (séparateur ou échappement).
 - [ ] Une grammaire invalide produit un avertissement, pas un silence (cf. PG-022).
+
+---
+
+## AM-065 — `dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-search`
+**Rencontré sur** 1 page(s) : impot-sur-le-revenu
+
+### Constat
+
+Avec `require-where` (#690), les afficheurs passent correctement en état `idle` tant qu'aucun filtre n'est posé — sauf le compteur de `dsfr-data-search`, qui annonce « 0 résultats ». L'utilisateur lit donc « aucun résultat » là où il faudrait lire « faites un choix ». C'est l'angle mort d'une fonctionnalité par ailleurs juste.
+
+### Impact de l'erreur ou du manque
+
+Un message contredit les cinq autres afficheurs sur la même page, et dit le contraire de la vérité.
+
+### Objectif métier de la correction
+
+Que le compteur de recherche se taise quand la page attend un choix.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : le motif `require-where` a vocation à servir sur toute page d'exploration.
+
+### Comment ça a été vérifié
+
+Relevé au navigateur le 2026-09-10 sur la page de l'impôt sur le revenu, après mise en œuvre de `require-where` : zéro requête au chargement (vérifié au réseau), les six afficheurs en état idle, et le compteur de recherche affichant « 0 résultats ».
+
+### Demande
+
+Propager l'état `idle` au compteur de `dsfr-data-search`, avec un libellé paramétrable.
+
+### Critères d'acceptation
+
+- [ ] Sous `require-where` et sans filtre, le compteur n'affiche pas « 0 résultats ».
+- [ ] Le libellé de l'état d'attente est paramétrable, comme celui des autres afficheurs.
+- [ ] Poser un filtre rétablit le compteur normal.
 
 ---
 
