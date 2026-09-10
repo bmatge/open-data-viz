@@ -5,6 +5,12 @@ v0.25.0) a été écrit à partir d'un seul portail. Auditer un second n'a d'int
 qui en sort et qui n'y était pas. Tout ce qui est déjà natif ou déjà planifié est écarté ici
 et documenté dans `_CIBLE-0.25.md`.
 
+**Vérifié après la livraison de v0.24.0 et v0.25.0 le 2026-09-10** : aucun des constats
+ci-dessous n'est couvert par ces deux jalons. `fetch-mode="export"` (#689) et `require-where`
+(#690) répondent au **chargement** et aux **états de pipeline** ; le résidu porte sur des
+asymétries entre composants, sur le domaine (année scolaire, mailles non françaises) et sur le
+modèle de donnée (tables de mesures). Il reste donc entier.
+
 Inventaire au 2026-09-10, les 36 entrées du catalogue traitées, une entrée par constat, avec la page qui l'établit et
 l'observation qui le fonde. **Rien n'entre ici sans observation** (règle du dépôt : pas de
 champ `verifie`, pas d'entrée). Les entrées marquées ⚠️ ne sont pas encore rejouées au
