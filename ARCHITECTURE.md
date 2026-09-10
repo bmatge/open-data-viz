@@ -20,7 +20,9 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 ## 2. Points d'entrée
 
 - Serveur / routage : `server.js:28` (`resolveFile`) et `server.js:47` (handler)
-- Page catalogue (accueil) : `public/index.html:52` (le pipeline commence là)
+- Tableau de bord (accueil) : `public/index.html` — trois sources sur `data/stats.json` via `transform`
+- Page catalogue Bercy : `public/bercy.html` (le pipeline commence à la `dsfr-data-source`)
+- Page catalogue Éducation : `public/education.html`
 - Une page dataviz : `public/viz/plan-de-relance.html` — modèle de référence, tout y est
 - Synthèse transverse : `public/synthese.html`
 - Registre d'avancement : `scripts/build-registre.mjs:33` (table `STATUTS`)
@@ -31,20 +33,22 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 | Module | Rôle | Chemin |
 |---|---|---|
 | Serveur statique | Sert `public/`, URLs propres, `/healthz` | `server.js` |
-| Page catalogue | Reproduit la page d'accueil ODS + badges d'avancement | `public/index.html` |
+| Tableau de bord | Le banc mesuré par lui-même (avancement, usage des composants, constats) | `public/index.html` |
+| Pages catalogue | Reproduisent les pages d'accueil ODS + badges d'avancement | `public/bercy.html`, `public/education.html` |
 | Pages dataviz | Une par visualisation reproduite, avec sa section `#analyse` | `public/viz/*.html` |
 | Synthèse | Agrège les analyses + tableau de bord d'avancement | `public/synthese.html` |
 | Registre d'avancement | État de reproduction, joint au catalogue ODS | `public/data/registre.json` |
 | Registre des retours | Constats sur ChartsBuilder, un objet par constat | `public/data/retours.json` |
 | Page des retours | Le registre rendu avec les composants qu'il évalue | `public/retours.html` |
 | Générateur de registre | Reconstruit le registre depuis le catalogue vivant | `scripts/build-registre.mjs` |
+| Générateur de statistiques | Unit les deux registres + scanne les balises des pages | `scripts/build-stats.mjs` |
 | Clés d'API | Clé de lecture publique du portail | `public/assets/cles.js` |
 | Habillage | En-tête / pied de page DSFR injectés | `public/assets/layout.js` |
 
 ## 4. Couplages non-évidents ⚠️
 
-- **La page d'accueil ne contient aucune liste de visualisations.** Elle fait un
-  `<dsfr-data-join on="titre">` (`public/index.html:64`) entre le catalogue vivant du portail et
+- **Les pages catalogue ne contiennent aucune liste de visualisations.** `public/bercy.html` fait un
+  `<dsfr-data-join on="titre">` entre le catalogue vivant du portail et
   `public/data/registre.json`. Les cartes viennent d'Opendatasoft, les badges d'avancement d'ici.
   ⇒ **Traiter une dataviz = éditer la table `STATUTS` (`scripts/build-registre.mjs:33`) puis
   relancer `node scripts/build-registre.mjs`.** Éditer `registre.json` à la main sera écrasé.
