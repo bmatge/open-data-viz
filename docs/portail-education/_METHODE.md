@@ -77,6 +77,14 @@ curl -s "https://data.education.gouv.fr/api/portal/v1.0/studio_pages/<slug>" | p
 — pour nommer les champs, les formules et les paramètres, jamais pour décrire un rendu qui n'a
 pas été vu à l'écran.
 
+**⚠️ La config servie par cette API peut être périmée.** Constaté sur
+`dataeducation.opendatasoft.com` : `studio_pages/<slug>` renvoyait une configuration **sans
+aucune `conditions`**, ce qui aurait fait écrire que deux pages sœurs affichent les mêmes
+chiffres — alors qu'elles diffèrent par 18 conditions. **La config vivante est celle que la
+page charge réellement**, dans le HTML servi (`appEvent.detail.initialize(...)`). Récupérer
+les deux et les comparer ; en cas d'écart, c'est le HTML servi qui fait foi, et l'écart
+lui-même est un constat.
+
 Deux pièges de repérage déjà payés :
 - Une URL de catalogue en `/explore/dataset/<jeu>/<vue>/` peut faire un **302** vers
   `/explore/assets/<jeu>/`, la dataviz vivant en réalité à `/explore/assets/<autre-slug>/view/`.
