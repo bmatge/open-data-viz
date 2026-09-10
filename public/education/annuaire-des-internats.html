@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Annuaire des internats — open-data-viz</title>
+  <meta name="description" content="Reproduction avec dsfr-data de la carte des internats de data.education.gouv.fr : 4 661 établissements, recherche par nom, taux d'occupation.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/education">Portail Éducation</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Annuaire des internats</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>L'annuaire des internats</h1>
+
+    <p class="fr-text--lead">
+      <strong>4 661 établissements</strong> publics et privés déclarent un internat. Le maillage
+      couvre tout le territoire, DROM-COM compris — de Wallis-et-Futuna à la Guadeloupe. L'internat
+      est d'abord un fait <strong>lycéen</strong> (3 145 des 4 661) et majoritairement
+      <strong>public</strong> (2 766 contre 1 895).
+    </p>
+
+    <div class="fr-callout fr-icon-database-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-internats/"
+           target="_blank" rel="noopener external"><code>fr-en-internats</code></a>
+        — 4 661 lignes, 26 champs, produit par la DNE. Issu de la base RAMSESE (2025) et de
+        l'enquête Immobilier de la DEPP, qui recense les lits des internats <strong>publics</strong>
+        en 2022. Lu sans clé, 4,6 Mo en 0,37 s.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        <strong>34 établissements sont sans position</strong> (21 privés, 13 publics) : la carte
+        en montre 4 627 sur 4 661. L'original affiche 4 661 au compteur et 4 627 sur la carte,
+        sans signaler l'écart.
+      </p>
+    </div>
+
+    <div class="fr-callout fr-icon-alert-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Pourquoi les chiffres de lits ne se lisent pas comme ceux d'internats</h2>
+      <p class="fr-callout__text fr-text--sm">
+        L'original pose « 4 661 Internats », « 196 335 Lits pré-bac » et « 34 256 Lits post-bac »
+        côte à côte, dans trois compteurs de même taille. Le rapprochement suggère une moyenne de
+        42 lits par internat. <strong>Elle est fausse.</strong> Les lits viennent d'une enquête qui
+        ne couvre que les internats publics : <strong>1 606 établissements sur 4 661</strong>
+        portent une valeur — et <strong>tous sont publics</strong> (vérifié à l'API : les 1 895
+        établissements privés n'ont aucune valeur de lits). La moyenne réelle, sur les
+        établissements renseignés, est de <strong>122 lits</strong>.
+      </p>
+      <p class="fr-callout__text fr-text--sm">
+        Les compteurs ci-dessous disent donc sur quoi ils portent. C'est le seul écart de fond
+        avec l'original, et il ne tient pas à la technique.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       Un chargement, tout se dérive côté client.
+
+       Mesure (fiche d'audit, recoupée ici) : `/exports/json` complet =
+       4,6 Mo en 0,37 s. Avec un `select` réduit à 12 champs, c'est plus léger
+       mais PLUS LENT (0,54 à 0,78 s) — le piège maison du `select` se vérifie
+       sur ce jeu, alors même qu'il ne porte aucun texte long. Donc pas de
+       `select` ici, contrairement à la page IPS Écoles où il divise le poids
+       par deux. L'arbitrage se mesure jeu par jeu, il ne se recopie pas.
+
+       `max-records="6000"` : 4 627 lignes dépassent le plafond par défaut de
+       1 000, qui tronque en silence.
+       ========================================================================== -->
+
+  <dsfr-data-source id="int" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-internats"
+    fetch-mode="export" max-records="6000"
+    where="position is not null">
+  </dsfr-data-source>
+
+  <!-- Trois corrections de données, toutes des défauts relevés à l'audit :
+
+       1. `"NA"` sert de valeur manquante dans `adresse` (chaîne littérale) et
+          dans `genre` (3 051 lignes). L'original l'affiche tel quel :
+          « Adresse : NA ». `replace-fields` compare la valeur ENTIÈRE, ce qui
+          convient exactement — et son séparateur d'entrées est le `|`.
+       2. Une valeur à 0 disparaît de l'infobulle d'origine comme si elle était
+          manquante : 828 établissements ont `nombre_de_lits_post_bac = 0`, et
+          le lecteur ne peut pas distinguer « pas d'internat post-bac » de « non
+          renseigné » — alors que le texte d'introduction l'avertit des valeurs
+          manquantes. `compute` sépare les deux cas.
+       3. Le taux d'occupation : `nombre_de_lits_*_occupes` est dans le jeu et
+          n'est affiché nulle part. Le `when … = 0 then null` évite la division
+          par zéro sur les 828 lignes à zéro lit.
+       -->
+  <dsfr-data-normalize id="int-n" source="int"
+    replace-fields="adresse:NA: | genre:NA:"
+    compute="lits_pre_txt = when is_null(nombre_de_lits_pre_bac) then 'non renseigné' else concat(nombre_de_lits_pre_bac, ' lits'); lits_post_txt = when is_null(nombre_de_lits_post_bac) then 'non renseigné' else concat(nombre_de_lits_post_bac, ' lits'); taux_pre = when is_null(nombre_de_lits_pre_bac) then null when nombre_de_lits_pre_bac = 0 then null else round(nombre_de_lits_pre_bac_occupes / nombre_de_lits_pre_bac * 100, 1); enquete_lits = when is_null(nombre_de_lits_pre_bac) then 'Lits non renseignés' else 'Lits renseignés (enquête 2022)'">
+  </dsfr-data-normalize>
+
+  <!-- Le manque le plus lourd de l'original : pour un objet nommé « Annuaire »,
+       il n'y a AUCUNE recherche plein texte. Il faut connaître la commune. -->
+  <dsfr-data-search id="int-q" source="int-n"
+    fields="etablissement, commune, uai, adresse"
+    label="Rechercher un internat" placeholder="Nom d'établissement, commune, code UAI…"
+    operator="words" count url-sync>
+  </dsfr-data-search>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+
+      <div class="fr-col-12 fr-col-md-3">
+        <h2 class="fr-h6">Filtrer</h2>
+        <!-- Les facettes de l'original sont triées alphabétiquement et SANS
+             compteur : impossible de voir que Bordeaux pèse 378 et
+             Wallis-et-Futuna 1, alors que l'information est côté serveur.
+             Ici `count:desc` est le défaut — il n'y a rien à écrire (et surtout
+             pas `-count`, qui trie à l'envers : PG-012). -->
+        <dsfr-data-facets id="int-f" source="int-q"
+          fields="statut, type, genre, enquete_lits, academie, departement, commune"
+          labels="statut:Statut | type:Type d'établissement | genre:Mixité | enquete_lits:Données de lits | academie:Académie | departement:Département | commune:Commune"
+          display="statut:radio-inline | type:checkbox | genre:checkbox | enquete_lits:checkbox | academie:multiselect | departement:multiselect | commune:radio"
+          searchable="academie, departement, commune"
+          disjunctive="type, genre, academie, departement"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-9">
+
+        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+          <dsfr-data-kpi source="int-f" value="count" format="nombre"
+            heading="Internats" label="dans la sélection"></dsfr-data-kpi>
+          <dsfr-data-kpi source="int-f" value="commune:distinct" format="nombre"
+            heading="Communes" label="équipées d'un internat"></dsfr-data-kpi>
+          <!-- Ces deux-là portent leur périmètre dans leur libellé, et le `where`
+               du KPI (#674) restreint le dénominateur aux lignes renseignées. -->
+          <dsfr-data-kpi source="int-f" value="nombre_de_lits_pre_bac:sum" format="nombre"
+            where="nombre_de_lits_pre_bac:isnotnull"
+            heading="Lits pré-bac" label="enquête 2022, internats publics seulement"></dsfr-data-kpi>
+          <dsfr-data-kpi source="int-f" value="nombre_de_lits_pre_bac:avg" format="nombre" decimals="0"
+            where="nombre_de_lits_pre_bac:isnotnull"
+            heading="Lits par internat" label="moyenne sur les établissements renseignés"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <!-- Le défaut n° 1 de l'original : sa carte s'ouvre sur le PLANISPHÈRE.
+             Elle fait un `fit-bounds` sans clip sur un jeu qui contient
+             Wallis-et-Futuna (1 internat, 176° O) et la Nouvelle-Calédonie
+             (27, 167° E) : la métropole occupe 3 % de la surface utile.
+
+             `insets` nomme ici les huit territoires du jeu — les cinq DROM plus
+             les trois du Pacifique. Poser un encart ultramarin clippe
+             automatiquement le fit sur la métropole (#687), ce qui règle le
+             planisphère ET le sur-zoom (deux points à Bastia → zoom 15 chez
+             l'original) sans écrire une coordonnée. -->
+        <dsfr-data-map id="carte-int"
+          name="Cartographie des internats de France"
+          height="620px" tiles="ign-plan" tiles-style="muted"
+          insets="drom,nouvelle-caledonie,polynesie-francaise,wallis-et-futuna"
+          fit-bounds fit-max-zoom="13">
+          <!-- `cluster` : l'original n'en a pas, et le clic sur un amas ouvre une
+               popup à carrousel « ‹ 1 / 3 › » qui feuillette les enregistrements
+               confondus au pixel. Le regroupement dit combien il y en a. -->
+          <dsfr-data-map-layer id="couche-int" source="int-f" type="circle"
+            geo-field="position" radius="6" fill-opacity="0.9"
+            color-field="statut"
+            color-map="Public:#18753c,Privé:#000091"
+            tooltip-field="etablissement"
+            max-items="6000" cluster cluster-radius="50">
+          </dsfr-data-map-layer>
+          <dsfr-data-map-legend for="couche-int" label="Statut de l'internat"></dsfr-data-map-legend>
+
+          <dsfr-data-map-popup mode="panel-right" title-field="etablissement" width="380px">
+            <template>
+              <!-- Le `statut` pilote la couleur et n'est PAS dans l'infobulle de
+                   l'original : l'information passe par la couleur seule, ce qui
+                   n'est pas conforme au RGAA 1.4. Il est ici en tête. -->
+              <p class="fr-badge fr-badge--sm fr-mb-2v">{{statut}}</p>
+              <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{type}}</p>
+
+              <p class="fr-text--sm fr-mb-1v">
+                <strong>{{commune}}</strong> — {{departement}}<br>
+                académie de {{academie}}
+              </p>
+              <p class="fr-text--sm fr-mb-3v">{{adresse|Adresse non renseignée}}</p>
+
+              <ul class="fr-text--sm fr-mb-3v">
+                <li>Lits pré-bac : <strong>{{lits_pre_txt}}</strong></li>
+                <li>Lits post-bac : <strong>{{lits_post_txt}}</strong></li>
+                {{#if taux_pre}}<li>Occupation pré-bac : <strong>{{taux_pre:number:1}} %</strong></li>{{/if}}
+                <li>Mixité : {{genre|non renseignée}}</li>
+              </ul>
+
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+
+        <dsfr-data-a11y source="int-f" for="carte-int" table download
+          filename="annuaire-des-internats.csv"
+          label="Données de la carte"
+          description="Un internat par ligne : établissement, statut, type, commune, académie, lits."
+          label-field="etablissement"
+          value-field="statut, type, commune, departement, academie, nombre_de_lits_pre_bac, nombre_de_lits_post_bac, genre">
+        </dsfr-data-a11y>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-7">
+        <h2 class="fr-h5">Internats par académie</h2>
+        <dsfr-data-chart id="g-int-aca" source="int-aca" type="bar" horizontal
+          label-field="academie" value-field="nb" name='["Internats"]'
+          databox databox-title="Nombre d'internats par académie"
+          databox-source="DNE — fr-en-internats, via data.education.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-int-aca" source="int-aca" table download></dsfr-data-a11y>
+      </div>
+      <div class="fr-col-12 fr-col-md-5">
+        <h2 class="fr-h5">Par type d'établissement</h2>
+        <dsfr-data-chart id="g-int-type" source="int-type" type="pie"
+          label-field="type" value-field="nb"
+          databox databox-title="Répartition des internats par type d'établissement"
+          databox-source="DNE — fr-en-internats, via data.education.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-int-type" source="int-type" table download></dsfr-data-a11y>
+      </div>
+    </div>
+  </div>
+
+  <!-- Branchées sur la facette, jamais sur la source (BUG-009). -->
+  <dsfr-data-query id="int-aca" source="int-f" group-by="academie"
+    aggregate="uai:count:nb" order-by="nb:desc" where="academie:isnotnull" limit="20"></dsfr-data-query>
+  <dsfr-data-query id="int-type" source="int-f" group-by="type"
+    aggregate="uai:count:nb" order-by="nb:desc" where="type:isnotnull"></dsfr-data-query>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">La liste</h2>
+    <dsfr-data-list source="int-f"
+      columns="etablissement, statut, type, commune, departement, academie, nombre_de_lits_pre_bac, nombre_de_lits_post_bac"
+      search sort pagination="25">
+    </dsfr-data-list>
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — Annuaire des internats</h2>
+
+      <p class="fr-text--sm fr-mb-4w">
+        Cible d'origine :
+        <a href="https://data.education.gouv.fr/explore/assets/carte-internats/view/" target="_blank" rel="noopener external">une page ODS Studio</a>
+        — la troisième génération du portail, rendue par le nouveau front-office React et configurée
+        à <code>/api/portal/v1.0/studio_pages/carte-internats</code>. Ni <code>$scope.blocks</code>,
+        ni « custom view » : la configuration JSON se lit comme une spécification.
+        Fiche d'audit : <code>docs/portail-education/annuaire-des-internats.md</code>, dix-sept défauts.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le planisphère réglé par un attribut.</strong> L'original s'ouvre sur le
+              monde entier : son <code>fit-bounds</code> englobe Wallis-et-Futuna (176° O) et la
+              Nouvelle-Calédonie (167° E), et la métropole tient dans 3 % du cadre. Ici,
+              <code>insets="drom,nouvelle-caledonie,polynesie-francaise,wallis-et-futuna"</code> —
+              les huit territoires du jeu sont des préréglages nommés — et le clip métropolitain
+              se pose <em>tout seul</em> dès qu'un encart ultramarin est présent. Le même attribut
+              règle le sur-zoom symétrique (deux points à Bastia → zoom 15 chez l'original), avec
+              <code>fit-max-zoom</code>.</li>
+            <li><strong>La recherche que l'« Annuaire » n'a pas.</strong> Une balise
+              <code>dsfr-data-search</code> sur quatre champs. C'est le manque le plus lourd de
+              l'original : pour trouver un internat, il faut déjà connaître sa commune.</li>
+            <li><strong>Les compteurs de facettes, gratuits.</strong> L'original trie ses six
+              filtres alphabétiquement et sans compteur, alors que <code>/facets</code> les renvoie.
+              En mode client, <code>count:desc</code> est le défaut : il n'y a rien à écrire.</li>
+            <li><strong>Distinguer 0 de « non renseigné ».</strong> Trois expressions
+              <code>compute</code>, et l'ambiguïté disparaît. Chez l'original, une valeur à 0 fait
+              disparaître la ligne de l'infobulle exactement comme une valeur nulle — sur
+              828 établissements.</li>
+            <li><strong>Le taux d'occupation.</strong> <code>nombre_de_lits_*_occupes</code> est
+              dans le jeu et n'est affiché nulle part sur le portail. Une division et un
+              <code>round</code>, avec un <code>when … = 0 then null</code> pour la division par
+              zéro.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Le <code>select</code> se retourne d'un jeu à l'autre.</strong> Ici, réduire
+              à 12 champs donne un fichier plus léger (383 Ko contre 631 Ko gzip) et pourtant
+              <strong>deux fois plus lent</strong> (0,54–0,78 s contre 0,35 s). Sur la page IPS
+              Écoles, le même geste divise le poids par deux et fait gagner du temps. La règle
+              maison — « un <code>select</code> sur un champ texte long est plus lent que l'export
+              complet » — se vérifie ici <em>sans aucun texte long</em>, ce qui veut dire qu'elle
+              n'explique pas tout : le seul recours reste de mesurer, jeu par jeu, avant d'écrire
+              la balise.</li>
+            <li><strong>Le <code>replace-fields</code> ne peut pas viser les « NA » numériques.</strong>
+              La chaîne <code>"NA"</code> sert de valeur manquante dans <code>adresse</code> et
+              <code>genre</code>, deux champs texte : <code>replace-fields</code> les nettoie.
+              Mais il ne visite que les valeurs <code>string</code> — un « NA » arrivé dans une
+              colonne typée lui échapperait sans un mot. C'est le même angle mort que celui
+              rencontré sur Euroscol, et il ne se voit qu'en lisant le source.</li>
+            <li><strong><code>cluster</code> et <code>color-field</code> se neutralisent.</strong>
+              Le regroupement règle le vrai problème de l'original — ses amas non groupés
+              obligent à feuilleter une popup à carrousel « ‹ 1 / 3 › » pour séparer des points
+              confondus au pixel — mais un cluster porte sa propre couleur, pas celle de ses
+              membres : tant qu'on n'a pas zoomé, la distinction public / privé, qui est
+              pourtant l'objet de la légende, <strong>n'est pas visible</strong>. Les deux
+              attributs sont acceptés ensemble et il n'y a rien à redire techniquement ; c'est
+              un arbitrage qu'il faut avoir vu pour le faire, et rien ne le pose. Choisi ici en
+              faveur du cluster, parce que la couleur revient au zoom alors que le carrousel ne
+              disparaît jamais.</li>
+            <li><strong>Ce que l'audit n'avait pas pu voir.</strong> Le défaut de fond de cette
+              page n'est pas cartographique : ses trois compteurs sont <strong>mathématiquement
+              justes et éditorialement faux</strong>. « 4 661 Internats » et « 196 335 Lits »
+              posés côte à côte suggèrent 42 lits par internat ; la vraie moyenne est de 122, parce
+              que l'enquête ne couvre que <strong>1 606 établissements, tous publics</strong>.
+              Aucune bibliothèque n'empêche cela — le <code>where</code> du KPI (#674) permet de
+              restreindre le dénominateur, mais encore faut-il avoir vérifié que les 1 895
+              établissements privés n'ont aucune valeur. <strong>C'est du travail de lecture de
+              données, pas de composant.</strong></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance bloc Studio → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Page Studio d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>data_provider</code> + section <code>filters</code> (6 filtres en modale)</td><td><code>dsfr-data-source</code> + <code>dsfr-data-facets</code></td><td>Meilleur : compteurs, tri par effectif, application à la volée (l'original exige « Valider »)</td></tr>
+            <tr><td>bloc <code>map</code> <code>mapType: poi</code>, <code>dividedByCategory</code></td><td><code>dsfr-data-map-layer</code> + <code>color-field</code> + <code>color-map</code></td><td>Équivalent</td></tr>
+            <tr><td>cadrage par <code>bbox(position)</code> → planisphère</td><td><code>insets="drom,nouvelle-caledonie,…"</code></td><td>Meilleur : le clip métropolitain se pose tout seul</td></tr>
+            <tr><td>popup + <strong>une requête par enregistrement</strong> au clic</td><td><code>dsfr-data-map-popup</code> + <code>&lt;template&gt;</code></td><td>Meilleur : les données sont déjà là, zéro requête au clic</td></tr>
+            <tr><td>amas non groupés, popup à carrousel « ‹ 1 / 3 › »</td><td><code>cluster</code></td><td>Meilleur : le nombre est annoncé au lieu d'être feuilleté</td></tr>
+            <tr><td>3 blocs <code>kpi</code></td><td><code>dsfr-data-kpi</code> + <code>where</code></td><td>Équivalent en technique, corrigé en énoncé</td></tr>
+            <tr><td>2 blocs graphiques (colonnes, camembert)</td><td><code>dsfr-data-chart</code> ×2</td><td>Équivalent</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-search</code>, <code>dsfr-data-list</code>, <code>dsfr-data-a11y</code>, <code>url-sync</code>, taux d'occupation</td><td>Sans équivalent côté Studio</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p>Reproduction <strong>immédiate</strong>, sur la troisième génération de pages du portail
+          — et c'est un résultat en soi : <strong>lire une configuration Studio comme une
+          spécification revient au même que lire un <code>$scope.blocks</code> AngularJS</strong>.
+          Le format change, la transposition ne change pas. Le seul apport véritablement coûteux
+          de cette page n'est pas technique : c'est d'avoir vérifié <em>à qui</em> se rapportent
+          les 196 335 lits. Trois compteurs justes peuvent composer une page fausse, et aucun
+          composant ne le dira.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.25.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

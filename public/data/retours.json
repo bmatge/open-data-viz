@@ -1099,10 +1099,11 @@
     "composants": [],
     "dataviz": [
       "barometre-france-num",
-      "comptabilite-generale"
+      "comptabilite-generale",
+      "edu/fei-chiffres-cles"
     ],
     "constat": "Écrire `year(annee) as an` dans `select` ET dans `group_by` renvoie « Alias 'an' is declared several times ». Il faut le déclarer dans le seul `group_by` — l'alias est alors disponible dans le résultat. Symétriquement, un alias déclaré dans `select` n'est pas utilisable dans `group_by`.",
-    "verifie": "`select=year(annee) as an, sum(x) as m&group_by=year(annee) as an` → ODSQLError. `select=sum(x) as m&group_by=year(annee) as an` → correct, colonne `an` présente dans le résultat.",
+    "verifie": "`select=year(annee) as an, sum(x) as m&group_by=year(annee) as an` → ODSQLError. `select=sum(x) as m&group_by=year(annee) as an` → correct, colonne `an` présente dans le résultat. — Repayé le 2026-09-10 sur le portail Éducation, et il faut noter POURQUOI : en rejouant PG-014 (fonction dans `group-by`), le premier essai déclarait `year(annee) as an` dans `group-by` ET dans `select`. L'API répond « Alias 'an' is declared several times », erreur qui ressemble à s'y méprendre au refus des fonctions — au point d'avoir failli faire conclure que le correctif #641 ne marchait pas. Déclarer l'alias dans le seul `group-by` (le `select` ne porte que les agrégats) donne HTTP 200. Les deux pièges se déguisent l'un en l'autre.",
     "contournement": "Déclarer les expressions groupées uniquement dans `group_by`, et réserver `select` aux agrégations.",
     "statut": "acte",
     "date": "2026-09-09"
@@ -1564,12 +1565,13 @@
     ],
     "dataviz": [
       "bofip",
-      "aide-publique-developpement"
+      "aide-publique-developpement",
+      "edu/fei-chiffres-cles"
     ],
     "constat": "`group-by=\"year(debut_de_validite) as annee\"` part en `group_by=\\`year(debut_de_validite) as annee\\`` : l'adaptateur protège la valeur comme un nom de champ, et l'API renvoie 400. ODSQL accepte pourtant les fonctions dans `group_by` (avec l'alias déclaré là, cf. PG-008). Grouper par un champ date brut donne des libellés ISO complets (« 2018-01-01T00:00:00+00:00 »).",
     "contournement": "Seul contournement sûr : source générique (`url` + `params` + `transform=\"results\"`) pour l'agrégat concerné — au prix de l'auth automatique et, surtout, des commandes de contexte : une source générique n'écoute pas `dsfr-data-context`. La recette du lot 9 (champ brut dans `group-by`, `year()` dans `select`) n'est PAS un groupement par année : elle groupe par valeur de date distincte, et ne coïncide que si le champ n'a qu'une valeur par an. C'est le cas des deux jeux où elle sert (vérifié à l'API au lot 11 : `group_by=annee` → 10 dates pour 10 années sur `balances_des_comptes_etat`, 6 pour 6 sur `questions-reponses`), elle y reste donc avec cette condition écrite en commentaire. Sur un jeu quotidien, elle produirait 365 barres par an.",
     "proposition": "Ne pas protéger une valeur de `group-by` qui contient une parenthèse, ou accepter un `group-by-raw`.",
-    "verifie": "Requête émise sur bofip : `records?select=count(*)+as+nb&group_by=\\`year(debut_de_validite)+as+annee\\`` → 400 ; la même sans accents graves → 15 lignes. Lot 11 : `records?select=annee,count(*)&group_by=annee` → 10 dates distinctes = 10 années (comptabilité), 6 = 6 (Baromètre). — Revérifié le 2026-09-10 à l'API du portail Éducation, des deux côtés : `group_by=year(date_de_naissance) as annee` en expression brute renvoie HTTP 200 avec un vrai groupement par année ; la même expression entourée d'accents graves renvoie HTTP 400. Correctif lu au source (`opendatasoft-adapter.ts`, `isOdsqlExpression`).",
+    "verifie": "Requête émise sur bofip : `records?select=count(*)+as+nb&group_by=\\`year(debut_de_validite)+as+annee\\`` → 400 ; la même sans accents graves → 15 lignes. Lot 11 : `records?select=annee,count(*)&group_by=annee` → 10 dates distinctes = 10 années (comptabilité), 6 = 6 (Baromètre). — Revérifié le 2026-09-10 à l'API du portail Éducation, des deux côtés : `group_by=year(date_de_naissance) as annee` en expression brute renvoie HTTP 200 avec un vrai groupement par année ; la même expression entourée d'accents graves renvoie HTTP 400. Correctif lu au source (`opendatasoft-adapter.ts`, `isOdsqlExpression`). — **Rejoué EN PAGE le 2026-09-10** (dsfr-data 0.25.0), ce que les vérifications précédentes n'avaient fait qu'à l'API et au source : `<dsfr-data-source api-type=\"opendatasoft\" group-by=\"pays, iso2_pays, year(annee) as an\" select=\"pays, iso2_pays, sum(inscrits) as v\">` sur `fr-en-delf-dalf_inscrits_centres` émet `group_by=pays,iso2_pays,year(annee) as an` SANS accents graves (URL relevée au réseau), répond HTTP 200 sur les six pages, et rend 500 lignes dont la somme des `v` pour `an = 2025` vaut exactement 513 435 — le chiffre affiché par le KPI de l'original. La voie native est donc confirmée de bout en bout, et le contournement par source générique n'a plus lieu d'être.",
     "statut": "corrige",
     "date": "2026-09-09",
     "correction": "Corrigé côté bibliothèque par #641 : `escapeOdsqlGroupField()` ne backquote plus un élément de `group-by` qui contient une parenthèse — une expression ODSQL passe désormais telle quelle. La source générique (`url` + `params`), qui coûtait l'écoute du contexte, n'est plus nécessaire. Les deux pages qui portent le contournement (comptabilité générale, Baromètre) peuvent repasser en voie native une fois le dépôt monté en 0.23.0.",
@@ -2704,10 +2706,11 @@
     "dataviz": [
       "edu/offre-formation-langues",
       "edu/carto-pix-fiche-etablissement",
-      "edu/fei-projets-europeens-donnees"
+      "edu/fei-projets-europeens-donnees",
+      "edu/tne-dashboard"
     ],
-    "constat": "`get_skill(dsfrDataMap, \"reference\")` sert une référence de `dsfr-data-map-layer` **sans** `refine-on-click`, `context`, `label` ni l'événement `dsfr-data-map-select`, alors que `skills/dsfr-data/references/dsfr-data-map.md` **les documente**. Ce n'est donc pas un manque de documentation : c'est un décalage entre la doc du dépôt et celle que sert le MCP — plus insidieux, parce que le lecteur consciencieux qui interroge le MCP obtient une réponse fausse par omission. Le même décalage frappe `dsfrDataDisplay`, dont la fiche ignore `{{#if}}`, `{{champ:date}}` et les pipes livrés en 0.22.0.",
-    "verifie": "Trois agents du lot 12 s'y sont fait prendre le même jour. L'un a écrit un faux manque (« rien ne relie déclarativement un clic carte à une seconde source ») avant correction ; un autre a écarté une voie native et l'a rouverte après signalement, ce qui a réglé deux défauts qu'il avait classés sans solution ; un troisième a d'abord classé cinq limites qui n'en étaient pas. Vérifié des deux côtés : l'attribut est dans `packages/core/src/components/dsfr-data-map-layer.ts` (propriété l. 209) et dans `skills/dsfr-data/references/dsfr-data-map.md`, absent de la sortie du MCP.",
+    "constat": "`get_skill(dsfrDataMap, \"reference\")` sert une référence de `dsfr-data-map-layer` **sans** `refine-on-click`, `context`, `label` ni l'événement `dsfr-data-map-select`, alors que `skills/dsfr-data/references/dsfr-data-map.md` **les documente**. Ce n'est donc pas un manque de documentation : c'est un décalage entre la doc du dépôt et celle que sert le MCP — plus insidieux, parce que le lecteur consciencieux qui interroge le MCP obtient une réponse fausse par omission. Le même décalage frappe `dsfrDataDisplay`, dont la fiche ignore `{{#if}}`, `{{champ:date}}` et les pipes livrés en 0.22.0. — Deuxième occurrence, sur un autre composant (2026-09-10) : la référence de l'attribut `value` de `dsfr-data-kpi` servie par `get_skill(dsfrDataKpi, \"reference\")` documente `champ:fn`, `distinct`, `meta:total`, le ratio, `count:champ:valeur` et `evolution` — mais **pas `first` ni `last`**, qui existent pourtant (`packages/core/src/utils/aggregations.ts`, `case 'last'`). Sur le tableau de bord TNE, `:last` est la seule écriture juste pour lire la dernière valeur d'une série chronologique ; faute de la connaître, la page affichait le maximum mensuel (95 672) au lieu de la valeur du dernier mois publié (94 383). Un chiffre faux, trouvé en lisant le source.",
+    "verifie": "Trois agents du lot 12 s'y sont fait prendre le même jour. L'un a écrit un faux manque (« rien ne relie déclarativement un clic carte à une seconde source ») avant correction ; un autre a écarté une voie native et l'a rouverte après signalement, ce qui a réglé deux défauts qu'il avait classés sans solution ; un troisième a d'abord classé cinq limites qui n'en étaient pas. Vérifié des deux côtés : l'attribut est dans `packages/core/src/components/dsfr-data-map-layer.ts` (propriété l. 209) et dans `skills/dsfr-data/references/dsfr-data-map.md`, absent de la sortie du MCP. — Recoupé le 2026-09-10 : `get_skill(dsfrDataKpi, \"reference\")` appelé dans la session ne mentionne ni `first` ni `last` ; les deux sont présents au source et fonctionnent en page (`value=\"…:last\"` rend 94 383, la dernière ligne de la série triée `mois_saisie:asc`).",
     "statut": "a-deposer",
     "date": "2026-09-10",
     "demande": "Générer les fiches du MCP depuis le source (ou depuis `skills/`) à chaque publication, et y porter la version dont elles sont issues.",
@@ -3242,10 +3245,11 @@
       "dsfr-data-source"
     ],
     "dataviz": [
-      "edu/dataviz-ips-colleges"
+      "edu/dataviz-ips-colleges",
+      "edu/tne-dashboard"
     ],
-    "constat": "`dsfr-data-query` négocie à l'initialisation la délégation de `group-by` / `aggregate` / `order-by` au serveur quand l'adaptateur le supporte : c'est documenté, voulu, et c'est même l'exemple du JSDoc de la classe, qui montre une query branchée directement sur la source. Ce que la délégation fait en pratique, c'est envoyer une commande à la source, qui repart chercher un agrégat — et la source ré-émet alors cet agrégat à TOUS ses abonnés. Une page qui branche une query d'agrégat sur la même source qu'une carte, un KPI ou une facette voit donc ses données remplacées par les quelques lignes de l'agrégat, sans aucun message. Le motif « une source, plusieurs vues » — un compteur, une carte et un graphique d'agrégat sur le même jeu — est pourtant le plus banal qui soit ; c'est celui de presque toutes les pages de ce banc, et il n'échouait pas jusqu'ici seulement parce qu'elles branchent leurs queries sur la facette et non sur la source.",
-    "verifie": "Rencontré au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges (dsfr-data 0.25.0), source `donnees-ips-colleges` en `fetch-mode=\"export\"`. Avec `<dsfr-data-query id=\"ips-par-secteur\" source=\"ips\" group-by=\"secteur\" aggregate=\"ips:avg:ips_moyen\">` : `document.getElementById('ips').getData().length` = 2 au lieu de 6 971, le KPI « Collèges » affichait 2, et la couche avertissait « 2 ligne(s) sur 2 sans coordonnées exploitables ». Aucune erreur console, aucune erreur de configuration. La seule modification `source=\"ips\"` → `source=\"ips-f\"` (la facette en aval) ramène la source à 6 971 lignes et tous les afficheurs à leurs valeurs justes ; les deux mesures ont été prises dans la même session, sur la même page, sans autre changement.",
+    "constat": "`dsfr-data-query` négocie à l'initialisation la délégation de `group-by` / `aggregate` / `order-by` au serveur quand l'adaptateur le supporte : c'est documenté, voulu, et c'est même l'exemple du JSDoc de la classe, qui montre une query branchée directement sur la source. Ce que la délégation fait en pratique, c'est envoyer une commande à la source, qui repart chercher un agrégat — et la source ré-émet alors cet agrégat à TOUS ses abonnés. Une page qui branche une query d'agrégat sur la même source qu'une carte, un KPI ou une facette voit donc ses données remplacées par les quelques lignes de l'agrégat, sans aucun message. Le motif « une source, plusieurs vues » — un compteur, une carte et un graphique d'agrégat sur le même jeu — est pourtant le plus banal qui soit ; c'est celui de presque toutes les pages de ce banc, et il n'échouait pas jusqu'ici seulement parce qu'elles branchent leurs queries sur la facette et non sur la source. — **Repayé sur le tableau de bord TNE alors que le piège était déjà connu et écrit**, ce qui en dit long sur sa capacité à passer inaperçu : cette page-là a trois consommateurs du même jeu (un KPI, une query de répartition par département, une query d'agrégats pour trois camemberts). Le KPI « participants aux formations » affichait **0** et les trois camemberts étaient vides, pendant que la query voisine rendait, elle, les bons chiffres par département — de sorte que la page avait l'air à moitié juste, ce qui est le pire des symptômes. Le contournement a coûté un `dsfr-data-normalize` sans aucun attribut, dont l'unique fonction est de s'interposer entre la source et ses queries.",
+    "verifie": "Rencontré au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges (dsfr-data 0.25.0), source `donnees-ips-colleges` en `fetch-mode=\"export\"`. Avec `<dsfr-data-query id=\"ips-par-secteur\" source=\"ips\" group-by=\"secteur\" aggregate=\"ips:avg:ips_moyen\">` : `document.getElementById('ips').getData().length` = 2 au lieu de 6 971, le KPI « Collèges » affichait 2, et la couche avertissait « 2 ligne(s) sur 2 sans coordonnées exploitables ». Aucune erreur console, aucune erreur de configuration. La seule modification `source=\"ips\"` → `source=\"ips-f\"` (la facette en aval) ramène la source à 6 971 lignes et tous les afficheurs à leurs valeurs justes ; les deux mesures ont été prises dans la même session, sur la même page, sans autre changement. — Reproduit une seconde fois le 2026-09-10 sur /education/tne-dashboard, jeu `fr-en-tne_personnels_formes_par_departement_secteur_type_etablissement` : avec les deux queries branchées sur la source, `tne-totaux` rend `{d1:0, d2:0, p1:0, p2:0, nc:0, tot:0}` et le KPI affiche 0, tandis que la query `group-by=\"departement\"` rend les douze valeurs justes (Aisne 13 811). L'interposition d'un `<dsfr-data-normalize>` vide ramène tout aux chiffres de référence (53 491 / 32 688 / 12 363 / 2 999 / 13 350 / 7 453).",
     "contournement": "Ne jamais brancher une `dsfr-data-query` d'agrégat directement sur une `dsfr-data-source` qui a d'autres consommateurs : l'intercaler derrière un transformateur (facette, normalize), ou déclarer une seconde `dsfr-data-source` dédiée à l'agrégat. Le contournement cesse d'être satisfaisant dès qu'on veut un agrégat NON filtré à côté d'une vue filtrée : il faut alors payer une source de plus, donc une requête de plus.",
     "demande": "Que la délégation serveur d'une query ne modifie pas ce que la source publie à ses autres abonnés — soit en réservant la réponse agrégée à la query qui l'a demandée, soit en refusant la délégation dès que la source a plusieurs consommateurs, soit à tout le moins en avertissant en console que la source est réécrite.",
     "statut": "a-deposer",
@@ -3254,7 +3258,7 @@
       "priorite": "P1",
       "effort": "L",
       "decision": "Accepter",
-      "impact": "Chiffres faux et carte vide sur le motif le plus courant de la bibliothèque — une source, plusieurs vues — dans la configuration exacte que le JSDoc donne en exemple. L'échec est entièrement silencieux : la page s'affiche, tout paraît fonctionner, seuls les nombres sont faux.",
+      "impact": "Chiffres faux et carte vide sur le motif le plus courant de la bibliothèque — une source, plusieurs vues — dans la configuration exacte que le JSDoc donne en exemple. L'échec est entièrement silencieux : la page s'affiche, tout paraît fonctionner, seuls les nombres sont faux. Repayé deux fois en une seule journée par un opérateur qui connaissait le piège et l'avait lui-même consigné quatre heures plus tôt : le motif est trop banal pour qu'on pense à s'en méfier à chaque balise.",
       "objectif": "Qu'ajouter un graphique d'agrégat à une page ne change pas ce que ses autres composants affichent.",
       "perennite": "Durable, et structurel : c'est le contrat du data-bridge entre une source et ses abonnés multiples.",
       "acceptation": [
@@ -3293,6 +3297,71 @@
         "La facette affiche cet effectif au lieu de son nombre de lignes.",
         "Sans cet attribut, le comportement actuel est inchangé.",
         "Le tri `count:desc` s'appuie sur l'effectif désigné."
+      ]
+    }
+  },
+  {
+    "id": "BUG-010",
+    "titre": "Un alias de `group-by` sans parenthèse est backquoté et vaut un HTTP 400 : le correctif #641 ne couvre que les expressions à fonction",
+    "type": "bug",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-source"
+    ],
+    "dataviz": [
+      "edu/fei-chiffres-cles"
+    ],
+    "constat": "Le correctif #641 avait réglé PG-014 : l'adaptateur Opendatasoft ne backquote plus un élément de `group-by` qui est une expression, de sorte que `year(annee) as an` passe tel quel. Mais la détection d'une expression est `field.includes('(')` — littéralement, « contient une parenthèse ouvrante ». Un **alias simple**, `pays_centre as pays` ou `periode as an`, n'en contient pas : il est traité comme un nom de champ, part en `` `periode as an` ``, et l'API répond 400. Or l'aliasing sans fonction est la forme la plus courante de l'aliasing ODSQL, et c'est le seul moyen d'harmoniser les noms de colonnes entre plusieurs jeux qui nomment différemment la même chose — exactement ce que demande une page multi-sources. Sur les neuf jeux de France Éducation international, quatre nomment le pays autrement (`pays_centre`, `pays_participants`) et trois nomment l'année autrement (`annee` date, `annee` texte, `periode` entier) : aucun ne peut être aliasé. Le JSDoc de `group-by` annonce pourtant « un élément peut être une expression aliasée […] transmise telle quelle — l'alias `as` est obligatoire côté ODS », sans restreindre aux expressions à fonction.",
+    "verifie": "Relevé au navigateur le 2026-09-10 sur /education/fei-chiffres-cles (dsfr-data 0.25.0). Avec `group-by=\"pays, iso2_pays, periode as an\"`, l'URL émise est `…&group_by=pays,iso2_pays,`periode+as+an`&limit=100` (relevée au réseau, accents graves présents) → HTTP 400, source en erreur, message en console. La même requête sans accents graves répond 200 en curl, avec ou sans guillemets sur la valeur. Le comportement est lu au source : `isOdsqlExpression(field) { return field.includes('('); }` puis `escapeOdsqlGroupField`, packages/core/src/adapters/opendatasoft-adapter.ts l. 109-116. Dans la même page, `year(annee) as an` passe et rend les bons chiffres (513 435 inscrits DELF-DALF en 2025) : la bascule tient bien à la seule parenthèse.",
+    "contournement": "Garder le nom d'origine du champ dans le `group-by` et renommer en aval (`dsfr-data-normalize rename`), au prix d'un composant de plus et de gabarits non homogènes entre sources. Le contournement ne marche pas quand l'alias sert à faire coïncider deux sources destinées à être jointes ou comparées sur le même nom de colonne.",
+    "demande": "Reconnaître comme expression tout élément de `group-by` contenant ` as ` (en plus du test sur la parenthèse), afin qu'un alias simple soit transmis tel quel.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Sur une page multi-sources — le motif que ce second portail a rendu courant — l'aliasing est le seul moyen d'harmoniser des colonnes qui portent le même sens sous trois noms. Il échoue sur la moitié des cas, et le JSDoc annonce qu'il fonctionne.",
+      "objectif": "Qu'un `group-by` accepte l'aliasing ODSQL sous toutes ses formes, pas seulement celle qui porte une fonction.",
+      "perennite": "Durable : le correctif est une ligne, et il complète un correctif déjà livré.",
+      "acceptation": [
+        "`group-by=\"periode as an\"` émet `group_by=periode as an`, sans accents graves.",
+        "`group-by=\"year(annee) as an\"` continue de passer tel quel.",
+        "Un nom de champ à espaces sans ` as ` reste échappé (#289).",
+        "Un test couvre les trois formes."
+      ]
+    }
+  },
+  {
+    "id": "PG-025",
+    "titre": "Le `where` d'un `dsfr-data-context` ne peut pas porter sur un alias d'agrégat : il s'applique avant le `group_by`",
+    "type": "piege",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-context",
+      "dsfr-data-context-filter",
+      "dsfr-data-source"
+    ],
+    "dataviz": [
+      "edu/fei-chiffres-cles"
+    ],
+    "constat": "Quand plusieurs sources agrégées partagent un alias commun (`… as an`), il est tentant de poser un seul `dsfr-data-context-filter field=\"an\"` pour les filtrer toutes d'un geste : c'est le sens même de l'alias. Mais le filtre du contexte est diffusé aux sources comme une clause `where`, et `where` s'applique AVANT `group_by` côté serveur — l'alias n'existe pas encore. L'API répond « Unknown field » / HTTP 400 sur chacune des sources visées. Il faut donc écrire un filtre par typage de champ d'origine (`year-of` sur une date, `eq` sur un texte ou un entier), chacun ciblant ses sources par `apply-to` — c'est-à-dire écrire trois fois ce que l'alias promettait d'unifier une fois.",
+    "verifie": "Rencontré et corrigé au navigateur le 2026-09-10 sur /education/fei-chiffres-cles. Avec `<dsfr-data-context-filter field=\"an\" operator=\"eq\" default=\"2025\">` sur les sept sources agrégées : sept requêtes `…&where=an = \"2025\"&group_by=…` → sept HTTP 400, sept messages `dsfr-data-source[<id>]: Erreur de chargement Error: HTTP 400` en console. Remplacé par trois filtres partageant le même `ui` — `field=\"annee\" operator=\"year-of\" apply-to=\"delf tcf belc mob\"`, `field=\"annee\" operator=\"eq\" apply-to=\"enic\"`, `field=\"periode\" operator=\"eq\" apply-to=\"asfr aslve\"` — : zéro erreur, et les sept KPI rendent les chiffres de référence de l'original (513 435, 310 473, 1 146, 50 477, 1 486, 4 376, 522).",
+    "contournement": "Un filtre de contexte par champ d'origine et par typage, ciblé avec `apply-to`, tous sur le même `ui`. Plusieurs `dsfr-data-context-filter` peuvent partager un même élément d'UI : un seul contrôle à l'écran.",
+    "demande": "Rien à demander sur le comportement, qui est celui d'ODSQL. En revanche, le mentionner dans le JSDoc de `dsfr-data-context-filter` et dans celui de `group-by` : c'est le premier réflexe qu'on a devant plusieurs sources agrégées partageant un alias.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "cadrage": {
+      "priorite": "P4",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Faible : l'échec est franc et immédiatement diagnosticable — c'est le SEUL du lot 14 qui n'ait pas été silencieux. Le coût est une demi-heure de tâtonnement, pas une page fausse mise en ligne.",
+      "objectif": "Que la documentation dise où s'applique le `where` d'un contexte par rapport à l'agrégation.",
+      "perennite": "Durable dès qu'une page agrège plusieurs sources, motif courant sur un portail multi-jeux.",
+      "acceptation": [
+        "Le JSDoc de `dsfr-data-context-filter` précise que le filtre est diffusé en `where` et ne peut donc pas porter sur un alias de `group-by`.",
+        "Le JSDoc de `group-by` renvoie à ce point.",
+        "Le motif « plusieurs filtres, un seul `ui`, `apply-to` par source » est donné en exemple."
       ]
     }
   }
