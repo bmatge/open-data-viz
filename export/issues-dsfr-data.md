@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 36 demandes cadrées — 5 bugs,
-> 26 améliorations,
+> 37 demandes cadrées — 5 bugs,
+> 27 améliorations,
 > 5 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -92,8 +92,9 @@ _10 demandes — S 6, M 3, L 1._
 | AM-047 | Pas de boucle dans un template : impossible d'émettre un élément par valeur d'un champ multivalué | amelioration | M | 2 | Accepter |
 | AM-051 | Les compteurs de facette n'ont pas de sens sur une table de mesures, et rien ne le dit | amelioration | M | 2 | Accepter |
 | AM-056 | Changer le champ d'un filtre selon la source, et vider un groupe de filtres exclusifs | amelioration | M | 1 | Accepter |
+| AM-070 | Le ratio d'un KPI sait filtrer un `count`, pas une `sum` : une part n'est pas calculable sur une source pré-agrégée | amelioration | M | 1 | Accepter |
 
-_11 demandes — S 6, M 5, L 0._
+_12 demandes — S 6, M 6, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -973,6 +974,49 @@ Un `field-map` par source sur un filtre de contexte, et une notion de groupe de 
 - [ ] Un filtre unique alimente neuf sources dont les champs portent quatre noms différents.
 - [ ] Changer de maille vide les filtres des autres mailles, sans en laisser derrière.
 - [ ] L'URL reflète la maille courante et se recharge à l'identique.
+
+---
+
+## AM-070 — Le ratio d'un KPI sait filtrer un `count`, pas une `sum` : une part n'est pas calculable sur une source pré-agrégée
+
+**Priorité** P2 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-kpi`
+**Rencontré sur** 1 page(s) : edu/patronymes-des-ecoles
+
+### Constat
+
+Le ratio de `dsfr-data-kpi` (#673) permet d'écrire une part : `value="count:statut:ouvert / count"`. Le filtre y est porté par la grammaire à trois parties `champ:fn:valeur`, qui ne fonctionne QUE pour `count` — et qui filtre sur le champ qu'elle agrège. Pour une `sum`, il n'existe pas de forme équivalente : `montant:sum:valeur` filtrerait sur `montant` lui-même, ce qui n'a pas de sens. Le `where` du KPI (#674) ne comble pas le manque : il s'applique aux DEUX côtés du ratio à la fois, si bien que `ecoles:sum / ecoles:sum` avec un `where` unique rend mécaniquement 100 %. Conséquence : sur une source PRÉ-AGRÉGÉE — une ligne par modalité, la mesure dans une colonne — une part n'est pas calculable en un KPI. Or c'est exactement la forme qu'impose un gros jeu : sur 809 225 lignes, on n'a pas le choix d'agréger côté serveur, et la question « quelle part de femmes ? » devient alors inexprimable, alors qu'elle l'est sur un jeu chargé ligne à ligne.
+
+### Impact de l'erreur ou du manque
+
+Une part est l'indicateur le plus courant d'un tableau de bord, et l'agrégation serveur est obligatoire dès qu'un jeu dépasse quelques dizaines de milliers de lignes. Les deux se rencontrent souvent — et là, la part devient inexprimable. Le symptôme est de surcroît trompeur : le KPI affiche 100 %, une valeur plausible pour un pourcentage, pas une erreur.
+
+### Objectif métier de la correction
+
+Qu'une part soit calculable sur une source pré-agrégée, comme elle l'est sur des lignes brutes.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : c'est le pendant naturel de #673, sur le régime de données qu'impose le gros volume.
+
+### Comment ça a été vérifié
+
+Rencontré au navigateur le 2026-09-10 sur /education/patronymes-des-ecoles (dsfr-data 0.27.0). Source agrégée `group-by="sexe_ou_genre" select="count(*) as ecoles"` — trois lignes : masculin 9 164, féminin 2 297, null 35 952. Avec `value="ecoles:sum / ecoles:sum" where="sexe_ou_genre:isnotnull"`, le KPI affiche **100,0 %** : le `where` filtre les deux côtés, la division porte sur la même valeur. Absence de forme `champ:sum:valeur` filtrant sur un AUTRE champ vérifiée au source (packages/core/src/utils/aggregations.ts : la branche à trois parties pose `filterField: field`, le champ agrégé lui-même). Les chiffres justes (20,0 % rapporté aux écoles, 17,2 % rapporté aux patronymes distincts) ont dû être écrits dans une note en prose, calculés hors de la page.
+
+### Contournement actuel
+
+Aucun en un KPI. Il faut soit charger les lignes brutes (impossible ici : 809 225 lignes), soit calculer la part hors de la page et l'écrire en dur — ce qui la fige et la rend fausse au premier changement de filtre. Une query intermédiaire ne résout rien : le pivot d'une colonne de modalités vers des colonnes nommées demanderait `dsfr-data-pivot`, puis un `compute` — trois composants pour un pourcentage.
+
+### Demande
+
+Étendre le filtre par valeur aux agrégats autres que `count`, sur un champ différent de celui agrégé — par exemple `ecoles:sum:sexe_ou_genre:féminin`, ou un `where` par côté du ratio (`value="ecoles:sum{sexe_ou_genre:eq:féminin} / ecoles:sum"`). La seconde forme a l'avantage de réemployer le dialecte colon déjà en place.
+
+### Critères d'acceptation
+
+- [ ] Un côté d'un ratio peut être filtré sur un champ autre que celui qu'il agrège.
+- [ ] L'autre côté reste non filtré, ou porte son propre filtre.
+- [ ] Le `where` global du KPI continue de s'appliquer aux deux côtés, sans ambiguïté avec la nouvelle forme.
+- [ ] Un test couvre le cas « source pré-agrégée, une ligne par modalité ».
 
 ---
 
