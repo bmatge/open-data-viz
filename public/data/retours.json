@@ -15,7 +15,7 @@
     "correction": "Le mode server-facets fonctionne, y compris AU-DESSUS D'UNE SOURCE AGRÉGÉE (select + group_by), ce qui n'était pas évident. Mieux : cocher une facette relance l'agrégation avec le where correspondant ET recalcule les compteurs des autres facettes dans le périmètre de la sélection — exactement le comportement contextuel d'Opendatasoft.",
     "verifie": "Page de test en navigateur : `/facets?facet=source&facet=nature&facet=procedure` au chargement, puis au clic sur « Dematis » → `records?select=nature,count(*)&where=source = \"Dematis\"&group_by=nature` + `/facets?facet=procedure&where=source = \"Dematis\"`. Compteurs justes (599 071 MARCHE au global, 60 099 chez Dematis).",
     "reste_vrai": "Deux écarts subsistent, bien plus étroits que ce que j'avais écrit : il faut nommer les champs (`fields` est obligatoire là où Opendatasoft les découvre seul — voir AM-003), et un composant de facettes ne pilote que sa propre source (voir AM-001).",
-    "statut": "corrige",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -34,7 +34,7 @@
     "correction": "Trois leviers, tous natifs, et j'en avais raté le principal. (1) L'endpoint `/exports/json` d'Opendatasoft renvoie le jeu ENTIER en une requête, là où `/records` plafonne à 100 et impose 31 allers-retours séquentiels — c'est le bon levier ici. (2) `dsfr-data-map-layer bbox` charge par viewport (`in_bbox(...)` en ODSQL). (3) Les graphiques n'ont jamais besoin des lignes : une source par agrégation coûte une requête. Le chargement intégral reste un CHOIX, mais son coût n'est pas celui que je croyais : bien fait, il vaut 0,6 s.",
     "verifie": "Mesures en navigateur, page identique. Avant : 31 requêtes `/records`, concurrence maximale 1, 28,9 s passées DANS les requêtes et 37 ms entre elles, 3,4 Mo. Après bascule sur `/exports/json` avec `select` : 1 requête, 0,6 s, 185 Ko sur le fil. KPI renseigné à 6,3 s au lieu de 31,4 s. `bbox` vérifié séparément : `records?where=in_bbox(coordonnees_gps, 45.668…, 4.434…, 45.850…, 5.225…)&limit=100` après déplacement de la carte.",
     "reste_vrai": "Deux nuances importantes. (a) `bbox` ne convient PAS à cette page : une carte nationale doit montrer les 3 080 points, or en mode `bbox` + `server-side` le zoom national ne rapatrie que 100 enregistrements — les grappes afficheraient des comptes faux. `bbox` sert l'exploration par zoom sur données denses, pas la vue d'ensemble. (b) `bbox` ne filtre pas le premier chargement (voir AM-008).",
-    "statut": "corrige",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -53,21 +53,10 @@
     "verifie": "Deux cas. (1) DECP : tableau croisé `source × nature × procedure` = 235 groupes réels ; une page bâtie dessus n'émet qu'une requête et affiche 632 062 marchés au lieu de 994 123, sans message. (2) Comptabilité générale : le graphique « postes × année » compte 264 groupes — c'est le premier cas où le bug BLOQUE réellement une reproduction, le graphique principal de la page n'aurait montré qu'un tiers des données.",
     "contournement": "**Trouvé au lot 3** : `/exports/json` accepte `group_by` et renvoie TOUS les groupes en une requête — 264 groupes en 0,5 s. Écrire la source en mode générique (`url=` vers `/exports/json` + `params`) contourne donc entièrement le bug. En mode adaptateur, aucun contournement : ni `limit` ni `max-records` ne changent la condition d'arrêt.",
     "demande": "Sur une requête agrégée (présence de `group_by`), ne se fier qu'à `pageResults.length < pageSize` pour arrêter la boucle, et ignorer `total_count`.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Un agrégat de plus de 100 groupes est tronqué à 100 sans avertissement ; sur DECP un KPI affichait 632 062 marchés au lieu de 994 123.",
-      "objectif": "Qu'une agrégation serveur soit complète ou signale qu'elle ne l'est pas.",
-      "perennite": "Structurel : tout croisement à plus de 100 groupes (année × catégorie, département × type). Le portail renverra toujours `total_count` = taille de page sur un `group_by`.",
-      "acceptation": [
-        "Sur `select=…&group_by=source,nature,procedure` (235 groupes), la source publie 235 lignes.",
-        "La boucle s'arrête sur une page incomplète, jamais sur `total_count` quand `group_by` est présent.",
-        "Test avec un faux serveur renvoyant `total_count` = 100 et 3 pages."
-      ]
-    }
+    "correction": "Corrigé par #641, livré en 0.21.1 : sur un `group-by`, l'adaptateur Opendatasoft ignore désormais le `total_count` renvoyé par l'API (égal à la taille de page) et lit toutes les pages jusqu'à une page incomplète — le total reste inconnu, mais l'agrégat est complet. #658 (0.22.0) complète le dispositif : la source pose `truncated: true` dans sa meta quand les lignes livrées sont un sous-ensemble, y compris sur un `group-by` ODS au total inconnu, et le volet Diagnostic le rend. Le contournement par source générique (`url` vers `/exports/json` + `params`), qui coûtait l'écoute du contexte, n'est plus nécessaire pour les agrégats.",
+    "reste_vrai": "Le chargement complet d'un jeu non agrégé reste paginé 100 lignes par 100 : c'est l'autre moitié du sujet, prévue au jalon v0.25.0 avec `fetch-mode=\"export\"` (#689, épic #699), qui charge par `/exports/json`. Sur le portail Éducation, c'est ce qui bute sur le refus ODS de `offset+limit > 10 000`."
   },
   {
     "id": "BUG-002",
@@ -85,20 +74,10 @@
     "verifie": "Console navigateur : « Request header field apikey is not allowed by Access-Control-Allow-Headers in preflight response » puis `TypeError: Failed to fetch`. Préflight OPTIONS testée au curl : `access-control-allow-headers: Authorization, X-Requested-With, Origin, …` — pas d'`apikey`.",
     "contournement": "`api-key-ref` + `window.DSFR_DATA_KEYS = { 'ods-mef': 'Apikey <clé>' }`, qui pose directement l'en-tête `Authorization`.",
     "demande": "Appeler `normalizeProviderAuthHeaders` dans l'adaptateur au moment de construire la requête, pas seulement dans l'UI du builder.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "La forme documentée `headers='{\"apikey\":…}'` échoue en préflight CORS sur tout portail Opendatasoft : première page, premier échec, message du navigateur opaque.",
-      "objectif": "Que la documentation et l'exécution disent la même chose ; qu'une clé ODS fonctionne dès la première tentative.",
-      "perennite": "Structurel : tous les portails Opendatasoft n'autorisent que `Authorization` en CORS.",
-      "acceptation": [
-        "`headers='{\"apikey\":\"K\"}'` sur une source `api-type=\"opendatasoft\"` émet `Authorization: Apikey K` et aucun en-tête `apikey`.",
-        "La fonction `normalizeProviderAuthHeaders` est appelée dans l'adaptateur (test unitaire)."
-      ]
-    }
+    "correction": "Corrigé par #655, livré en 0.21.1 : un en-tête `apikey` (ou `x-api-key`, `api-key`) passé par `headers` est réécrit à l'exécution en `Authorization: Apikey <clé>` — en mode `api-type=\"opendatasoft\"` comme en mode URL sur un hôte ODS —, et la documentation prescrit désormais la bonne forme. Le piège du CLAUDE.md (« clé ODS en `headers` → préflight refusée ») n'a plus lieu d'être.",
+    "reste_vrai": "`api-key-ref` + `window.DSFR_DATA_KEYS` reste la bonne pratique du dépôt : elle garde la clé hors du HTML servi. Les 26 pages continuent de l'utiliser par choix, non par contrainte."
   },
   {
     "id": "AM-001",
@@ -117,20 +96,10 @@
     "verifie": "Sur DECP, les quatre graphiques s'appuient sur quatre agrégations distinctes. Avec des facettes, une seule se refiltre. Avec un contexte, les quatre se refiltrent mais les valeurs des trois listes déroulantes sont écrites à la main.",
     "contournement": "Écrire les valeurs de filtre en dur dans des `<select>` DSFR pilotés par `dsfr-data-context`. Elles ne suivent pas l'évolution du jeu de données.",
     "demande": "Soit un attribut `apply-to`/`context` sur `dsfr-data-facets` pour diffuser à N sources ; soit un `dsfr-data-context-filter` capable de peupler ses valeurs depuis `/facets` et de rendre une UI de facettes.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "L",
-      "decision": "À discuter avec AM-043",
-      "impact": "Une barre de facettes serveur ne pilote qu'une source ; pour N agrégations il faut abandonner les facettes et repartir de zéro avec un contexte.",
-      "objectif": "Réutiliser `server-facets` (valeurs, compteurs, recalcul contextuel — déjà au niveau d'Opendatasoft) pour piloter N sources.",
-      "perennite": "Structurel. Partiellement couvert par AM-043 si les filtres de contexte savent se peupler.",
-      "acceptation": [
-        "`<dsfr-data-facets apply-to=\"src-a src-b\">` (ou `context=\"ctx\"`) émet ses `where` vers toutes les cibles, avec un `whereKey` stable par facette.",
-        "Les compteurs de facettes restent calculés sur une seule source déclarée."
-      ]
-    }
+    "correction": "Corrigé par #678, livré en 0.23.0 : `dsfr-data-facets` gagne un attribut `context=\"id\"` — les facettes (et `dsfr-data-search`, en filtre `contains`) deviennent des filtres de `dsfr-data-context`, qui diffuse à N sources. Un composant de facettes pilote donc désormais plusieurs sources par le bus du contexte, avec `select` peuplé depuis la donnée et cascade en `server-facets`.",
+    "reste_vrai": "Ce qui traverse le contexte reste une clause `where` sur un champ : un filtre qui passerait par un référentiel (académie → liste de départements) n'a toujours pas d'équivalent (AM-058)."
   },
   {
     "id": "AM-002",
@@ -148,20 +117,10 @@
     "verifie": "Constaté en écrivant la page Plan de relance : sans `max-records=\"3500\"`, KPI et carte ne portent que 1 000 des 3 080 projets.",
     "contournement": "Fixer `max-records` explicitement dès qu'un jeu peut dépasser 1 000 lignes — donc savoir à l'avance combien il en contient.",
     "demande": "Un avertissement console systématique quand la troncature est effective (un `console.warn` existe mais dépend d'un `total_count` que l'API ne fournit pas toujours — voir BUG-001), et idéalement un état visible sur le composant.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Un jeu de 3 080 lignes se charge au tiers ; les KPI et graphiques sont faux avec l'aplomb de chiffres justes.",
-      "objectif": "Qu'une troncature soit toujours visible du développeur (console) et idéalement de l'utilisateur.",
-      "perennite": "Structurel : le plafond est un défaut de sécurité légitime, mais il doit se voir.",
-      "acceptation": [
-        "Quand `fetchAll` s'arrête sur le plafond alors qu'une page suivante existe, `console.warn` nomme la source, le plafond et l'attribut à relever.",
-        "Événement `dsfr-data-truncated` (ou champ de meta) exploitable par une bannière."
-      ]
-    }
+    "correction": "Corrigé par #658, livré en 0.22.0 : `dsfr-data-source` pose `truncated: true` dans sa meta dès que les lignes livrées sont un sous-ensemble du jeu (plafond `max-records` atteint, `limit` sous le total, `group-by` ODS au total inconnu) ; le volet Diagnostic et `formatTrace()` rendent « tronqué à N / total lignes ». La troncature n'est donc plus muette pour qui regarde la trace.",
+    "reste_vrai": "Le plafond par défaut reste 1 000, et l'avertissement vit dans la meta, la console et le volet Diagnostic — pas sur le composant visible par le lecteur de la page. Le piège du CLAUDE.md (« fixer `max-records` explicitement dès qu'un jeu dépasse 1 000 lignes ») reste la règle du dépôt."
   },
   {
     "id": "AM-003",
@@ -181,19 +140,10 @@
     "verifie": "`GET /api/explore/v2.1/catalog/datasets/decp_augmente/facets` renvoie 7 facettes nommées (source, formeprix, nature, procedure, datenotification, natureobjetmarche, nomacheteur) sans qu'on ait rien précisé.",
     "contournement": "Nommer les champs à la main — coût faible, mais c'est la dernière ligne qui sépare de l'équivalence stricte avec `ods-facets`.",
     "demande": "Rendre `fields` facultatif en mode `server-facets` : sans lui, exposer les facettes que l'endpoint renvoie.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "`fields` obligatoire en `server-facets` alors que `/facets` renvoie déjà la liste.",
-      "objectif": "Zéro configuration, comme `ods-facets`.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "Sans `fields`, `server-facets` expose toutes les facettes renvoyées par `/facets`."
-      ]
-    }
+    "correction": "Corrigé par #680, livré en 0.23.0 : `dsfr-data-facets server-facets` sans `fields` découvre au premier cycle les facettes déclarées par le jeu (Opendatasoft : champs annotés « facet » des métadonnées, avec leur libellé ; Grist : colonnes Choice / ChoiceList), mémorisées et invalidées au changement de `dataset-id`. C'est l'équivalence stricte avec `ods-facets` qui manquait.",
+    "reste_vrai": "Un jeu qui ne déclare aucune facette au back-office rend toujours une liste vide — c'est le cas de prix-controle-technique, dont les filtres restent en `<select>` + contexte. La découverte ne crée pas la facette, elle la lit."
   },
   {
     "id": "AM-004",
@@ -211,19 +161,9 @@
     "verifie": "Première écriture de la page Plan de relance : le KPI restait vide, sans message.",
     "contournement": "Intercaler un `dsfr-data-query group-by=\"nom_departement\"` et compter ses lignes avec `value=\"count\"`. Le pipeline reste lisible.",
     "demande": "Ajouter `distinct` (ou `count-distinct`) à la grammaire commune, et signaler une fonction inconnue au lieu de l'ignorer.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "`value=\"champ:distinct\"` est ignoré en silence.",
-      "objectif": "Un KPI « N départements couverts » en un attribut.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "`distinct` dans la grammaire commune ; une fonction inconnue déclenche `reportConfigError`."
-      ]
-    }
+    "correction": "Corrigé en deux temps. #649, livré en 0.21.1 : une fonction d'agrégat inconnue n'est plus silencieuse — `dsfr-data-kpi` et `dsfr-data-query` affichent une erreur de configuration au lieu d'un indicateur vide ou d'un 0 plausible. #672, livré en 0.24.0 : l'agrégat `distinct` (alias `count-distinct`) entre dans la grammaire commune — `value=\"nom_departement:distinct\"` sur le KPI, `aggregate=\"commune:distinct\"` sur la query, délégué à Opendatasoft en `count(distinct x)` et à Grist en `COUNT(DISTINCT)`. Le contournement du CLAUDE.md (une `dsfr-data-query group-by` intercalée puis un `count`) n'est plus nécessaire."
   },
   {
     "id": "AM-005",
@@ -245,19 +185,9 @@
     "verifie": "Légende du camembert « Répartition par type d'entreprise ». Vérifié à l'API : `group_by=type_entreprise` renvoie bien un groupe `null` de 21 lignes.",
     "contournement": "Aucun de propre : `dsfr-data-normalize` travaille sur des motifs de chaînes (`replace`, `replace-fields`), pas sur `null`. Il faut filtrer les lignes ou nettoyer à la source.",
     "demande": "Un attribut de libellé pour les valeurs manquantes (ex. `empty-label=\"Non renseigné\"`) sur le graphique, ou une option `null-as` sur `dsfr-data-normalize`.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Les valeurs nulles apparaissent en légende sous « Série 4 » sur une page publique.",
-      "objectif": "Un libellé maîtrisé pour l'absence.",
-      "perennite": "Structurel : tout jeu avec des nuls.",
-      "acceptation": [
-        "`empty-label=\"Non renseigné\"` sur le graphique ; sans lui, « Non renseigné » par défaut plutôt que « Série N »."
-      ]
-    }
+    "correction": "Corrigé par #647, livré en 0.21.1 : `dsfr-data-chart` gagne `empty-label` (défaut « Non renseigné ») pour libeller les catégories vides (`null`, `undefined`, `\"\"`) ; le libellé de repli des labels manquants passe de `N/A` à « Non renseigné ». Une légende de camembert n'affiche plus « Série 4 » pour un groupe sans valeur."
   },
   {
     "id": "AM-006",
@@ -275,19 +205,9 @@
     "verifie": "Page Plan de relance : après trois cases cochées dans trois facettes différentes, rien ne résume l'état courant hors de la colonne de filtres. Lot 11, Plan de relance : après une case cochée, bouton « Réinitialiser les filtres » présent dans `dsfr-data-facets` ; aucun « tout effacer » dans `dsfr-data-context-tags.ts:70-90`.",
     "contournement": "Aucun sans JavaScript.",
     "demande": "Faire accepter à `dsfr-data-context-tags` une source de type `dsfr-data-facets`, ou fournir un `dsfr-data-facets-tags`.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Gratuit avec AM-001",
-      "impact": "Pas de rappel des filtres actifs avec des facettes, contrairement à `ods-filter-summary`.",
-      "objectif": "Voir et retirer ses filtres d'un clic.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "`dsfr-data-context-tags for=\"id-facettes\"` liste les sélections actives des facettes, supprimables, avec « tout effacer »."
-      ]
-    }
+    "correction": "Corrigé par #679, livré en 0.23.0 : `dsfr-data-context-tags` reprend les filtres issus des facettes (un tag par valeur, retirable seule) et de la recherche (« Recherche : terme »), et gagne `clear-all` — un bouton « Tout effacer » qui vide tous les filtres du contexte en une diffusion. Le récapitulatif en tags hors de la colonne de filtres existe donc, comme l'`ods-filter-summary` du portail."
   },
   {
     "id": "AM-007",
@@ -311,19 +231,10 @@
     "verifie": "Champ `site_web` absent d'une partie des enregistrements des trois jeux d'annuaire. Le contournement retenu — afficher l'URL en texte plutôt qu'en lien — est visible sur les cartes et les panneaux de détail des trois pages.",
     "contournement": "Précalculer en données quand c'est possible (page catalogue), ou renoncer au lien et afficher la valeur en texte (pages d'annuaire). Aucune des deux solutions ne restitue un lien cliquable quand la valeur existe.",
     "demande": "Au minimum, une conditionnelle de présence (`{{#si champ}}…{{/si}}`) pour envelopper un fragment. À défaut, un mécanisme dédié aux liens optionnels, le cas étant fréquent dans les annuaires publics.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "M",
-      "decision": "Fusionner avec AM-039",
-      "impact": "Voir AM-039 : lien vide annoncé comme valide par un lecteur d'écran.",
-      "objectif": "Idem AM-039.",
-      "perennite": "Idem.",
-      "acceptation": [
-        "Couvert par les critères d'AM-039."
-      ]
-    }
+    "correction": "Corrigé par #664, livré en 0.22.0 : les templates de `dsfr-data-display` et `dsfr-data-map-popup` acceptent les blocs `{{#if champ}}…{{/if}}` et `{{#unless champ}}…{{/unless}}`, plus un pipe `{{lien:url}}` à liste blanche de schémas (`http:`, `https:`, `mailto:`, `tel:`, URL relatives). Un lien optionnel s'enveloppe donc, et le défaut d'accessibilité du lien vide disparaît sans précalcul ni renoncement.",
+    "reste_vrai": "Les blocs ne s'imbriquent pas, et il n'y a toujours pas de boucle : émettre un élément par valeur d'un champ multivalué reste impossible (AM-047)."
   },
   {
     "id": "AM-008",
@@ -340,19 +251,10 @@
     "verifie": "Page de test : au chargement `plan-de-relance/records?limit=100` (sans in_bbox), carte centrée sur Paris mais les 100 cercles rendus étaient hors cadre. Le `in_bbox` n'apparaît qu'après le premier déplacement.",
     "contournement": "Poser un `where` initial sur la source, ou accepter un premier rendu approximatif.",
     "demande": "Émettre la commande bbox une fois la carte prête, avant ou à la place du premier fetch de la source.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "M",
-      "decision": "Accepter",
-      "impact": "En mode `bbox`, le premier chargement rapatrie 100 lignes sans filtre géographique.",
-      "objectif": "Un premier affichage déjà cadré.",
-      "perennite": "Structurel au mode bbox.",
-      "acceptation": [
-        "La première requête d'une source alimentant une couche `bbox` porte déjà `in_bbox` de la vue initiale."
-      ]
-    }
+    "correction": "Corrigé par #652, livré en 0.21.1 : en mode `bbox`, la commande `in_bbox` du viewport initial est émise dès que la carte est prête, sans attendre un déplacement de l'utilisateur.",
+    "reste_vrai": "Le premier fetch de la source reste non filtré : sur un gros jeu, il faut toujours poser un `limit` ou un `where` sur la source pour qu'il ne parte pas à vide. Le manque se réduit à ce premier appel — et `require-where` (#690, jalon v0.25.0) est la réponse générale à ce motif."
   },
   {
     "id": "AM-009",
@@ -369,19 +271,9 @@
     "verifie": "Première version de la page Plan de relance, capture d'écran à l'appui : vue centrée sur l'océan.",
     "contournement": "`max-bounds=\"41,-5.5,51.5,10\"`, documenté mais non évident.",
     "demande": "Quand `insets` est renseigné, restreindre par défaut le calcul de `fit-bounds` aux points hors territoires d'encart.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Sans `max-bounds`, un jeu avec DROM dézoome sur l'Atlantique ; avec, BUG-004.",
-      "objectif": "Que `insets` suffise à un cadrage sensé.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "Avec `insets` déclaré et sans `max-bounds`, `fit-bounds` exclut les points des territoires d'encart."
-      ]
-    }
+    "correction": "Corrigé par #687, livré en 0.22.0, dans la forme exacte de la demande : quand une carte porte un encart ultramarin (`insets=\"drom\"`…) sans `max-bounds`, `fit-bounds` se cale par défaut sur la métropole (`41,-5.5,51.5,10`) — les DROM ne dézooment plus la vue, et le déplacement reste libre. Un attribut `fit-zone=\"latSW,lonSW,latNE,lonNE\"` permet de surcharger la zone. #642 (0.21.1) avait traité le cas voisin d'une emprise réduite à un point (BUG-004). Le `max-bounds` posé à la main, qui bloquait le déplacement (PG-021), n'est plus nécessaire."
   },
   {
     "id": "AM-010",
@@ -398,19 +290,9 @@
     "verifie": "Capture de `dsfr-data-map` en 896 px de large : les encarts occupent les 330 premiers pixels.",
     "contournement": "Aucun sans CSS externe.",
     "demande": "Répartir les encarts sur la largeur disponible.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Fusionner avec AM-032",
-      "impact": "Voir AM-032.",
-      "objectif": "Idem.",
-      "perennite": "Idem.",
-      "acceptation": [
-        "Couvert par AM-032."
-      ]
-    }
+    "correction": "Corrigé par #643, livré en 0.21.1 : `dsfr-data-map-inset` gagne un attribut `width` (px, rem ou `%` — `width=\"20%\"` répartit cinq encarts sur une ligne) et une largeur par défaut de 10 rem posée par la feuille injectée de la carte. La rangée d'encarts territoriaux ne se tasse plus à gauche."
   },
   {
     "id": "LIM-001",
@@ -704,7 +586,8 @@
       "acceptation": [
         "Sans `server-side`, l'adaptateur ODS charge par `/exports/json` avec `select`/`where`, et retombe sur `/records` si l'export échoue."
       ]
-    }
+    },
+    "correction": "Non corrigé, mais cadré : prévu au jalon v0.25.0 avec `fetch-mode=\"export\"` (#689, épic #699), qui charge par `/exports/json` en une requête, avec repli automatique sur `/records` et `meta.truncated` obtenu par `limit+1` faute de `total_count`. Absent de 0.24.0, la version chargée par le dépôt : le contournement par source générique reste nécessaire aujourd'hui."
   },
   {
     "id": "AM-012",
@@ -737,19 +620,9 @@
     "verifie": "Les quatre pages du dépôt privées de `chart.umd.min.js` : les huit graphiques (barres, barres horizontales, camemberts) se dessinent tous — vérifié en lisant les pixels du canvas, pas seulement la présence de la balise. `window.Chart` est `undefined`, donc rien d'autre ne s'appuyait sur la variable globale.",
     "contournement": "Retirer la ligne. 201 Ko économisés par page.",
     "demande": "Corriger la recette CDN de la skill : retirer `chart.js`, ou préciser dans quel cas il reste nécessaire.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P4",
-      "effort": "S",
-      "decision": "Corriger la skill (doc)",
-      "impact": "201 Ko chargés pour rien sur chaque page qui suit la recette.",
-      "objectif": "Une recette CDN juste.",
-      "perennite": "Une fois.",
-      "acceptation": [
-        "La skill `compositionPatterns` ne liste plus `chart.js`."
-      ]
-    }
+    "correction": "Corrigé par #656, livré en 0.21.1 : `chart.js` est retiré de la recette CDN — `@gouvfr/dsfr-chart` l'embarque déjà dans `DSFRChart.js`. `CDN_URLS.chartJs` disparaît du paquet partagé, et le guide, le template d'aperçu et les quinze points d'injection sont alignés. Les ~200 Ko par page ne sont plus prescrits par erreur."
   },
   {
     "id": "PG-004",
@@ -804,7 +677,8 @@
       "acceptation": [
         "`render-into=\"#cible\"` sur facettes et recherche déplace le rendu sans changer le câblage."
       ]
-    }
+    },
+    "correction": "Refusé côté bibliothèque, explicitement et avec motif (#692, 0.21.1) : un attribut `render-into` a été écarté comme contraire au choix de conception du light DOM, et pour le risque d'accessibilité que porte un rendu délégué. La contrainte reste donc entière — écrire la balise là où son interface doit apparaître —, mais ce n'est plus une demande en attente : c'est une décision."
   },
   {
     "id": "AM-014",
@@ -822,19 +696,9 @@
     "verifie": "Le jeu fournit heureusement une colonne de résumé `handicaps_attribues`, déjà en tableau, qui rend le repliage inutile ici. Sans elle, la facette n'aurait pas été reproductible sans JavaScript.",
     "contournement": "S'appuyer sur une colonne de résumé quand le producteur en fournit une — ce qui est le cas ici, et ce que fait aussi la page d'origine.",
     "demande": "Une option de repliage de colonnes en champ multi-valeurs (par exemple `fold=\"handicap_*:handicaps\"` sur `dsfr-data-normalize`), le motif « une colonne booléenne par modalité » étant courant dans les données publiques.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Quatre colonnes booléennes parallèles ne font pas une facette.",
-      "objectif": "Une facette « handicap couvert » sans prétraitement.",
-      "perennite": "Récurrent sur les jeux à colonnes parallèles.",
-      "acceptation": [
-        "`fold=\"handicap_*:handicaps\"` sur `dsfr-data-normalize` produit un tableau des noms de colonnes vraies."
-      ]
-    }
+    "correction": "Corrigé par #677, livré en 0.24.0 : `dsfr-data-normalize` gagne `fold=\"motif_*:cible\"`, qui replie des colonnes booléennes parallèles (`handicap_auditif`, `handicap_mental`, `handicap_moteur`, `handicap_visuel`…) en un champ tableau contenant les noms des colonnes vraies — Oui/Non, 1/0, true/false, X/vide —, directement facettable. Le motif « une colonne booléenne par modalité » a désormais sa voie native."
   },
   {
     "id": "AM-015",
@@ -851,19 +715,10 @@
     "verifie": "Attributs `refine-on-click-*` présents sur la couche entreprises de la page d'origine. Aucun attribut correspondant dans la référence de `dsfr-data-map-layer`, et aucun événement de commande émis au clic (la couche n'émet que vers le compagnon popup).",
     "contournement": "Aucun sans JavaScript.",
     "demande": "Un attribut du type `refine-on-click=\"champ\"` sur la couche, qui émettrait la même commande `where` que les facettes vers la source amont.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "M",
-      "decision": "Accepter",
-      "impact": "Cliquer un objet de la carte n'affine pas les autres vues, contrairement au `refine-on-click` d'Opendatasoft ; les annuaires y perdent leur interaction principale.",
-      "objectif": "La carte comme filtre.",
-      "perennite": "Structurel : tout annuaire cartographié.",
-      "acceptation": [
-        "`refine-on-click=\"champ\"` sur la couche émet la commande `where champ = valeur` vers l'amont, avec un `whereKey` stable, et un tag supprimable apparaît."
-      ]
-    }
+    "correction": "Corrigé par #681 (ADR-104), livré en 0.23.0 : `dsfr-data-map-layer` émet `dsfr-data-map-select` `{ record, layerId, selected }` au clic sur un marqueur, un cercle ou une forme ; avec `refine-on-click=\"champ\"` et `context=\"id\"`, la couche devient un filtre du contexte et recentre les autres vues. C'est l'équivalent des trois attributs `refine-on-click-*` d'Opendatasoft.",
+    "reste_vrai": "La sélection ne part toujours que d'une carte : ni une liste, ni une fiche, ni un graphique ne peut jouer le même rôle (AM-045)."
   },
   {
     "id": "AM-016",
@@ -881,20 +736,10 @@
     "verifie": "Lot 11, Notre-Dame : `url=\"/data/geo/regions-simplifiees.geojson\" transform=\"features\"`, `geo-field=\"geometry\"` → 13 polygones rendus (`getRenderedCount()`), plus aucune requête vers public.opendatasoft.com ; 225 Ko servis en 0,8 ms en local contre 307 Ko et 1,07 s pour le jeu distant ce jour. Les encarts DROM n'ont plus de contour.",
     "contournement": "GeoJSON simplifié statique servi par la page (recette `guide/examples/carte-territoires-electrification-v2.html`).",
     "demande": "Livrer des GeoJSON simplifiés (régions, départements, métropole + DROM) dans le paquet npm, hors bundle, référençables par URL CDN.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "M",
-      "decision": "Accepter (GeoJSON dans le paquet, hors bundle) ; `builtin` refusé",
-      "impact": "Afficher des contours régionaux comme repère coûte un jeu externe de 135 Ko et 5 s.",
-      "objectif": "Réutiliser les géométries déjà embarquées pour `map-reg`.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "`dsfr-data/geo/regions.geojson` et `departements.geojson` publiés dans le paquet npm, chargeables depuis jsDelivr.",
-        "Le guide documente la couche décorative depuis ces fichiers."
-      ]
-    }
+    "correction": "Corrigé par #688, livré en 0.22.0 : le paquet npm livre deux fonds administratifs GeoJSON simplifiés hors bundle — `dsfr-data/geo/regions.json` (18 régions, DROM compris) et `dsfr-data/geo/departements.json` (101 départements), Contours administratifs Etalab sous Licence Ouverte 2.0 —, résolus par `import.meta.resolve` ou servis par CDN. Le GeoJSON statique `public/data/geo/regions-simplifiees.geojson` du dépôt, limité à la métropole, n'a plus de raison d'être.",
+    "reste_vrai": "Ce sont des GeoJSON pour une couche Leaflet, pas des géométries pour `dsfr-data-chart type=\"map*\"`, qui reste sur les SVG de DSFR Chart : une limite de rendu cartographique s'y remonte chez `GouvernementFR/dsfr-chart`, pas ici."
   },
   {
     "id": "AM-017",
@@ -915,22 +760,12 @@
       "centres-controle-technique"
     ],
     "constat": "Les préréglages sont `ign-plan`, `ign-ortho`, `ign-cadastre`, `osm-fr`, `osm-standard`, `opentopomap` — tous très détaillés ; `carto-positron`, le fond clair, est déprécié et redirige vers `ign-plan`. Sur une carte thématique, les aplats régionaux et les grappes se disputent l'attention avec le réseau routier. J'avais écrit que « l'IGN publie un style plan-ign-clair » : faux, le WMTS libre ne sert que `PLANIGNV2/normal` en raster ; les styles atténués sont des tuiles vectorielles (`PLAN.IGN`) que Leaflet ne rend pas sans MapLibre. Voie native ratée (lot 11) : les tuiles sont en light DOM, une règle CSS de page suffit — `.leaflet-tile-pane { filter: grayscale(1) opacity(.55) }` — souveraine et sans dépendance ; le guide de la bibliothèque utilise déjà ce type de filtre.",
-    "verifie": "Couche régions rendue (26 polygones confirmés par `getRenderedCount()`) mais illisible à l'écran sur `ign-plan`, même en remontant l'opacité. Le préréglage `carto-positron` émet un avertissement de dépréciation et bascule sur `ign-plan`. Lot 11 : règle `dsfr-data-map.odv-fond-attenue .leaflet-tile-pane { filter: grayscale(1) opacity(.55) }` dans `site.css`, classe posée sur les huit cartes ; `getComputedStyle(.leaflet-tile-pane).filter` = `grayscale(1) opacity(0.55)` ; capture avant/après sur Notre-Dame : aplats régionaux et grappes lisibles, encarts DROM inclus.",
+    "verifie": "Couche régions rendue (26 polygones confirmés par `getRenderedCount()`) mais illisible à l'écran sur `ign-plan`, même en remontant l'opacité. Le préréglage `carto-positron` émet un avertissement de dépréciation et bascule sur `ign-plan`. Lot 11 : règle `dsfr-data-map.odv-fond-attenue .leaflet-tile-pane { filter: grayscale(1) opacity(.55) }` dans `site.css`, classe posée sur les huit cartes ; `getComputedStyle(.leaflet-tile-pane).filter` = `grayscale(1) opacity(0.55)` ; capture avant/après sur Notre-Dame : aplats régionaux et grappes lisibles, encarts DROM inclus. — Vérifié le 2026-09-10 dans les bundles npm publiés : `tiles-style` est absent de `dsfr-data@0.20.0` et présent dès `0.22.0` (`dist/dsfr-data.map.esm.js`, 5 occurrences).",
     "contournement": "Filtre CSS de page sur `.leaflet-tile-pane` (classe `odv-fond-attenue` de `site.css`).",
     "demande": "Un préréglage ou un attribut `tiles-style=\"muted\"` qui applique ce filtre depuis le composant, pour que ce soit déclaratif et documenté.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter (tiles-style=\"muted\")",
-      "impact": "Les fonds IGN détaillés concurrencent la donnée thématique.",
-      "objectif": "Un fond neutre lisible.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "`tiles-style=\"muted\"` atténue le fond (niveaux de gris + opacité) sans changer de fournisseur."
-      ]
-    }
+    "correction": "Corrigé côté bibliothèque par #686, livré en 0.22.0 : `tiles-style=\"muted|grey\"` donne un fond de carte atténué. La classe `odv-fond-attenue` de `site.css` (`filter: grayscale(1) opacity(.55)`), posée sur huit cartes, devient inutile à la montée en 0.23.0."
   },
   {
     "id": "PG-005",
@@ -1051,19 +886,9 @@
     "verifie": "Reproduit sur une page minimale ne contenant qu'une source et un `dsfr-data-chart type=\"map-reg\"` : une erreur, systématique. Confirmé sur `type=\"map\"` (page Fiscalité locale, 4 occurrences pour 2 cartes). Les graphiques `bar`, `line` et `pie` des autres pages n'en produisent aucune.",
     "contournement": "Aucun ; l'erreur est cosmétique.",
     "demande": "Ne créer le composant `map-chart` qu'une fois les données disponibles, ou passer un tableau vide plutôt qu'`undefined`.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Une erreur console à chaque chargement d'une carte DSFR Chart ; bruit qui masque les vraies erreurs.",
-      "objectif": "Console propre.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "Aucune erreur console au chargement d'un `type=\"map\"`/`map-reg`/`map-monde`."
-      ]
-    }
+    "correction": "Corrigé par #651, livré en 0.21.1 : les données sont posées dès le montage du composant DSFR Chart, donc plus de `console.error` « Erreur lors du parsing des données data » à chaque affichage de carte `map` / `map-reg` / `map-aca` / `map-monde`."
   },
   {
     "id": "AM-018",
@@ -1081,19 +906,10 @@
     "verifie": "Documentation de `compute` : « Hors périmètre : conditions, fonctions, calculs sur valeurs agrégées. » Les KPI d'évolution de la page d'origine n'ont pas été reproduits.",
     "contournement": "Deux sources + `dsfr-data-join` + `compute` pour une différence. Rien pour une variation temporelle.",
     "demande": "Des colonnes calculées portant sur des séries : différence entre deux séries d'un même group-by, et accès décalé (`lag`) pour les évolutions — le besoin le plus fréquent d'un tableau de bord financier ou statistique.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "L",
-      "decision": "Requalifier : seule l'évolution N/N-1 reste",
-      "impact": "Le solde se lit dans la colonne signée (FP-007) ; reste l'évolution d'une année sur l'autre, calculée dans le template par le portail.",
-      "objectif": "Taux d'évolution sans script.",
-      "perennite": "Récurrent sur les séries temporelles.",
-      "acceptation": [
-        "`compute` avec accès décalé (`lag(champ, 1)`) sur une query ordonnée, ou une agrégation `evolution` sur le KPI."
-      ]
-    }
+    "correction": "Corrigé par #675 et #671, livrés en 0.24.0. #671 donne à `compute` une grammaire v2 (ADR-105) : fonctions en liste blanche, conditions `when … then … else`, comparaisons et booléens. #675 ajoute l'agrégat `evolution` sur `dsfr-data-kpi` (`value=\"recettes:evolution\" format=\"pourcentage\"` = (dernière − première) / première), rendu aussi dans `trend` et `lines`. #255 (`dsfr-data-pivot`, 0.24.0) replie un tableau long en tableau croisé : la soustraction entre deux séries se fait alors en une colonne calculée, sans jointure.",
+    "reste_vrai": "`lag` — l'accès à la ligne précédente — est explicitement différé, et le cumul est hors périmètre de #671 (« ni fenêtre, ni cumul, ni ligne précédente »). Une somme cumulée le long d'une série reste sans voie native (AM-046)."
   },
   {
     "id": "AM-019",
@@ -1110,19 +926,10 @@
     "verifie": "Page comptabilité générale : trois `dsfr-data-query` n'existent que pour alimenter trois KPI. La grammaire `count:champ:valeur` existe mais ne compte que des occurrences ; elle ne sait pas sommer sous condition.",
     "contournement": "Un `dsfr-data-query where` par KPI. Lisible, mais verbeux.",
     "demande": "Un attribut `where` sur `dsfr-data-kpi`, ou une grammaire d'agrégation conditionnelle du type `montant:sum:categorie=Actif`.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Trois KPI côte à côte coûtent trois queries.",
-      "objectif": "Un KPI conditionnel en une balise.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "`where=\"categorie:eq:Actif\"` sur `dsfr-data-kpi`."
-      ]
-    }
+    "correction": "Corrigé par #674, livré en 0.24.0 : `dsfr-data-kpi` gagne un attribut `where` dans le dialecte colon de `dsfr-data-query` (douze opérateurs, clauses multiples), appliqué à `value`, `trend` et `lines`. `value=\"montant:sum\" where=\"categorie:eq:Actif\"` remplace la query intercalée — trois KPI côte à côte ne coûtent plus trois transformateurs.",
+    "reste_vrai": "Le filtre est purement client : il porte sur les lignes déjà reçues, pas sur la requête envoyée au portail. Sur une source en mode serveur, la query intermédiaire reste nécessaire."
   },
   {
     "id": "AM-020",
@@ -1141,19 +948,9 @@
     "verifie": "Premier rendu du graphique « prix moyen par carburant » : axe en `gazole_prix`, `sp98_prix`… Corrigé par un `dsfr-data-normalize replace-fields` de six règles.",
     "contournement": "Un `dsfr-data-normalize replace-fields=\"carburant:gazole_prix:Gazole | …\"` en aval — une balise et autant de règles que de colonnes dépliées.",
     "demande": "Un dictionnaire d'étiquettes sur l'unpivot lui-même, par exemple `var-labels=\"gazole_prix:Gazole | sp95_prix:SP95\"`.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Noms techniques sur l'axe après un unpivot.",
-      "objectif": "Étiquettes lisibles.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "`var-labels=\"gazole_prix:Gazole | …\"` sur `dsfr-data-unpivot`."
-      ]
-    }
+    "correction": "Corrigé par #668, livré en 0.22.0 : l'alias inline `col:Libellé` est accepté sur `value-cols` de `dsfr-data-unpivot` (`value-cols=\"gazole_prix:Gazole, sp95_prix:SP95\"`) comme sur `value-field`, `value-field-2` et `value-fields` de `dsfr-data-chart`. Le `dsfr-data-normalize replace-fields` posé en aval pour renommer les modalités dépliées devient inutile."
   },
   {
     "id": "AM-021",
@@ -1170,19 +967,9 @@
     "verifie": "Attribut `databox-date` de `dsfr-data-chart` : chaîne statique. Aucun composant n'expose le maximum d'un champ date autrement qu'en KPI dédié, dont le format n'affiche pas de date.",
     "contournement": "Écrire la date à la main, donc la laisser vieillir.",
     "demande": "Accepter une expression de champ dans `databox-date` (par exemple `databox-date-field=\"gazole_maj:max\"`), et un format date pour les KPI.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Impossible d'afficher « données à jour au … » depuis la donnée.",
-      "objectif": "Afficher la fraîcheur.",
-      "perennite": "Récurrent sur les flux.",
-      "acceptation": [
-        "`databox-date-field=\"champ:max\"` lit la valeur dans la source et la formate en date."
-      ]
-    }
+    "correction": "Corrigé en deux temps. #650, livré en 0.21.1 : `databox-date` n'a plus de valeur par défaut — la DataBox n'affiche plus la date de rendu comme date des données. #661 et #667, livrés en 0.22.0 : `databox-date-field` lit la date dans la donnée (la plus récente des dates ISO de la colonne, formatée JJ/MM/AAAA) et `dsfr-data-kpi` accepte `format=\"date\"` avec les agrégats `min`/`max`/`first`/`last` sur des dates ISO. « Données à jour au … » se déclare donc sans écrire la date à la main."
   },
   {
     "id": "PG-007",
@@ -1246,19 +1033,10 @@
     "verifie": "Carte « taux moyen TFB par département » : légende continue de 21,21 à 63,2 %, la quasi-totalité des départements dans une nuance indiscernable. Aucun attribut de la référence de `dsfr-data-chart` ne concerne la discrétisation ; `selected-palette` n'agit que sur les séries catégorielles. Lot 11, fiscalité locale : `selected-palette` passé de `categorical` à `divergentAscending` puis `sequentialDescending` sur la carte des taux → les 101 remplissages changent (`#999fd9…` → `#904a2b…` → `#7675b5…`) ; `map-chart` porte l'attribut.",
     "contournement": "`selected-palette=\"sequentialAscending\"` sur `type=\"map\"` (posé sur les deux cartes départementales) ; rien pour `map-layer`.",
     "demande": "Sur `dsfr-data-map-layer` : `classes`, `method` (quantiles, égales, seuils) et `breaks`, avec une légende. Côté DSFR Chart : issue amont pour un `nb-classes` sur `map-chart`.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "M",
-      "decision": "Accepter sur map-layer ; issue amont DSFR Chart pour type=\"map\"",
-      "impact": "Choroplèthes en quantiles imposés, sans légende, là où l'original a des classes et une légende chiffrée.",
-      "objectif": "Une choroplèthe paramétrable et lisible.",
-      "perennite": "Structurel : toute carte thématique.",
-      "acceptation": [
-        "`classes=\"4\"`, `method=\"equal|quantile|manual\"`, `breaks=\"…\"` sur `type=\"map\"` et `geoshape fill-field`, avec légende chiffrée rendue."
-      ]
-    }
+    "correction": "Corrigé par #685, livré en 0.22.0 : `dsfr-data-map-layer` expose `classes=\"5\"`, `method=\"quantile|equal|manual\"` et `breaks=\"…\"` (défaut inchangé : quantiles, 9 classes), et le compagnon `<dsfr-data-map-legend for=\"couche\">` rend la légende DSFR sous la carte, avec les bornes chiffrées réellement appliquées.",
+    "reste_vrai": "La part amont reste vraie : sur `dsfr-data-chart type=\"map\"`, l'échelle continue est celle de DSFR Chart (`chroma.scale` entre deux couleurs, aucune propriété de classes). Cette demande-là se dépose chez `GouvernementFR/dsfr-chart`, pas ici."
   },
   {
     "id": "AM-023",
@@ -1276,19 +1054,9 @@
     "verifie": "Carte de la fiscalité locale : `name='[\"Taux moyen TFB (%)\"]'` affiche littéralement `[\"Taux moyen TFB (%)\"]` en titre de série ; `name=\"Taux moyen TFB (%)\"` affiche le libellé attendu. Capture avant/après à l'appui. Lot 11, carburants : `name=\"Prix moyen (€/L)\"` en chaîne simple sur le `bar` → légende « Prix moyen (€/L) » ; avant/après sur la carte régionale : `[\"Prix moyen du gazole (€/L)\"]` littéral → « Prix moyen du gazole (€/L) ».",
     "contournement": "Chaîne simple partout.",
     "demande": "Déballer la forme tableau sur les cartes (correctif XS), et documenter que la chaîne simple est la forme canonique.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "`name` attend un tableau JSON ici, une chaîne là.",
-      "objectif": "Une grammaire cohérente.",
-      "perennite": "Une fois.",
-      "acceptation": [
-        "Les deux formes acceptées sur tous les types, documentées."
-      ]
-    }
+    "correction": "Corrigé par #653, livré en 0.21.1 : sur les cartes (`map`, `map-reg`, `map-aca`, `map-monde`), un `name` écrit en JSON (`name='[\"Taux\"]'`) est déballé et affiche « Taux » au lieu du tableau littéral ; la chaîne simple reste la forme canonique, désormais documentée."
   },
   {
     "id": "AV-014",
@@ -1340,19 +1108,9 @@
     "verifie": "Sur le Baromètre, la jointure appariait 237 lignes sur 1 065 et 9 questions sur 119. Ce taux de 22 % aurait dû alerter immédiatement ; il a fallu comparer les deux jeux à la main pour le calculer.",
     "contournement": "Compter soi-même dans la console du navigateur.",
     "demande": "Exposer le taux d'appariement sur le composant (attribut de diagnostic ou `console.info`), et l'afficher dans le volet Diagnostic prévu par l'epic #602 de dsfr-data.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Aucun taux d'appariement : une jointure sur des clés homonymes passe inaperçue.",
-      "objectif": "Rendre visible la qualité d'une jointure.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "`dsfr-data-join` expose le taux de lignes appariées (attribut de diagnostic + `console.info`), visible dans le volet Diagnostic (#602)."
-      ]
-    }
+    "correction": "Corrigé par #660, livré en 0.22.0 : `dsfr-data-join` publie son taux d'appariement dans sa meta (`join: { leftMatched, leftTotal, rightMatched, rightTotal }`, aussi via `getJoinStats()`) ; le volet Diagnostic et `formatTrace()` rendent « 237 / 1 065 lignes gauche appariées (22 %) », avec alerte sous 50 %. Le signal qui manquait pour repérer une jointure sur des clés homonymes (PG-009) existe."
   },
   {
     "id": "PG-008",
@@ -1453,19 +1211,10 @@
     "verifie": "`group_by=dep_code, dep_name` sur signalconso : premier groupe `{dep_code: null, n: 95309}`. Carte rendue sans mention, KPI total à 1 733 022.",
     "contournement": "Compter soi-même les lignes sans code et l'indiquer en note, ou les exclure explicitement par un `where` pour que les chiffres concordent.",
     "demande": "Signaler, sur le composant ou en console, le nombre de lignes écartées faute de code géographique reconnu — l'écart entre total et total cartographié est une source d'erreur classique.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "5,5 % des signalements écartés d'une carte sans que rien ne le dise ; total carte ≠ total KPI.",
-      "objectif": "Rendre visible ce que la carte tait.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "Le composant expose le nombre de lignes sans code reconnu (console + attribut), et peut l'afficher sous la carte."
-      ]
-    }
+    "correction": "Corrigé par #648, livré en 0.21.1 : les lignes sans position exploitable ne disparaissent plus en silence — `dsfr-data-map-layer` (marqueurs, cercles, heatmap, comme le geoshape depuis #482) et les cartes `map*` de `dsfr-data-chart` comptent les lignes écartées, émettent un avertissement et exposent le compteur.",
+    "reste_vrai": "Le compteur ne voit que ce qu'il sait reconnaître comme absent. Une clé géographique présente mais hors référentiel (code INSEE là où `map-reg` attend de l'ISO 3166-2, libellé d'académie accentué) produit toujours une carte muette avec un compteur d'écarts à zéro : c'est BUG-008, ouvert depuis le portail Éducation."
   },
   {
     "id": "PG-010",
@@ -1567,20 +1316,9 @@
     "contournement": "Deux `<input type=\"hidden\">` (AAAA et AAAA-MM) dérivés de la date par un script de dix lignes, qui dispatche un `change` sur chacun. C'est le seul JavaScript de la page Rappel Conso.",
     "proposition": "Accepter une date ISO complète dans `year-of` et `month-of` (tronquer à 4 ou 7 caractères), et signaler par `reportConfigError` ou `console.warn` une valeur non parsable au lieu de retirer silencieusement le filtre.",
     "verifie": "Source `dsfr-data-context-filter.ts` : `monthRange` teste `/^(\\d{4})-(\\d{2})$/`, `yearRange` teste `/^\\d{4}$/`, retour null → `buildColonWhere` renvoie ''. En navigateur, avec les champs cachés : `where=date_publication < \"2026-09-10\" AND date_publication >= \"2026-01-01\" AND date_publication < \"2027-01-01\"` sur rc-annee, 2 402 fiches, chiffre égal à la facette date_publication=2026 de l'API. Page : /viz/rappel-conso-tableau-de-bord (reproduction fidèle de la page vivante /pages/rappel-conso-v2/, variante de /viz/rappelconso).",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Un `<input type=\"date\">` ne peut pas nourrir `year-of` / `month-of` ; le filtre est silencieusement absent et le compteur « année » affiche le total.",
-      "objectif": "Un tableau de bord daté (total, année, mois) sans script.",
-      "perennite": "Récurrent : tout bulletin mensuel.",
-      "acceptation": [
-        "`year-of` et `month-of` acceptent « AAAA-MM-JJ » (troncature).",
-        "Une valeur non parsable déclenche `reportConfigError` au lieu d'un filtre vide."
-      ]
-    }
+    "correction": "Corrigé par #646, livré en 0.21.1 : `year-of` et `month-of` acceptent une date complète (celle d'un `<input type=\"date\">`) et la tronquent à l'année ou au mois, y compris depuis l'URL ; une valeur inexploitable retire le filtre en le signalant par un avertissement console au lieu de le retirer en silence. Les deux `<input type=\"hidden\">` dérivés par script du tableau de bord Rappel Conso deviennent inutiles."
   },
   {
     "id": "AM-030",
@@ -1597,19 +1335,9 @@
     "contournement": "`current-year` pour l'année en cours ; script pour tout le reste.",
     "proposition": "Un attribut `default` sur `dsfr-data-context-filter` acceptant des littéraux relatifs (`today`, `first-of-month`, `first-of-year`), appliqué à l'UI au montage puis émis par le chemin habituel — cohérent avec l'esprit de `last-n-days` et `current-year`, qui savent déjà calculer « maintenant » côté clause.",
     "verifie": "Chronométrage en navigateur : les sept requêtes partent à +230 ms, toutes avec la clause de date, aucune requête non filtrée préalable. En retirant le script, les compteurs année et mois affichent 18 581 (le total) au chargement. Page : /viz/rappel-conso-tableau-de-bord (reproduction fidèle de la page vivante /pages/rappel-conso-v2/, variante de /viz/rappelconso). Lot 11, page de test : `current-year` + `<input type=\"checkbox\" checked hidden>` → `where=date_publication >= \"2026-01-01\" AND < \"2027-01-01\"`, KPI « 2 402 » sans script. Source : `dsfr-data-context-filter.ts:341-344`, `_bind` l.181-183.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Un tableau de bord « au jour J » s'ouvre vide ou figé sur une date en dur.",
-      "objectif": "Ouvrir sur aujourd'hui sans JavaScript.",
-      "perennite": "Récurrent avec AM-029.",
-      "acceptation": [
-        "`default=\"today\"` (et `first-of-month`, `first-of-year`) sur `dsfr-data-context-filter` remplit l'UI au montage puis émet par le chemin normal."
-      ]
-    }
+    "correction": "Corrigé par #682, livré en 0.23.0 : `dsfr-data-context-filter` gagne un attribut `default` (`today`, `first-of-month`, `first-of-year` ou un littéral), appliqué au montage — l'URL gardant la priorité —, et un opérateur `current-month` symétrique de `current-year`. Un tableau de bord « au jour J » s'ouvre donc sur la date du jour sans une ligne de script."
   },
   {
     "id": "PG-011",
@@ -1655,21 +1383,10 @@
     "contournement": "Vérifié sur une variante de la page Prix des carburants sans `max-bounds` ni `insets` (le jeu est purement métropolitain : 0 point hors [41–51.5, -6–10]) : Leaflet zoome alors au maximum sur le point. La page retenue garde `max-bounds` par cohérence avec le gabarit ; huit pages sont touchées. Au lot 9, la page Prix des carburants applique ce contournement (jeu 100 % métropolitain vérifié par `where=not in_bbox(geom,41,-5.5,51.5,10)` → 0 station) : zoom 18 sur une commune à station unique.",
     "proposition": "Dans `clipBoundsForFit`, traiter une emprise dégénérée (point ou segment) comme un point : si elle est dans la zone, renvoyer un petit carré autour (ou `setView` au zoom max) au lieu de null. La condition `>=` devrait être `>`.",
     "verifie": "Navigateur, page prix-des-carburants avec `fit-bounds max-bounds=\"41,-5.5,51.5,10\"` : facette Occitanie → zoom 7 centré 43.76,2.30 (le fit marche) ; recherche « Montgenèvre » (1 station, layerBounds 6.733,44.934,6.733,44.934) → zoom 5, centre inchangé. Après retrait de `max-bounds` : zoom 18 centré 44.93,6.73. Source : `packages/core/src/components/dsfr-data-map.ts`, `clipBoundsForFit`, `if (south >= north || west >= east) return null`.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Sur neuf pages cartographiques, chercher une commune et n'obtenir qu'un point laisse la carte sur la France entière : l'utilisateur ne trouve pas ce qu'il a cherché. Aucun message.",
-      "objectif": "Qu'une recherche à résultat unique — le cas le plus fréquent d'un annuaire — aboutisse à une carte centrée sur le résultat.",
-      "perennite": "Structurel : tout annuaire cartographié avec DROM pose `max-bounds`, donc rencontre le cas. Reproduit sur 9 pages du banc d'essai.",
-      "acceptation": [
-        "Avec `fit-bounds max-bounds=\"41,-5.5,51.5,10\"`, une source réduite à un point situé dans la zone produit un zoom sur ce point (test : Montgenèvre 44.93,6.73 → zoom ≥ 15).",
-        "Un point hors zone laisse la vue inchangée (comportement actuel conservé).",
-        "Test unitaire sur `clipBoundsForFit` avec une emprise dégénérée (sud = nord)."
-      ]
-    }
+    "correction": "Corrigé par #642, livré en 0.21.1 : `fit-bounds` combiné à `max-bounds` zoome désormais sur une emprise dégénérée (un point, un segment) au lieu de laisser la vue inchangée ; un attribut `fit-max-zoom` plafonne ce zoom. #687 (0.22.0) va plus loin : une carte qui porte des encarts ultramarins sans `max-bounds` cale son `fit-bounds` sur la métropole par défaut, et `fit-zone=\"latSW,lonSW,latNE,lonNE\"` permet de surcharger la zone.",
+    "reste_vrai": "Le contournement du lot 9 sur Prix des carburants (retirer `max-bounds` et `insets` parce que le jeu est 100 % métropolitain) reste valide, mais il n'est plus nécessaire : `fit-zone` fait le même travail sans renoncer aux encarts."
   },
   {
     "id": "PG-012",
@@ -1696,19 +1413,9 @@
     "contournement": "Ne rien écrire (`count` décroissant est le défaut). Retiré sur les onze pages.",
     "proposition": "Aligner la sémantique sur la convention dominante (`-count` = décroissant) ou, à défaut, l'écrire noir sur blanc dans la fiche du composant, qui liste aujourd'hui « count, -count, alpha, -alpha » sans dire lequel est lequel.",
     "verifie": "Source `_sortValues` : `case 'count': b.count - a.count` ; `case '-count': a.count - b.count`. Navigateur, facette carburants avec `-count` : GPLc 1494, SP95 2935, E85 3933, SP98 7163 (croissant, Gazole 9531 caché) ; sans attribut : Gazole 9529, E10 7231, SP98 7155, E85 3931.",
-    "statut": "acte",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Accepter (sémantique ou doc)",
-      "impact": "`sort=\"-count\"` trie croissant : les valeurs les plus fréquentes cachées derrière « Voir plus » sur onze pages.",
-      "objectif": "Une convention alignée sur ODS et l'usage.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "`-count` = décroissant (ou la sémantique actuelle écrite dans la fiche du composant et un `console.warn` de transition)."
-      ]
-    }
+    "correction": "Corrigé par #645, livré en 0.21.1 : le tri des facettes adopte la grammaire `critère:sens` d'`order-by` — `sort=\"count:desc\"` (défaut), `count:asc`, `alpha:asc`, `alpha:desc` ; `count` et `alpha` restent des raccourcis, `-count` et `-alpha` sont dépréciés avec un avertissement console qui explicite l'ambiguïté, sans inversion silencieuse. On peut de nouveau écrire le tri explicitement sans se tromper."
   },
   {
     "id": "PG-013",
@@ -1726,20 +1433,10 @@
     "constat": "Le plafond par défaut d'une couche est de 5 000 éléments. Sur 9 805 stations, la carte n'en dessinait que 5 000 et affichait un bandeau « 5 000 éléments affichés sur 9 805 disponibles. Zoomez pour voir plus de détail » — sauf que zoomer ne charge rien de plus, les données étant déjà là. Le bandeau se répète dans chaque encart territorial (la couche y est clonée) et en recouvre les libellés. Même famille qu'AM-002 (`max-records`) : un plafond utile, mais un défaut trop bas pour un jeu national avec grappes, et un message qui promet un remède qui n'existe pas en mode client. Deux autres pages étaient dans le même cas sans le savoir : l'annuaire DGFiP (21 761 structures chargées, 5 000 dessinées — 77 % manquantes) et les centres de contrôle technique (6 113).\n\nRelecture du lot 11 : le plafond de 5 000 est documenté et protège le DOM (marqueurs `divIcon`), le `fit` et les popups — pas seulement le rendu ; relever le défaut selon `cluster` est refusé côté lib. Ce qui est cassé, c'est le bandeau (« Zoomez » faux hors `bbox`, répété dans chaque encart). La bibliothèque documentera « avec `cluster`, `max-items=\"20000\"` est sans risque » ; les pages gardent leur `max-items` explicite.",
     "contournement": "`max-items=\"12000\"` sur la couche. Avec `cluster`, 9 805 points se rendent sans peine.",
     "verifie": "`getRenderedCount()` = 5000 et 1 bandeau par carte (6 avec les encarts) avant ; 9805 et 0 bandeau après. Sur main : `max-items` posé sur les trois pages ; comptes rendus vérifiés au navigateur après correctif.",
-    "statut": "acte",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Bandeau à corriger ; défaut inchangé, documentation max-items avec cluster",
-      "impact": "Le plafond de 5 000 points cache 77 % des structures DGFiP avec un bandeau qui promet un zoom qui ne charge rien.",
-      "objectif": "Un plafond honnête.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "Le bandeau ne dit « zoomez » que si un `bbox` est actif ; il n'est rendu qu'une fois, pas dans chaque encart.",
-        "La référence de `max-items` indique « avec `cluster`, 20 000 est sans risque »."
-      ]
-    }
+    "correction": "Corrigé par #644, livré en 0.21.1 : le bandeau `max-items` nomme le remède réel — hors mode `bbox`, « N affichés sur M — relevez max-items » au lieu d'un « Zoomez » qui ne charge rien ; et les mini-cartes des encarts territoriaux (carte `locked`) ne l'affichent plus jamais. C'était la moitié cassée du piège.",
+    "reste_vrai": "Le plafond par défaut reste 5 000, et c'est délibéré : il protège le DOM (marqueurs `divIcon`), le `fit` et les popups, et le relever selon `cluster` a été refusé côté bibliothèque. Les pages gardent donc leur `max-items` explicite, et la ligne du CLAUDE.md reste valable — avec `cluster`, `max-items=\"20000\"` est sans risque."
   },
   {
     "id": "AM-031",
@@ -1757,19 +1454,9 @@
     "contournement": "`format=\"decimal\"` avec l'unité dans `label` ; `format=\"compact\"` + facteur d'échelle dans le `select` pour les milliards.",
     "proposition": "Un attribut `decimals` (min = max) et un attribut `unit` (suffixe libre) sur `dsfr-data-kpi`, ou un `format=\"euro:3\"`. `formatCurrency` et `formatDecimal` sont dans `@dsfr-data/shared` : la modification est locale.",
     "verifie": "Source `packages/shared/src/utils/formatters.ts` : `formatCurrency` → `minimumFractionDigits: 0, maximumFractionDigits: 0` ; `formatDecimal` → 1 à 2. Navigateur : KPI E10 rendu « 2,1 » quand la moyenne vaut 2,10, Gazole « 2,29 » (API : 2,2942). Lot 11, APD : `value=\"m_eur:max\" format=\"compact\"` rend « 44,9 Md » et « 33,6 Md ». Source : `formatters.ts:52-57`.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "`euro` arrondit un prix au litre à « 2 € » ; `decimal` affiche « 2,1 » à côté de « 2,29 » ; les milliards passent par `compact` mais sans leur unité.",
-      "objectif": "Des KPI monétaires lisibles à la précision du métier.",
-      "perennite": "Structurel : tout KPI de prix ou de montant.",
-      "acceptation": [
-        "`decimals=\"3\"` fixe min = max ; `unit=\"€/L\"` ajoute un suffixe ; `format=\"compact\"` → « 44,9 Md€ »."
-      ]
-    }
+    "correction": "Corrigé en deux temps. #657, livré en 0.21.1 : le JSDoc de `format` documente enfin `compact` (14 785 684 → « 14,8 M »), qui existait sans être listé — c'est la voie native que le banc avait ratée. #665, livré en 0.22.0 : `dsfr-data-kpi` gagne `decimals` (`format=\"euro\" decimals=\"3\"` → « 1,749 € ») et `unit` (suffixe après une espace insécable : `format=\"compact\" unit=\"€\"` → « 44,9 Md € »), disponibles aussi sur chaque ligne de `lines`. Le piège du CLAUDE.md (« l'unité va dans `label` ») n'a plus lieu d'être."
   },
   {
     "id": "AM-032",
@@ -1789,19 +1476,9 @@
     "contournement": "Règle de page : `dsfr-data-map-inset { width: 10rem; margin: .5rem .5rem 0 0 }`.",
     "proposition": "Une largeur par défaut (l'attribut `height` existe déjà, un `width` symétrique suffirait) ou un ratio.",
     "verifie": "`getBoundingClientRect()` des cinq encarts : 77×188, 69×188, 48×188, 70×188, 53×188 sur les pages prix-des-carburants ET qualite-tourisme ; 160×188 chacun après la règle de page.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Les encarts DROM s'écrasent à 50 px sur sept pages sans règle de page.",
-      "objectif": "Des encarts lisibles par défaut.",
-      "perennite": "Structurel : toute carte avec `insets`.",
-      "acceptation": [
-        "Sans CSS de page, un encart `insets=\"drom\"` fait au moins 10 rem de large ; attribut `width` symétrique de `height`."
-      ]
-    }
+    "correction": "Corrigé par #643, livré en 0.21.1 : `dsfr-data-map-inset` gagne un attribut `width` et une largeur par défaut de 10 rem posée par la feuille injectée de la carte, que le CSS de page peut toujours surcharger ; plus de style inline sur l'encart. La règle `dsfr-data-map-inset { width: 10rem }` de `site.css` devient inutile."
   },
   {
     "id": "AM-033",
@@ -1818,19 +1495,9 @@
     "contournement": "`dsfr-data-normalize round=\"champ:N\"` en amont du tableau (précision juste, séparateur décimal faux).",
     "proposition": "Formater les nombres du tableau a11y comme le graphique (même locale, mêmes décimales), ou exposer un attribut `decimals`.",
     "verifie": "Lot 9 : première ligne « Corse | 2.2665920000000006 | 126 ». Lot 11, `round=\"prix_moyen:2\"` sur la source de la carte régionale : « Grand Est | 44 | 2.31 » ; `round=\"prix_moyen:3\"` sur les carburants : « Gazole | 2.294 ». Source : `dsfr-data-a11y.ts:382` ; `dsfr-data-normalize.ts:82-84, 340-352`.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Précision réglable par `round`, mais le tableau accessible écrit 2.31 quand le graphique dit 2,31.",
-      "objectif": "Que l'équivalent accessible soit aussi lisible que le graphique.",
-      "perennite": "Structurel : toute moyenne.",
-      "acceptation": [
-        "Les nombres du tableau a11y passent par le même formateur fr-FR que le graphique, mêmes décimales."
-      ]
-    }
+    "correction": "Corrigé par #666, livré en 0.22.0 : `dsfr-data-list` et `dsfr-data-a11y` rendent les nombres en français (`2.27` → « 2,27 », au plus deux décimales), avec un attribut `decimals` optionnel ; les chaînes (codes INSEE, SIREN) restent intactes et l'export CSV reste brut. Le `dsfr-data-normalize round=\"champ:2\"` posé en amont pour l'arrondi n'est plus nécessaire à la lecture du tableau."
   },
   {
     "id": "AM-034",
@@ -1850,19 +1517,9 @@
     "contournement": "`dsfr-data-search count` (rendu brut, voir AM-044).",
     "proposition": "Une expression `value=\"$total\"` (ou `meta:total`) sur `dsfr-data-kpi`, lue dans la meta de la source amont en mode serveur.",
     "verifie": "Lot 11, `count` posé sur les trois moteurs serveur : « 35305 resultats » (réseau cuivre) puis « 1 resultat » après « Siévoz » ; « 9146 » → « 1226 » après la facette BIC (BOFiP) ; « 145146 » → « 28808 » après le choix « Voiture particulière » du contexte (contrôle technique). Source : `dsfr-data-search.ts:294-296, 590-608` ; `dsfr-data-kpi.ts:182-195` ne lit pas la méta.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Le total d'une recherche serveur est affichable par `search count`, pas par un KPI.",
-      "objectif": "Donner le résultat le plus utile d'une recherche : combien.",
-      "perennite": "Structurel : toute page `server-side`. La donnée (`total_count`) est déjà dans la meta.",
-      "acceptation": [
-        "`dsfr-data-kpi value=\"meta:total\"` affiche le `total_count` de la source amont en mode serveur."
-      ]
-    }
+    "correction": "Corrigé par #659, livré en 0.22.0 : `dsfr-data-query` publie `total` dans sa meta (nombre de lignes avant `limit`), et `dsfr-data-kpi value=\"meta:total\"` l'affiche — le total serveur en mode `server-side`. « 35 305 communes » tient donc dans une tuile chiffrée, formatée comme les autres KPI."
   },
   {
     "id": "AV-020",
@@ -1905,7 +1562,8 @@
       "acceptation": [
         "`require-filter` sur les composants d'affichage : message DSFR tant qu'aucun filtre amont n'est actif."
       ]
-    }
+    },
+    "correction": "Non corrigé, mais cadré : prévu au jalon v0.25.0 avec `require-where` (#690, épic #700) — aucune requête tant qu'aucun filtre n'est posé, état `idle` rendu en message DSFR sur les afficheurs. Absent de 0.24.0, la version chargée par le dépôt."
   },
   {
     "id": "AM-036",
@@ -1924,19 +1582,9 @@
     "contournement": "Côté Opendatasoft : `date_format()` dans le `select` de l'export (voir FP-003). Côté client : aucun.",
     "proposition": "Un format `:date` (JJ/MM/AAAA) et `:datetime` dans `resolveTemplateExpression`, branchés sur `formatDate`.",
     "verifie": "Cartes des communes du réseau cuivre : « Fermeture technique : 2028-01-31 ». Source : `formatTemplateValue` ne connaît que `number`.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Dates ISO brutes dans les fiches (« 2028-01-31 ») ; contournable en ODSQL seulement (FP-003).",
-      "objectif": "Un format de date natif, indépendant du fournisseur.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "`{{champ:date}}` → JJ/MM/AAAA, `{{champ:datetime}}` → JJ/MM/AAAA HH:mm, via `formatDate` de shared ; valeur invalide → « — »."
-      ]
-    }
+    "correction": "Corrigé par #662, livré en 0.22.0 : les templates de `dsfr-data-display` et `dsfr-data-map-popup` acceptent `{{champ:date}}` (JJ/MM/AAAA, « — » si invalide) et `{{champ:datetime}}` (avec HH:MM), sur une grammaire d'argument commune `{{chemin[:format[:arg]][|défaut]}}` — `{{prix:number:2}}` fixe le nombre de décimales. Le `date_format()` dans le `select` ODSQL (FP-003) reste utile côté serveur, mais n'est plus la seule voie."
   },
   {
     "id": "PG-014",
@@ -1953,20 +1601,11 @@
     "constat": "`group-by=\"year(debut_de_validite) as annee\"` part en `group_by=\\`year(debut_de_validite) as annee\\`` : l'adaptateur protège la valeur comme un nom de champ, et l'API renvoie 400. ODSQL accepte pourtant les fonctions dans `group_by` (avec l'alias déclaré là, cf. PG-008). Grouper par un champ date brut donne des libellés ISO complets (« 2018-01-01T00:00:00+00:00 »).",
     "contournement": "Seul contournement sûr : source générique (`url` + `params` + `transform=\"results\"`) pour l'agrégat concerné — au prix de l'auth automatique et, surtout, des commandes de contexte : une source générique n'écoute pas `dsfr-data-context`. La recette du lot 9 (champ brut dans `group-by`, `year()` dans `select`) n'est PAS un groupement par année : elle groupe par valeur de date distincte, et ne coïncide que si le champ n'a qu'une valeur par an. C'est le cas des deux jeux où elle sert (vérifié à l'API au lot 11 : `group_by=annee` → 10 dates pour 10 années sur `balances_des_comptes_etat`, 6 pour 6 sur `questions-reponses`), elle y reste donc avec cette condition écrite en commentaire. Sur un jeu quotidien, elle produirait 365 barres par an.",
     "proposition": "Ne pas protéger une valeur de `group-by` qui contient une parenthèse, ou accepter un `group-by-raw`.",
-    "verifie": "Requête émise sur bofip : `records?select=count(*)+as+nb&group_by=\\`year(debut_de_validite)+as+annee\\`` → 400 ; la même sans accents graves → 15 lignes. Lot 11 : `records?select=annee,count(*)&group_by=annee` → 10 dates distinctes = 10 années (comptabilité), 6 = 6 (Baromètre).",
-    "statut": "a-deposer",
+    "verifie": "Requête émise sur bofip : `records?select=count(*)+as+nb&group_by=\\`year(debut_de_validite)+as+annee\\`` → 400 ; la même sans accents graves → 15 lignes. Lot 11 : `records?select=annee,count(*)&group_by=annee` → 10 dates distinctes = 10 années (comptabilité), 6 = 6 (Baromètre). — Revérifié le 2026-09-10 à l'API du portail Éducation, des deux côtés : `group_by=year(date_de_naissance) as annee` en expression brute renvoie HTTP 200 avec un vrai groupement par année ; la même expression entourée d'accents graves renvoie HTTP 400. Correctif lu au source (`opendatasoft-adapter.ts`, `isOdsqlExpression`).",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "`year(…)` dans `group-by` → 400 ; le seul contournement général perd le contexte, et la recette « date brute » n'est valable que sur des jeux annuels.",
-      "objectif": "Ne pas protéger une expression.",
-      "perennite": "Récurrent sur les dates.",
-      "acceptation": [
-        "Une valeur de `group-by` contenant une parenthèse n'est pas entourée d'accents graves."
-      ]
-    }
+    "correction": "Corrigé côté bibliothèque par #641 : `escapeOdsqlGroupField()` ne backquote plus un élément de `group-by` qui contient une parenthèse — une expression ODSQL passe désormais telle quelle. La source générique (`url` + `params`), qui coûtait l'écoute du contexte, n'est plus nécessaire. Les deux pages qui portent le contournement (comptabilité générale, Baromètre) peuvent repasser en voie native une fois le dépôt monté en 0.23.0.",
+    "reste_vrai": "L'autre moitié du piège tient toujours : grouper sur la date brute avec `year()` dans le `select` n'est PAS grouper par année — ça ne coïncide que si le champ n'a qu'une valeur par an. Sur un jeu quotidien, 365 barres par an. Vérifier à l'API que `group_by=annee` donne autant de lignes que d'années."
   },
   {
     "id": "AM-037",
@@ -1995,7 +1634,8 @@
       "acceptation": [
         "Hors périmètre dsfr-data ; issue chez @gouvfr/dsfr-chart."
       ]
-    }
+    },
+    "correction": "Refusé côté `dsfr-data` (#692, 0.21.1), et pour la bonne raison : le type de graphique appartient à DSFR Chart. Une demande de treemap se dépose chez `GouvernementFR/dsfr-chart`, pas ici — c'est la quatrième des cinq règles du lot 11."
   },
   {
     "id": "AV-021",
@@ -2028,19 +1668,10 @@
     "contournement": "Aucun côté client ; côté serveur, `year()` est refusé par l'adaptateur (PG-014).",
     "proposition": "Accepter une expression régulière (`/…/`) dans `replace` et `replace-fields`, ou un séparateur échappable.",
     "verifie": "Source `_parseReplaceFields` : `indexOf(':')` deux fois puis `normalizedValue === pattern` ; en page, le libellé reste « 2018-01-01T00:00:00+00:00 » après la règle.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "`replace-fields` ne peut ni cibler une valeur avec deux-points ni remplacer par motif.",
-      "objectif": "Récrire une date ISO ou un libellé par regex.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "Motif `/regex/` accepté dans `replace` et `replace-fields`, ou séparateur échappable."
-      ]
-    }
+    "correction": "Corrigé par #676, livré en 0.24.0 : `replace`, `replace-fields` et `rename` de `dsfr-data-normalize` acceptent l'échappement percent d'un `:` littéral (`%3A`, ainsi que `%7C`, `%2C`, `%25`), avec la même convention que `where` — `replace-fields=\"h:10%3A00:10h\"` récrit désormais une heure. Une valeur ISO peut donc être ciblée. #671 (0.24.0) ajoute par ailleurs à `compute` des fonctions de chaîne (`replace`, `concat`, `lower`, `trim`, `len`, `contains`) et des conditions `when … then … else`.",
+    "reste_vrai": "Il n'y a toujours pas de motif : ni expression régulière ni sous-chaîne dans `replace-fields`, dont la comparaison reste stricte. Ramener « 2018-01-01T00:00:00+00:00 » à « 2018 » demande toujours une règle par valeur. Et `replace-fields` reste silencieusement sans effet sur une valeur numérique (BUG-007)."
   },
   {
     "id": "LIM-007",
@@ -2097,7 +1728,7 @@
     "correction": "Ce qui est vrai : `date_format(champ, \"'€ ('dd/MM/yyyy 'à' HH:mm')'\") as champ_txt` dans le `select` de l'export, avec `timezone=Europe/Paris` dans les `params`, renvoie la chaîne prête à afficher ; un carburant absent donne null côté serveur, donc `{{champ_txt|Indisponible}}` fait le repli sans conditionnelle.",
     "reste_vrai": "Un format `:date` natif dans le template (AM-036) éviterait de déléguer la mise en forme au serveur, et ne vaut que pour Opendatasoft. Sans `timezone`, l'heure sort en UTC.",
     "verifie": "Panneau de la station de Liernais : « 2,43 € (03/09/2026 à 09:42) » ; portail : « 2,430 € (03/09/2026 à 09:42) ». Sans `timezone` : 07:42.",
-    "statut": "acte",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -2123,20 +1754,10 @@
     "constat": "Chaque `select count(*) … group_by champ` remonte une ligne à clé vide (decp_augmente : 399 sources, 3 724 natures, 27 451 procédures ; rappelconso : 2 001 natures et modalités). Elle devient une barre ou une part sans libellé, alors qu'`ods-chart` l'écarte silencieusement — d'où des écarts avec les chiffres du portail.\n\nFusion du lot 11 (ex-PG-018) : le même piège existe côté client — `dsfr-data-query group-by` produit un groupe pour les lignes sans valeur, et la clé ressort en `''` (chaîne vide), pas en `null` ; un `isnull` posé en aval ne l'attraperait donc pas. La voie native est identique dans les deux cas et tient dans un attribut de la balise déjà présente : `where=\"champ is not null\"` sur la `dsfr-data-source`, `where=\"champ:isnotnull\"` sur la `dsfr-data-query`. Un `drop-null` par défaut serait un masquage silencieux, contraire à la ligne de la bibliothèque (jamais de 0 silencieux) ; la réponse retenue côté lib est un `empty-label=\"Non renseigné\"` sur le graphique, qui rend visible au lieu de supprimer.",
     "contournement": "`where=\"champ is not null\"` (source) ou `where=\"champ:isnotnull\"` (query), sur la balise existante. Motif « parité ods-chart » à poser systématiquement sur un `group-by`.",
     "verifie": "Tableaux `dsfr-data-a11y` avant/après : 8→7, 10→9, 20→19 lignes sur DECP ; 3→2 sur la nature juridique Rappel Conso, parts 14 402 / 2 178 égales à la fiche d'audit. Lot 11, Prix des carburants : le tableau des régions s'ouvrait sur « | | 2.36 » (stations sans région) ; `where=\"region:isnotnull\"` sur la query → première ligne « Grand Est | 44 | 2.31 ». Relecture dsfr-data : `dsfr-data-query.ts:774-777` (isnotnull) et l.793 (clé `''`).",
-    "statut": "acte",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Documenter + empty-label (pas de drop-null par défaut)",
-      "impact": "Le groupe null d'un `group_by` devient une barre sans libellé ; comptes décalés de l'original.",
-      "objectif": "Parité avec `ods-chart`.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "La référence de `group-by` (source et query) mentionne le groupe null et le `where … is not null` / `:isnotnull`.",
-        "Un graphique nourri d'un groupe `null` ou `''` l'affiche sous `empty-label` (« Non renseigné ») au lieu d'une barre sans libellé."
-      ]
-    }
+    "correction": "Corrigé par #647, livré en 0.21.1, dans la forme retenue au lot 11 : `empty-label` (défaut « Non renseigné ») libelle les catégories vides sur `dsfr-data-chart`, et la cohérence `null` / `''` est établie entre le chemin serveur et le chemin client. Le groupe sans valeur n'est plus une barre anonyme : il est nommé, donc visible, plutôt que supprimé.",
+    "reste_vrai": "Nommer n'est pas écarter : pour retrouver les chiffres d'`ods-chart`, qui écarte le groupe null, il faut toujours poser `where=\"champ is not null\"` sur la source ou `where=\"champ:isnotnull\"` sur la query. Le motif « parité ods-chart » reste à appliquer sur tout `group-by`."
   },
   {
     "id": "PG-016",
@@ -2155,7 +1776,9 @@
     "proposition": "Accepter la grammaire `champ:tri | champ2:tri` déjà utilisée par `labels` et `display`.",
     "verifie": "`dsfr-data-facets.ts`, propriété `sort` (l. 70) et `_sortValues` (l. 648), sans grammaire par champ.",
     "statut": "a-deposer",
-    "date": "2026-09-09"
+    "date": "2026-09-09",
+    "correction": "Partiellement traité par #645, livré en 0.21.1 : le tri des facettes adopte la grammaire `critère:sens` (`sort=\"count:desc\"`), ce qui lève l'ambiguïté du tiret (PG-012).",
+    "reste_vrai": "Le tri demeure global : `_resolveSort()` lit un seul `sort` pour tout le composant (vérifié au source, `dsfr-data-facets.ts`, et dans le bundle publié 0.24.0). La grammaire par champ `champ:tri | champ2:tri`, déjà en usage pour `labels` et `display`, n'existe pas — une barre ne peut toujours pas trier les départements en alphanumérique et les carburants par effectif."
   },
   {
     "id": "PG-017",
@@ -2174,19 +1797,9 @@
     "constat": "`dsfr-data-kpi value=\"count\"` branché sur une `dsfr-data-query limit=\"12\"` affiche 12 quelle que soit la donnée. Les trois annuaires du lot 2 affichaient « 12 activités » pour 28, 22 et 29 réelles — un chiffre faux d'apparence plausible, pendant sept lots.",
     "contournement": "Une seconde query sans `limit` réservée au KPI.",
     "verifie": "Playwright, KPI 12→28 (Qualité Tourisme), 12→22 (Tourisme & Handicap), 12→29 (DGFiP) après ajout d'une query sans limite.",
-    "statut": "acte",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Un KPI `count` sur une query `limit` compte la limite : « 12 activités » pour 28, trois pages, sept lots.",
-      "objectif": "Un chiffre faux doit se voir.",
-      "perennite": "Structurel.",
-      "acceptation": [
-        "`console.warn` quand un KPI `count` consomme une query avec `limit`."
-      ]
-    }
+    "correction": "Corrigé par #659, livré en 0.22.0 : `dsfr-data-query` publie `total` (nombre de lignes avant `limit`) et `truncated` dans sa meta, `dsfr-data-kpi value=\"count\"` avertit en console quand l'amont détient plus de lignes que celles reçues, et `value=\"meta:total\"` affiche le total réel. Le chiffre faux d'apparence plausible se signale désormais, et se corrige sans seconde query."
   },
   {
     "id": "FP-004",
@@ -2205,7 +1818,7 @@
     "correction": "Ce qui est vrai : 1 nul sur 3 604 (Qualité Tourisme), 0 sur 3 708 (Tourisme & Handicap) ; e-mail et lien questionnaire remplis à 100 %. Les liens sont désormais de vrais liens, et le seul cas vide est masqué par CSS.",
     "reste_vrai": "AM-007 sur l'annuaire DGFiP (`courriel` nul sur 16 457 lignes sur 21 761), et le principe : compter les nuls avant de choisir texte ou lien.",
     "verifie": "Comptage sur les exports JSON des deux jeux ; panneau « GROTTE DE BAUME OBSCURE » avec 3 liens actifs.",
-    "statut": "acte",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -2227,21 +1840,11 @@
     "constat": "Une valeur interpolée dans un attribut (`class=\"odv-picto--{{champ|absent}}\"`, `href=\"{{champ|}}\"`, `data-intitule` + `{{champ|}}`) et une règle CSS (`:empty`, `[href=\"\"]`, `:has()`) font le travail d'un `ng-if`, sans JavaScript. Mais c'est une convention à connaître, et les intitulés passent en `::before`.",
     "contournement": "Le motif ci-dessus, documenté dans `site.css` (bloc « Annuaires (lot 9) »).",
     "proposition": "`{{#if champ}}…{{/if}}` ou un format `{{champ:link}}` / `{{champ:mailto}}`.",
-    "verifie": "Pictos handicap (Oui/Non/null → 3, 0 badges), rubriques DGFiP (SIP Beaune 5 visibles vs buraliste 3), lien vide de « BEST HOTEL » en `display:none`.",
-    "statut": "a-deposer",
+    "verifie": "Pictos handicap (Oui/Non/null → 3, 0 badges), rubriques DGFiP (SIP Beaune 5 visibles vs buraliste 3), lien vide de « BEST HOTEL » en `display:none`. — Vérifié le 2026-09-10 dans les bundles npm publiés : la regex de bloc `/\\{\\{#(if|unless)\\s+…\\}\\}([\\s\\S]*?)\\{\\{\\/\\1\\s*\\}\\}/g` est absente de `dsfr-data@0.20.0` et présente dès `0.22.0` (`dist/dsfr-data.core.esm.js`).",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "M",
-      "decision": "Accepter",
-      "impact": "Sans conditionnelle, un champ absent produit un lien vide (défaut d'accessibilité) ou une rubrique orpheline ; le contournement CSS d'attribut fonctionne mais doit être connu.",
-      "objectif": "Écrire une fiche avec des champs optionnels sans convention cachée.",
-      "perennite": "Structurel : toute fiche d'annuaire. Rencontré sur 8 pages (avec AM-007).",
-      "acceptation": [
-        "`{{#if champ}}…{{/if}}` dans `dsfr-data-display` et `dsfr-data-map-popup`, sans réévaluation de la valeur substituée (pas d'injection).",
-        "`{{champ:link}}` rend `<a href>` si valeur http, texte sinon, rien si vide."
-      ]
-    }
+    "correction": "Corrigé côté bibliothèque par #664, livré en 0.22.0 : `{{#if}}` / `{{#unless}}` existent dans le moteur de templates, avec `{{champ:number:2}}`, `{{champ:date}}`, `{{champ:join: / }}` et `{{lien:url}}` (#662, #663). Le contournement par CSS d'attribut (`:empty`, `[href=\"\"]`, `:has()`) et le bloc « Annuaires » de `site.css` deviennent inutiles à la montée en 0.23.0.",
+    "reste_vrai": "Il n'y a toujours PAS de boucle : la regex de bloc du moteur ne connaît que `if` et `unless`, donc pas de `{{#each}}`. Émettre un élément par valeur d'un champ multivalué reste impossible (voir AM-047)."
   },
   {
     "id": "AM-040",
@@ -2260,19 +1863,9 @@
     "constat": "`{{public}}` sur un tableau rend « particuliers,professionnels » (`String(array)`, sans espace) ; le portail affiche « Particuliers et Professionnels ».",
     "proposition": "`{{champ:join}}` ou `{{champ:join(\" et \")}}` dans `resolveTemplateExpression`.",
     "verifie": "Panneau du buraliste « LE PARIS » (Noyon) : « particuliers,professionnels » ; `services_service` sur Prix des carburants idem.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Un champ tableau s'affiche « a,b,c » sans espace ; le portail affiche « a et b ».",
-      "objectif": "Rendre lisibles les champs multivalués, très fréquents sur Opendatasoft.",
-      "perennite": "Structurel : les tableaux sont le format natif des multivalués ODS.",
-      "acceptation": [
-        "`{{champ:join}}` → « a, b, c » ; `{{champ:join(\" et \")}}` → séparateur libre."
-      ]
-    }
+    "correction": "Corrigé par #663, livré en 0.22.0 : un champ multivalué (ODS, Grist) est rendu joint par « , » dans les templates de `dsfr-data-display` / `dsfr-data-map-popup` et dans les cellules de `dsfr-data-list`, au lieu du `a,b` de `String(array)` ; le pipe `{{tags:join: / }}` choisit le séparateur."
   },
   {
     "id": "AV-022",
@@ -2325,19 +1918,9 @@
     "contournement": "Liste DSFR statique sous la carte.",
     "proposition": "Un attribut `legend` sur la couche (ou un composant `dsfr-data-map-legend`) dérivé de `color-map`.",
     "verifie": "grep « legend » vide dans `dsfr-data-map*.ts` (0.20.0 et 0.21.0).",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P2",
-      "effort": "M",
-      "decision": "Accepter",
-      "impact": "Une carte colorée par `color-map` n'a pas de légende : on écrit une liste HTML à maintenir à part.",
-      "objectif": "Une légende dérivée du mapping, toujours juste.",
-      "perennite": "Structurel : toute carte catégorielle.",
-      "acceptation": [
-        "`legend` sur la couche rend une liste DSFR des paires valeur/couleur de `color-map`, plus la couleur de repli si des valeurs n'y sont pas."
-      ]
-    }
+    "correction": "Corrigé par #685, livré en 0.22.0 : nouveau compagnon `<dsfr-data-map-legend for=\"id-couche\" label=\"…\">`, légende DSFR rendue sous la carte (pastilles décoratives `aria-hidden` + texte) pour une couche catégorielle (`color-map` + repli `color`) comme pour une choroplèthe, dont les classes deviennent paramétrables (`classes`, `method`, `breaks`). La légende dérive du rendu réel : elle ne peut plus mentir. Ce n'était donc pas une limite dure mais un manque, désormais comblé — les listes HTML écrites à la main sous les quatre cartes concernées deviennent inutiles."
   },
   {
     "id": "LIM-010",
@@ -2355,8 +1938,10 @@
     "contournement": "Aucun déclaratif.",
     "proposition": "Un `dsfr-data-facets-tags` (ou étendre `context-tags` aux facettes).",
     "verifie": "Source des deux composants : `activeFilters()` du contexte seulement.",
-    "statut": "a-deposer",
-    "date": "2026-09-09"
+    "statut": "corrige",
+    "date": "2026-09-09",
+    "correction": "Corrigé par #679, livré en 0.23.0 : `dsfr-data-context-tags` reprend les filtres issus des facettes (un tag par valeur, retirable seule) et de la recherche, et gagne `clear-all`. La sélection de facette se reflète donc en texte hors de la colonne de filtres. Ce n'était pas une limite dure mais un manque comblé.",
+    "reste_vrai": "Un tag n'est pas un titre : interpoler la valeur courante d'un filtre dans une phrase (« Établissements pour payer vos impôts ») reste sans voie native — c'est AM-057."
   },
   {
     "id": "PG-019",
@@ -2390,7 +1975,7 @@
     "correction": "Ce qui est vrai : 16 173 lignes « professionnels » proposent « Payer mes factures locales ». La liste du portail est fausse ; les facettes, calculées sur la donnée, sont justes.",
     "reste_vrai": "Rien.",
     "verifie": "Comptage sur l'export JSON de `coordonnees-des-structures-dgfip`.",
-    "statut": "acte",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -2410,19 +1995,10 @@
     "contournement": "`compute=\"k = 1\"` ; `group-by=\"k\"` sur chaque agrégat ; `join on=\"k\"` ; `compute=\"pct = a / b * 100\"`.",
     "proposition": "Une expression `value=\"a:count / b:count\"` sur le KPI, ou un `dsfr-data-query` acceptant une agrégation conditionnelle (`count-if`).",
     "verifie": "EPV : 24,3 % et 15,9 % = 308/1 267 et 202/1 267 (API) ; suivent les filtres (Arts de la table : 49,2 % et 32,3 %).",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "M",
-      "decision": "Accepter",
-      "impact": "Un KPI de proportion coûte six balises.",
-      "objectif": "Un ratio en une expression.",
-      "perennite": "Récurrent : toute part en %.",
-      "acceptation": [
-        "`value=\"a:count / b:count\"` sur le KPI ou `count-if` sur la query."
-      ]
-    }
+    "correction": "Corrigé par #673, livré en 0.24.0 : `dsfr-data-kpi` accepte un ratio de deux agrégats — `value=\"count:statut:ouvert / count\" format=\"pourcentage\"` —, chaque côté étant une expression de la grammaire courante (`count`, `montant:sum`, `champ:distinct`, `meta:total`…), et la forme `count:champ:valeur` fait le comptage conditionnel. Division par zéro rendue « — », jamais Infinity. Les six balises (trois `dsfr-data-query`, deux `dsfr-data-join`, un `compute`) tombent à une.",
+    "reste_vrai": "Le ratio est mono-source : `dsfr-data-kpi` l'évalue sur `this._filteredData()`, donc sur les lignes d'une seule source. Un numérateur et un dénominateur venus de deux jeux différents restent sans voie native (AM-049)."
   },
   {
     "id": "PG-020",
@@ -2492,7 +2068,7 @@
     "correction": "Ce qui est vrai aujourd'hui : 0,65 s compressé avec la description, 0,37 s sans. Le panneau à 9 champs de l'original est donc abordable.",
     "reste_vrai": "+80 % de temps et ×7 de poids avec le champ long ; la règle « pas de `select` qui inclut un texte long si on n'en a pas besoin » tient, mais ce n'est plus prohibitif. Le comportement de l'export Opendatasoft varie dans le temps : re-chronométrer avant de conclure.",
     "verifie": "`curl --compressed` ×2 et `performance.getEntries()` navigateur : 0,65 s / 1,26 Mo contre 0,37 s / 185 Ko.",
-    "statut": "acte",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -2543,7 +2119,7 @@
     "correction": "Ce qui est vrai : le jeu porte une colonne signée (`balance_sortie`, débit +, crédit −) ; `sum(balance_sortie)/1e9` renvoie le solde en une expression ODSQL. Les 4 KPI 2025 de la fiche (1 326 / 3 442 / 526 / 655 Md€), les 8 graphiques de la vue générale et les 2 soldes sont désormais identiques à l'original.",
     "reste_vrai": "L'évolution N/N-1 (calcul entre lignes) n'a pas d'équivalent déclaratif. Chercher la colonne signée avant de calculer entre séries.",
     "verifie": "`exports/json`, `select=sum(balance_sortie)/1000000000 where categorie in (Actif,Passif) group_by year(annee)` → −1 202,94 … −2 115,89, les dix valeurs de l'original.",
-    "statut": "acte",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -2562,7 +2138,7 @@
     "correction": "Ce qui est vrai : `dsfr-data-context` refiltre autant de sources adaptateur qu'on veut — les 4 sources de l'écran départemental de Fiscalité locale bougent ensemble (`?exercice=2023&reg=53&dep=29`, 6 requêtes).",
     "reste_vrai": "Une source `url=` + `params` ignore les commandes `where` (avertissement console), et l'adaptateur impose `/records` (100 lignes par page, plafond de 100 groupes). Passer en `api-type=\"opendatasoft\"` quand une source doit suivre les filtres, garder `/exports/json` pour les agrégats de plus de 100 groupes. AM-001 reste vrai pour les facettes (qui ne pilotent que leur source).",
     "verifie": "fiscalite-locale : 4 sources adaptateur refiltrées ensemble ; les sources `/exports/json` de la vue nationale ne bougent pas.",
-    "statut": "acte",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -2579,7 +2155,7 @@
     "correction": "Ce qui est vrai, lu dans `$scope.blocks` : la page particuliers ne déclare que `fiscalite-locale-des-particuliers-geo` (4 contextes) ; le Baromètre lit `bfn-table-de-correspondance`, dont `code_unifie` est celui de `questions-reponses` — 119 codes communs sur 119, différence d'ensembles vide. Les deux pages sont reconstruites sur les bons jeux : 8 moyennes identiques à la fiche à la décimale (Côte-d'Or 2025), scores du Baromètre égaux à la fiche (question 501 : 68,1 → 77,9 %, Bretagne 2025 75,8 %).",
     "reste_vrai": "PG-009 (référentiels homonymes) tient pour `bfn-2022-resultats-2022`. La leçon est de méthode : lire le source de la page d'origine avant toute jointure, et ne jamais conclure « la donnée ment » sans avoir vérifié qu'on lit la bonne.",
     "verifie": "Sources `$scope.blocks` des deux pages ; `group_by code_unifie` sur les deux jeux : intersection 119, code 201 = « Secteur d'activité » dans les deux.",
-    "statut": "acte",
+    "statut": "retire",
     "date": "2026-09-09"
   },
   {
@@ -2604,23 +2180,10 @@
     "contournement": "Options générées hors ligne depuis un `group_by` de l'API ; ou, quand une seule source est à piloter, `facets display=\"champ:select\" server-facets`.",
     "proposition": "Un `dsfr-data-context-filter` capable de peupler son `ui` depuis une source (`options-source`, `options-field`), avec restriction par les autres filtres du contexte.",
     "verifie": "Lot 11, page de test (réseau cuivre, `server-facets`, `display=\"region:select | departement:select\"`) : 21 régions et 95 départements peuplés avec compteurs ; choisir « Bretagne » refetch `facets?facet=departement&where=region = \"Bretagne\"` et le second select tombe à 4 départements (Côtes-d'Armor 345, Ille-et-Vilaine 337, Finistère 279, Morbihan 251). Source : `dsfr-data-facets.ts:1517` (select), l.755-767 (`whereToFields`).",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P1",
-      "effort": "L",
-      "decision": "Fusionner avec AM-001 (facets context=\"ctx\")",
-      "impact": "Sept pages du banc d'essai portent des `<select>` écrits en dur (56 missions, 101 départements, 119 questions) générés hors ligne : toute évolution de la donnée les rend faux, et une cascade région → département exige du JavaScript.",
-      "objectif": "Qu'un tableau de bord à plusieurs agrégations serveur se filtre sans une seule valeur écrite à la main, comme le fait le contexte Opendatasoft.",
-      "perennite": "Structurel et récurrent : c'est la friction la plus répétée du banc d'essai. Tout dashboard multi-vues sur un jeu volumineux la rencontre.",
-      "acceptation": [
-        "`<dsfr-data-facets context=\"ctx\" server-facets display=\"mission:select\">` peuple son select depuis `/facets` et pousse le `where` dans le contexte.",
-        "Les options se restreignent par les autres filtres (cascade), comme aujourd'hui en `server-facets`.",
-        "Une valeur pré-sélectionnée par l'URL est conservée après peuplement.",
-        "Démonstration : la page Comptabilité générale sans `<option>` écrite en dur."
-      ]
-    },
-    "demande": "Non pas un `options-source` sur `dsfr-data-context-filter`, mais un `dsfr-data-facets context=\"ctx\"` : les facettes (select, cases, cascade) diffusent dans le contexte, qui pilote toutes les sources. Un seul bus."
+    "demande": "Non pas un `options-source` sur `dsfr-data-context-filter`, mais un `dsfr-data-facets context=\"ctx\"` : les facettes (select, cases, cascade) diffusent dans le contexte, qui pilote toutes les sources. Un seul bus.",
+    "correction": "Corrigé par #678, livré en 0.23.0 : c'est exactement la forme demandée — `dsfr-data-facets context=\"ctx\"` diffuse dans le contexte, qui pilote toutes les sources, avec un filtre par champ, un `select` peuplé depuis la donnée et la cascade en `server-facets`, sans `<option>` en dur. Les sept pages qui portent des `<select>` générés hors ligne peuvent repasser en voie native."
   },
   {
     "id": "LIM-013",
@@ -2652,7 +2215,7 @@
     "correction": "`split` sépare ses entrées par une virgule, et le premier deux-points isole le séparateur : `split=\"risques_encourus:|\"` découpe `blessures|incendie` en tableau. Le JSDoc de l'attribut donne l'exemple `\"Axes:|, Cibles:;\"` et la fiche de référence dit en toutes lettres de ne pas utiliser `|` entre les entrées. Je n'avais lu que la fiche du composant.",
     "reste_vrai": "Les grammaires d'attributs diffèrent d'un attribut à l'autre — `|` pour `labels` et `display`, `,` pour `split`, `round` et `fields` (PG-019). Et un tableau s'interpole « a,b » sans espace dans un template (AM-040).",
     "verifie": "Page Rappel Conso, `dsfr-data-normalize split=\"risques_encourus:|\"` posé entre les facettes et les cartes : « Risques : blessures,incendie » rendu depuis un tableau de deux éléments ; « produits phytosanitaires non autorisés,dépassement des limites autorisées de pesticides » sur une autre fiche. Relecture dsfr-data : `dsfr-data-normalize.ts:407-425`, tests l.787-839.",
-    "statut": "corrige",
+    "statut": "retire",
     "date": "2026-09-10"
   },
   {
@@ -2670,7 +2233,7 @@
     "correction": "La jointure convertit déjà ses deux clés en chaîne (`buildKey` fait `String(row[f] ?? '')` des deux côtés, inchangé depuis 0.20.0). Rejouée sans le `normalize numeric` : 1 065 lignes sur 1 065 appariées, 119 codes sur 119 — exactement comme avec. Le `numeric` n'a jamais changé la clé calculée.",
     "reste_vrai": "Les 0 appariements initiaux étaient réels, mais la cause était le jeu (PG-009) : `bfn-2022-resultats-2022` code ses questions « 001 », « 002 »… sur trois chiffres avec un zéro de tête, et 109 441 de ses lignes n'ont pas de code du tout. `String(201)` ne vaut jamais « 001 ». La demande utile qui reste est AM-026 : un taux d'appariement affiché par le composant aurait pointé le bon jeu tout de suite.",
     "verifie": "Navigateur, page Baromètre avec `right=\"bfn-corr\"` (sans normalize) puis `right=\"bfn-corr-num\"` (avec) : dans les deux cas `lignes: 1065, appariées: 1065, codes: 119, codesAppariés: 119`. API : `bfn-2022-resultats-2022` `group_by=code_unifie` → `null ×109441, \"001\" ×4671, \"002\" ×4671…`. Source : `packages/shared/src/utils/join.ts:139`.",
-    "statut": "corrige",
+    "statut": "retire",
     "date": "2026-09-10"
   },
   {
@@ -2688,7 +2251,7 @@
     "correction": "`server-facets` lit l'endpoint `/facets`, qui renvoie la facette telle que le portail la déclare — ici sept années avec leurs comptes. Sur une page de test (source adaptateur `server-side`), `fields=\"date_de_labellisation\"` affiche « 2025 (368), 2022 (250), 2023 (229)… » sans une ligne de plus. L'affichage était un faux problème.",
     "reste_vrai": "Cocher une année ne marche pas : le refine émis est typé texte et l'API répond 400 (BUG-005). Et en mode client — celui de la page EPV, qui charge l'export — la facette compterait bien les dates, pas les années : la voie native est serveur.",
     "verifie": "Page de test EPV : `/facets?facet=date_de_labellisation` → 7 valeurs rendues avec compteurs ; clic sur « 2022 » → `records?where=date_de_labellisation = \"2022\"` → HTTP 400.",
-    "statut": "corrige",
+    "statut": "retire",
     "date": "2026-09-10"
   },
   {
@@ -2737,19 +2300,9 @@
     "verifie": "Page Notre-Dame, facette « Accueil du public » en `display=\"…:select\"` : `<select>` rendu avec « Tous / Non (164) / Oui (61) » ; choisir Oui ramène le KPI « Sélection courante » à 61. Aucun `input[type=radio]` hors panneau en mode `radio` (DOM inspecté, lot 8). Source : `_renderRadioGroup`, `dsfr-data-facets.ts:1640-1720` ; select l.1517.",
     "contournement": "`display=\"champ:select\"` pour un choix unique en ligne.",
     "demande": "Un mode `radio-inline` (boutons radio DSFR en ligne, sans panneau), sans changer `radio`.",
-    "statut": "a-deposer",
+    "statut": "corrige",
     "date": "2026-09-10",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter (mode radio-inline)",
-      "impact": "Nom de mode trompeur ; le choix unique en ligne existe sous un autre nom.",
-      "objectif": "Un Oui / Non en deux boutons radio visibles, comme sur le portail.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "`display=\"champ:radio-inline\"` rend des `input[type=radio]` DSFR en ligne, sans panneau."
-      ]
-    }
+    "correction": "Corrigé par #684, livré en 0.23.0 : `dsfr-data-facets` gagne `display=\"champ:radio-inline\"` — boutons radio DSFR visibles en ligne, dans un `fieldset` dont la légende est le libellé de la facette, avec une option « Tous » qui retire la sélection. Le mode `radio` (menu déroulant à radios) ne change pas et sera renommé `radio-dropdown`."
   },
   {
     "id": "AM-044",
@@ -2781,7 +2334,9 @@
         "`count` rend « 35 305 résultats ».",
         "`count-label=\"communes\"` rend « 35 305 communes »."
       ]
-    }
+    },
+    "correction": "Corrigé à moitié par #654, livré en 0.21.1 : le mot « résultat » est accentué et accordé, et le compteur ne parle plus en double au lecteur d'écran quand un afficheur aval annonce déjà son compte. Vérifié dans le bundle publié `dsfr-data@0.24.0` (`dist/dsfr-data.core.esm.js`) : le libellé y est bien `${count} résultat${s}`.",
+    "reste_vrai": "Le nombre reste rendu brut, sans séparateur de milliers — « 35305 résultats » là où le KPI voisin écrit « 35 305 » —, et il n'existe toujours pas de `count-label` pour remplacer le mot par « communes » ou « documents ». La demande tient, réduite de moitié."
   },
   {
     "id": "PG-022",
@@ -2815,6 +2370,746 @@
         "Chaque fiche de composant rappelle le séparateur de chaque attribut multi-entrées.",
         "Un `display`/`labels` sans `|` mais avec `,` déclenche un avertissement console."
       ]
+    },
+    "correction": "Partiellement traité par #657, livré en 0.21.1 : une fiche « grammaires d'attributs » a été ajoutée aux skills et au guide, qui rappelle par attribut le séparateur attendu et les voies natives ratées par le banc d'essai. Le piège est documenté.",
+    "reste_vrai": "Rien n'avertit à l'exécution : `display=\"a:select, b:select\"` rend toujours zéro `<select>` sans un mot en console. Tant que l'échec reste silencieux, la documentation ne suffit pas — c'est la demande qui tient."
+  },
+  {
+    "id": "AM-045",
+    "titre": "La sélection ne part que d'une carte : ni une liste, ni une fiche, ni un graphique ne peut filtrer un contexte",
+    "type": "amelioration",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-list",
+      "dsfr-data-display",
+      "dsfr-data-chart",
+      "dsfr-data-context"
+    ],
+    "dataviz": [
+      "edu/educajou-ecolemap",
+      "edu/fei-projets-europeens-donnees",
+      "edu/carto-pix-fiche-etablissement",
+      "edu/portrait-de-territoire-sports",
+      "edu/annuaire-des-internats"
+    ],
+    "constat": "Depuis 0.23.0 (#681, ADR-104), `refine-on-click` + `context` + `label` sur `dsfr-data-map-layer` diffusent la valeur d'un objet cliqué à N sources via le contexte, au dialecte de chacune. Le bus est ouvert, l'interface `ContextFilterLike` est en place — mais **aucun autre composant ne sait s'en servir**. Cliquer une ligne de tableau, une fiche d'une grille, ou une barre d'un graphique pour filtrer le reste de la page n'a pas d'équivalent déclaratif. C'est le motif maître-détail, et la carte n'en est qu'une porte d'entrée parmi trois : les annuaires et les palmarès entrent par la liste, les tableaux de bord par le graphique, et toute donnée non géographique n'a pas le choix.",
+    "verifie": "Grep sur `packages/core/src` : `refine-on-click` n'apparaît que dans `dsfr-data-map-layer.ts`, et `dsfr-data-map-select` est le seul événement de sélection de toute la bibliothèque. Constaté indépendamment par deux agents (fiches `educajou-ecolemap.md` et `portrait-de-territoire-sports.md`). Sur FEI, la grille de 44 fiches projet est le sélecteur principal de la page d'origine et n'a pas de transposition ; contournement retenu dans la fiche : un `<select>` + `dsfr-data-context-filter`, qui gagne l'URL partageable mais perd le clic sur la fiche.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Le symétrique de #681 sur `dsfr-data-display` (une fiche), `dsfr-data-list` (une ligne) et `dsfr-data-chart` (une barre, un secteur) : même trio d'attributs `refine-on-click` / `context` / `label`, même événement de sélection, même retrait au second clic.",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "M",
+      "decision": "Accepter",
+      "impact": "Le maître-détail est le motif central de cinq pages du portail Éducation. Faute de ce geste, la reproduction remplace un clic par un menu déroulant : le sens est conservé, l'ergonomie non.",
+      "objectif": "Qu'un composant d'affichage puisse filtrer un contexte, comme une couche de carte le fait déjà.",
+      "perennite": "Structurel : tout annuaire, tout palmarès, tout tableau de bord cliquable. La fondation existe déjà (bus de contexte, tag, URL) — c'est le branchement qui manque.",
+      "acceptation": [
+        "Cliquer une ligne de `dsfr-data-list` pose un filtre `eq` sur le contexte nommé par `context`.",
+        "Un second clic sur la même ligne retire le filtre, comme sur la couche de carte.",
+        "Le tag `dsfr-data-context-tags` et la synchronisation d'URL fonctionnent à l'identique.",
+        "Même comportement sur `dsfr-data-display` et sur une barre de `dsfr-data-chart`."
+      ]
     }
+  },
+  {
+    "id": "AM-046",
+    "titre": "Le cumul existe, mais seulement dans un `_bucketDate` privé de la couche de carte",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-query",
+      "dsfr-data-chart",
+      "dsfr-data-map-layer"
+    ],
+    "dataviz": [
+      "edu/tne-dashboard",
+      "edu/educajou-ecolemap"
+    ],
+    "constat": "`time-field`, `time-bucket` (`hour` … `year`) et `time-mode=\"cumulative\"` sont implémentés — sur `dsfr-data-map-layer` uniquement, dans une fonction privée. Rien d'équivalent sur `dsfr-data-query` ni sur `dsfr-data-chart`. Et ce n'est pas un manque que le jalon v0.24.0 comblera : #671 **exclut explicitement** le cumul de la grammaire de `compute` (« par ligne uniquement : pas de fenêtre, cumul ni ligne précédente ») en renvoyant les besoins inter-lignes à `query` — qui ne sait pas le faire non plus. Il y a donc un trou assumé entre deux composants, et la capacité est déjà écrite, sur le mauvais.",
+    "verifie": "Le tableau de bord TNE rend sa courbe de cumul mensuel par **douze expressions de template** successives, relevées dans son `$scope.blocks`. Côté bibliothèque, grep sur `packages/core/src` : `time-mode` et `time-bucket` n'apparaissent que dans `dsfr-data-map-layer.ts`. Le corps de #671 a été lu : l'exclusion du cumul y est écrite noir sur blanc.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Remonter `time-bucket` / `time-mode=\"cumulative\"` dans la grammaire commune, ou les exposer sur `dsfr-data-query` et `dsfr-data-chart`.",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "M",
+      "decision": "Accepter",
+      "impact": "Une série cumulée est la forme normale d'un suivi de déploiement. Sans elle, la reproduction affiche des valeurs mensuelles là où l'original montre une progression.",
+      "objectif": "Qu'un cumul se déclare, au lieu de s'écrire à la main dans un template.",
+      "perennite": "Structurel, et le code existe déjà : c'est un déplacement, pas une conception.",
+      "acceptation": [
+        "`time-mode=\"cumulative\"` sur `dsfr-data-query` produit une série cumulée.",
+        "Même résultat qu'un cumul calculé à la main sur le jeu TNE (50 lignes).",
+        "Le `time-bucket` accepte les mêmes valeurs que sur la couche de carte."
+      ]
+    }
+  },
+  {
+    "id": "BUG-006",
+    "titre": "Un champ multivalué : `dsfr-data-facets` éclate les valeurs, un `group-by` client compte les combinaisons",
+    "type": "bug",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-facets",
+      "dsfr-data-query"
+    ],
+    "dataviz": [
+      "edu/educajou-ecolemap",
+      "edu/accompagnement-deficience-sensorielle"
+    ],
+    "constat": "Sur un même champ multivalué et dans le même pipeline, deux composants donnent deux réponses différentes à la même question : les facettes **éclatent** les valeurs (une entrée par modalité), un `group-by` côté client **compte les combinaisons** (une ligne par assemblage observé). Rien ne signale la divergence. `dsfr-data-unpivot` ne rattrape pas le cas : il travaille sur des noms de colonnes, pas sur des cellules.",
+    "verifie": "Mesuré sur le champ multivalué d'`ecolemap` : 3 modalités côté facettes, 8 lignes côté `group-by` client. Le motif est confirmé sur la déficience sensorielle, où `langue` est multivalué et où 24 établissements appartiennent à deux couches (union = 155, somme = 181).",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "contournement": "Agrégation serveur (ODS éclate correctement), au prix de la perte du fonctionnement hors ligne et d'un aller-retour supplémentaire.",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "M",
+      "decision": "Accepter",
+      "impact": "Deux chiffres contradictoires sur la même page, sans avertissement : c'est la famille des défauts qui produisent des résultats faux sans se voir.",
+      "objectif": "Que le traitement d'un champ multivalué soit le même dans tout le pipeline, ou qu'il se déclare.",
+      "perennite": "Structurel : les champs multivalués sont courants en open data (langues, dispositifs, publics).",
+      "acceptation": [
+        "Un `group-by` client sur un champ multivalué rend les mêmes modalités que `dsfr-data-facets`.",
+        "Si le comportement « combinaisons » est voulu, il se demande par un attribut explicite.",
+        "Le volet Diagnostic signale qu'un champ groupé est multivalué."
+      ]
+    }
+  },
+  {
+    "id": "AM-047",
+    "titre": "Pas de boucle dans un template : impossible d'émettre un élément par valeur d'un champ multivalué",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-display",
+      "dsfr-data-list",
+      "dsfr-data-map"
+    ],
+    "dataviz": [
+      "edu/fei-projets-europeens-donnees",
+      "edu/annuaire-des-internats"
+    ],
+    "constat": "Le moteur de templates connaît `{{#if}}` et `{{#unless}}` (#664) mais **aucune boucle**. Le pipe `join` (#663) produit une chaîne ; il n'y a pas moyen de rendre « une pastille `fr-tag` par thème » à partir d'un champ multivalué. Or c'est la forme visuelle standard d'une fiche : les thèmes, les publics, les langues, les dispositifs s'affichent en tags, pas en phrase séparée par des virgules.",
+    "verifie": "Vérifié dans le bundle npm publié 0.23.0 : la regex de bloc est `/\\{\\{#(if|unless)\\s+([^}]+?)\\s*\\}\\}([\\s\\S]*?)\\{\\{\\/\\1\\s*\\}\\}/g` — elle ne reconnaît que `if` et `unless`. Ce n'est donc pas un oubli de documentation. La page FEI porte **trois** champs multivalués qui structurent la fiche et le panneau de détail.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "`{{#each champ}}…{{/each}}`, ou un pipe `{{champ:tags}}` qui rende N éléments plutôt qu'une chaîne.",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "M",
+      "decision": "Accepter",
+      "impact": "Les fiches d'un annuaire perdent leur structure visuelle : une liste de tags devient une phrase.",
+      "objectif": "Rendre N éléments de balisage à partir d'un champ multivalué, de façon déclarative.",
+      "perennite": "Structurel : les champs multivalués sont partout, et le tag DSFR est leur rendu canonique.",
+      "acceptation": [
+        "Un champ à 3 valeurs rend 3 éléments `fr-tag` distincts.",
+        "Le cas à 0 valeur ne rend rien (pas de conteneur vide).",
+        "Fonctionne dans `dsfr-data-display`, dans une cellule de `dsfr-data-list` et dans une popup de carte."
+      ]
+    }
+  },
+  {
+    "id": "AM-048",
+    "titre": "Aucun diagnostic quand un attribut désigne un champ qui n'existe pas dans le schéma",
+    "type": "amelioration",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-source",
+      "dsfr-data-map-layer",
+      "dsfr-data-chart",
+      "dsfr-data-facets"
+    ],
+    "dataviz": [
+      "edu/portrait-de-territoire-sports",
+      "edu/fei-chiffres-cles",
+      "edu/cactus-hameconnage",
+      "edu/generation-2024",
+      "edu/cnr-education"
+    ],
+    "constat": "Un attribut nomme un champ absent du schéma de la source, et **il ne se passe rien** : pas d'erreur, pas d'avertissement, pas de compteur d'écarts. La page rend un bloc vide, une carte grise ou des marqueurs sans couleur, et rien ne distingue « aucune donnée ne correspond » de « ce champ n'existe pas ». C'est le mode d'échec le plus fréquemment rencontré du lot 12 — et il frappe autant l'original que sa transposition. Le volet Diagnostic (#602, #693) existe désormais : le champ inexistant y a sa place naturelle.",
+    "verifie": "Cinq pages, quatre agents indépendants, le même symptôme. Sur « Portrait de territoire », l'onglet « Rectorat » est **entièrement vide** parce que sa facette porte sur `aca_nom`, champ absent de `data-es` (vérifié au schéma de l'API). Sur Génération 2024, `color-by-field=\"type_etablissement\"` vise un champ nommé `type` : marqueurs noirs, légende affichée quand même. Sur le CNR, `color-by-field=\"avancement_du_projet\"` désigne un champ inexistant. Sur FEI et Cactus, un code région hors référentiel produit une carte grise avec `getSkippedCount() = 0` — lu dans `_processMapData`, qui ne compte comme ignorée qu'une chaîne vide hors `type=\"map\"`.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Signaler dans le volet Diagnostic tout attribut désignant un champ absent du schéma de la source.",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Le mode d'échec le mieux étayé du lot : cinq pages, quatre agents. Deux bugs de l'original en découlent directement et n'ont jamais été vus par leurs auteurs.",
+      "objectif": "Qu'un champ inexistant se voie, au lieu de produire un rendu vide indiscernable d'un jeu vide.",
+      "perennite": "Structurel : les schémas bougent, les jeux sont renommés, les copier-coller entre pages survivent. Le coût est faible — le schéma est déjà connu de la source.",
+      "acceptation": [
+        "Un `color-by-field` sur un champ absent produit une ligne de Diagnostic nommant le champ et la source.",
+        "Idem pour `fill-field`, `geo-field`, `group-by`, `fields` de facettes et `value` de KPI.",
+        "Le message distingue « champ absent du schéma » de « champ présent mais vide sur toutes les lignes »."
+      ]
+    }
+  },
+  {
+    "id": "AM-049",
+    "titre": "Un ratio dont le numérateur et le dénominateur viennent de deux sources différentes",
+    "type": "amelioration",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-kpi",
+      "dsfr-data-query",
+      "dsfr-data-join"
+    ],
+    "dataviz": [
+      "edu/portrait-de-territoire-sports",
+      "edu/equipements-sportifs-milieu-scolaire",
+      "edu/personnels-colleges",
+      "edu/accessibilite-equipements-sportifs"
+    ],
+    "constat": "« Équipements pour 10 000 habitants », « enseignants par élève », « dossiers par établissement » : le numérateur vient d'un jeu, le dénominateur d'un autre. **#673 ne couvre pas ce cas** — le corps de l'issue est explicite, son ratio est mono-source. Un `dsfr-data-join` rapproche bien deux jeux, mais à la maille de la ligne, pas à celle de l'agrégat : joindre 333 611 équipements à une table de population pour en tirer une division est un contresens de volume.",
+    "verifie": "Relevé sur « Portrait de territoire » : **13 indicateurs sur 40** sont de cette forme, numérateur `count`/`sum` sur `data-es`, dénominateur `SUM(population)` sur `insee-2020-geoapi-2023`. Le motif se répète sur la seconde page Sports, et sur les pages « personnels » où 15 des 18 blocs sont des ratios (là mono-source, réalisables par `select` ODSQL). Le corps de #673 a été lu pour vérifier qu'il ne s'applique pas. — Revérifié le 2026-09-10 APRÈS la livraison de #673 en 0.24.0 (commit c14c762) : `dsfr-data-kpi` évalue son expression sur `this._filteredData()`, c'est-à-dire les données d'une source unique. Le ratio livré est donc bien mono-source et ne couvre pas ce besoin.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "contournement": "Aucun côté client. Côté serveur, seulement si les deux mesures vivent dans le même jeu (`select` ODSQL) — ce qui n'est pas le cas ici.",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "M",
+      "decision": "Accepter",
+      "impact": "C'est le motif de tout indicateur « par habitant », donc de toute comparaison entre territoires de tailles différentes. Sans lui, une fiche de territoire ne peut afficher que des volumes bruts, qui classent mécaniquement les grandes villes en tête.",
+      "objectif": "Qu'un KPI puisse diviser un agrégat d'une source par un agrégat d'une autre.",
+      "perennite": "Structurel : la population, les effectifs et les surfaces vivent toujours dans un référentiel séparé.",
+      "acceptation": [
+        "`value=\"src_a:count / src_b:sum:population\"` rend le ratio attendu.",
+        "Les deux membres suivent le même filtre de contexte (le territoire choisi).",
+        "Un dénominateur nul rend un état vide explicite, pas `Infinity` ni `NaN`."
+      ]
+    }
+  },
+  {
+    "id": "AM-050",
+    "titre": "Aucun opérateur d'année scolaire : `year-of` coupe l'année scolaire en deux, en silence",
+    "type": "amelioration",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-context-filter"
+    ],
+    "dataviz": [
+      "edu/capytale-usages",
+      "edu/dnma-usages-ent",
+      "edu/dataviz-ips-colleges",
+      "edu/tne-dashboard"
+    ],
+    "constat": "Tous les opérateurs de `dsfr-data-context-filter` raisonnent en année **civile** ou en fenêtre glissante. Or l'unité de temps de tout ce portail est l'**année scolaire** — septembre à août. `year-of` n'est pas seulement inadapté : il est trompeur, puisqu'il coupe l'année scolaire en son milieu sans que rien ne le signale. `between` fonctionne, mais impose un `<select>` dont les bornes sont écrites à la main, page par page.",
+    "verifie": "Relevé sur les jeux d'usage : `…usages-academiques-douzederniersmois` couvre 36 mois, les jeux DNMA sont hebdomadaires depuis 2019, et les jeux d'IPS sont estampillés `rentree_scolaire`. Sur les quatre pages, aucune ne peut exprimer « l'année scolaire 2024-2025 » autrement qu'en écrivant deux dates. Vérifié dans la liste des opérateurs : `eq, in, lt, gte, between, month-of, year-of, lt-day-after, last-n-days, current-year` — aucun ne connaît de découpage à mois de départ paramétrable.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "`operator=\"school-year\"`, ou un `year-start-month` sur les opérateurs d'année existants.",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "C'est la différence structurelle la plus nette entre le portail Éducation et celui de Bercy. Tout le domaine compte en années scolaires ; la bibliothèque ne sait compter qu'en années civiles.",
+      "objectif": "Qu'une année scolaire se déclare, au lieu de s'écrire en deux bornes à la main.",
+      "perennite": "Structurel et pas seulement éducatif : les exercices comptables, les saisons et les campagnes annuelles décalées relèvent du même besoin.",
+      "acceptation": [
+        "`operator=\"school-year\"` avec la valeur `2024` filtre du 1er septembre 2024 au 31 août 2025.",
+        "Le mois de départ est paramétrable, pour couvrir les exercices décalés.",
+        "Le libellé rendu par `dsfr-data-context-tags` dit « 2024-2025 », pas une paire de dates."
+      ]
+    }
+  },
+  {
+    "id": "AM-051",
+    "titre": "Les compteurs de facette n'ont pas de sens sur une table de mesures, et rien ne le dit",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-facets"
+    ],
+    "dataviz": [
+      "edu/dnma-usages-ent",
+      "edu/capytale-usages"
+    ],
+    "constat": "Sur un jeu où une ligne est un **objet** (un établissement, un marché), compter les lignes d'une facette **est** l'information. Sur un jeu où une ligne est une **mesure datée** (un UAI × une semaine), ce compte ne répond à rien et induit en erreur : il se lit comme un volume alors qu'il mesure une densité d'observation. Aucun attribut ne pondère une facette par une mesure, ni ne masque un compte dénué de sens.",
+    "verifie": "Mesuré sur DNMA : la facette `academie` affiche « Lille 326 879 », ce qui **classe Lille devant Versailles alors que Versailles a plus de visites** — le compte porte sur des lignes UAI × semaine, pas sur des usages. Les jeux concernés font 12,35 millions de lignes au total, dont un de 3,9 millions déclaré et jamais lu.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "`weight-field` sur `dsfr-data-facets` (compter une somme plutôt que des lignes), ou à défaut un masquage des compteurs assorti d'un avertissement en Diagnostic.",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "M",
+      "decision": "Accepter",
+      "impact": "Un chiffre faux mais plausible, affiché à côté de chaque valeur de facette, qui inverse un classement.",
+      "objectif": "Qu'une facette compte ce qui a un sens sur le jeu, ou se taise.",
+      "perennite": "Structurel : les portails publient de plus en plus de tables de mesures à côté de leurs tables d'objets. Le banc n'avait jamais rencontré ce modèle avant ce portail.",
+      "acceptation": [
+        "`weight-field=\"nb_visites\"` fait afficher la somme de la mesure au lieu du nombre de lignes.",
+        "Sans `weight-field`, le comportement actuel est inchangé.",
+        "Le Diagnostic signale qu'une facette compte des lignes sur un jeu à plusieurs lignes par entité."
+      ]
+    }
+  },
+  {
+    "id": "BUG-007",
+    "titre": "`replace-fields` est silencieusement sans effet sur une valeur numérique",
+    "type": "bug",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-normalize"
+    ],
+    "dataviz": [
+      "edu/etablissements-euroscol"
+    ],
+    "constat": "`_normalizeRow` ne visite que les valeurs dont `typeof value === 'string'`. Un `replace-fields` posé sur une colonne numérique **ne fait rien, sans erreur ni avertissement**. C'est distinct de #676, qui traite l'échappement `%3A` : ici le problème est le typage. Conséquence pratique : même après #677 (`fold`), une facette bâtie sur des colonnes de drapeaux affichera « 0 » et « 1 » au lieu de libellés.",
+    "verifie": "Relevé sur Euroscol : les six drapeaux de la popup sont typés `int` (0/1) au schéma de l'API. `replace-fields` a été écarté après lecture de `_normalizeRow` dans le source. Deux vérifications annexes : la grammaire de l'attribut sépare par `|` et non par la virgule (PG-022), et l'ODSQL du portail refuse `if()`/`case()` — trois HTTP 400 testés. Le contournement `data-v` + CSS règle l'infobulle mais **pas les facettes**.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Appliquer `replace` / `replace-fields` aux valeurs numériques et booléennes, en comparant sur leur forme chaîne. Demande jumelle : `value-labels` sur `dsfr-data-facets`.",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Un attribut écrit correctement qui ne produit rien, sans le dire — la famille de PG-022.",
+      "objectif": "Qu'un remplacement de valeur fonctionne quel que soit le type de la colonne.",
+      "perennite": "Structurel : les drapeaux 0/1 et les codes numériques sont partout en open data.",
+      "acceptation": [
+        "`replace-fields=\"drapeau:1:Oui | drapeau:0:Non\"` sur une colonne `int` produit « Oui » / « Non ».",
+        "Une facette sur cette colonne affiche les libellés, pas les codes.",
+        "Le CSV exporté conserve la valeur d'origine."
+      ]
+    }
+  },
+  {
+    "id": "BUG-008",
+    "titre": "Cartes thématiques : une clé hors référentiel produit une carte muette, avec zéro écart signalé",
+    "type": "bug",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-chart"
+    ],
+    "dataviz": [
+      "edu/fei-chiffres-cles",
+      "edu/cactus-hameconnage",
+      "edu/capytale-usages",
+      "edu/dnma-usages-ent"
+    ],
+    "constat": "`type=\"map-reg\"` attend des codes **ISO 3166-2** (`IDF`, `GES`, `ARA`… `20R`), pas l'INSEE : un `code_region=\"44\"` rend une carte **entièrement grise**. Et les 30 clés de `map-aca` sont en capitales **non accentuées** (`ORLEANS-TOURS`, `BESANCON`, `REUNION`, sans article) alors que les jeux écrivent « Orléans-Tours », « La Réunion » : `_processMapData` ne fait qu'un `toUpperCase()`. Dans tous les cas, `getSkippedCount()` vaut 0 — le composant ne compte comme ignorée qu'une chaîne vide hors `type=\"map\"`. Le silence est le vrai défaut : une carte partiellement muette est indétectable à l'œil.",
+    "verifie": "⚠️ **Établi par lecture du source `dsfr-data` et du bundle DSFR Chart livré, NON REJOUÉ AU NAVIGATEUR** — DSFR Chart pourrait normaliser de son côté. Ce qui est mesuré, en revanche, ce sont les conséquences : sur Capytale, 3 académies sur 32 tomberaient (`LA REUNION`, `POLYNESIE`, `AEFE` — 224 331 visites, 2 %) ; sur DNMA, 9 sur 35 (les six libellés accentués, plus Étranger, Saint-Pierre-et-Miquelon, Wallis). Deux jeux du même producteur, deux normalisations opposées. **À confirmer au navigateur avant dépôt**, et à scinder : la désaccentuation et le comptage des clés hors découpage relèvent de `dsfr-data` ; les territoires absents du découpage `aca` relèvent de `GouvernementFR/dsfr-chart`.",
+    "statut": "ouvert",
+    "date": "2026-09-10",
+    "contournement": "`replace-fields` en amont, à condition que la colonne soit textuelle (voir BUG-007)."
+  },
+  {
+    "id": "AM-052",
+    "titre": "La fiche servie par le serveur MCP est en retard sur la documentation du dépôt",
+    "type": "amelioration",
+    "severite": "haute",
+    "composants": [
+      "documentation"
+    ],
+    "dataviz": [
+      "edu/offre-formation-langues",
+      "edu/carto-pix-fiche-etablissement",
+      "edu/fei-projets-europeens-donnees"
+    ],
+    "constat": "`get_skill(dsfrDataMap, \"reference\")` sert une référence de `dsfr-data-map-layer` **sans** `refine-on-click`, `context`, `label` ni l'événement `dsfr-data-map-select`, alors que `skills/dsfr-data/references/dsfr-data-map.md` **les documente**. Ce n'est donc pas un manque de documentation : c'est un décalage entre la doc du dépôt et celle que sert le MCP — plus insidieux, parce que le lecteur consciencieux qui interroge le MCP obtient une réponse fausse par omission. Le même décalage frappe `dsfrDataDisplay`, dont la fiche ignore `{{#if}}`, `{{champ:date}}` et les pipes livrés en 0.22.0.",
+    "verifie": "Trois agents du lot 12 s'y sont fait prendre le même jour. L'un a écrit un faux manque (« rien ne relie déclarativement un clic carte à une seconde source ») avant correction ; un autre a écarté une voie native et l'a rouverte après signalement, ce qui a réglé deux défauts qu'il avait classés sans solution ; un troisième a d'abord classé cinq limites qui n'en étaient pas. Vérifié des deux côtés : l'attribut est dans `packages/core/src/components/dsfr-data-map-layer.ts` (propriété l. 209) et dans `skills/dsfr-data/references/dsfr-data-map.md`, absent de la sortie du MCP.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Générer les fiches du MCP depuis le source (ou depuis `skills/`) à chaque publication, et y porter la version dont elles sont issues.",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Une documentation en retard ne ralentit pas : elle fait écrire des critiques fausses. Trois agents en une journée, dont un jusqu'à la rédaction.",
+      "objectif": "Que la fiche servie par le MCP corresponde à la version publiée, et le dise.",
+      "perennite": "Structurel : l'écart se recreusera à chaque version tant que la génération n'est pas automatique.",
+      "acceptation": [
+        "`get_skill(dsfrDataMap, \"reference\")` liste `refine-on-click`, `context`, `label` et `dsfr-data-map-select`.",
+        "Chaque fiche porte le numéro de version dont elle est issue.",
+        "Une vérification de CI échoue si une fiche diverge du source."
+      ]
+    }
+  },
+  {
+    "id": "AM-053",
+    "titre": "Un attribut inconnu d'un composant est ignoré sans aucun avertissement",
+    "type": "amelioration",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-source",
+      "documentation"
+    ],
+    "dataviz": [
+      "edu/offre-formation-langues",
+      "edu/carto-pix-fiche-etablissement"
+    ],
+    "constat": "Une page peut être écrite juste, contre une documentation juste, et ne rien faire — parce que le bundle chargé est antérieur à l'attribut employé. Aucune erreur, aucun avertissement : l'attribut est silencieusement ignoré. C'est la même famille que PG-022 (grammaire fausse silencieuse) et que `max-records` qui tronque sans le dire, mais appliquée à la version elle-même.",
+    "verifie": "Vérifié version par version dans les bundles npm publiés (`npm pack dsfr-data@<v>` puis grep dans `package/dist/`) : `refine-on-click` et `dsfr-data-map-select` sont absents de 0.20.0, 0.21.0 et 0.22.0, présents en 0.23.0. Sur une page chargeant 0.20.0 — c'est-à-dire les 26 pages de ce dépôt — les trois attributs `refine-on-click`, `context` et `label` **ne déclenchent aucune erreur console**.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Un avertissement de développement lorsqu'un composant `dsfr-data` reçoit un attribut qu'il ne connaît pas, et une ligne de Diagnostic le récapitulant.",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "L'écart entre « ça ne marche pas » et « votre version est trop ancienne » est aujourd'hui invisible. C'est le pire mode d'échec pour un intégrateur qui découvre la bibliothèque.",
+      "objectif": "Qu'un attribut inconnu se signale, au lieu de produire du vide.",
+      "perennite": "Structurel, et le coût est faible : la liste des attributs connus est déjà déclarée par chaque composant.",
+      "acceptation": [
+        "Un attribut inconnu produit un avertissement console nommant le composant, l'attribut et la version.",
+        "Le volet Diagnostic récapitule les attributs ignorés de la page.",
+        "Aucun bruit en production (avertissement de développement seulement)."
+      ]
+    }
+  },
+  {
+    "id": "AM-054",
+    "titre": "Aucune maille géographique non française, ni référentiel de noms de pays en français",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-map",
+      "dsfr-data-chart"
+    ],
+    "dataviz": [
+      "edu/fei-projets-europeens-donnees"
+    ],
+    "constat": "Deux manques jumeaux, rencontrés sur la même page. **Un** : `packages/core/geo/` ne livre que `regions.json` et `departements.json` (#688), et le motif « fond administratif » ne parle que de contours français ; le seul recours hors France est `map-monde`, c'est-à-dire le planisphère (voir AM-055). **Deux** : `toIsoA2` convertit l'alpha-3 et le numérique, mais ne connaît **aucun nom de pays**. Or aucun jeu français ne stocke des codes ISO : il stocke « Allemagne », « slovénie ». Chaque réutilisateur réécrit donc la même table d'appariement.",
+    "verifie": "Relevé sur la seule carte non française du portail (44 projets européens). La page d'origine porte une table de **66 lignes** écrite à la main dans son template, qui est la conséquence directe du second manque. Vérifié au source : `toIsoA2` ne prend que des codes ; `geo/` ne contient que les deux fichiers français.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "`geo/europe.json` sur le modèle de #688 (nom français en propriété), et `geo/pays-iso.json` — ou un `code-field-lookup=\"nom-fr\"` qui résolve le nom vers l'ISO alpha-2.",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Une carte d'Europe oblige aujourd'hui l'auteur à produire et maintenir son propre GeoJSON, plus une table de 66 appariements.",
+      "objectif": "Que les données publiques françaises qui parlent de l'étranger trouvent leur maille et leur référentiel.",
+      "perennite": "Structurel mais peu fréquent : une entrée sur 36 dans ce portail. Le coût est faible (deux fichiers).",
+      "acceptation": [
+        "`geo/europe.json` est livré hors bundle, comme les régions et départements (#688).",
+        "Un champ « Allemagne » se résout en `DE` sans table écrite à la main.",
+        "Les noms sont en français et couvrent au moins l'Union et l'Espace économique européen."
+      ]
+    }
+  },
+  {
+    "id": "AM-055",
+    "titre": "`map-monde` rend le planisphère entier : aucun attribut de cadrage",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-chart"
+    ],
+    "dataviz": [
+      "edu/fei-projets-europeens-donnees"
+    ],
+    "constat": "`dsfr-data-chart type=\"map-monde\"` n'a ni attribut de zone, ni de bbox, ni de zoom : une carte consacrée à l'Europe s'affiche sur un planisphère où l'Europe occupe un huitième de la surface. ⚠️ **Relève probablement de `GouvernementFR/dsfr-chart` et non de `dsfr-data`** — à trancher avant dépôt (règle n° 4 du lot 11 : une limite de `map-chart` se remonte chez dsfr-chart).",
+    "verifie": "Relevé sur les 44 projets européens de FEI. La solution retenue dans la fiche contourne `map-monde` entièrement : `dsfr-data-map` + GeoJSON Europe en `geoshape no-interactive`, ce qui redonne le cadrage, les classes (#685) et le clic-pour-filtrer (#681) — mais au prix du GeoJSON à fournir soi-même (voir AM-054).",
+    "statut": "ouvert",
+    "date": "2026-09-10",
+    "contournement": "`dsfr-data-map` + GeoJSON statique, qui est de toute façon meilleur ici : cadrage, légende bornée et sélection."
+  },
+  {
+    "id": "AM-056",
+    "titre": "Changer le champ d'un filtre selon la source, et vider un groupe de filtres exclusifs",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-context",
+      "dsfr-data-context-filter"
+    ],
+    "dataviz": [
+      "edu/portrait-de-territoire-sports"
+    ],
+    "constat": "Un sélecteur de territoire à six mailles (commune, EPCI, bassin de vie, département, région, France) sur neuf jeux se heurte à deux manques. **Un** : la clé pivot change de nom d'un jeu à l'autre et d'une maille à l'autre — `new_code`, `code_geographique`, `code_insee`, `installation_insee`, tantôt un code tantôt un libellé. Un `dsfr-data-context-filter` par jeu écoutant le même `ui` répond au besoin, mais au prix d'une balise par jeu. **Deux** : rien ne permet de **vider un groupe de filtres mutuellement exclusifs** quand on change de maille.",
+    "verifie": "24 couples (jeu, maille) relevés sur « Portrait de territoire », avec le nom de clé de chacun. Le second manque cause un bug **mesuré dans l'original** : après un passage d'un EPCI à « France », l'écran affiche « territoire : France » avec **5 QPV au lieu de 1 584**, parce que la remise à zéro efface `epci_code` mais que le jeu QPV porte `code_epci`. La voie `apply-to` + `field` a été lue au source (`dsfr-data-context.ts:316-322`, `dsfr-data-context-filter.ts:325-328`), **non rejouée au navigateur**.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Un `field-map` par source sur un filtre de contexte, et une notion de groupe de filtres mutuellement exclusifs qui se vide d'un coup.",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "M",
+      "decision": "Accepter",
+      "impact": "Le motif « fiche de territoire » est un genre entier de la donnée publique locale. Le bug de remise à zéro observé dans l'original montre que le contournement manuel est fragile.",
+      "objectif": "Qu'un même choix d'utilisateur adresse des champs de noms différents selon la source, et se retire proprement.",
+      "perennite": "Structurel : les référentiels géographiques ne nomment jamais leurs clés de la même façon.",
+      "acceptation": [
+        "Un filtre unique alimente neuf sources dont les champs portent quatre noms différents.",
+        "Changer de maille vide les filtres des autres mailles, sans en laisser derrière.",
+        "L'URL reflète la maille courante et se recharge à l'identique."
+      ]
+    }
+  },
+  {
+    "id": "AM-057",
+    "titre": "La valeur courante d'un filtre n'est pas interpolable dans du texte",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-context"
+    ],
+    "dataviz": [
+      "edu/portrait-de-territoire-sports"
+    ],
+    "constat": "Une fiche de territoire écrit « Équipements sportifs à **Rennes** » : le libellé choisi doit apparaître dans les titres et les phrases de la page. Aucun moyen déclaratif de reprendre l'état courant d'un contexte hors d'un composant de donnée.",
+    "verifie": "Relevé sur « Portrait de territoire », dont l'original interpole le nom du territoire dans une dizaine de titres et d'intertitres. Contournement possible par un `dsfr-data-display` sur une source d'une ligne, mais c'est une requête pour afficher un mot déjà connu du contexte.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Interpolation de l'état du contexte dans du texte libre (par exemple un composant `dsfr-data-context-value` ou un attribut sur un élément hôte).",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Sans cela, une page filtrée ne peut pas se nommer : les titres restent génériques alors que le contenu est spécifique. C'est aussi un point d'accessibilité (le contexte de la page doit être annoncé).",
+      "objectif": "Reprendre dans une phrase la valeur que l'utilisateur vient de choisir.",
+      "perennite": "Structurel : toute page filtrée a des titres à qualifier.",
+      "acceptation": [
+        "Le libellé du filtre courant s'affiche dans un `<h1>` sans requête supplémentaire.",
+        "L'état vide rend un texte de repli déclaré.",
+        "La valeur affichée est le libellé, pas le code."
+      ]
+    }
+  },
+  {
+    "id": "AM-058",
+    "titre": "Un filtre qui traverse un référentiel (académie → départements)",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-context-filter",
+      "dsfr-data-join"
+    ],
+    "dataviz": [
+      "edu/portrait-de-territoire-sports",
+      "edu/dataviz-ips-ecoles"
+    ],
+    "constat": "Choisir une académie doit filtrer un jeu qui ne porte que le département. La relation est un référentiel stable, mais il faut aujourd'hui charger un jeu d'appariement et joindre côté client pour un filtre que le contexte pourrait résoudre seul.",
+    "verifie": "Relevé sur « Portrait de territoire » (onglet Rectorat) et retrouvé sur les pages d'IPS, où la cascade académie → département → commune est le geste principal. Sur les écoles, la cascade des facettes serveur ne suffit pas : **79 des 103 départements ont plus de 100 communes**, or `/facets` plafonne à 100 valeurs — mesuré.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Résolution d'un filtre à travers une table de correspondance déclarée (le filtre porte une valeur, la source reçoit la liste des valeurs correspondantes).",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "M",
+      "decision": "Étudier",
+      "impact": "Sans cela, toute hiérarchie territoriale absente du jeu impose une jointure côté client.",
+      "objectif": "Filtrer un jeu par un niveau qu'il ne porte pas, via un référentiel.",
+      "perennite": "Structurel : académie/département, EPCI/commune, région/département — les jeux ne portent jamais tous les niveaux.",
+      "acceptation": [
+        "Un filtre « académie » restreint un jeu qui n'a qu'un champ « département ».",
+        "La table de correspondance est déclarée une fois, pas rechargée par filtre.",
+        "Le tag affiche l'académie choisie, pas la liste des départements."
+      ]
+    }
+  },
+  {
+    "id": "AM-059",
+    "titre": "Colorer une cellule selon un seuil dans un tableau",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-list"
+    ],
+    "dataviz": [
+      "edu/capytale-usages",
+      "edu/portrait-de-territoire-sports"
+    ],
+    "constat": "`threshold-*` n'existe que sur `dsfr-data-kpi`. `compute` ne fait pas de condition — et #671, qui l'y ajoutera, produira une **valeur**, pas une classe CSS. CSS ne compare pas de nombres. Un tableau dont une colonne doit signaler un dépassement n'a donc pas de voie déclarative.",
+    "verifie": "Relevé sur Capytale, dont le classement d'académies est écrit en dur avec ses pastilles de seuil (10 lignes de HTML statique, dont trois chiffres déjà faux — vérifiés à l'API). À rapprocher de #671 sans être couvert par lui : il faudra vérifier au jalon si une valeur calculée peut alimenter un attribut de classe.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Un `threshold-*` sur une colonne de `dsfr-data-list`, ou la possibilité d'alimenter un attribut `class` depuis une valeur calculée.",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "S",
+      "decision": "Étudier",
+      "impact": "Un tableau de suivi sans signalement visuel oblige le lecteur à comparer les nombres un à un.",
+      "objectif": "Marquer visuellement une cellule qui dépasse un seuil.",
+      "perennite": "Fréquent sur les tableaux de bord ; dépend de ce que #671 rendra possible.",
+      "acceptation": [
+        "Une colonne dépassant un seuil déclaré reçoit une classe DSFR.",
+        "Le CSV exporté n'est pas affecté.",
+        "L'information portée par la couleur est aussi disponible en texte (RGAA 1.4.1)."
+      ]
+    }
+  },
+  {
+    "id": "AM-060",
+    "titre": "`color-map` n'existe que sur une couche de carte, et sa grammaire sépare par des virgules",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-chart",
+      "dsfr-data-map-layer"
+    ],
+    "dataviz": [
+      "edu/portrait-de-territoire-sports",
+      "edu/generation-2024",
+      "edu/label-egalite-fille-garcon"
+    ],
+    "constat": "Deux points sur le même attribut. **Un** : `color-map` est porté par la couche de carte, pas par `dsfr-data-chart` — une même modalité ne peut donc pas garder sa couleur entre la carte et le graphique de la même page, ce qui est pourtant la première attente d'un tableau de bord. **Deux** : sa grammaire sépare les paires par des virgules, or des valeurs métier en contiennent.",
+    "verifie": "Relevé sur Génération 2024, dont le champ `type` compte **39 valeurs réelles dont plusieurs contiennent une virgule** : la grammaire ne permet pas de les cartographier. Le besoin de couleur partagée carte/graphique vient de « Portrait de territoire » ; le besoin de `color-map` tout court est établi sur le Label égalité, où trois niveaux de labellisation doivent être distingués.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "`color-map` sur `dsfr-data-chart`, et un séparateur qui admette des valeurs à virgule (ou un échappement, cohérent avec #676).",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Une modalité change de couleur entre deux blocs de la même page ; et un jeu dont les libellés contiennent une virgule ne peut pas être coloré du tout.",
+      "objectif": "Qu'un codage couleur soit déclaré une fois et respecté partout.",
+      "perennite": "Structurel : les libellés métier contiennent des virgules, et les tableaux de bord mêlent cartes et graphiques.",
+      "acceptation": [
+        "`color-map` est accepté par `dsfr-data-chart` avec la même grammaire que sur la couche.",
+        "Une valeur contenant une virgule est cartographiable (séparateur ou échappement).",
+        "Une grammaire invalide produit un avertissement, pas un silence (cf. PG-022)."
+      ]
+    }
+  },
+  {
+    "id": "AM-061",
+    "titre": "Contrôles de carte : bascule du fond, plein écran, capture",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-map"
+    ],
+    "dataviz": [
+      "edu/educajou-ecolemap",
+      "edu/annuaire-des-internats"
+    ],
+    "constat": "Trois contrôles usuels d'une carte n'ont pas de composant : le **choix du fond** (six préréglages existent et réagissent à chaud, mais rien ne les expose à l'utilisateur), le **plein écran**, et la **capture** de la carte en image. Les deux derniers sont offerts par Opendatasoft et par la plupart des visualiseurs.",
+    "verifie": "Relevé sur `ecolemap`, dont l'application maison expose le choix du fond, et sur l'annuaire des internats, dont le kebab de bloc propose l'export PNG. Entrée issue de la fusion de deux constats distincts relevés par deux agents (règle « fusionner avant d'ajouter »).",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Un `dsfr-data-map-controls` (ou des attributs sur `dsfr-data-map`) exposant le fond, le plein écran et la capture.",
+    "cadrage": {
+      "priorite": "P4",
+      "effort": "M",
+      "decision": "Étudier",
+      "impact": "Confort ; aucune donnée n'est perdue sans ces contrôles.",
+      "objectif": "Offrir sur une carte les gestes que les utilisateurs y attendent.",
+      "perennite": "Durable mais non bloquant. Le fond est le plus simple : le mécanisme existe déjà.",
+      "acceptation": [
+        "Un contrôle de fond permet de basculer entre les préréglages livrés.",
+        "Le plein écran est atteignable au clavier et annonce son état.",
+        "La capture rend une image contenant la légende."
+      ]
+    }
+  },
+  {
+    "id": "AM-062",
+    "titre": "Aucune position documentée sur l'encastrement en iframe",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "documentation"
+    ],
+    "dataviz": [
+      "edu/equipements-sportifs-milieu-scolaire"
+    ],
+    "constat": "Le portail Sports publie une page dont l'unique raison d'être est d'être encastrée ailleurs (`?headless=true`). Rien dans la documentation de `dsfr-data` ne traite de l'encastrement — ni comme motif à servir, ni comme motif à décourager. Or l'argument du banc d'essai est précisément qu'une dataviz `dsfr-data` **est** le contenu de la page hôte : pas de second document, pas de second moteur, pas de mentions légales perdues en route.",
+    "verifie": "Mesuré, deux chargements comparés avec et sans le paramètre : `?headless=true` vide l'en-tête et le pied — dont **la déclaration d'accessibilité, la gestion des cookies, les CGU, la politique de confidentialité et la licence** —, retire le widget de chat, 4 scripts, **18 feuilles de style**, 70 ressources, 20 Ko et 463 px. Mais il garde le moteur entier : **48 requêtes d'API et 55 Ko à l'identique**, 27 scripts et 13 CSS d'AngularJS/ODS. L'hôte hérite donc de la donnée sans les mentions obligatoires.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "demande": "Une position documentée sur l'encastrement, et sur ce qu'il advient des mentions obligatoires.",
+    "cadrage": {
+      "priorite": "P4",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Une page encastrée qui perd sa déclaration d'accessibilité et ses mentions légales est un problème de conformité, pas d'ergonomie.",
+      "objectif": "Dire ce que la bibliothèque recommande quand une dataviz doit vivre dans un site tiers.",
+      "perennite": "Durable : la demande d'encastrement revient à chaque fois qu'un site institutionnel veut réutiliser une dataviz d'un autre.",
+      "acceptation": [
+        "Le guide dit quand encastrer, quand intégrer les balises, et ce que devient l'accessibilité.",
+        "Le cas « site tiers hors DSFR » est traité explicitement."
+      ]
+    }
+  },
+  {
+    "id": "AM-063",
+    "titre": "Pas d'échelle logarithmique sur un graphique",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-chart"
+    ],
+    "dataviz": [
+      "edu/portrait-de-territoire-sports"
+    ],
+    "constat": "Sur une distribution très étalée, l'échelle linéaire écrase tout ce qui n'est pas le maximum. ⚠️ **Relève probablement de `GouvernementFR/dsfr-chart` et non de `dsfr-data`** — à trancher avant dépôt (règle n° 4 du lot 11).",
+    "verifie": "Relevé sur « Portrait de territoire », dont plusieurs indicateurs varient de un à plusieurs milliers entre une commune rurale et la France entière. Non rejoué au navigateur sur une transposition.",
+    "statut": "ouvert",
+    "date": "2026-09-10"
+  },
+  {
+    "id": "AV-025",
+    "titre": "La légende d'une choroplèthe dérive des bornes réellement appliquées, donc elle ne peut pas mentir",
+    "type": "avantage",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-map-legend",
+      "dsfr-data-map-layer"
+    ],
+    "dataviz": [
+      "edu/hybridation-enseignement-lycee"
+    ],
+    "constat": "`dsfr-data-map-legend` construit ses libellés à partir des classes effectivement calculées (« Jusqu'à 100 000 », « De 100 000 à 300 000 »…, formatés en `Intl fr-FR`). La légende de l'original, écrite à la main, **contredit sa propre configuration sur trois entrées sur quatre**, dont une plage à l'envers (« 1000001 → 300000 »). Le défaut principal de la page devient structurellement impossible, pour une balise.",
+    "verifie": "Comparaison ligne à ligne entre la configuration de la vue ODS (`breaks`) et le texte de sa légende, sur la page « Hybridation de l'enseignement en lycée ». `breaks=\"100000,300000,1000000\"` reproduit les quatre classes à l'identique.",
+    "statut": "acte",
+    "date": "2026-09-10"
+  },
+  {
+    "id": "AV-026",
+    "titre": "Une source par jeu de détail supprime la jointure — et avec elle une famille entière de bugs",
+    "type": "avantage",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-context",
+      "dsfr-data-display"
+    ],
+    "dataviz": [
+      "edu/carto-pix-fiche-etablissement",
+      "edu/tne-dashboard"
+    ],
+    "constat": "Le motif maître-détail d'Opendatasoft joint les jeux **dans le template**, par boucles imbriquées. `dsfr-data` branche une source par jeu sur un contexte commun, qui diffuse la clé au dialecte de chacune. Les trois bugs d'affichage de la fiche PIX (accordéon « profil/formation » toujours vide, accordéon « classe » mélangeant quatre années sans les nommer, 33 requêtes dupliquées) viennent tous du même geste, et deviennent impossibles.",
+    "verifie": "Relevé sur PIX : l'original pose **18 attributs** `refine-on-click-ctxN-*` pour diffuser `uai` à six contextes ; la transposition en pose **3** (`refine-on-click`, `context`, `label`) plus un `dsfr-data-context sources=\"…\"`, et gagne le tag supprimable et l'URL partageable. Mesuré côté requêtes : 39 appels dont 33 facettes identiques dans l'original, contre 5 appels, 0,09–0,21 s et 36 Ko pour les mêmes données.",
+    "statut": "acte",
+    "date": "2026-09-10"
+  },
+  {
+    "id": "AV-027",
+    "titre": "Séparer connexion, tri et filtres évite que deux blocs du même jeu affichent des chiffres différents",
+    "type": "avantage",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-source",
+      "dsfr-data-query",
+      "dsfr-data-context"
+    ],
+    "dataviz": [
+      "edu/tne-dashboard"
+    ],
+    "constat": "Un contexte Opendatasoft porte à la fois la connexion, le tri et les filtres : composer une page multi-jeux force à dupliquer des contextes, et les blocs qui en dépendent **divergent** dès qu'un filtre bouge. `dsfr-data` sépare les trois axes, donc une source unique alimente un KPI et un graphique qui restent d'accord.",
+    "verifie": "Relevé sur le tableau de bord TNE : **6 contextes pour 5 jeux**, dont deux sur le même jeu. Vérifié à l'écran : bouger le sélecteur de période fait diverger le KPI et le graphique alimentés par ce même jeu.",
+    "statut": "acte",
+    "date": "2026-09-10"
+  },
+  {
+    "id": "AV-028",
+    "titre": "Le second clic retire la sélection : un geste que l'original n'a pas",
+    "type": "avantage",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-map-layer",
+      "dsfr-data-context-tags"
+    ],
+    "dataviz": [
+      "edu/fei-projets-europeens-donnees",
+      "edu/carto-pix-fiche-etablissement"
+    ],
+    "constat": "`refine-on-click` retire la sélection au second clic sur le même objet, et `dsfr-data-context-tags` en donne le retrait explicite. Sur la carte d'Europe de FEI, l'original ne propose aucun moyen de désélectionner un pays autrement qu'en rechargeant la page.",
+    "verifie": "Lu au source (`MapSelectFilter.clear()`, `dsfr-data-map-layer.ts`) et confirmé par la fiche PIX, où le retrait est identifié comme le vrai coût du motif maître-détail : sur des points clusterisés, `dsfr-data-context-tags` n'est pas décoratif, il est obligatoire.",
+    "statut": "acte",
+    "date": "2026-09-10"
   }
 ]

@@ -257,10 +257,23 @@ const exportIssues = `# Demandes à déposer sur bmatge/dsfr-data — rapport de
 
 ## Comment lire ce rapport
 
-Chaque demande naît d'une reproduction réelle du banc d'essai
-[open-data-viz](https://github.com/bmatge/open-data-viz) (30 entrées du catalogue de visualisations
-de data.economie.gouv.fr, 24 reproduites) et porte la trace de sa vérification. Le cadrage ajoute ce
-qu'il faut pour décider :
+Chaque demande naît d'une confrontation réelle au banc d'essai
+[open-data-viz](https://github.com/bmatge/open-data-viz) et porte la trace de sa vérification.
+Le banc couvre désormais **deux portails Opendatasoft de l'État** :
+
+- **data.economie.gouv.fr** — 30 entrées du catalogue de visualisations, 24 reproduites (lots 1 à 11) ;
+- **data.education.gouv.fr** — 36 entrées du catalogue de data-visualisations, auditées et transposées
+  sur le papier (lot 12, fiches dans \`docs/portail-education/\`), y compris les cibles hébergées sur
+  \`equipements.sports.gouv.fr\`, \`dataeducation.opendatasoft.com\` et la forge des communs numériques.
+
+Le second portail n'a pas redemandé les fonctions du premier : il a fait apparaître des **asymétries**
+(une capacité présente sur un composant et absente de son voisin), des **silences** (un attribut qui
+ne produit rien sans le dire) et deux écarts de terrain que Bercy ne pouvait pas montrer — l'unité de
+temps du domaine est l'**année scolaire**, et une partie de ses jeux sont des **tables de mesures**
+(une ligne = une entité × une date) là où Bercy publie des tables d'objets, ce qui prive de sens les
+compteurs de facette. Le détail est dans \`docs/portail-education/_RESIDU.md\`.
+
+Le cadrage ajoute ce qu'il faut pour décider :
 
 - **Impact** — ce qui se passe pour l'utilisateur ou l'auteur de page tant que ce n'est pas fait ;
 - **Objectif métier** — ce que la correction permet, formulé côté usage ;
@@ -275,9 +288,24 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-Neuf critiques ont été **retirées** au fil du banc d'essai parce qu'une vérification a montré une voie
-native ou une erreur de notre part (faux problèmes FP-001 à FP-009 du registre) : ce rapport ne liste
-que ce qui a résisté à la vérification.
+\${retours.filter((r) => r.type === 'faux-probleme').length} critiques ont été **retirées** au fil du
+banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
+\`faux-probleme\` du registre), et \${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length}
+autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
+registre, avec ce qui en demeure vrai). Ce rapport ne liste que ce qui a résisté à la vérification.
+
+Un rappel de méthode issu du lot 12, qui vaut avertissement : une capacité peut être **native, publiée,
+et malgré tout absente du bundle chargé** par un site — les 26 pages de ce dépôt ont épinglé
+\`dsfr-data@0.20.0\` pendant que npm servait déjà 0.23.0, puis 0.24.0. Avant de conclure à un manque,
+il faut donc chercher l'attribut dans le source, **puis vérifier dans quelle version publiée il
+apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux constats antérieurs
+(AM-017, AM-039) en sont sortis.
+
+Le dépôt est désormais monté en \`dsfr-data@0.24.0\`, et le registre en tire les conséquences :
+les jalons 0.21.1, 0.22.0, 0.23.0 et 0.24.0 ont comblé ${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length} des constats déposés,
+passés au statut \`corrige\` et sortis de ce rapport. Ce qui reste ci-dessous n'est ni livré ni
+planifié — à deux exceptions près, signalées comme telles : \`fetch-mode="export"\` (#689) et
+\`require-where\` (#690), prévus au jalon v0.25.0.
 
 ## Priorisation
 
