@@ -5,7 +5,7 @@ v0.25.0) a été écrit à partir d'un seul portail. Auditer un second n'a d'int
 qui en sort et qui n'y était pas. Tout ce qui est déjà natif ou déjà planifié est écarté ici
 et documenté dans `_CIBLE-0.25.md`.
 
-Inventaire provisoire au 2026-09-10, une entrée par constat, avec la page qui l'établit et
+Inventaire au 2026-09-10, les 36 entrées du catalogue traitées, une entrée par constat, avec la page qui l'établit et
 l'observation qui le fonde. **Rien n'entre ici sans observation** (règle du dépôt : pas de
 champ `verifie`, pas d'entrée). Les entrées marquées ⚠️ ne sont pas encore rejouées au
 navigateur et ne doivent pas être déposées en l'état.
@@ -23,6 +23,12 @@ n'est pas faisable en balises, alors que « carte → détail » l'est.
 C'est un motif au moins aussi courant que le second, et il est le seul disponible quand la
 donnée n'est pas géographique. Le portail Éducation en compte plusieurs (annuaires, palmarès,
 fiches d'établissement atteintes autrement que par la carte).
+
+**Le manque vaut aussi pour `dsfr-data-chart`** (`portrait-de-territoire-sports.md`, vérifié :
+`refine-on-click` n'apparaît que dans `dsfr-data-map-layer.ts`). Or « cliquer une barre pour
+filtrer » est le geste de base d'un tableau de bord, et l'original le propose. La demande
+porte donc sur **trois composants** : `dsfr-data-list` (une ligne), `dsfr-data-display` (une
+fiche), `dsfr-data-chart` (une barre, un secteur).
 
 ## 2. Cumul et agrégation temporelle hors carte
 
@@ -193,6 +199,95 @@ ligne = un objet », où le compte **est** l'information. Trois jeux de ce porta
 *Demande : `weight-field` sur `dsfr-data-facets`, ou un masquage automatique des compteurs
 assorti d'un avertissement.*
 
+## 17. Un ratio dont les deux membres viennent de deux sources différentes
+
+**Établi par** : `portrait-de-territoire-sports.md` (13 indicateurs sur 40) et
+`equipements-sportifs-milieu-scolaire.md` — **deux pages sur deux**.
+
+Le motif est « nombre d'équipements ÷ population » : le numérateur vient de `data-es`, le
+dénominateur de `insee-2020-geoapi-2023`. **#673 ne le couvre pas** : le corps de l'issue est
+explicite, le ratio y est **mono-source**. Un `dsfr-data-join` rapprocherait les deux jeux,
+mais à la maille de la ligne, pas à celle de l'agrégat.
+
+C'est le motif fondamental de tout indicateur « par habitant », « par élève », « par
+établissement » — donc de toute comparaison entre territoires de tailles différentes.
+*Demande : un ratio dont les deux agrégats sont adressés à deux sources.*
+
+## 18. Changer le champ d'un filtre selon la source, et regrouper des filtres exclusifs
+
+**Établi par** : `portrait-de-territoire-sports.md`.
+
+Le sélecteur de territoire a **six mailles** (commune, EPCI, bassin de vie, département,
+région, France) sur **neuf jeux**, et la clé pivot **change de nom d'un jeu à l'autre et d'une
+maille à l'autre** : `new_code`, `code_geographique`, `code_insee`, `installation_insee` —
+tantôt un code, tantôt un libellé, 24 couples relevés. Un `dsfr-data-context-filter` par jeu
+écoutant le même `ui` répond au premier besoin (`apply-to` + `field`, lu au source, non rejoué),
+mais rien ne permet de **vider un groupe de filtres exclusifs** quand on change de maille : le
+bug n° 5 de l'original vient précisément de là (passer d'un EPCI à « France » laisse un
+`code_epci` derrière et affiche 5 QPV au lieu de 1 584).
+*Demande : `field-map` par source sur un filtre, et un groupe de filtres mutuellement exclusifs.*
+
+## 19. La valeur courante d'un filtre n'est pas interpolable dans du texte
+
+**Établi par** : `portrait-de-territoire-sports.md`.
+
+Une fiche de territoire écrit « Équipements sportifs à **Rennes** » : le libellé choisi doit
+apparaître dans les titres et les phrases. Aucun moyen déclaratif de reprendre la valeur
+courante d'un filtre hors d'un composant de donnée.
+*Demande : interpolation de l'état du contexte dans du texte libre.*
+
+## 20. Un filtre qui traverse un référentiel
+
+**Établi par** : `portrait-de-territoire-sports.md`.
+
+Choisir une académie doit filtrer sur ses départements, quand le jeu ne porte que le
+département. Il faut aujourd'hui un jeu d'appariement et une jointure côté client, alors que
+la relation est un référentiel stable.
+*Demande : résolution d'un filtre à travers une table de correspondance.*
+
+## 21. Aucun diagnostic quand un champ n'existe pas dans le schéma
+
+**Établi par** : `portrait-de-territoire-sports.md` (onglet « Rectorat » entièrement vide,
+facette sur un `aca_nom` absent de `data-es`), `fei-chiffres-cles.md` et `cactus-hameconnage.md`
+(carte grise, `getSkippedCount() = 0`), `generation-2024.md` (`color-by-field` visant un champ
+nommé autrement), `cnr-education.md` (`color-by-field="avancement_du_projet"`, inexistant).
+
+**Cinq pages, quatre agents, le même mode d'échec** : un attribut désigne un champ qui n'existe
+pas, et il ne se passe rien — pas d'erreur, pas d'avertissement, pas de compteur d'écarts. Le
+volet Diagnostic (#602, #693) existe désormais : le champ inexistant y a sa place naturelle.
+*Demande : signaler en Diagnostic tout attribut désignant un champ absent du schéma de la
+source.* C'est, de tout le résidu, le constat le mieux étayé.
+
+## 22. `color-map` sur un graphique
+
+**Établi par** : `portrait-de-territoire-sports.md`, recoupé par `generation-2024.md`.
+
+`color-map` existe sur une couche de carte, pas sur `dsfr-data-chart` : une même modalité ne
+peut pas garder sa couleur entre la carte et le graphique de la même page. À rapprocher de la
+grammaire de `color-map`, dont le séparateur est la virgule alors que des valeurs métier en
+contiennent (relevé sur `generation-2024.md`, 39 valeurs de `type`).
+
+## 23. Encastrement : une doctrine manque
+
+**Établi par** : `equipements-sportifs-milieu-scolaire.md`.
+
+`?headless=true` mesuré, deux chargements comparés : le paramètre retire le chrome (en-tête,
+pied — dont **la déclaration d'accessibilité, les CGU, la politique de confidentialité et la
+licence** —, le widget de chat, 18 feuilles de style, 70 ressources) **mais garde le moteur
+entier** : 48 requêtes d'API et 55 Ko à l'identique, 27 scripts et 13 CSS d'AngularJS/ODS.
+
+La page n'existe que pour être encastrée, et **l'hôte hérite de la donnée sans les mentions
+légales**. Une dataviz `dsfr-data` n'a pas ce problème puisqu'elle *est* le contenu de la page
+hôte — mais rien au backlog ne traite de l'encastrement, ni comme motif à servir, ni comme
+motif à décourager.
+*Demande : une position documentée sur l'encastrement (et ce qu'il advient des mentions
+obligatoires).*
+
+## 24. Échelle logarithmique ⚠️
+
+**Établi par** : `portrait-de-territoire-sports.md`. **À trancher** : relève probablement de
+`GouvernementFR/dsfr-chart` et non de `dsfr-data`.
+
 ---
 
 ## Ce que ce résidu dit du banc d'essai
@@ -209,6 +304,13 @@ l'édifice est inégal.
 **Ce qui tient au domaine** (entrées 13, 14, 15) : l'éducation compte en **années scolaires**,
 et un de ses jeux regarde vers l'**Europe**. Ni l'un ni l'autre n'existait à Bercy. Ce ne sont
 pas des cas exotiques — l'année scolaire est l'unité de temps de tout le portail.
+
+**Ce qui tient au maître-détail** (entrées 1, 17, 18, 19, 20) : le portail Éducation compose
+des pages où un choix commande N sources — une fiche d'établissement à cinq jeux, un portrait
+de territoire à neuf. Bercy était très majoritairement mono-jeu. Le bus de contexte de 0.23.0
+est la bonne fondation ; ce qui manque est autour : sélectionner depuis autre chose qu'une
+carte, adresser un champ différent par source, calculer un ratio entre deux sources, reprendre
+le libellé choisi dans une phrase.
 
 **Ce qui tient au modèle de donnée** (entrée 16, et l'entrée 7 par ricochet) : Bercy publie des
 **objets** (une ligne = une entreprise, un point de vente, un marché), où compter les lignes
