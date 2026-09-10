@@ -147,6 +147,22 @@ Utile :
 
 Certaines pages portent leur propre `ctx-apikey` : la relever dans leur `$scope.blocks`.
 
+## ⚠️ La cible est 0.25.0, et le livrable est le résidu — lire `_CIBLE-0.25.md`
+
+**Avant d'écrire la section « Limites » d'une fiche, lire `_CIBLE-0.25.md`.** Il donne l'état
+du backlog `dsfr-data` au 2026-09-10 (0.23.0 publiée, neuf issues au jalon v0.24.0, quatre au
+jalon v0.25.0) et les quatre verdicts à ne pas confondre : natif / natif mais postérieur à la
+version épinglée / prévu à un jalon / manque réel.
+
+Mais attention au contresens inverse : **ce document ne sert pas à conclure que tout est déjà
+prévu.** Le backlog a été écrit à partir d'un seul portail (Bercy). Toute la raison d'auditer
+data.education.gouv.fr est de trouver ce qu'un **second** portail révèle et que le premier n'a
+pas montré. Le résidu — ce qui n'est ni natif ni planifié — est le produit du lot.
+
+Donc : présumer *couvert* est aussi fautif que présumer *impossible*. À la moindre hésitation,
+écrire le constat avec son observation ; une demande en double se fusionne au registre, une
+demande jamais écrite est perdue.
+
 ## Version de la bibliothèque : lire le source ET vérifier ce qui est publié
 
 Le dépôt épingle **`dsfr-data@0.20.0`** sur ses 26 pages, mais la version publiée sur npm au

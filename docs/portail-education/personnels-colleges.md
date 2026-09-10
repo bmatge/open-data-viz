@@ -527,7 +527,7 @@ les surcouches dynamiques).
 | kebab « Exporter au format PNG/CSV » | `databox databox-download databox-screenshot databox-source="DEPP — fr-en-indicateurs_personnels_etablissements2d, rentrée 2024"` sur chaque `dsfr-data-chart` |
 | kebab « View dataset source » | `databox-actions='["Voir le jeu de données"]'` ou un lien DSFR sous le bloc |
 | — (absent de l'original) | `<dsfr-data-a11y for="…" source="…" table download>` sous chaque graphique et chaque carte : les 18 blocs de l'original n'ont **aucune** alternative |
-| — (absent de l'original) | `<dsfr-data-list source="f" columns="nom_de_l_etablissement, nature_de_l_etablissement, secteur, libelle_departement, etp_total, etp_enseignants_hommes_et_femmes" search sort pagination="20">` : la donnée par établissement que la page promet « bientôt » et qui est déjà dans le jeu |
+| — (absent de l'original) | `<dsfr-data-list source="f" columns="nom_de_l_etablissement, nature_de_l_etablissement, secteur, libelle_departement, etp_total, etp_enseignants_hommes_et_femmes" search sort="etp_total:desc" pagination="20">` : la donnée par établissement que la page promet « bientôt » et qui est déjà dans le jeu. **Attention** : `sort` de `dsfr-data-list` est une **expression de tri par défaut** (`"champ:desc"`), pas un booléen — un `sort` nu ne trie rien (vérifié dans le source, `dsfr-data-list.ts` l. 88-90) ; et les formes françaises `colonnes`/`recherche`/`filtres`/`tri` sont dépréciées |
 | — (absent de l'original) | `<dsfr-data-map>` sur `geolocalisation` : 10 697 points géolocalisés inutilisés. **`max-items` à relever explicitement** (défaut 5 000 < 10 697, PG-013) |
 | 5 `<h1>` | `heading-level="2"` sur les `dsfr-data-chart` (défaut 3) et des `<h2>` HTML pour les trois sections |
 
@@ -700,7 +700,7 @@ les surcouches dynamiques).
       <h2 class="fr-h4 fr-mt-4w">Les collèges un par un</h2>
       <dsfr-data-list source="f"
         columns="nom_de_l_etablissement, nature_de_l_etablissement, secteur, libelle_departement, etp_total, etp_enseignants_hommes_et_femmes"
-        search sort pagination="20"></dsfr-data-list>
+        search sort="etp_total:desc" pagination="20"></dsfr-data-list>
     </div>
   </div>
 </div>

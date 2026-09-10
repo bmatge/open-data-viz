@@ -351,11 +351,17 @@ recalcul instantané de tous les blocs sur une sélection.
 Le mode « une requête agrégée par bloc » de l'original (11 requêtes) n'a aucun intérêt ici ; il n'en
 aurait que si le jeu grossissait d'un ordre de grandeur.
 
-Deux points de vigilance mesurés :
+Trois points de vigilance mesurés :
 - `max-records` par défaut de l'adaptateur ODS = 1 000 (`CLAUDE.md`). 904 passe, **mais de justesse** :
   le jeu est mis à jour et le franchira. **Poser `max-records="20000"` explicitement.**
 - `/exports/json?select=count(*) as n` **sans** `group_by` renvoie la valeur **904 fois** (vérifié).
   Sur `/records`, `limit=1` suffit. Le piège du `CLAUDE.md` vaut donc surtout pour l'endpoint d'export.
+- **`count(distinct …)` d'ODS est approximatif.** `select=count(distinct uai) as n&limit=1` renvoie
+  **877**, alors que le dénombrement exact sur l'export complet donne **887** (vérifié en Python sur les
+  904 lignes) : une erreur de 10, soit 1,1 %. Pour un dénombrement de valeurs distinctes qui doit être
+  juste, il faut donc soit un `group_by` dont on compte les lignes (c'est déjà le contournement
+  documenté du `CLAUDE.md` pour l'absence d'agrégat `distinct` côté `dsfr-data`), soit le comptage
+  côté client — pas `count(distinct)`.
 
 ### Le point réutilisable : comment calculer un taux avec `dsfr-data`
 
