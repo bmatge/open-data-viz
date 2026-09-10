@@ -351,7 +351,7 @@ Tout attribut non vérifié est signalé comme tel.
 | `<ods-dataset-context context="ctx1,…,ctx6">` — **6 contextes, 1 jeu** | **un seul `<dsfr-data-source>`** | `api-type="opendatasoft"`, `base-url="https://data.education.gouv.fr"`, `dataset-id="fr-en-ulis-tfv"`, `api-key-ref` (clé de lecture du portail). 52 lignes : pas de `server-side`, pas de `max-records` (défaut adaptateur 1 000 > 52). Les six contextes ODS n'ont pas de raison d'être : un contexte par couche est un artefact du modèle ODS, pas un besoin. |
 | `ctx6` (source non filtrée des listes de facettes) | — | Supprimé. `dsfr-data-facets` en mode local recalcule les valeurs **et les compteurs** selon les autres sélections (cascade native, `attributeGrammars` § facettes). C'est exactement ce que ctx6 empêchait. |
 | `ctx5` + `ods-results-max="1"` + tiroir HTML (fiche de détail) | `<dsfr-data-map-popup>` + `<template>` | `mode="panel-right"`, `title-field="nom_etablissement"`, `width`. Le `<template>` interpole `{{champ}}`, `{{champ\|défaut}}`, `{{lien:url}}` et surtout **`{{#if champ}}…{{/if}}`** — qui règle le défaut n° 7 (liens morts) en une ligne. Pas de sixième contexte. |
-| `refine-on-click-context="ctx5" …-context-field="uai"` | `refine-on-click="uai"` sur `<dsfr-data-map-layer>` (+ `context`, `label`) | **Existe dans le source** (`packages/core/src/components/dsfr-data-map-layer.ts`, `@property attribute:'refine-on-click'`, événement `dsfr-data-map-select`), mais le changeset `.changeset/map-layer-refine-on-click.md` **n'est pas dans le CHANGELOG publié** (npm : 0.22.0) : **pas encore disponible au CDN au 2026-09-10**. De toute façon inutile ici : le popup fait le travail sans filtrer la source. |
+| `refine-on-click-context="ctx5" …-context-field="uai"` | `refine-on-click="uai"` sur `<dsfr-data-map-layer>` (+ `context`, `label`) | **Natif et publié depuis la 0.23.0** (#681, ADR-104) : la couche émet `dsfr-data-map-select` `{record, layerId, selected}` au clic et, avec `context="id"`, s'enregistre comme filtre `eq` d'un `dsfr-data-context` — les autres vues se filtrent, un tag apparaît dans `context-tags`, l'URL est portée par le contexte, un second clic retire la sélection. Vérifié dans les bundles publiés : absent en 0.20.0 / 0.21.0 / 0.22.0, **présent en 0.23.0** (`latest`). **Le dépôt épingle encore `dsfr-data@0.20.0` sur ses 26 pages : c'est une montée de version à faire côté banc d'essai, pas un manque de la bibliothèque.** Ici on ne s'en sert pas pour afficher la fiche — le popup le fait mieux — mais pour lier la carte au tableau : voir « Limites », point 3. |
 | **4 × `<ods-map-layer>`** distinguées par `color` + `picto` + refine `type_etablissement` | **1 seule `<dsfr-data-map-layer>`** | `type="marker"`, `geo-field="position"`, `color-field="type_etablissement"`, `color-map="Ecole:#000091,Collège:#E18B76,Lycée:#46724B,EREA:#D8C634"` (**paires séparées par des virgules**, `valeur:#couleur`), `color` = repli. Une couche au lieu de quatre : les quatre partitions d'un champ mono-valué sont un **encodage catégoriel**, pas quatre couches. |
 | `picto="playground\|administration\|college\|social"` | **aucun équivalent** | Vérifié au source : `type="marker"` rend toujours `<span class="fr-icon-map-pin-2-fill" style="color: …">` — une épingle DSFR unique, colorée. Il n'y a **pas d'attribut d'icône** sur `dsfr-data-map-layer`. **Écart assumé, pas un manque** : quatre pictogrammes non légendés sont moins lisibles que quatre couleurs légendées, et le DSFR impose son épingle. |
 | `display-legend="false"` (pas de légende) | `<dsfr-data-map-legend>` | `for="<id de la couche>"`, `label="Type d'établissement"`. Rend une liste DSFR « pastille + texte », **une entrée par paire de `color-map`**, pastille `aria-hidden`, le texte porte le sens (RGAA). Se rafraîchit à chaque rendu. C'est la légende que l'original ne peut pas avoir. |
@@ -490,14 +490,33 @@ Tout attribut non vérifié est signalé comme tel.
    et `width="380px"` donnent le même geste. `width` accepte une valeur CSS libre.
    **Non vérifié au navigateur** : le rendu du voile et le comportement à 400 px de large.
 
-3. **`refine-on-click` existe mais n'est pas publié.**
-   Obstacle : reproduire littéralement le mécanisme ODS (clic → refine d'un contexte → tout le
-   reste de la page se filtre) suppose `refine-on-click="uai"` + `context="…"`, présents dans le
-   source (avec l'événement `dsfr-data-map-select` et un `label` pour le tag) mais dont le
-   changeset n'est pas encore au CHANGELOG publié (npm 0.22.0 au 2026-09-10). Voie retenue :
-   **ne pas le reproduire** — le besoin réel est « afficher la fiche », et
-   `dsfr-data-map-popup` le fait sans filtrer quoi que ce soit ni consommer un contexte de plus.
-   Le mécanisme ODS était un contournement de l'absence de popup riche, pas une intention.
+3. **`refine-on-click` : natif depuis la 0.23.0 — ce n'est pas une limite, c'est une montée
+   de version du banc d'essai.**
+   Le mécanisme ODS « clic sur un point → refine d'un contexte → tout le reste de la page se
+   filtre » a un équivalent natif complet : `refine-on-click="uai"` + `context="…"` + `label`
+   sur `<dsfr-data-map-layer>`, avec l'événement `dsfr-data-map-select`
+   `{record, layerId, selected}`, le tag supprimable dans `dsfr-data-context-tags`, l'URL
+   portée par le contexte et le second clic qui retire la sélection (#681, ADR-104). Sans
+   `context`, la clause `eq` part directement à `source` sous le `whereKey`
+   `map-select-<id>`.
+   **État de publication, vérifié bundle par bundle** (`npm pack dsfr-data@<v>` puis lecture
+   de `package/dist/dsfr-data.map.esm.js`) : **absent en 0.20.0, 0.21.0 et 0.22.0, présent en
+   0.23.0**, qui est le `latest` npm ; plus aucun changeset en attente dans le dépôt
+   `dsfr-data`. **Le banc d'essai, lui, épingle encore `dsfr-data@0.20.0` sur ses 26 pages**
+   (`grep -rho "dsfr-data@[0-9.]*" public/` → 26 occurrences de `0.20.0`) : l'attribut est
+   donc indisponible *pour ce dépôt tant qu'il n'aura pas monté sa version*, ce qui est un
+   travail de banc d'essai et **pas un manque de la bibliothèque**.
+   **Ce que ça change ici.** Pour *afficher la fiche*, rien : `dsfr-data-map-popup` reste le
+   bon outil, il montre le détail sans filtrer quoi que ce soit ni consommer un contexte de
+   plus — le `ctx5` d'ODS était un contournement de l'absence de popup riche, pas une
+   intention. En revanche la voie s'ouvre pour ce que l'original ne sait pas faire :
+   **lier la carte au tableau**. En posant `refine-on-click="uai" context="sel"` sur la couche
+   et un `<dsfr-data-context id="sel" sources="ulis">`, cliquer une épingle réduit le
+   `dsfr-data-list` (et les KPI) au seul établissement retenu, avec un tag supprimable et une
+   URL partageable — ce qui répond exactement au défaut n° 12 de l'original (« l'URL n'est pas
+   un état partageable ») et au défaut n° 1 (la donnée n'est atteignable que point par point).
+   **Non vérifié au navigateur** : cette liaison suppose une montée en 0.23.0 du dépôt, et
+   l'interaction entre le filtre de contexte et les facettes reste à observer.
 
 4. **Le KPI « nombre de départements couverts ».**
    Obstacle : je n'ai **pas relu** la liste des agrégats acceptés par `value` de

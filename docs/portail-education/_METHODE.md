@@ -105,6 +105,31 @@ Utile :
 
 Certaines pages portent leur propre `ctx-apikey` : la relever dans leur `$scope.blocks`.
 
+## Version de la bibliothèque : lire le source ET vérifier ce qui est publié
+
+Le dépôt épingle **`dsfr-data@0.20.0`** sur ses 26 pages, mais la version publiée sur npm au
+2026-09-10 est **0.23.0**. Une capacité présente dans `~/Developer/GitHub/dsfr-data` peut donc
+être native, publiée, et malgré tout absente des pages du dépôt.
+
+**Cas établi, vérifié version par version** : `refine-on-click` et l'événement
+`dsfr-data-map-select` (couche `dsfr-data-map-layer`, #681 / ADR-104) sont **absents de 0.20.0,
+0.21.0 et 0.22.0, et présents en 0.23.0** — contrôlé dans le bundle publié
+(`dist/dsfr-data.map.esm.js` du tarball npm), pas seulement dans le source. Ils sont en
+revanche **absents de la fiche de référence** servie par `get_skill(dsfrDataMap, "reference")`,
+ce qui a induit deux agents en erreur le même jour.
+
+Règle qui en découle, à appliquer avant d'écrire qu'une capacité manque :
+1. Chercher l'attribut dans le **source** (`packages/core/src/components/`), pas seulement dans
+   la fiche du composant — la fiche peut être en retard sur le code.
+2. Vérifier dans **quelle version publiée** il apparaît :
+   `npm pack dsfr-data@<v>` puis `grep` dans `package/dist/`. Ne pas se fier à un numéro de
+   version lu de mémoire ni à un changeset local.
+3. Distinguer alors trois verdicts, qui n'ont pas la même valeur :
+   - **capacité native** (présente dans la version publiée) → toute critique est un faux problème ;
+   - **capacité native mais postérieure à la version épinglée** → ce n'est pas un manque de la
+     bibliothèque, c'est une montée de version à faire dans le dépôt (à signaler comme telle) ;
+   - **capacité absente du source** → là seulement, c'est une demande à la bibliothèque.
+
 ## Pièges déjà payés sur le portail Bercy (ne pas les repayer)
 
 Lire `../../CLAUDE.md`, section « Pièges déjà payés » — 30 lignes, toutes applicables ici.

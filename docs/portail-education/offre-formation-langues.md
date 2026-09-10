@@ -385,7 +385,9 @@ est signalé.
 | Original Opendatasoft | `dsfr-data` | Attributs nécessaires |
 |---|---|---|
 | `<ods-dataset-context context="offredeformation" …-dataset="fr-en-offre-langues-2d">` | `<dsfr-data-source>` | `api-type="opendatasoft"`, `base-url="https://data.education.gouv.fr"`, `dataset-id="fr-en-offre-langues-2d"`, `server-side`, `page-size`. Le portail répond en anonyme : **pas d'`api-key-ref`**. |
-| Le second contexte `offredeformationpourdetail` | **aucun** | Inutile. La popup de `dsfr-data-map-layer` reçoit le record cliqué ; le regroupement LV1/LV2/LV3/LCA se fait sur les lignes déjà chargées, sans second contexte ni second aller-retour. C'est un artefact du modèle ODS (un contexte = un jeu de paramètres). |
+| Le second contexte `offredeformationpourdetail` | `<dsfr-data-source>` n° 2 + `<dsfr-data-context>` | Il **garde** sa raison d'être : la fiche a besoin des ~22 lignes de l'établissement, pas du record cliqué. Une seconde source sur le même jeu, prise pour cible par un `<dsfr-data-context id="fiche" sources="…" url-sync>`. |
+| `refine-on-click-context="[offredeformationpourdetail]"` + `…-context-field="uai"` + `…-map-field="uai"` + `…-replace-refine="true"` (**4 attributs**) | **`<dsfr-data-map-layer refine-on-click context label>`** (**3 attributs**) | `refine-on-click="uai"`, `context="fiche"`, `label="Établissement"`. **Exige `dsfr-data` ≥ 0.23.0** (absent de 0.20.0/0.21.0/0.22.0, vérifié dans les bundles npm) — or le banc d'essai épinge 0.20.0 sur ses 26 pages : en 0.20.0 les trois attributs sont **ignorés en silence**. Vérifié dans le source (`packages/core/src/components/dsfr-data-map-layer.ts`, propriété l. 209, JSDoc l. 89-95 et 134-138 ; #681 / ADR-104) et dans `skills/dsfr-data/references/dsfr-data-map.md` l. 56-58 et 459-481. Premier clic = filtre `eq`, second clic sur le même objet = retrait, autre objet = remplacement — c'est exactement le `replace-refine="true"` de l'original. Le contexte diffuse à toutes ses `sources` au dialecte de chacune, porte l'URL (`url-sync`) et un tag supprimable. **Piège documenté** : ne **pas** lister la source de la carte dans les `sources` du contexte, sinon la carte se filtre elle-même et il ne reste que l'épingle cliquée. |
+| — (absent de l'original) | `<dsfr-data-context-tags for="fiche">` | Le tag « Établissement : 6200011T », supprimable d'un clic — **la fermeture de fiche que l'original n'a pas** (défaut n° 9). Ici `for` désigne bien un `dsfr-data-context`, qui existe : la réserve émise sur la fiche IPS Collèges ne s'applique pas. |
 | `<ods-select>` × 5 (région, académie, département, langues, enseignements) | **un seul** `<dsfr-data-facets>` | `server-facets` (la cascade native), `fields="region, academie, departement, langues, enseignements, type_d_etablissement, secteur_de_l_etablissement"` (**virgules**), `labels="region:Région \| academie:Académie \| …"` (**barres**), `display="region:multiselect \| academie:multiselect \| departement:multiselect \| langues:multiselect \| enseignements:checkbox \| …"` (**barres**), `disjunctive="langues, enseignements"` (virgules), `sort="count:desc"`, `cols="…"`. `fields` est **obligatoire** en `server-facets`. |
 | Multi-sélection des `ods-select` | `display="champ:multiselect"` | Le tableau de `attributeGrammars` est explicite : `multiselect` = dropdown repliable avec cases à cocher et « tout sélectionner » — c'est l'équivalent exact de l'`ods-select multiple="true"`. **`radio` serait faux** (choix unique) et **`select` aussi** (choix unique en ligne). |
 | Le champ « Filtre » dans chaque panneau | `searchable="departement, langues, commune"` | Barre de recherche par facette (virgules). |
@@ -396,7 +398,8 @@ est signalé.
 | `<ods-map-layer color-by-field="secteur" color-categories="{…}" display="categories">` | `<dsfr-data-map-layer>` | `source`, `type="marker"`, `geo-field="position"`, **`color-field="secteur_de_l_etablissement"`**, **`color-map="Public:#18753C,Privé:#E4794A"`** (paires `valeur:#couleur` séparées par des **virgules** — pas de barres ici), `cluster`, `max-items="20000"`, `tooltip-field="libelle"`. Le champ correct fait fonctionner ce que l'original annonce sans le faire. |
 | L'encadré « Secteur / Public / Privé » écrit à la main | `<dsfr-data-map-legend>` | `for`, `label="Secteur"`. `getLegendEntries()` retourne les paires de `color-map` : **la légende est dérivée du rendu**, donc elle ne peut pas mentir. C'est exactement le défaut n° 3 qui disparaît par construction. |
 | `show-if="region||academie||departement"` | **rien** | Pas d'équivalent, et il n'en faut pas : avec `cluster` et `server-side`, la carte peut afficher la France entière dès le chargement. Le `show-if` est un contournement de performance d'ODS, pas une fonctionnalité. |
-| `refine-on-click` + colonne de droite | `<dsfr-data-map-popup>` + `<template>` | `mode="panel-right"`, `title-field="libelle"`, `width="380px"`. Le clic fournit le record ; **mais** un record = une ligne = **une** langue, pas les quatre cartes LV1/LV2/LV3/LCA. Cf. « Limites » n° 1. |
+| La colonne de droite, cartes LV1 / LV2 / LV3 / LCA | **4 × (`<dsfr-data-source>` + `<dsfr-data-display>`)** | Quatre sources cibles du contexte `fiche`, chacune portant son `where="enseignements = 'LV1'"` statique ; le contexte y superpose le filtre `uai` du clic (`getEffectiveWhere` : « static + all dynamic overlays merged »). Chaque `dsfr-data-display` rend les langues de son niveau, `cols="1"`, template `{{langues}}`. C'est le décalque exact des quatre blocs `ng-if` de l'original, en déclaratif. |
+| L'infobulle (absente : `tooltip-disabled`) | `<dsfr-data-map-popup>` + `<template>` | `mode="popup"`, `title-field="libelle"`. Complémentaire de la fiche, pas concurrente : la popup montre la ligne cliquée, la colonne de droite montre l'établissement entier. |
 | `tooltip-disabled="true"` | `tooltip-field="libelle"` | On fait l'inverse : un survol qui nomme l'établissement, ce que l'original refuse. |
 | La loupe « Rechercher un lieu » | **écart assumé** | Aucun attribut de géocodage dans la référence de `dsfr-data-map`. Substitut fonctionnel : la facette `commune` en `multiselect searchable`, plus lisible qu'un géocodeur pour ce besoin. |
 | Le dessin de zone (polygone / rectangle / cercle) | **écart assumé** | Aucun attribut de dessin. Remplacé par les facettes géographiques. |
@@ -417,6 +420,23 @@ est signalé.
   where="position is not null"
   server-side page-size="100">
 </dsfr-data-source>
+
+<!-- Quatre sources de fiche, une par niveau, sur le MÊME jeu. Chacune porte son
+     `where` statique ; le contexte y superpose le filtre `uai` du clic carte
+     (dsfr-data-source.getEffectiveWhere : « static + all dynamic overlays merged »).
+     La source `langues` de la carte n'est PAS listée dans `sources` : sinon la carte
+     se filtrerait elle-même et il ne resterait que l'épingle cliquée (JSDoc de
+     refine-on-click, l. 134-138). -->
+<dsfr-data-source id="lv1" api-type="opendatasoft" base-url="https://data.education.gouv.fr"
+  dataset-id="fr-en-offre-langues-2d" where="enseignements = 'LV1'" order-by="langues"></dsfr-data-source>
+<dsfr-data-source id="lv2" api-type="opendatasoft" base-url="https://data.education.gouv.fr"
+  dataset-id="fr-en-offre-langues-2d" where="enseignements = 'LV2'" order-by="langues"></dsfr-data-source>
+<dsfr-data-source id="lv3" api-type="opendatasoft" base-url="https://data.education.gouv.fr"
+  dataset-id="fr-en-offre-langues-2d" where="enseignements = 'LV3'" order-by="langues"></dsfr-data-source>
+<dsfr-data-source id="lca" api-type="opendatasoft" base-url="https://data.education.gouv.fr"
+  dataset-id="fr-en-offre-langues-2d" where="enseignements = 'LCA'" order-by="langues"></dsfr-data-source>
+
+<dsfr-data-context id="fiche" sources="lv1, lv2, lv3, lca" url-sync></dsfr-data-context>
 
 <div class="fr-container fr-mt-6w">
   <h1>Offre de langues dans les collèges et lycées</h1>
@@ -450,21 +470,26 @@ est signalé.
     center="46.6,2.3" zoom="6" height="640px"
     tiles="ign-plan" tiles-style="muted"
     fit-bounds fit-max-zoom="12" fit-zone="none">
+    <!-- refine-on-click : #681 / ADR-104, dsfr-data >= 0.23.0 REQUIS.
+         Les 26 pages de public/ chargent 0.20.0, où ces trois attributs sont
+         ignorés SANS ERREUR : monter le CDN à 0.23.0 avant d'écrire cette page.
+         Trois attributs remplacent les quatre refine-on-click-* de l'original,
+         et ajoutent l'URL (url-sync) et le tag supprimable. -->
     <dsfr-data-map-layer id="etabs" source="f" type="marker"
       geo-field="position"
       color-field="secteur_de_l_etablissement"
       color-map="Public:#18753C,Privé:#E4794A"
       tooltip-field="libelle"
+      refine-on-click="uai" context="fiche" label="Établissement"
       cluster cluster-radius="60" max-items="20000">
     </dsfr-data-map-layer>
     <dsfr-data-map-legend for="etabs" label="Secteur"></dsfr-data-map-legend>
-    <dsfr-data-map-popup for="etabs" mode="panel-right" title-field="libelle" width="380px">
+    <dsfr-data-map-popup for="etabs" mode="popup" title-field="libelle">
       <template>
         <p class="fr-badge fr-badge--sm">{{type_d_etablissement|type non renseigné}}</p>
         <p class="fr-text--sm fr-mb-1v"><strong>{{commune}}</strong> — {{departement}},
            académie de {{academie}}</p>
         <p class="fr-text--sm fr-mb-2v">{{adresse|adresse non renseignée}}</p>
-        <p class="fr-highlight">{{enseignements}} · <strong>{{langues}}</strong></p>
         <p class="fr-text--xs">UAI {{uai}}</p>
       </template>
     </dsfr-data-map-popup>
@@ -477,33 +502,116 @@ est signalé.
     value-field="commune, departement, academie, enseignements, langues, secteur_de_l_etablissement">
   </dsfr-data-a11y>
 </div>
+
+<!-- La fiche établissement : le tag porte la fermeture que l'original n'a pas. -->
+<aside class="fr-container fr-mt-3w" aria-label="Établissement sélectionné">
+  <dsfr-data-context-tags for="fiche"></dsfr-data-context-tags>
+
+  <section><h3 class="fr-h6">LV1</h3>
+    <dsfr-data-display source="lv1" cols="4" empty="—">
+      <template><p class="fr-tag">{{langues}}</p></template>
+    </dsfr-data-display></section>
+  <section><h3 class="fr-h6">LV2</h3>
+    <dsfr-data-display source="lv2" cols="4" empty="—">
+      <template><p class="fr-tag">{{langues}}</p></template>
+    </dsfr-data-display></section>
+  <section><h3 class="fr-h6">LV3</h3>
+    <dsfr-data-display source="lv3" cols="4" empty="—">
+      <template><p class="fr-tag">{{langues}}</p></template>
+    </dsfr-data-display></section>
+  <section><h3 class="fr-h6">Langues et cultures de l'Antiquité</h3>
+    <dsfr-data-display source="lca" cols="4" empty="—">
+      <template><p class="fr-tag">{{langues}}</p></template>
+    </dsfr-data-display></section>
+</aside>
 ```
 
 ## Limites et points durs identifiés
 
-1. **La fiche « LV1 / LV2 / LV3 / LCA » ne se transpose pas telle quelle — et c'est le
-   seul vrai point dur de la page.**
-   *Obstacle* : la popup de `dsfr-data-map-layer` reçoit **un** record, c'est-à-dire une
-   seule paire (niveau, langue). Le bloc de droite de l'original agrège les **jusqu'à 22
-   lignes** de l'établissement et les regroupe par `enseignements`. La référence de
-   `dsfr-data-map-popup` n'expose que `title-field`, `mode`, `width` et un `<template>`
-   interpolé sur un record : **aucun mécanisme de regroupement**.
-   *Voie native essayée* : (a) `dsfr-data-normalize split` — inapplicable, les langues
-   sont sur des **lignes** distinctes, pas dans une colonne multivaluée ; (b) un
-   `dsfr-data-query group-by="uai,enseignements"` en amont de la couche — ça produit bien
-   un record par établissement × niveau, mais **la carte n'aurait plus qu'un point par
-   niveau** et perdrait la liste des langues (l'agrégat ne concatène pas) ; (c) la
-   grammaire de `group-by` avec une fonction ODSQL est le piège PG-014 du dépôt, sans
-   rapport ici.
-   *Contournement envisagé* : **assumer un autre découpage**. La popup montre
-   l'établissement et **la** ligne cliquée ; le détail complet va dans un
-   `<dsfr-data-display>` sous la carte, alimenté par un `dsfr-data-source` distinct
-   `where="uai = '…'"` — mais rien ne relie nativement un clic carte à une seconde source
-   (c'est exactement le `refine-on-click` d'ODS, qui n'a pas d'équivalent déclaratif).
-   *Verdict honnête* : **c'est un manque de `dsfr-data`, pas un contresens de
-   transposition.** Un « cliquer un point pour refiner une autre source » est un besoin
-   général, et le seul chemin actuel est du JavaScript sur l'événement de la couche.
-   **Non vérifié au navigateur.**
+1. **La fiche « LV1 / LV2 / LV3 / LCA » se câble nativement — `refine-on-click` existe.**
+   *Ce que je croyais* (première rédaction de cette fiche, corrigée le même jour) : que
+   la popup ne recevant qu'**un** record, et rien ne reliant déclarativement un clic
+   carte à une seconde source, le `refine-on-click` d'Opendatasoft n'avait pas
+   d'équivalent et qu'il fallait du JavaScript. J'en avais fait « le seul vrai point dur
+   de la page » et « un manque de `dsfr-data` ».
+   *Ce qui est vrai* : **`refine-on-click` existe, sur `dsfr-data-map-layer`** (#681,
+   ADR-104), avec `context` et `label` — **depuis la version 0.23.0**, cf. l'encadré
+   « Version » ci-dessous. La couche pose **un filtre `eq`** sur le champ
+   nommé, avec la valeur de l'objet cliqué ; premier clic = filtre, second clic sur le
+   même objet = retrait, autre objet = remplacement — soit exactement le
+   `replace-refine="true"` de l'original. Avec `context="id"`, c'est le
+   `dsfr-data-context` qui **diffuse la sélection à toutes ses `sources`, au dialecte de
+   chacune**, porte l'URL (`url-sync`) et un **tag supprimable**
+   (`dsfr-data-context-tags`). Sans `context`, chemin dégradé : un
+   `dsfr-data-source-command` poussé directement à `source` sous le whereKey
+   `map-select-<id>`, sans tag ni URL. La couche émet en outre
+   `dsfr-data-map-select` `{record, layerId, selected}`.
+   *Ce qui reste vrai* : le besoin de **quatre** blocs (LV1/LV2/LV3/LCA) demande quatre
+   sources cibles, chacune avec son `where="enseignements = '…'"` statique par-dessus
+   lequel le contexte superpose le filtre `uai` — c'est documenté
+   (`getEffectiveWhere` : « static + all dynamic overlays merged »), mais **non vérifié
+   au navigateur**. Résidu honnête, bien plus petit que ce que j'annonçais : **masquer
+   entièrement un bloc dont la source est vide** (LV3 et LCA sur la plupart des
+   établissements) n'a pas d'attribut ; `empty` remplace le contenu par un message mais
+   laisse le titre. L'idiome maison AM-039 (interpoler dans un attribut, masquer en CSS
+   `:empty`) s'applique à un enfant de template, pas à un composant entier.
+   *Comment je l'ai vérifié* : lecture du source
+   `~/Developer/GitHub/dsfr-data/packages/core/src/components/dsfr-data-map-layer.ts` —
+   `@property({attribute: 'refine-on-click'})` l. 209, JSDoc de la classe
+   `MapSelectFilter` l. 89-95, JSDoc de la propriété l. 134-138, `@fires
+   dsfr-data-map-select` / `dsfr-data-source-command` — plus
+   `skills/dsfr-data/references/dsfr-data-map.md` l. 56-58 et 459-481, et
+   `docs/USER-GUIDE.md` l. 710-737 (« Recette annuaire : la carte filtre la liste »).
+   *Clé pivot retenue pour cette page* : **`uai`** (champ `text` du jeu, ex. `0011071J`,
+   `6200011T`) — c'est déjà celle de l'original (`…-context-field="uai"` /
+   `…-map-field="uai"`), et la seule stable : ni la position (197 lignes nulles, et un
+   geo_point ne fait pas une clé), ni `libelle` (homonymes).
+   *Piège à ne pas repayer* : la JSDoc prévient que **si la source de la couche figure
+   aussi dans les `sources` du contexte, la carte se filtre elle-même** — il ne reste
+   que l'épingle cliquée. Il faut donner à la carte sa propre source, ce que fait
+   l'esquisse.
+
+   **Version — et c'est le cœur du verdict.** `refine-on-click` est natif, mais
+   **postérieur à la version que le banc d'essai épingle**. Vérifié dans les bundles
+   **publiés** sur npm (`npm pack dsfr-data@<v>` puis `grep` dans
+   `package/dist/dsfr-data.map.esm.js`), pas seulement dans le source :
+
+   | Version | `refine-on-click` | `dsfr-data-map-select` |
+   |---|---|---|
+   | 0.20.0 | absent | absent |
+   | 0.21.0 | absent | absent |
+   | 0.22.0 | absent | absent |
+   | **0.23.0** | **présent** | **présent** |
+
+   `npm view dsfr-data version` = **0.23.0** (`latest`), et **les 26 pages de `public/`
+   du banc d'essai chargent encore `dsfr-data@0.20.0`** depuis jsDelivr (vérifié :
+   `grep -rho "dsfr-data@[0-9.]*" public/` → 26 occurrences, toutes 0.20.0).
+
+   Trois verdicts à ne pas confondre, et celui-ci est le deuxième :
+   1. capacité native dans la version publiée **et épinglée** → faux problème ;
+   2. **capacité native mais postérieure à la version épinglée par le dépôt** → ce n'est
+      pas un manque de `dsfr-data`, **c'est une montée de version à faire côté banc
+      d'essai** ;
+   3. capacité absente du source → demande à la bibliothèque.
+
+   **Action pour le dépôt, pas demande à la bibliothèque** : reproduire cette page
+   suppose de charger **0.23.0** et non 0.20.0. Tant que la page reste en 0.20.0,
+   `refine-on-click`, `context` et `label` sont **ignorés silencieusement** (attributs
+   inconnus d'un custom element) — le clic ne filtrerait rien, sans la moindre erreur
+   console. C'est le pire mode d'échec possible, et il faut le savoir avant d'écrire la
+   page.
+
+   **Constat à consigner au registre — requalifié en demande de documentation, pas en
+   manque de capacité.** `get_skill(dsfrDataMap, "reference")` sert une référence de
+   `dsfr-data-map-layer` **qui ne mentionne ni `refine-on-click`, ni `context`, ni
+   `label`, ni l'événement `dsfr-data-map-select`** — alors que le fichier
+   `skills/dsfr-data/references/dsfr-data-map.md` du dépôt, lui, les documente. La fiche
+   servie par le MCP est en retard sur le dépôt. C'est ce décalage, et lui seul, qui a
+   produit la fausse conclusion ci-dessus ; il a induit **deux agents en erreur le même
+   jour** (cette fiche et une autre du lot). Type : `amelioration` (documentation),
+   `verifie` : la liste d'attributs servie par `get_skill` comparée à
+   `skills/dsfr-data/references/dsfr-data-map.md` l. 56-58 et 459-481 et au source
+   l. 134-209.
 
 2. **Charger le jeu complet par l'adaptateur ODS est impossible — mais ce n'est pas
    `dsfr-data`.** `max-records="40000"` sur un `dsfr-data-source api-type="opendatasoft"`

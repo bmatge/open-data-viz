@@ -398,7 +398,7 @@ des contextes de service, liens conditionnels, `dsfr-data-a11y`) est détaillé 
 | `<input ng-change="… q.textual = #search(a,'X') OR #search(b,'X') …">` (5 champs, sans libellé) | `<dsfr-data-search>` | `fields="nom_des_etablissements, ville, libelle_departement, academie, libelle_region"` (**virgules** — exactement les 5 champs de l'original), `label`, `placeholder`, `count`. Un attribut remplace la concaténation ODSQL, et `count` donne le compte de résultats que l'original n'affiche jamais. Filtrage local sur 1 678 lignes chargées : pas de `server-search`. |
 | Accordéons Niveau / Campagne / Type / Secteur / Départements / Académies (6 listes de radios sur ctx6) | **un seul `<dsfr-data-facets>`** | `fields="niveaudelabellisation, campagnedelabellisation, typeeple, secteur, libelle_departement, academie"` (**virgules**), `labels="… \| …"` (**barres**), `display="…:select \| …:select \| …"` (**barres**), `sort="alpha:asc"`. Les compteurs sont affichés par défaut et **cascadent** en mode local : filtrer sur « La Réunion » réduit la liste des académies avec les bons comptes. C'est le défaut « listes non cascadées, sans compteur » réglé sans attribut supplémentaire. |
 | `<ods-clear-all-filters>` (pictogramme seul, désynchronise) | rien à transposer | Une facette `select` se remet à zéro par son option vide, et `dsfr-data-search` expose `clear()`. Pas de bouton global qui puisse mentir sur l'état. |
-| `ctx5` + tiroir + `refine-on-click-*` | `<dsfr-data-map-popup>` + `<template>` | `mode="panel-right"`, `title-field="nom_des_etablissements"`, `width="380px"`. `{{#if}}` pour les liens (règle les 87 liens morts), `{{champ:url}}` dans les `href`. Le `refine-on-click="identifiantuai"` du source `dsfr-data-map-layer` existe mais **n'est pas publié** (changeset hors CHANGELOG, npm 0.22.0) — et n'est pas le bon outil ici : le popup affiche la fiche sans consommer un contexte. |
+| `ctx5` + tiroir + `refine-on-click-*` | `<dsfr-data-map-popup>` + `<template>` | `mode="panel-right"`, `title-field="nom_des_etablissements"`, `width="380px"`. `{{#if}}` pour les liens (règle les 87 liens morts), `{{champ:url}}` dans les `href`. `refine-on-click="identifiantuai"` (+ `context`, `label`) est **natif et publié depuis la 0.23.0** (#681, ADR-104 ; vérifié dans les bundles npm : absent en 0.20.0/0.21.0/0.22.0, présent en 0.23.0 = `latest`) — **le dépôt épingle encore `dsfr-data@0.20.0` sur ses 26 pages, c'est donc une montée de version à faire côté banc d'essai, pas un manque de la bibliothèque**. Pour afficher la fiche, le popup reste préférable (pas de contexte à consommer) ; l'attribut sert ici à autre chose — voir « Limites », point 10. |
 | — (absent : le multi-labellisation) | `<dsfr-data-query>` + `<dsfr-data-list>` | `group-by="identifiantuai"` pour compter les établissements distincts (1 529) ; une liste par établissement avec ses campagnes. Voir « Limites », point 3. |
 | — (absent : la progression du dispositif) | `<dsfr-data-query>` + `<dsfr-data-chart>` | `group-by="campagnedelabellisation, niveaudelabellisation"`, `aggregate="count"`, puis `type="bar"` empilé. La seule série temporelle du jeu, que la page ignore. |
 | — (absent) | `<dsfr-data-kpi>` × 3 | `value="count"` (source client, non paginée), `heading`, `label`, `col`. 1 678 labellisations · 1 529 établissements · 97 au niveau 3. |
@@ -619,6 +619,33 @@ des contextes de service, liens conditionnels, `dsfr-data-a11y`) est détaillé 
    - `display="categories"` (agrégats en camemberts d'ODS) : pas d'équivalent, et c'est
      exactement ce qui produisait la tache blanche. **Écart assumé, et souhaitable.**
    - Les **sept contextes** : artefact du modèle ODS.
+
+10. **`refine-on-click` : natif depuis la 0.23.0 — et il règle le défaut n° 2 de cette page.**
+    L'équivalent natif du `refine-on-click-context="ctx5"` d'ODS est
+    `refine-on-click="identifiantuai"` + `context="…"` + `label` sur
+    `<dsfr-data-map-layer>`, avec l'événement `dsfr-data-map-select`, le tag supprimable dans
+    `dsfr-data-context-tags`, l'URL portée par le contexte et le second clic qui désélectionne
+    (#681, ADR-104). **État de publication vérifié bundle par bundle** (`npm pack
+    dsfr-data@<v>` puis lecture de `package/dist/dsfr-data.map.esm.js`) : **absent en 0.20.0,
+    0.21.0 et 0.22.0, présent en 0.23.0**, qui est le `latest` npm, et plus aucun changeset en
+    attente dans le dépôt `dsfr-data`. **Le banc d'essai épingle encore `dsfr-data@0.20.0` sur
+    ses 26 pages** (`grep -rho "dsfr-data@[0-9.]*" public/`) : c'est **une montée de version à
+    faire ici**, pas un manque de la bibliothèque.
+    **Ce que ça change pour cette page — et c'est le cas le plus intéressant du lot.** Le
+    défaut n° 2 est que **1 678 lignes valent 1 529 établissements** : 140 d'entre eux ont été
+    labellisés plusieurs fois, leurs points sont exactement superposés, et le tiroir ODS
+    (`ods-results-max="1"` sur un refine `identifiantuai`) n'en montre **qu'une campagne**,
+    sans dire qu'il y en a d'autres. Un popup ne corrige pas cela : il affiche lui aussi le
+    seul enregistrement cliqué. `refine-on-click="identifiantuai" context="sel"` **le
+    corrige** : le clic filtre le `dsfr-data-list` et le graphique sur cet UAI, qui affichent
+    alors **toutes** ses labellisations — le lycée Jules Siegfried apparaît en niveau 2 en
+    2022-2023 *puis* en niveau 3 en 2023-2024, c'est-à-dire la trajectoire de progression que
+    le dispositif cherche à encourager et que l'original rend invisible. En prime, le contexte
+    sérialise la sélection dans l'URL, ce qui règle aussi le défaut n° 16.
+    **La réserve que j'avais posée ici (« attribut non publié ») était périmée** : la voie
+    native existe, elle est publiée, et elle répond à un défaut que je disais éditorial.
+    **Non vérifié au navigateur** : suppose la montée en 0.23.0, et l'articulation entre le
+    filtre `eq` du contexte et les six facettes reste à observer.
 
 ## Données à reproduire fidèlement
 
