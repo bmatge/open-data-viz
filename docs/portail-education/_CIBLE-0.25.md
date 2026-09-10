@@ -1,8 +1,10 @@
 # Cible du portage : `dsfr-data` 0.25.0, pas 0.20.0
 
 **La faisabilité de chaque page se juge contre 0.25.0** — mais 0.25.0 est le **plancher**,
-pas la réponse. Le dépôt épingle encore `dsfr-data@0.20.0` sur ses 26 pages, npm sert
-`0.23.0`, et les jalons v0.24.0 et v0.25.0 sont déjà cadrés et en cours.
+pas la réponse. Au moment où ce document a été écrit (2026-09-10, matin), le dépôt épinglait
+encore `dsfr-data@0.20.0` sur ses 26 pages et les jalons v0.24.0 et v0.25.0 étaient en cours.
+**Les deux ont été livrés le jour même, et le dépôt est monté en 0.25.0** — voir le chapeau
+de mise à jour ci-dessous.
 
 > ### À quoi sert ce document
 >
@@ -41,7 +43,35 @@ neuf au jalon v0.24.0 et quatre au jalon v0.25.0.
 Un attribut d'une version non chargée est **ignoré sans erreur console** : l'échec est
 silencieux, comme `display="a:select, b:select"` (PG-022) ou `max-records` qui tronque.
 
-## ⚠️ Mise à jour du 2026-09-10, 10 h — **v0.24.0 est sortie pendant la rédaction de ce lot**
+## ⚠️ Mise à jour du 2026-09-10, 12 h — **v0.25.0 est sortie, ce document est désormais historique**
+
+**Les deux jalons décrits ci-dessous sont livrés.** `npm view dsfr-data version` = **0.25.0**
+(commit `0bf9444`, « export ODS en une requête, require-where et recette des variantes API »,
+épics #699 et #700, ADR-106). Le jalon v0.24.0 avait été fermé à 09 h 48, le v0.25.0 dans la
+foulée. **Le dépôt est monté en 0.25.0** et ses 15 pages qui portaient le contournement de
+chargement ont été migrées vers `fetch-mode="export"` (lot 13).
+
+Ce que ça change pour les fiches du portail Éducation : **tout ce qui y est écrit « prévu au
+jalon v0.25.0 » est désormais disponible.** En particulier —
+
+- **#689 `fetch-mode="export"`** répond au constat central du lot 12 : le mur des 10 000 offsets
+  de l'API ODS. Les pages à gros volume (IPS Écoles et ses 279 318 points, PIX et ses 354 012)
+  ne sont plus bloquées par le chargement.
+- **#690 `require-where`** donne le motif « aucune requête tant qu'aucun filtre », qui est la
+  bonne réponse à ces mêmes pages : l'original les charge puis n'affiche rien.
+
+**Deux pièges neufs sont apparus en migrant, et valent pour tout portage à venir :**
+1. Repasser en mode adaptateur fait de nouveau s'appliquer **`max-records`, plafond par défaut
+   1 000, qui tronque en silence**. Relever le volume réel du jeu **avant** de migrer.
+2. **`fetch-mode="export"` ne se combine pas avec `server-side`** : la contradiction est
+   signalée en console et la source reste paginée. Sur une page mixte (agrégats + tableau
+   paginé), seules les sources d'agrégat passent en export.
+
+Le reste du document garde sa valeur : la grille des **quatre verdicts** (natif / postérieur à
+la version épinglée / prévu à un jalon / manque réel) et l'inventaire du résidu
+(`_RESIDU.md`), qui n'est touché par aucun de ces deux jalons.
+
+## Mise à jour du 2026-09-10, 10 h — v0.24.0 est sortie pendant la rédaction de ce lot
 
 Le jalon v0.24.0 a été **entièrement fermé à 09 h 48** (#671 à #677, #255, épic #696) et publié :
 `packages/core` est en **0.24.0**, commit `c14c762` « expressions et conditions, agrégats étendus,

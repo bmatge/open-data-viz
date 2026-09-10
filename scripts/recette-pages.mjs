@@ -26,6 +26,7 @@ if (process.argv[2] === '--diff') {
   const b = JSON.parse(readFileSync(process.argv[4], 'utf8'));
   const chiffres = (s) => (String(s).match(/[\d   ,.]+/g) || []).join('|');
   let ecarts = 0;
+  const indicatif = [];
   for (const p of Object.keys(a)) {
     const x = a[p], y = b[p] || {};
     const l = [];
@@ -33,8 +34,13 @@ if (process.argv[2] === '--diff') {
       l.push(`erreurs console ${x.erreurs.length} → ${y.erreurs.length}`);
     if ((y.erreursConfig?.length ?? 0) > 0)
       l.push(`⛔ erreur de configuration ×${y.erreursConfig.length} : ${y.erreursConfig[0]}`);
-    for (const k of ['nbCanvas', 'nbCarte', 'nbLignesTable', 'nbFacettes'])
+    for (const k of ['nbCanvas', 'nbLignesTable', 'nbFacettes'])
       if (x[k] !== y[k]) l.push(`${k} ${x[k]} → ${y[k]}`);
+    // `nbCarte` est INDICATIF, jamais bloquant : les cartes se rendent a la
+    // visibilite et leur nombre depend du moment ou l'on regarde. Trois faux
+    // positifs en une journee sont venus de la — dont un qui a failli faire
+    // annuler une montee de version saine. On l'affiche, on n'en conclut rien.
+    if (x.nbCarte !== y.nbCarte) indicatif.push(`${p} : conteneurs de carte ${x.nbCarte} → ${y.nbCarte} (indicatif)`);
     const ka = (x.kpi || []).map(chiffres), kb = (y.kpi || []).map(chiffres);
     if (ka.length !== kb.length) l.push(`nombre de KPI ${ka.length} → ${kb.length}`);
     else {
@@ -44,6 +50,10 @@ if (process.argv[2] === '--diff') {
     if (l.length) { ecarts++; console.log(`\n■ ${p}`); l.forEach((s) => console.log('   ' + s)); }
   }
   console.log(`\n${Object.keys(a).length - ecarts} pages identiques, ${ecarts} avec un écart.`);
+  if (indicatif.length) {
+    console.log('\nIndicatif (jamais bloquant, rendu differe) :');
+    indicatif.forEach((s) => console.log('   ' + s));
+  }
   process.exit(ecarts ? 1 : 0);
 }
 
@@ -77,7 +87,29 @@ for (const p of pages) {
       }
       window.scrollTo(0, 0);
     });
-    await page.waitForTimeout(3000);
+    // Stabilisation : on attend que le DOM cesse de bouger plutot qu'une duree
+    // fixe. Trois faux positifs en une journee (conteneurs de carte, puis deux
+    // KPI lus avant la fin du chargement) ont montre qu'une attente constante
+    // ne suffit pas : les pages a pagination serveur + agregations multiples
+    // rendent par vagues. Une recette qui crie au loup est pire qu'une absence
+    // de recette — on cesse de la croire.
+    await page.waitForFunction(
+      () => {
+        const w = window;
+        const signature =
+          document.body.innerText.length + ':' +
+          document.querySelectorAll('canvas, .leaflet-container, tbody tr').length;
+        if (w.__recetteSignature === signature) {
+          w.__recetteStable = (w.__recetteStable || 0) + 1;
+        } else {
+          w.__recetteSignature = signature;
+          w.__recetteStable = 0;
+        }
+        return w.__recetteStable >= 3;
+      },
+      { timeout: 20000, polling: 500 }
+    ).catch(() => {});
+    await page.waitForTimeout(1500);
   } catch (e) {
     erreurs.push('NAVIGATION ' + String(e.message).slice(0, 120));
   }

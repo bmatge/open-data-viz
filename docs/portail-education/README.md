@@ -9,6 +9,14 @@ Chaque fiche suit la même structure : objectif de la dataviz → relevé visuel
 défauts de l'original → tableau de correspondance directive Opendatasoft / composant
 `dsfr-data` + esquisse de code → limites et points durs → données à reproduire fidèlement.
 
+> **⚠️ 2026-09-10 — les jalons v0.24.0 et v0.25.0 de `dsfr-data` ont été livrés le jour même
+> de cet audit.** Les fiches ont été écrites le matin, quand ils étaient en cours : celles qui
+> renvoient à « prévu au jalon v0.25.0 » décrivent donc quelque chose de désormais disponible
+> (`fetch-mode="export"` #689, `require-where` #690). Le dépôt est monté en 0.25.0, et ses
+> 15 pages qui portaient le contournement de chargement ont été migrées. Les analyses ne sont
+> pas réécrites : elles disent ce qui a été rencontré au moment du portage. Voir
+> [`_CIBLE-0.25.md`](_CIBLE-0.25.md) pour l'état courant.
+
 ## À lire avant toute fiche
 
 | Fichier | Ce qu'il donne |

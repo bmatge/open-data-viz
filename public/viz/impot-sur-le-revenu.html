@@ -65,13 +65,55 @@
   </div>
 
   <!-- ==========================================================================
-       Export complet (585 Ko, 1,1 s), recherche sur libellé et code, facette
-       « case » en liste déroulante pré-remplie depuis l'URL (?nom=1AJ), puis
-       une agrégation par année pour deux courbes et un tableau.
+       Recherche sur libellé et code, facette « case » en liste déroulante
+       pré-remplie depuis l'URL (?nom=1AJ), puis une agrégation par année pour
+       deux courbes et un tableau.
+
+       Lot 13, deux nouveautés de dsfr-data 0.25.0 sur la même source.
+
+       1. AM-011 — la source était écrite en mode générique (`url=` vers
+          /exports/json, sans `params`), contournement qui achetait la requête
+          unique au prix du mode adaptateur : plus de délégation serveur du
+          where/order-by, plus de server-facets, plus de meta.truncated, et une
+          source qui n'annonçait plus quel jeu elle lit. La mesure d'origine
+          reste la justification : /records plafonne à 100 lignes par requête,
+          soit 194 allers-retours séquentiels pour les 19 388 lignes de ce jeu
+          (585 Ko, 1,1 s par l'export). `fetch-mode="export"` (#689) rend la même
+          requête unique EN restant en mode adaptateur. Conséquence directe :
+          `max-records` s'applique de nouveau, et son plafond par défaut (1 000)
+          tronquerait en silence — le jeu compte 19 388 lignes (relevé à l'API le
+          2026-09-10, `metas.default.records_count`), d'où le max-records="25000".
+
+       2. AM-035 — la page s'ouvrait sur une courbe absurde : sans case choisie,
+          les deux graphiques additionnaient 2 253 cases hétérogènes d'une
+          déclaration de revenus. Le contournement était éditorial (liens
+          d'exemple + texte d'aide), et il ne changeait rien au fait que la page
+          rapatriait 19 388 lignes que personne ne regardait. `require-where`
+          (#690) le règle à la racine : tant qu'aucun filtre n'est arrivé PAR
+          COMMANDE, la source n'émet aucune requête, publie `dsfr-data-idle`, et
+          les afficheurs rendent leur `idle-message` au lieu d'un chiffre faux.
+          Retirer le dernier filtre y ramène — jamais de requête « tout »
+          implicite.
+
+          Le JSDoc est explicite sur ce qui compte comme filtre : les clauses
+          reçues par COMMANDE (facettes serveur, recherche serveur, contexte,
+          délégation d'une query). Une facette en mode CLIENT, elle, ne commande
+          rien — elle filtre l'aval. C'est pourquoi la recherche passe ici en
+          `server-search` : c'est elle qui porte le filtre jusqu'à la source
+          (template ODS par défaut, `search("{q}")`), et la facette « case »
+          reste en aval, peuplée des seules cases rapportées par la recherche —
+          le comportement d'avant, mais délégué au portail.
+
+          `url-search-param="nom"` garde les liens d'exemple (?nom=1AJ) vivants :
+          le paramètre amorce le terme de recherche, donc le chargement, et la
+          facette y lit sa sélection comme avant. La recherche ne pose pas
+          `url-sync` — c'est la facette qui écrit l'URL, et deux composants sur
+          le même paramètre se marcheraient dessus.
        ========================================================================== -->
 
-  <dsfr-data-source id="ir"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/ir-declarations-2042-nat/exports/json"
+  <dsfr-data-source id="ir" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
+    fetch-mode="export" max-records="25000" require-where
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
@@ -86,7 +128,7 @@
         <h2 class="fr-h6">Choisir une case</h2>
         <dsfr-data-search id="ir-q" source="ir"
           fields="libelle, nom" label="Libellé ou code de la case" placeholder="Ex. : salaires, pensions, 1AJ…"
-          operator="words" count>
+          server-search url-search-param="nom" count>
         </dsfr-data-search>
         <dsfr-data-facets id="ir-f" source="ir-q"
           fields="nom" labels="nom:Case de la déclaration" display="nom:select"
@@ -94,17 +136,22 @@
         </dsfr-data-facets>
         <p class="fr-text--xs fr-hint-text">
           La liste se restreint aux cases qui correspondent à la recherche. Sans case choisie, les courbes
-          additionnent toutes les cases, ce qui n'a pas de sens&nbsp;: choisissez-en une.
+          additionnent toutes les cases, ce qui n'a pas de sens&nbsp;: choisissez-en une. Depuis
+          <code>dsfr-data</code> 0.25.0 la page ne se contente plus de le dire&nbsp;: tant qu'aucun filtre
+          n'est posé, <code>require-where</code> retient la requête et les blocs restent en attente.
         </p>
       </div>
 
       <div>
         <dsfr-data-kpi-group class="fr-mb-4w">
           <dsfr-data-kpi source="ir-f" value="count" format="nombre" col="4"
+            idle-message="Choisissez une case pour afficher les données"
             heading="Lignes" label="années × cases dans la sélection"></dsfr-data-kpi>
           <dsfr-data-kpi source="ir-f" value="nombre:max" format="nombre" col="4"
+            idle-message="Choisissez une case pour afficher les données"
             heading="Pic de déclarants" label="foyers, meilleure année"></dsfr-data-kpi>
           <dsfr-data-kpi source="ir-f" value="montant:max" format="euro" col="4"
+            idle-message="Choisissez une case pour afficher les données"
             heading="Pic de montant" label="euros déclarés, meilleure année"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
 
@@ -112,6 +159,7 @@
           <div class="fr-col-12 fr-col-lg-6">
             <div class="odv-chart-slot">
               <dsfr-data-chart id="g-nombre" source="ir-annees" type="line"
+                idle-message="Choisissez une case pour afficher les données"
                 label-field="annee" value-field="nombre" name='["Foyers déclarants"]'
                 databox databox-title="Nombre de foyers ayant rempli la case, par année"
                 databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr" databox-download>
@@ -122,6 +170,7 @@
           <div class="fr-col-12 fr-col-lg-6">
             <div class="odv-chart-slot">
               <dsfr-data-chart id="g-montant" source="ir-annees" type="line"
+                idle-message="Choisissez une case pour afficher les données"
                 label-field="annee" value-field="montant" name='["Montant déclaré (€)"]' unit-tooltip="€"
                 databox databox-title="Montant total déclaré dans la case, par année"
                 databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr" databox-download>
@@ -133,6 +182,7 @@
 
         <h2 class="fr-h4">Le détail</h2>
         <dsfr-data-list source="ir-f"
+          idle-message="Choisissez une case pour afficher les données"
           columns="annee:Année, nom:Case, libelle:Libellé, nombre:Foyers, montant:Montant (€)"
           sort="annee:desc" pagination="20" export="csv">
         </dsfr-data-list>
@@ -186,6 +236,48 @@
         </div>
       </div>
 
+      <div class="fr-alert fr-alert--success fr-mt-4w fr-mb-4w odv-corrige-depuis">
+        <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
+        <p class="fr-text--sm">
+          Deux des frictions décrites ci-dessus ont été comblées par la bibliothèque <em>après</em> cette
+          reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace du banc d'essai —
+          mais les contournements, eux, ont été retirés de la page au lot 13. Détail et vérification au
+          <a href="/retours#AM-035">registre des retours</a>.
+        </p>
+        <ul class="fr-text--sm">
+          <li><strong>AM-035</strong> — <strong>0.25.0</strong> (#690)&nbsp;: <code>require-where</code> sur
+            <code>dsfr-data-source</code> (et son pendant sur <code>dsfr-data-query</code>). Tant qu'aucun
+            filtre n'est arrivé <em>par commande</em>, la source ne part rien chercher, publie
+            <code>dsfr-data-idle</code>, et chaque afficheur rend son <code>idle-message</code> — un état
+            distinct d'un chargement, d'une erreur et d'un «&nbsp;aucune donnée&nbsp;». Retirer le dernier
+            filtre y ramène. Les liens d'exemple et le texte d'aide restent dans la page, mais ils ne sont
+            plus la seule réponse&nbsp;: ce sont désormais des raccourcis de confort, pas un pansement.
+            <strong>Vérifié au navigateur&nbsp;:</strong> zéro requête vers
+            <code>data.economie.gouv.fr</code> au chargement (les seules requêtes sont le CDN DSFR)&nbsp;;
+            le premier terme de recherche en déclenche exactement une, sur
+            <code>/exports/json?where=search("1AJ")</code>&nbsp;; vider le champ ramène les six blocs à
+            l'état d'attente sans qu'aucune requête «&nbsp;tout&nbsp;» ne parte.
+            <em>Ce que cela coûte&nbsp;:</em> une facette en mode client ne commande rien à sa source — elle
+            filtre son aval. Le filtre qui lève l'attente doit donc être un filtre <em>serveur</em>&nbsp;;
+            ici la recherche est passée en <code>server-search</code>, et la facette «&nbsp;case&nbsp;»
+            reste en aval, peuplée des seules cases rapportées. Cela ne se devine pas au nom de l'attribut,
+            mais le JSDoc de <code>require-where</code> le dit noir sur blanc.
+            <em>Un angle mort observé au passage&nbsp;:</em> <code>dsfr-data-search count</code> n'a pas
+            d'état d'attente — il affiche «&nbsp;0 résultats&nbsp;» tant que la source est en
+            <code>idle</code>, là où les six autres afficheurs rendent leur <code>idle-message</code>.
+            Le composant ne connaît ni <code>idle-message</code> ni l'événement
+            <code>dsfr-data-idle</code>&nbsp;: c'est le seul endroit de la page où l'attente ressemble
+            à un résultat vide.</li>
+          <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;:
+            <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du
+            portail, en une requête et <em>sans</em> quitter le mode adaptateur. La source de cette page
+            était écrite en mode générique pour cette seule raison&nbsp;; elle est redevenue une source
+            adaptateur, et le <code>where</code> de la recherche est maintenant délégué au portail.
+            Contrepartie&nbsp;: <code>max-records</code> redevient actif, et son plafond par défaut de
+            1 000 aurait tronqué les 19 388 lignes en silence.</li>
+        </ul>
+      </div>
+
       <div class="fr-table fr-table--bordered">
         <table>
           <caption>Correspondance onglet « Analyse » du portail → composant dsfr-data</caption>
@@ -198,6 +290,8 @@
             <tr><td>onglet tableau + export</td><td><code>dsfr-data-list</code> + <code>export="csv"</code></td><td>Équivalent</td></tr>
             <tr><td>URL de l'état d'exploration</td><td><code>url-params url-sync</code></td><td>Équivalent</td></tr>
             <tr><td>choix libre de l'axe et de la mesure</td><td>—</td><td>Absent&nbsp;: c'est une page, pas un explorateur</td></tr>
+            <tr><td>l'onglet « Analyse » n'affiche rien avant qu'on ait choisi</td><td><code>require-where</code> + <code>idle-message</code> (0.25.0)</td><td>Équivalent&nbsp;: le contournement éditorial n'était pas la seule réponse</td></tr>
+            <tr><td>contexte ODS paginé à 100</td><td><code>fetch-mode="export"</code> (0.25.0&nbsp;; source générique auparavant)</td><td>1 requête au lieu de 194</td></tr>
           </tbody>
         </table>
       </div>
@@ -209,7 +303,9 @@
           reproduire — mais un test de la partie exploratoire de ChartsBuilder, qui tient grâce à deux
           attributs (<code>url-params</code>, <code>display="…:select"</code>). Le manque est structurel et
           assumé&nbsp;: une page déclarative fige les axes, elle ne remplace pas l'onglet «&nbsp;Analyse&nbsp;».</p>
-        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AM-035 (état vide d'un graphique), AM-031 et LIM-003 confirmés.</p>
+        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AM-035 (état vide d'un graphique) et AM-011
+          (chargement par l'endpoint d'export) <strong>corrigés en 0.25.0</strong> et mis en œuvre ici&nbsp;;
+          AM-031 et LIM-003 confirmés.</p>
       </div>
     </div>
   </section>
@@ -220,7 +316,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.24.0/dist/dsfr-data.core.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.25.0/dist/dsfr-data.core.umd.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

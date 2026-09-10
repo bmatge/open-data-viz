@@ -1,5 +1,14 @@
 # Éducajou — ÉcoleMap
 
+> **⚠️ Mise à jour du 2026-09-10 — les jalons v0.24.0 et v0.25.0 sont livrés.**
+> Cette fiche a été écrite le matin même, quand ils étaient encore en cours ; elle y renvoie
+> donc au futur (« prévu au jalon v0.25.0 »). **Tout ce qui y est annoncé comme prévu est
+> désormais disponible** : `dsfr-data@0.25.0` livre `fetch-mode="export"` (#689) et
+> `require-where` (#690), et le dépôt est monté en 0.25.0. Les analyses ne sont pas réécrites —
+> elles disent ce qui a été rencontré au moment du portage, et c'est leur valeur. Pour l'état
+> courant du backlog et les quatre verdicts, voir [`_CIBLE-0.25.md`](_CIBLE-0.25.md).
+
+
 - **URL du catalogue** : https://educajou.forge.apps.education.fr/ecolemap/ — **200**, page vivante.
 - **Id catalogue** : 26 · **Thématique** : Éducation (pas de sous-thématique) · **Filtre** : aucun.
   Titre au catalogue : « Vue cartographique d'un établissement produite par la forge des communs

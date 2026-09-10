@@ -56,7 +56,7 @@
     "statut": "corrige",
     "date": "2026-09-09",
     "correction": "Corrigé par #641, livré en 0.21.1 : sur un `group-by`, l'adaptateur Opendatasoft ignore désormais le `total_count` renvoyé par l'API (égal à la taille de page) et lit toutes les pages jusqu'à une page incomplète — le total reste inconnu, mais l'agrégat est complet. #658 (0.22.0) complète le dispositif : la source pose `truncated: true` dans sa meta quand les lignes livrées sont un sous-ensemble, y compris sur un `group-by` ODS au total inconnu, et le volet Diagnostic le rend. Le contournement par source générique (`url` vers `/exports/json` + `params`), qui coûtait l'écoute du contexte, n'est plus nécessaire pour les agrégats.",
-    "reste_vrai": "Le chargement complet d'un jeu non agrégé reste paginé 100 lignes par 100 : c'est l'autre moitié du sujet, prévue au jalon v0.25.0 avec `fetch-mode=\"export\"` (#689, épic #699), qui charge par `/exports/json`. Sur le portail Éducation, c'est ce qui bute sur le refus ODS de `offset+limit > 10 000`."
+    "reste_vrai": "Le chargement complet d'un jeu non agrégé reste paginé 100 lignes par 100 : c'est l'autre moitié du sujet, **livrée depuis** : `fetch-mode=\"export\"` (#689, épic #699) est sorti en 0.25.0 et charge par `/exports/json` en une requête. Sur le portail Éducation, c'est ce qui bute sur le refus ODS de `offset+limit > 10 000`."
   },
   {
     "id": "BUG-002",
@@ -571,23 +571,13 @@
       "centres-controle-technique"
     ],
     "constat": "En mode adaptateur, un chargement complet passe par `/records` avec `limit=100` et un `offset` croissant : la boucle de `fetchAll` est strictement séquentielle (packages/core/src/adapters/opendatasoft-adapter.ts:121). Pour 3 080 lignes, cela fait 31 allers-retours l'un après l'autre. Or Opendatasoft expose `/exports/json`, qui renvoie le jeu entier en une requête, accepte `select`, et répond en CORS `*`.",
-    "verifie": "Chronométrage en navigateur sur la même page : 31 requêtes, concurrence maximale 1, durée moyenne 931 ms (max 3 721 ms — la pagination profonde se dégrade), 28,9 s passées dans les requêtes contre 37 ms entre elles. Le poids n'y est pour rien : un `select` divisant le transfert par 3,7 n'a fait gagner aucune seconde. La même page basculée sur `/exports/json` : 1 requête, 0,62 s, 185 Ko. Lot 3 : `/exports/json` avec `group_by=postes, year(annee) as an` sur 517 489 lignes renvoie les 264 groupes en 0,50 s.",
+    "verifie": "Chronométrage en navigateur sur la même page : 31 requêtes, concurrence maximale 1, durée moyenne 931 ms (max 3 721 ms — la pagination profonde se dégrade), 28,9 s passées dans les requêtes contre 37 ms entre elles. Le poids n'y est pour rien : un `select` divisant le transfert par 3,7 n'a fait gagner aucune seconde. La même page basculée sur `/exports/json` : 1 requête, 0,62 s, 185 Ko. Lot 3 : `/exports/json` avec `group_by=postes, year(annee) as an` sur 517 489 lignes renvoie les 264 groupes en 0,50 s. — Correctif vérifié le 2026-09-10 : `npm view dsfr-data version` = 0.25.0, issues #689 et #699 fermées, attribut `fetch-mode` présent au source (`dsfr-data-source.ts`, propriété l. 208) avec son JSDoc.",
     "contournement": "Écrire la source en mode générique (`url=` vers `/exports/json` + `params` pour le `select`) au lieu du mode adaptateur. On y perd la délégation serveur du `where`/`order-by` — sans conséquence quand toute la page travaille côté client.",
     "demande": "Quand la source demande un chargement complet (pas de `server-side`, pas de pagination), utiliser `/exports/json` plutôt que la boucle sur `/records`. L'endpoint accepte AUSSI `group_by`, `select` et `where` : il couvre donc à la fois le chargement de lignes et les agrégations, et règle du même coup BUG-001. À défaut, paralléliser les pages une fois `total_count` connu : 8 requêtes concurrentes prennent 0,44 s contre 2,4 s en série.",
-    "statut": "ouvert",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "M",
-      "decision": "À discuter (contournement en une ligne)",
-      "impact": "31 requêtes séquentielles pour 3 080 lignes (31 s) là où `/exports/json` coûte 0,6 s.",
-      "objectif": "Un chargement complet rapide par défaut.",
-      "perennite": "Structurel, mais contournable par `url=` sur l'export.",
-      "acceptation": [
-        "Sans `server-side`, l'adaptateur ODS charge par `/exports/json` avec `select`/`where`, et retombe sur `/records` si l'export échoue."
-      ]
-    },
-    "correction": "Non corrigé, mais cadré : prévu au jalon v0.25.0 avec `fetch-mode=\"export\"` (#689, épic #699), qui charge par `/exports/json` en une requête, avec repli automatique sur `/records` et `meta.truncated` obtenu par `limit+1` faute de `total_count`. Absent de 0.24.0, la version chargée par le dépôt : le contournement par source générique reste nécessaire aujourd'hui."
+    "correction": "Corrigé par #689 (épic #699), livré en **0.25.0** : `fetch-mode=\"export\"` sur `dsfr-data-source` charge le jeu **en une seule requête** via l'endpoint d'export du portail, en mode adaptateur — donc avec les mêmes clauses `select`, `where`, `group-by` et `order-by`, et sans perdre la délégation serveur. C'est exactement la voie que le contournement par source générique achetait au prix de l'écoute du contexte. Repli automatique sur `/records` si le portail n'expose pas d'endpoint d'export, avec avertissement en console.",
+    "reste_vrai": "Deux points d'attention subsistent, documentés dans le JSDoc : en mode `export` le total serveur est inconnu, la troncature se détecte en demandant une ligne de plus que `max-records` ; et `fetch-mode=\"export\"` ne se combine pas avec `server-side` (pagination page par page), contradiction signalée en console. Le mode reste opt-in : une page qui ne le pose pas garde les 100 lignes par requête."
   },
   {
     "id": "AM-012",
@@ -665,19 +655,8 @@
     "verifie": "Constaté sur les quatre pages à colonne de filtres du dépôt. Première écriture de la page Plan de relance : les facettes déclarées dans le bloc de pipeline s'affichaient au-dessus du conteneur, hors de la colonne.",
     "contournement": "Déclarer les composants d'interface dans le conteneur voulu et les référencer par `id` depuis le bloc de pipeline. Ça marche, mais la lecture du fichier en souffre.",
     "demande": "Un attribut de rendu délégué (par exemple `render-into=\"#mon-conteneur\"`) qui découplerait le point de déclaration du point d'affichage, comme le `for` de `dsfr-data-a11y` le fait déjà pour sa cible.",
-    "statut": "ouvert",
+    "statut": "acte",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P4",
-      "effort": "M",
-      "decision": "Refusé côté lib (a11y) ; remède = AM-001 + convention",
-      "impact": "Les facettes se rendent où la balise est écrite ; mise en page contrainte.",
-      "objectif": "Découpler déclaration et affichage.",
-      "perennite": "Récurrent.",
-      "acceptation": [
-        "`render-into=\"#cible\"` sur facettes et recherche déplace le rendu sans changer le câblage."
-      ]
-    },
     "correction": "Refusé côté bibliothèque, explicitement et avec motif (#692, 0.21.1) : un attribut `render-into` a été écarté comme contraire au choix de conception du light DOM, et pour le risque d'accessibilité que porte un rendu délégué. La contrainte reste donc entière — écrire la balise là où son interface doit apparaître —, mais ce n'est plus une demande en attente : c'est une décision."
   },
   {
@@ -1549,21 +1528,10 @@
     "constat": "Sur un jeu où l'agrégat global n'a pas de sens (additionner toutes les cases d'une déclaration de revenus), la page s'ouvre sur une courbe absurde tant que l'utilisateur n'a rien choisi. Le composant dessine ce qu'il reçoit ; rien ne permet de dire « attends un filtre ».",
     "contournement": "Liens d'exemple (`?nom=1AJ`) et texte d'aide ; `url-params` sur les facettes pour que le catalogue pointe directement sur une case.",
     "proposition": "Un attribut `require-filter` (ou `empty-until-filtered`) sur les composants d'affichage, avec un message DSFR à la place du rendu.",
-    "verifie": "Page impot-sur-le-revenu sans paramètre : KPI « pic de déclarants » = max de toutes les cases confondues, courbe sur 19 388 lignes hétérogènes.",
-    "statut": "a-deposer",
+    "verifie": "Page impot-sur-le-revenu sans paramètre : KPI « pic de déclarants » = max de toutes les cases confondues, courbe sur 19 388 lignes hétérogènes. — Correctif vérifié le 2026-09-10 : issues #690 et #700 fermées, `require-where` annoncé au CHANGELOG de 0.25.0, npm `latest` = 0.25.0.",
+    "statut": "corrige",
     "date": "2026-09-09",
-    "cadrage": {
-      "priorite": "P3",
-      "effort": "S",
-      "decision": "Accepter",
-      "impact": "Une page d'exploration s'ouvre sur un agrégat absurde tant qu'aucun filtre n'est posé.",
-      "objectif": "Un état vide explicite.",
-      "perennite": "Récurrent sur les pages d'exploration.",
-      "acceptation": [
-        "`require-filter` sur les composants d'affichage : message DSFR tant qu'aucun filtre amont n'est actif."
-      ]
-    },
-    "correction": "Non corrigé, mais cadré : prévu au jalon v0.25.0 avec `require-where` (#690, épic #700) — aucune requête tant qu'aucun filtre n'est posé, état `idle` rendu en message DSFR sur les afficheurs. Absent de 0.24.0, la version chargée par le dépôt."
+    "correction": "Corrigé par #690 (épic #700), livré en **0.25.0** : `require-where` sur `dsfr-data-source` et `dsfr-data-query` — aucune requête n'est lancée tant que l'utilisateur n'a posé aucun filtre, et retirer le dernier filtre y ramène. L'état « idle » est rendu par les afficheurs, ce qui remplace le lien d'exemple et le texte d'aide par un comportement. La page de l'impôt sur le revenu, qui ouvrait sur une courbe absurde (la somme de toutes les cases d'une déclaration), peut désormais attendre un choix."
   },
   {
     "id": "AM-036",
@@ -1778,7 +1746,20 @@
     "statut": "a-deposer",
     "date": "2026-09-09",
     "correction": "Partiellement traité par #645, livré en 0.21.1 : le tri des facettes adopte la grammaire `critère:sens` (`sort=\"count:desc\"`), ce qui lève l'ambiguïté du tiret (PG-012).",
-    "reste_vrai": "Le tri demeure global : `_resolveSort()` lit un seul `sort` pour tout le composant (vérifié au source, `dsfr-data-facets.ts`, et dans le bundle publié 0.24.0). La grammaire par champ `champ:tri | champ2:tri`, déjà en usage pour `labels` et `display`, n'existe pas — une barre ne peut toujours pas trier les départements en alphanumérique et les carburants par effectif."
+    "reste_vrai": "Le tri demeure global : `_resolveSort()` lit un seul `sort` pour tout le composant (vérifié au source, `dsfr-data-facets.ts`, et dans le bundle publié 0.24.0). La grammaire par champ `champ:tri | champ2:tri`, déjà en usage pour `labels` et `display`, n'existe pas — une barre ne peut toujours pas trier les départements en alphanumérique et les carburants par effectif.",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Une page qui veut trier une facette par ordre alphabétique et une autre par compte doit écrire deux composants de facettes, ou renoncer.",
+      "objectif": "Trier chaque facette selon ce qui a du sens pour son champ.",
+      "perennite": "Structurel, et la grammaire existe déjà : `champ:valeur | champ2:valeur` est celle de `labels` et `display` sur le même composant. C'est une extension, pas une conception.",
+      "acceptation": [
+        "`sort=\"academie:alpha:asc | type:count:desc\"` trie chaque facette séparément.",
+        "Un `sort` sans nom de champ garde le comportement global actuel.",
+        "Une grammaire invalide produit un avertissement, pas un silence (PG-022)."
+      ]
+    }
   },
   {
     "id": "PG-017",
@@ -2020,21 +2001,37 @@
   },
   {
     "id": "LIM-011",
-    "titre": "`color-map` n'échappe pas la virgule",
-    "type": "limite-dure",
+    "titre": "`color-map` sépare ses paires par une virgule, que des valeurs métier contiennent",
+    "type": "amelioration",
     "severite": "basse",
     "composants": [
       "dsfr-data-map-layer"
     ],
     "dataviz": [
-      "entreprise-patrimoine-vivant"
+      "entreprise-patrimoine-vivant",
+      "edu/generation-2024",
+      "edu/label-egalite-fille-garcon"
     ],
-    "constat": "`_parseColorMap` découpe sur « , » : une valeur qui contient une virgule (« Equipements Industriels, Médicaux, Mécaniques ») ne peut pas recevoir de couleur.",
+    "constat": "`_parseColorMap` découpe sur « , » : une valeur qui contient une virgule ne peut pas recevoir de couleur. **Requalifié de `limite-dure` en `amelioration` le 2026-09-10** : ce n'est pas une contrainte extérieure mais un choix de grammaire, et #676 a précisément montré la voie en ajoutant l'échappement percent (`%3A`, `%7C`, `%2C`, `%25`) à `replace` et `replace-fields`. Le même échappement réglerait ce cas.",
     "contournement": "Renommer la valeur en amont par `dsfr-data-normalize replace-fields`.",
     "proposition": "Accepter `|` comme séparateur alternatif, ou un JSON.",
-    "verifie": "`dsfr-data-map-layer.ts` l. 290 ; couleur #639F6A appliquée après renommage.",
+    "verifie": "Deux portails, deux jeux. Bercy : `dsfr-data-map-layer.ts` l. 290, couleur #639F6A appliquée seulement après renommage de « Equipements Industriels, Médicaux, Mécaniques ». Éducation (lot 12) : le champ `type` de `fr-en-etablissements-labellises-generation-2024` compte **39 valeurs réelles dont plusieurs contiennent une virgule** — aucune n'est cartographiable. Le découpage sur « , » est inchangé dans le bundle publié 0.25.0.",
     "statut": "a-deposer",
-    "date": "2026-09-09"
+    "date": "2026-09-09",
+    "demande": "Accepter l'échappement percent dans `color-map`, avec la même convention que `replace-fields` depuis #676.",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Un jeu dont les libellés contiennent une virgule ne peut pas être coloré du tout, et rien ne le signale — la carte sort monochrome.",
+      "objectif": "Colorer par une modalité dont le libellé contient une virgule.",
+      "perennite": "Structurel : les nomenclatures métier énumèrent (« A, B et C »). Deux portails sur deux l'ont rencontré. Le mécanisme d'échappement existe déjà depuis #676.",
+      "acceptation": [
+        "`color-map=\"Equipements Industriels%2C Médicaux:#639F6A\"` applique la couleur.",
+        "La convention est celle de `replace-fields` (#676), documentée au même endroit.",
+        "Une grammaire invalide produit un avertissement, pas un silence (cf. PG-022)."
+      ]
+    }
   },
   {
     "id": "PG-021",
@@ -2934,7 +2931,7 @@
   },
   {
     "id": "AM-060",
-    "titre": "`color-map` n'existe que sur une couche de carte, et sa grammaire sépare par des virgules",
+    "titre": "`color-map` n'existe que sur une couche de carte, pas sur `dsfr-data-chart`",
     "type": "amelioration",
     "severite": "basse",
     "composants": [
@@ -2943,11 +2940,10 @@
     ],
     "dataviz": [
       "edu/portrait-de-territoire-sports",
-      "edu/generation-2024",
       "edu/label-egalite-fille-garcon"
     ],
-    "constat": "Deux points sur le même attribut. **Un** : `color-map` est porté par la couche de carte, pas par `dsfr-data-chart` — une même modalité ne peut donc pas garder sa couleur entre la carte et le graphique de la même page, ce qui est pourtant la première attente d'un tableau de bord. **Deux** : sa grammaire sépare les paires par des virgules, or des valeurs métier en contiennent.",
-    "verifie": "Relevé sur Génération 2024, dont le champ `type` compte **39 valeurs réelles dont plusieurs contiennent une virgule** : la grammaire ne permet pas de les cartographier. Le besoin de couleur partagée carte/graphique vient de « Portrait de territoire » ; le besoin de `color-map` tout court est établi sur le Label égalité, où trois niveaux de labellisation doivent être distingués.",
+    "constat": "`color-map` est porté par `dsfr-data-map-layer`, pas par `dsfr-data-chart` : une même modalité ne peut pas garder sa couleur entre la carte et le graphique de la même page, ce qui est la première attente d'un tableau de bord. (Le second point de la rédaction initiale — le séparateur virgule — a été **fusionné dans LIM-011**, qui le portait déjà depuis le portail Bercy : règle « fusionner avant d'ajouter ».)",
+    "verifie": "Relevé sur « Portrait de territoire », dont l'original code la même modalité de deux couleurs différentes entre sa carte et ses graphiques. Grep sur `packages/core/src` : `color-map` n'apparaît que dans `dsfr-data-map-layer.ts`.",
     "statut": "a-deposer",
     "date": "2026-09-10",
     "demande": "`color-map` sur `dsfr-data-chart`, et un séparateur qui admette des valeurs à virgule (ou un échappement, cohérent avec #676).",
@@ -3111,5 +3107,66 @@
     "verifie": "Lu au source (`MapSelectFilter.clear()`, `dsfr-data-map-layer.ts`) et confirmé par la fiche PIX, où le retrait est identifié comme le vrai coût du motif maître-détail : sur des points clusterisés, `dsfr-data-context-tags` n'est pas décoratif, il est obligatoire.",
     "statut": "acte",
     "date": "2026-09-10"
+  },
+  {
+    "id": "AM-064",
+    "titre": "En mode adaptateur, aucun moyen de passer un paramètre de requête qui n'est pas une clause (`timezone`)",
+    "type": "amelioration",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-source"
+    ],
+    "dataviz": [
+      "prix-des-carburants"
+    ],
+    "constat": "`fetch-mode=\"export\"` (#689) doit permettre de retirer les contournements par source générique. Il ne le permet pas partout : le mode adaptateur ne transmet que des **clauses** (`select`, `where`, `group-by`, `order-by`, `limit`), et `this.params` n'est lu que sur le chemin URL générique. Or l'API Opendatasoft accepte des **paramètres de requête** qui ne sont pas des clauses, dont `timezone`, indispensable dès qu'un `date_format` ODSQL rend une heure. Une page qui en a besoin ne peut donc pas être migrée — et si on la migre sans s'en apercevoir, elle affiche des heures **justes en apparence et fausses de deux heures**.",
+    "verifie": "Établi au source le 2026-09-10 : `AdapterParams` (`dsfr-data-source.ts`, `getAdapterParams()` l. 923) ne porte ni `timezone` ni passe-plat ; `this.params` n'apparaît qu'aux lignes 988, 1034 et 1057, toutes sur le chemin générique ; aucune occurrence de `timezone` dans `dsfr-data-source.ts` ni dans `opendatasoft-adapter.ts`. Contournement par la clause écarté par test à l'API : `date_format(champ, \"…\", \"Europe/Paris\")` renvoie une ODSQLSyntaxError. Conséquence mesurée sur la page des prix des carburants : sans `timezone=Europe/Paris`, une même station rend « 09:23 » au lieu de « 11:23 », sur les six dates de mise à jour et 9 807 stations. La page est donc **restée en mode générique** au lot 13, seule des quinze.",
+    "contournement": "Rester en source générique (`url=` + `params`) — c'est-à-dire renoncer au mode adaptateur, ce que #689 était censé rendre inutile.",
+    "demande": "Un attribut `timezone` sur `dsfr-data-source` en mode adaptateur, ou plus généralement un passe-plat de paramètres de requête pour ce que le portail accepte hors clauses.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Le seul cas connu où `fetch-mode=\"export\"` ne peut pas remplacer le contournement qu'il vient supprimer. Et le mode d'échec est le pire : migrer sans le voir donne des heures fausses sans aucun message.",
+      "objectif": "Qu'une page ayant besoin d'un paramètre de requête non-clause puisse quand même passer en mode adaptateur.",
+      "perennite": "Structurel : `timezone` concerne tout jeu horodaté rendu avec `date_format`, c'est-à-dire une grande partie des jeux temps réel des portails.",
+      "acceptation": [
+        "Une source en `fetch-mode=\"export\"` avec `timezone=\"Europe/Paris\"` rend les mêmes heures que la source générique équivalente.",
+        "Le paramètre est transmis aussi bien en mode `records` qu'en mode `export`.",
+        "Un paramètre non reconnu par le portail produit un message, pas un silence."
+      ]
+    }
+  },
+  {
+    "id": "AM-065",
+    "titre": "`dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-search"
+    ],
+    "dataviz": [
+      "impot-sur-le-revenu"
+    ],
+    "constat": "Avec `require-where` (#690), les afficheurs passent correctement en état `idle` tant qu'aucun filtre n'est posé — sauf le compteur de `dsfr-data-search`, qui annonce « 0 résultats ». L'utilisateur lit donc « aucun résultat » là où il faudrait lire « faites un choix ». C'est l'angle mort d'une fonctionnalité par ailleurs juste.",
+    "verifie": "Relevé au navigateur le 2026-09-10 sur la page de l'impôt sur le revenu, après mise en œuvre de `require-where` : zéro requête au chargement (vérifié au réseau), les six afficheurs en état idle, et le compteur de recherche affichant « 0 résultats ».",
+    "demande": "Propager l'état `idle` au compteur de `dsfr-data-search`, avec un libellé paramétrable.",
+    "statut": "a-deposer",
+    "date": "2026-09-10",
+    "cadrage": {
+      "priorite": "P3",
+      "effort": "S",
+      "decision": "Accepter",
+      "impact": "Un message contredit les cinq autres afficheurs sur la même page, et dit le contraire de la vérité.",
+      "objectif": "Que le compteur de recherche se taise quand la page attend un choix.",
+      "perennite": "Durable : le motif `require-where` a vocation à servir sur toute page d'exploration.",
+      "acceptation": [
+        "Sous `require-where` et sans filtre, le compteur n'affiche pas « 0 résultats ».",
+        "Le libellé de l'état d'attente est paramétrable, comme celui des autres afficheurs.",
+        "Poser un filtre rétablit le compteur normal."
+      ]
+    }
   }
 ]

@@ -48,9 +48,21 @@
   </div>
 
   <!-- ==========================================================================
-       Toutes les agrégations passent par /exports/json, qui accepte `group_by`
-       ET renvoie tous les groupes en une fois — l'endpoint /records paginé
-       s'arrête à 100 groupes sans le dire (BUG-001).
+       Toutes les agrégations passent par l'endpoint d'export du portail, qui
+       accepte `group_by` ET renvoie tous les groupes en une fois — l'endpoint
+       /records paginé s'arrêtait à 100 groupes sans le dire (BUG-001).
+
+       Historique : au lot 3, la seule façon d'atteindre /exports/json était
+       d'écrire la source en mode générique (`url=` + `params`), ce qui faisait
+       perdre le mode adaptateur (plus de délégation serveur du where /
+       order-by / group-by, plus de server-facets, plus de meta.truncated, et
+       une déclaration qui n'indique plus quel jeu elle lit). C'était le
+       contournement mesuré du registre — AM-011 — dont la mesure d'origine
+       reste : sur /records, 3 080 lignes coûtaient 31 requêtes en série,
+       931 ms en moyenne, 28,9 s cumulées, contre 1 requête et 0,62 s en export.
+       Depuis dsfr-data 0.25.0 (#689), `fetch-mode="export"` fait la même
+       requête unique EN RESTANT en mode adaptateur : les neuf sources
+       ci-dessous sont redevenues des sources déclaratives sur le jeu.
 
        Colonnes : balance_sortie_3 est en Md€ (celle des graphiques « Générale »
        de l'original). balance_sortie (en €) est la seule SIGNÉE — débit positif,
@@ -59,10 +71,11 @@
        ========================================================================== -->
 
   <!-- KPI 2025 : une ligne par catégorie, un query par KPI -->
-  <dsfr-data-source id="cg-2025"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"categorie, sum(balance_sortie_3) as montant","group_by":"categorie","where":"year(annee) = 2025"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-2025" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="categorie, sum(balance_sortie_3) as montant"
+    group-by="categorie" where="year(annee) = 2025">
   </dsfr-data-source>
   <dsfr-data-query id="cg-actif-2025"    source="cg-2025" where="categorie:eq:Actif"></dsfr-data-query>
   <dsfr-data-query id="cg-passif-2025"   source="cg-2025" where="categorie:eq:Passif"></dsfr-data-query>
@@ -70,83 +83,101 @@
   <dsfr-data-query id="cg-charges-2025"  source="cg-2025" where="categorie:eq:Charges"></dsfr-data-query>
 
   <!-- Bilan : Actif / Passif par année, puis par postes, puis solde -->
-  <dsfr-data-source id="cg-bilan-an"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"sum(balance_sortie_3) as montant","group_by":"categorie, year(annee) as an","where":"categorie in (\"Actif\",\"Passif\")","order_by":"categorie, an"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-bilan-an" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="categorie, year(annee) as an"
+    where='categorie in ("Actif","Passif")' order-by="categorie, an">
   </dsfr-data-source>
-  <dsfr-data-source id="cg-actif-postes"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"sum(balance_sortie_3) as montant","group_by":"postes, year(annee) as an","where":"categorie = \"Actif\"","order_by":"postes, an"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-actif-postes" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="postes, year(annee) as an"
+    where='categorie = "Actif"' order-by="postes, an">
   </dsfr-data-source>
-  <dsfr-data-source id="cg-passif-postes"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"sum(balance_sortie_3) as montant","group_by":"postes, year(annee) as an","where":"categorie = \"Passif\"","order_by":"postes, an"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-passif-postes" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="postes, year(annee) as an"
+    where='categorie = "Passif"' order-by="postes, an">
   </dsfr-data-source>
-  <dsfr-data-source id="cg-solde-bilan"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"sum(balance_sortie)/1000000000 as solde","group_by":"year(annee) as an","where":"categorie in (\"Actif\",\"Passif\")","order_by":"an"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-solde-bilan" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie)/1000000000 as solde"
+    group-by="year(annee) as an"
+    where='categorie in ("Actif","Passif")' order-by="an">
   </dsfr-data-source>
 
   <!-- Compte de résultat : Charges / Produits -->
-  <dsfr-data-source id="cg-cr-an"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"sum(balance_sortie_3) as montant","group_by":"categorie, year(annee) as an","where":"categorie in (\"Charges\",\"Produits\")","order_by":"categorie, an"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-cr-an" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="categorie, year(annee) as an"
+    where='categorie in ("Charges","Produits")' order-by="categorie, an">
   </dsfr-data-source>
-  <dsfr-data-source id="cg-charges-postes"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"sum(balance_sortie_3) as montant","group_by":"postes, year(annee) as an","where":"categorie = \"Charges\"","order_by":"postes, an"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-charges-postes" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="postes, year(annee) as an"
+    where='categorie = "Charges"' order-by="postes, an">
   </dsfr-data-source>
-  <dsfr-data-source id="cg-produits-postes"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"sum(balance_sortie_3) as montant","group_by":"postes, year(annee) as an","where":"categorie = \"Produits\"","order_by":"postes, an"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-produits-postes" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="postes, year(annee) as an"
+    where='categorie = "Produits"' order-by="postes, an">
   </dsfr-data-source>
-  <dsfr-data-source id="cg-solde-cr"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/balances_des_comptes_etat/exports/json"
-    params='{"select":"-sum(balance_sortie)/1000000000 as solde","group_by":"year(annee) as an","where":"categorie in (\"Charges\",\"Produits\")","order_by":"an"}'
-    api-key-ref="ods-mef">
+  <dsfr-data-source id="cg-solde-cr" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="-sum(balance_sortie)/1000000000 as solde"
+    group-by="year(annee) as an"
+    where='categorie in ("Charges","Produits")' order-by="an">
   </dsfr-data-source>
 
-  <!-- Vue par mission : régime adaptateur (le contexte ne peut pas pousser un
-       `where` dans une source en mode URL). 20 à 60 groupes par requête, sous
-       le plafond de 100 de /records. Montants en M€ (balance_sortie_4).
-       L'adaptateur entoure d'accents graves un group-by contenant une fonction
-       (PG-014) : on groupe sur la date brute `annee` et on calcule `year(annee)`
-       dans le select. Ce n'est PAS un groupement par année : ça ne coïncide que
+  <!-- Vue par mission : régime adaptateur, comme tout le reste de la page
+       désormais. 20 à 60 groupes par requête. Montants en M€ (balance_sortie_4).
+       Ces quatre sources portaient le contournement de PG-014 : l'adaptateur
+       entourait d'accents graves un group-by contenant une fonction (HTTP 400),
+       on groupait donc sur la date brute `annee` en calculant `year(annee)` dans
+       le select — ce qui n'est PAS un groupement par année, et ne coïncidait que
        parce que `annee` n'a qu'une valeur par an dans ce jeu (vérifié à l'API,
-       lot 11 : `group_by=annee` → 10 dates distinctes pour 10 années). -->
+       lot 11 : `group_by=annee` → 10 dates distinctes pour 10 années). Corrigé
+       par #641 (0.21.1) : une expression aliasée passe telle quelle, le
+       group-by par année est redevenu déclaratif et vrai. -->
   <dsfr-data-source id="cgm-cr" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
     api-key-ref="ods-mef"
-    select="year(annee) as an, sum(balance_sortie_4) as montant"
-    group-by="categorie, annee"
+    select="sum(balance_sortie_4) as montant"
+    group-by="categorie, year(annee) as an"
     where='categorie in ("Charges","Produits")' order-by="categorie, an">
   </dsfr-data-source>
   <dsfr-data-source id="cgm-charges" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
     api-key-ref="ods-mef"
-    select="year(annee) as an, sum(balance_sortie_4) as montant"
-    group-by="postes, annee"
+    select="sum(balance_sortie_4) as montant"
+    group-by="postes, year(annee) as an"
     where='categorie = "Charges"' order-by="postes, an">
   </dsfr-data-source>
   <dsfr-data-source id="cgm-produits" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
     api-key-ref="ods-mef"
-    select="year(annee) as an, sum(balance_sortie_4) as montant"
-    group-by="postes, annee"
+    select="sum(balance_sortie_4) as montant"
+    group-by="postes, year(annee) as an"
     where='categorie = "Produits"' order-by="postes, an">
   </dsfr-data-source>
   <dsfr-data-source id="cgm-bilan" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
     api-key-ref="ods-mef"
-    select="year(annee) as an, sum(balance_sortie_4) as montant"
-    group-by="categorie, annee"
+    select="sum(balance_sortie_4) as montant"
+    group-by="categorie, year(annee) as an"
     where='categorie in ("Actif","Passif")' order-by="categorie, an">
   </dsfr-data-source>
 
@@ -462,7 +493,12 @@
               <em>bloque réellement</em> une reproduction. La sortie&nbsp;: <code>/exports/json</code>
               accepte <code>group_by</code> et renvoie les 264 groupes en une requête de
               0,5&nbsp;s. Ce contournement, découvert ici, vaut pour tous les tableaux de bord
-              à agrégats nombreux.</li>
+              à agrégats nombreux. Il coûtait cependant le mode adaptateur&nbsp;: neuf des
+              treize sources de la page étaient écrites en <code>url</code>&nbsp;+&nbsp;<code>params</code>,
+              donc sans délégation serveur, sans <code>server-facets</code> et sans jeu de
+              données lisible dans la déclaration (AM-011). Depuis
+              <code>fetch-mode="export"</code>, les neuf sont redevenues déclaratives — même
+              requête unique, mode adaptateur retrouvé (voir l'encadré ci-dessous).</li>
             <li><strong>Un KPI ne sait pas filtrer.</strong> «&nbsp;L'actif en 2025&nbsp;» suppose de
               prendre une ligne parmi six. <code>dsfr-data-kpi</code> agrège tout ce que sa source
               lui donne&nbsp;; il faut intercaler un <code>dsfr-data-query where="categorie:eq:Actif"</code>
@@ -490,7 +526,10 @@
               de date distincte. Il ne coïncide ici que parce que <code>annee</code> n'a qu'une
               valeur par an (vérifié à l'API&nbsp;: <code>group_by=annee</code> renvoie 10 dates
               pour 10 années). Sur un jeu quotidien il produirait 365 barres par an. Le seul
-              contournement général reste la source générique, qui n'écoute pas le contexte.</li>
+              contournement général était alors la source générique, qui n'écoute pas le contexte.
+              PG-014 est corrigé depuis (#641)&nbsp;: les quatre sources de la vue par mission
+              groupent désormais sur <code>categorie, year(annee) as an</code>, ce qui est un
+              vrai groupement par année et ne dépend plus de la propriété du jeu.</li>
             <li><strong>Relecture face au relevé visuel du portail.</strong> La première version
               de cette page couvrait 2 des 6 graphiques de la vue générale (elle mélangeait les
               six catégories dans un seul histogramme et les 27 postes dans un seul empilement),
@@ -523,14 +562,18 @@
           </ul>
 
           <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.24.0</h4>
+            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
             <p class="fr-text--sm">
-              6 des frictions décrites ci-dessus ont été comblées par la bibliothèque
+              8 des frictions décrites ci-dessus ont été comblées par la bibliothèque
               <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
+              du banc d'essai. Deux de ces correctifs sont <strong>appliqués dans le code de la page</strong>
+              (AM-011 et PG-014, signalés ci-dessous)&nbsp;; pour les autres, la page porte encore son
+              contournement, qui n'est simplement plus nécessaire.
+              Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
             </p>
             <ul class="fr-text--sm">
+              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689) — <em>appliqué</em>&nbsp;: <code>fetch-mode="export"</code> charge le jeu en <strong>une seule requête</strong> tout en restant en mode adaptateur. Les 9 sources génériques (<code>url</code>&nbsp;+&nbsp;<code>params</code>) de cette page sont redevenues des sources déclaratives, à comportement réseau inchangé — chronométré au navigateur avant et après&nbsp;: 13 requêtes dans les deux cas (9 sur l'endpoint d'export, 4 sur <code>/records</code> pour la vue par mission), toutes concurrentes, page complète en 0,5 à 1,6&nbsp;s selon le tirage. Ce qui revient, c'est la délégation serveur, le jeu de données lisible dans la déclaration et la détection de troncature.</li>
+              <li><strong>PG-014</strong> — <strong>0.21.1</strong> (#641) — <em>appliqué</em>&nbsp;: un élément de <code>group-by</code> contenant une parenthèse est transmis tel quel au lieu d'être backquoté. La vue par mission groupe désormais sur <code>year(annee) as an</code> — un vrai groupement par année, au lieu du groupement par date brute qui ne coïncidait que sur ce jeu-ci.</li>
               <li><strong>AM-005</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code>&nbsp;: plus de «&nbsp;Série N&nbsp;» en légende pour un groupe sans valeur.</li>
               <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
               <li><strong>BUG-001</strong> — <strong>0.21.1</strong> (#641)&nbsp;: l'adaptateur Opendatasoft ne se fie plus au <code>total_count</code> d'un <code>group-by</code>&nbsp;: toutes les pages de l'agrégat sont lues.</li>
@@ -557,7 +600,7 @@
             <tr><td>glossaire, descriptifs de mission (jeux <em>restricted</em>)</td><td>—</td><td><strong>Inaccessible sans la clé privée du portail</strong></td></tr>
             <tr><td>KPI en expression AngularJS</td><td><code>dsfr-data-query where</code> + <code>dsfr-data-kpi</code></td><td>Plus verbeux, mais typé</td></tr>
             <tr><td>évolution N/N-1 dans le template</td><td>—</td><td><strong>Sans équivalent (calcul entre lignes)</strong></td></tr>
-            <tr><td>—</td><td><code>/exports/json</code> + <code>group_by</code></td><td>Contourne la troncature à 100 groupes</td></tr>
+            <tr><td>—</td><td><code>fetch-mode="export"</code> + <code>group-by</code></td><td>Une requête par source, sans quitter le mode adaptateur (#689)</td></tr>
             <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>unit-tooltip</code></td><td>Sans équivalent</td></tr>
           </tbody>
         </table>
@@ -579,8 +622,9 @@
         <p class="fr-text--sm fr-hint-text">
           Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: BUG-001 (enrichi
           d'un contournement et d'un cas bloquant réel), AM-011 (enrichi&nbsp;: l'export accepte
-          <code>group_by</code>), AM-018 (arithmétique entre séries), AM-019 (un KPI ne sait pas
-          filtrer).
+          <code>group_by</code>&nbsp;; corrigé en 0.25.0 par <code>fetch-mode="export"</code>, appliqué
+          ici), PG-014 (<code>group-by</code> avec fonction, corrigé en 0.21.1, appliqué ici),
+          AM-018 (arithmétique entre séries), AM-019 (un KPI ne sait pas filtrer).
         </p>
       </div>
     </div>
@@ -592,7 +636,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.24.0/dist/dsfr-data.core.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.25.0/dist/dsfr-data.core.umd.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>
