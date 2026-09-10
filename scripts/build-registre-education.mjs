@@ -82,6 +82,22 @@ const STATUTS = {
   'Cartographie Conseil National de la Refondation - CNR Education': ['reproduite', '/education/cnr-education',
     '178 thèmes mais 1 814 combinaisons : premier emploi d’explode ; un champ email qui contient des académies', 'angular'],
 
+  // --- Lot 17 : les trois vues de jeu heritees.
+  'Hybridation de l’enseignement en lycée': ['reproduite', '/education/hybridation-enseignement-lycee',
+    '19 régions portant leur geo_shape : premier emploi de fill-field, là où il fonctionne', 'vue'],
+  "L'annuaire des bureaux des entreprises": ['reproduite', '/education/annuaire-bureaux-des-entreprises',
+    '1 381 métiers en multivalué (explode) ; cinq contacts valent « #N/A »', 'vue'],
+  'Appel à projet Socle Numérique dans les Ecoles Elémentaires': ['reproduite', '/education/aap-socle-numerique-ecoles',
+    'Jumeau de l’hybridation à la maille communale : le même taux, coloré par un autre chemin', 'vue'],
+
+  'Cartographie PIX fiche établissement': ['reproduite', '/education/carto-pix-fiche-etablissement',
+    'Les 43 479 lignes de la carte d’origine ont UNE seule position : reproduite en changeant de source', 'angular'],
+
+  'Suivi d\'impact de l\'Opération de Sensibilisation au risque de l\'hameçonnage "Cactus"': ['reproduite', '/education/cactus-hameconnage',
+    '904 réponses ; fold suppose des booléens, un questionnaire produit des ternaires', 'studio'],
+  'Quelles personnalités ont donné leur nom aux écoles ?': ['reproduite', '/education/patronymes-des-ecoles',
+    '809 225 lignes, zéro chargée ; 17,2 % de femmes, et trois dénominateurs possibles', 'asset'],
+
   // --- Les trois galeries editoriales : aucune dataviz a reproduire.
   'Challenge wikidata en classe': ['analyse', '/education/non-reproduites',
     'Galerie éditoriale de liens : aucune directive ods-*, aucun iframe, aucune requête /api/', 'angular'],

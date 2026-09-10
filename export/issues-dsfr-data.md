@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 35 demandes cadrées — 5 bugs,
-> 25 améliorations,
+> 37 demandes cadrées — 5 bugs,
+> 27 améliorations,
 > 5 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -92,8 +92,9 @@ _10 demandes — S 6, M 3, L 1._
 | AM-047 | Pas de boucle dans un template : impossible d'émettre un élément par valeur d'un champ multivalué | amelioration | M | 2 | Accepter |
 | AM-051 | Les compteurs de facette n'ont pas de sens sur une table de mesures, et rien ne le dit | amelioration | M | 2 | Accepter |
 | AM-056 | Changer le champ d'un filtre selon la source, et vider un groupe de filtres exclusifs | amelioration | M | 1 | Accepter |
+| AM-070 | Le ratio d'un KPI sait filtrer un `count`, pas une `sum` : une part n'est pas calculable sur une source pré-agrégée | amelioration | M | 1 | Accepter |
 
-_11 demandes — S 6, M 5, L 0._
+_12 demandes — S 6, M 6, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -109,8 +110,9 @@ _11 demandes — S 6, M 5, L 0._
 | AM-065 | `dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé | amelioration | S | 1 | Accepter |
 | PG-027 | L'adaptateur Opendatasoft backquote `group-by` mais pas `select` : un champ au nom non standard vaut un HTTP 400 | piege | S | 1 | Accepter |
 | AM-058 | Un filtre qui traverse un référentiel (académie → départements) | amelioration | M | 2 | Étudier |
+| AM-069 | Une couche dont tous les points sont confondus se comporte comme une couche qui marche : rien ne le signale | amelioration | M | 1 | Accepter |
 
-_10 demandes — S 9, M 1, L 0._
+_11 demandes — S 9, M 2, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -975,6 +977,49 @@ Un `field-map` par source sur un filtre de contexte, et une notion de groupe de 
 
 ---
 
+## AM-070 — Le ratio d'un KPI sait filtrer un `count`, pas une `sum` : une part n'est pas calculable sur une source pré-agrégée
+
+**Priorité** P2 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-kpi`
+**Rencontré sur** 1 page(s) : edu/patronymes-des-ecoles
+
+### Constat
+
+Le ratio de `dsfr-data-kpi` (#673) permet d'écrire une part : `value="count:statut:ouvert / count"`. Le filtre y est porté par la grammaire à trois parties `champ:fn:valeur`, qui ne fonctionne QUE pour `count` — et qui filtre sur le champ qu'elle agrège. Pour une `sum`, il n'existe pas de forme équivalente : `montant:sum:valeur` filtrerait sur `montant` lui-même, ce qui n'a pas de sens. Le `where` du KPI (#674) ne comble pas le manque : il s'applique aux DEUX côtés du ratio à la fois, si bien que `ecoles:sum / ecoles:sum` avec un `where` unique rend mécaniquement 100 %. Conséquence : sur une source PRÉ-AGRÉGÉE — une ligne par modalité, la mesure dans une colonne — une part n'est pas calculable en un KPI. Or c'est exactement la forme qu'impose un gros jeu : sur 809 225 lignes, on n'a pas le choix d'agréger côté serveur, et la question « quelle part de femmes ? » devient alors inexprimable, alors qu'elle l'est sur un jeu chargé ligne à ligne.
+
+### Impact de l'erreur ou du manque
+
+Une part est l'indicateur le plus courant d'un tableau de bord, et l'agrégation serveur est obligatoire dès qu'un jeu dépasse quelques dizaines de milliers de lignes. Les deux se rencontrent souvent — et là, la part devient inexprimable. Le symptôme est de surcroît trompeur : le KPI affiche 100 %, une valeur plausible pour un pourcentage, pas une erreur.
+
+### Objectif métier de la correction
+
+Qu'une part soit calculable sur une source pré-agrégée, comme elle l'est sur des lignes brutes.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : c'est le pendant naturel de #673, sur le régime de données qu'impose le gros volume.
+
+### Comment ça a été vérifié
+
+Rencontré au navigateur le 2026-09-10 sur /education/patronymes-des-ecoles (dsfr-data 0.27.0). Source agrégée `group-by="sexe_ou_genre" select="count(*) as ecoles"` — trois lignes : masculin 9 164, féminin 2 297, null 35 952. Avec `value="ecoles:sum / ecoles:sum" where="sexe_ou_genre:isnotnull"`, le KPI affiche **100,0 %** : le `where` filtre les deux côtés, la division porte sur la même valeur. Absence de forme `champ:sum:valeur` filtrant sur un AUTRE champ vérifiée au source (packages/core/src/utils/aggregations.ts : la branche à trois parties pose `filterField: field`, le champ agrégé lui-même). Les chiffres justes (20,0 % rapporté aux écoles, 17,2 % rapporté aux patronymes distincts) ont dû être écrits dans une note en prose, calculés hors de la page.
+
+### Contournement actuel
+
+Aucun en un KPI. Il faut soit charger les lignes brutes (impossible ici : 809 225 lignes), soit calculer la part hors de la page et l'écrire en dur — ce qui la fige et la rend fausse au premier changement de filtre. Une query intermédiaire ne résout rien : le pivot d'une colonne de modalités vers des colonnes nommées demanderait `dsfr-data-pivot`, puis un `compute` — trois composants pour un pourcentage.
+
+### Demande
+
+Étendre le filtre par valeur aux agrégats autres que `count`, sur un champ différent de celui agrégé — par exemple `ecoles:sum:sexe_ou_genre:féminin`, ou un `where` par côté du ratio (`value="ecoles:sum{sexe_ou_genre:eq:féminin} / ecoles:sum"`). La seconde forme a l'avantage de réemployer le dialecte colon déjà en place.
+
+### Critères d'acceptation
+
+- [ ] Un côté d'un ratio peut être filtré sur un champ autre que celui qu'il agrège.
+- [ ] L'autre côté reste non filtré, ou porte son propre filtre.
+- [ ] Le `where` global du KPI continue de s'appliquer aux deux côtés, sans ambiguïté avec la nouvelle forme.
+- [ ] Un test couvre le cas « source pré-agrégée, une ligne par modalité ».
+
+---
+
 ## AM-054 — Aucune maille géographique non française, ni référentiel de noms de pays en français
 
 **Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
@@ -1372,6 +1417,49 @@ Résolution d'un filtre à travers une table de correspondance déclarée (le fi
 - [ ] Un filtre « académie » restreint un jeu qui n'a qu'un champ « département ».
 - [ ] La table de correspondance est déclarée une fois, pas rechargée par filtre.
 - [ ] Le tag affiche l'académie choisie, pas la liste des départements.
+
+---
+
+## AM-069 — Une couche dont tous les points sont confondus se comporte comme une couche qui marche : rien ne le signale
+
+**Priorité** P3 · **Effort estimé** M (un à trois jours) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-map-layer`
+**Rencontré sur** 1 page(s) : edu/carto-pix-fiche-etablissement
+
+### Constat
+
+Le jeu que la page Pix du portail cartographie porte 43 479 lignes et 11 113 établissements distincts pour UNE SEULE coordonnée : toutes ses lignes ont hérité de la position de la première (45,97497 / 5,35024 — le lycée Alexandre-Bérard à Ambérieu-en-Bugey). La carte se comporte pourtant normalement : les coordonnées sont valides, `getSkippedCount()` vaut 0, aucun avertissement n'est émis, le cluster s'affiche et annonce 43 479. Il ne se disperse simplement jamais, y compris au zoom 19 — et c'est le SEUL signe visible : il ne se passe rien. Une carte dont tous les points sont confondus est visuellement indiscernable d'une carte dont le clustering fonctionne mal, ou dont le fit est mal réglé. Le diagnostic a demandé d'exporter le jeu et de dédoublonner les coordonnées en dehors de la page. Or la bibliothèque tient déjà les données : elle est le seul acteur de la chaîne en position de compter les positions distinctes d'une couche, et de dire « 43 479 éléments, 1 position distincte » — ce qui aurait fait gagner une heure et, surtout, aurait empêché de publier une carte inopérante.
+
+### Impact de l'erreur ou du manque
+
+Le défaut est rare mais total : la dataviz d'origine est entièrement inopérante et personne ne s'en est aperçu. C'est aussi le genre de défaut qu'une reprise de jeu introduit sans bruit — un géocodage qui échoue et retombe sur une valeur par défaut. La bibliothèque est le seul maillon qui puisse le voir.
+
+### Objectif métier de la correction
+
+Qu'une carte dont les points sont tous confondus le dise, au lieu de ressembler à une carte qui fonctionne.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : c'est une mesure sur les données rendues, indépendante du portail et de l'adaptateur.
+
+### Comment ça a été vérifié
+
+Établi le 2026-09-10 en construisant /education/carto-pix-fiche-etablissement (dsfr-data 0.27.0). Export complet de `fr-en-pix_certification_pix_inscription_et_passation_par_eple` (`/exports/json?select=position,uai`, 43 479 lignes, 3,7 Mo) puis dédoublonnage des coordonnées arrondies à 5 décimales : **1 position distincte pour 11 113 UAI distincts**. Recoupé par l'API elle-même, dont l'emprise du jeu entier est un point : `/records/1.0/boundingbox/` renvoie `bbox` aux quatre coordonnées identiques. Les trois jeux frères du même producteur ont de vraies positions — `…_sans_collecte_de_profil` rend 10 095 coordonnées distinctes pour 41 422 lignes, mesuré de la même façon. La page a été bâtie sur ce jeu-là.
+
+### Contournement actuel
+
+Compter soi-même les positions distinctes, hors de la page, avant de faire confiance à une carte. Aucun moyen de le faire depuis la page.
+
+### Demande
+
+Que `dsfr-data-map-layer` expose le nombre de positions distinctes de ce qu'elle a rendu (par exemple `getDistinctPositionCount()`, à côté de `getSkippedCount()` et `getRenderedCount()`), et avertisse en console quand ce nombre est très inférieur au nombre d'éléments — par exemple une position pour plus de dix éléments. Le seuil doit rester silencieux sur les cas légitimes : plusieurs services à une même adresse, plusieurs millésimes d'un même établissement.
+
+### Critères d'acceptation
+
+- [ ] La couche expose le nombre de positions distinctes rendues.
+- [ ] Un avertissement console est émis quand ce nombre est très inférieur au nombre d'éléments, avec les deux chiffres.
+- [ ] Le seuil ne se déclenche pas sur un jeu où quelques éléments partagent une adresse.
+- [ ] L'information apparaît dans le volet Diagnostic.
 
 ---
 
