@@ -61,9 +61,18 @@ if (process.argv[2] === '--diff') {
 const pw = await import(join(homedir(), 'Developer/GitHub/dsfr-data/node_modules/playwright/index.js'));
 const { chromium } = pw.default ?? pw;
 
+// Deux portails depuis le lot 14 : public/viz (Bercy) et public/education.
+const html = (dossier, prefixe) => {
+  try {
+    return readdirSync(dossier).filter((f) => f.endsWith('.html')).map((f) => prefixe + f);
+  } catch {
+    return [];
+  }
+};
 const pages = [
-  ...readdirSync('public').filter((f) => f.endsWith('.html')).map((f) => '/' + f),
-  ...readdirSync('public/viz').filter((f) => f.endsWith('.html')).map((f) => '/viz/' + f),
+  ...html('public', '/'),
+  ...html('public/viz', '/viz/'),
+  ...html('public/education', '/education/'),
 ].sort();
 
 const sortie = process.argv[2] || 'recette.json';

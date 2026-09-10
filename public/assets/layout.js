@@ -3,13 +3,13 @@
    (differe), qui trouve donc un DOM complet a instrumenter. */
 (() => {
   const TITRE = 'open-data-viz';
-  const BASELINE = 'Reproduire le catalogue de visualisations de data.economie.gouv.fr avec dsfr-data';
+  const BASELINE = 'Reproduire les catalogues de visualisations de data.economie.gouv.fr et data.education.gouv.fr avec dsfr-data';
 
   const LIENS = [
-    { href: '/', libelle: 'Catalogue' },
+    { href: '/', libelle: 'Portail Bercy' },
+    { href: '/education', libelle: 'Portail Éducation' },
     { href: '/synthese', libelle: 'Synthèse' },
-    { href: '/retours', libelle: 'Registre des retours' },
-    { href: 'https://data.economie.gouv.fr/pages/catalogue-visualisations/', libelle: 'Original Opendatasoft', externe: true }
+    { href: '/retours', libelle: 'Registre des retours' }
   ];
 
   const courant = window.location.pathname.replace(/\/$/, '') || '/';
@@ -65,11 +65,14 @@
       </div>
       <div class="fr-footer__content">
         <p class="fr-footer__content-desc">
-          Banc d'essai indépendant : chaque page rejoue une visualisation du catalogue
+          Banc d'essai indépendant : chaque page rejoue une visualisation des catalogues
           <a class="fr-footer__content-link" href="https://data.economie.gouv.fr/pages/catalogue-visualisations/"
              target="_blank" rel="noopener external">data.economie.gouv.fr</a>
+          et
+          <a class="fr-footer__content-link" href="https://data.education.gouv.fr/pages/dataviz-list/"
+             target="_blank" rel="noopener external">data.education.gouv.fr</a>
           avec les composants <code>dsfr-data</code> (ChartsBuilder), puis documente ce qui a été
-          simple ou coûteux. Les données sont lues en direct sur l'API Opendatasoft du portail.
+          simple ou coûteux. Les données sont lues en direct sur l'API Opendatasoft des portails.
         </p>
         <ul class="fr-footer__content-list">
           <li class="fr-footer__content-item">
@@ -80,6 +83,9 @@
           </li>
           <li class="fr-footer__content-item">
             <a class="fr-footer__content-link" href="https://data.economie.gouv.fr" target="_blank" rel="noopener external">data.economie.gouv.fr</a>
+          </li>
+          <li class="fr-footer__content-item">
+            <a class="fr-footer__content-link" href="https://data.education.gouv.fr" target="_blank" rel="noopener external">data.education.gouv.fr</a>
           </li>
         </ul>
       </div>

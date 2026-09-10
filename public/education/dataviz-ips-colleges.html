@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPS des collèges — open-data-viz</title>
+  <meta name="description" content="Reproduction avec dsfr-data de la dataviz « IPS Collèges » de data.education.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/education">Portail Éducation</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">IPS Collèges</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Indice de position sociale des collèges — rentrée 2023-2024</h1>
+
+    <p class="fr-text--lead">
+      L'indice de position sociale (IPS) résume la situation sociale des familles des élèves
+      d'un établissement : plus il est élevé, plus les conditions sociales sont favorables aux
+      apprentissages. Sur les <strong>6 985 collèges</strong> de la rentrée 2023-2024, l'IPS
+      moyen est de <strong>104,7</strong> et s'étend de <strong>54,9</strong> à
+      <strong>161,9</strong>. Le secteur est la variable qui le structure le plus :
+      <strong>100,1</strong> dans le public, <strong>119,4</strong> dans le privé sous contrat.
+    </p>
+
+    <div class="fr-callout fr-icon-database-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/donnees-ips-colleges/"
+           target="_blank" rel="noopener external"><code>donnees-ips-colleges</code></a>
+        — 62 646 lignes sur 9 rentrées, produit par la DEPP. C'est un <strong>jeu technique</strong>
+        (titre interne « dataviz2 », mot-clé <em>hors catalogue</em>) : il n'apparaît pas au
+        catalogue du portail, et il est le seul des quatre jeux d'IPS de collèges à porter
+        une position géographique — c'est ce qui rend la carte possible.
+        Lu <strong>sans clé</strong> : le portail Éducation répond en anonyme.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        <strong>14 collèges sont écartés de cette page</strong> : leurs lignes n'ont ni nom, ni
+        commune, ni département, ni académie, ni position — seulement un UAI, un secteur et un
+        IPS. La carte en montre donc <strong>6 971</strong> sur 6 985. L'original les compte sans
+        le dire ; ici c'est écrit.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       UNE requête pour toute la page.
+
+       L'arbitrage a été tranché par la mesure, comme l'exige le dépôt :
+         · /exports/json    → 1 requête, 0,42 s, 2,6 Mo, 6 971 lignes ;
+         · /records pagine  → 70 allers-retours en série à ~80 ms, soit ~5,6 s.
+       Donc `fetch-mode="export"` (#689), et tout se dérive côté client.
+
+       Conséquence architecturale, et c'est elle qui répond au principal défaut de
+       l'original : les facettes sont CLIENT, donc complètes. L'original passe par
+       l'API v1 dont les facettes plafonnent à 100 valeurs — sa liste de communes
+       s'arrête à « Aramon », soit 100 communes sur 3 791. Ici les 3 791 y sont.
+
+       `max-records` : le piège maison. Repasser en mode adaptateur réactive le
+       plafond par défaut de 1 000, qui tronque EN SILENCE. Sans le `max-records`
+       ci-dessous, cette page afficherait 1 000 collèges sur 6 971 sans un mot.
+       ========================================================================== -->
+
+  <dsfr-data-source id="ips" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-colleges"
+    fetch-mode="export"
+    max-records="8000"
+    where="rentree_scolaire = '2023-2024' and position is not null">
+  </dsfr-data-source>
+
+  <!-- La tranche d'IPS, calculée par ligne.
+
+       Pourquoi ce détour : `fill-field` (la choroplèthe continue) n'agit QUE sur
+       `type="geoshape"`. Vérifié au source — `if (this.fillField && this.type ===
+       'geoshape')`, aux deux endroits qui comptent : le calcul des classes et la
+       construction de la légende. Sur une couche `type="circle"`, `fill-field`,
+       `breaks`, `classes`, `method` et `selected-palette` sont acceptés puis
+       IGNORÉS, sans erreur console : les 6 971 cercles sortent tous en bleu
+       France et `getLegendEntries()` renvoie une entrée sans libellé, ce qui fait
+       que la légende se rend `hidden`. Rien ne le signale. Constat AM-065.
+
+       Voie native, cherchée avant de conclure au manque (règle du dépôt) :
+       discrétiser soi-même en une expression `compute`, puis colorer par
+       `color-field` + `color-map`, qui sont catégoriels et fonctionnent sur les
+       points. La légende est alors alimentée par le `color-map`. Les bornes sont
+       calées sur la moyenne nationale (104,7) et non sur les effectifs — une
+       choroplèthe d'IPS a un centre de lecture.
+
+       Bénéfice inattendu du détour : la tranche devient une FACETTE. -->
+  <dsfr-data-normalize id="ips-n" source="ips"
+    compute="tranche_ips = when ips &lt; 90 then 'Moins de 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 125 then '110 à 125' else '125 et plus'">
+  </dsfr-data-normalize>
+
+  <!-- ⚠️ Les deux agrégats sont branchés sur `ips-f` (la facette), PAS sur `ips`.
+       Ce n'est pas un détail de style : une `dsfr-data-query group-by` posée
+       directement sur une source ODS négocie la délégation de son agrégation au
+       serveur (comportement documenté, et c'est même l'exemple du JSDoc) — mais
+       la source repart alors chercher un agrégat, et TOUS ses consommateurs
+       reçoivent l'agrégat à la place des données. Payé ici : la source est
+       tombée de 6 971 lignes à 2, le KPI « Collèges » affichait 2 et la carte
+       ignorait ses deux lignes « sans coordonnées exploitables ». Aucune erreur
+       console. Constat BUG-009 du registre. -->
+  <dsfr-data-query id="ips-par-secteur" source="ips-f" group-by="secteur"
+    aggregate="ips:avg:ips_moyen, uai:count:nb" order-by="ips_moyen:desc">
+  </dsfr-data-query>
+
+  <dsfr-data-query id="ips-par-academie" source="ips-f" group-by="libelle_academie"
+    aggregate="ips:avg:ips_moyen, uai:count:nb" order-by="ips_moyen:desc" limit="12">
+  </dsfr-data-query>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+
+      <div class="fr-col-12 fr-col-md-3">
+        <h2 class="fr-h6">Filtrer</h2>
+        <!-- Facettes CLIENT : `server-facets` exigerait `server-side`, qui ne se
+             combine pas avec `fetch-mode="export"`. Le compromis est ici tout
+             bénéfice — les 3 791 communes sont là, et les compteurs aussi.
+             `display` : `|` sépare les entrées, `:` sépare champ et mode (PG-022).
+             `radio` = menu déroulant à panneau AVEC recherche (choix unique) ;
+             ce n'est pas un bouton radio en ligne, qui serait `radio-inline` (PG-023). -->
+        <dsfr-data-facets id="ips-f" source="ips-n"
+          fields="secteur, tranche_ips, libelle_academie, libelle_departement, libelle_commune"
+          labels="secteur:Secteur | tranche_ips:Tranche d'IPS | libelle_academie:Académie | libelle_departement:Département | libelle_commune:Commune"
+          display="secteur:radio-inline | tranche_ips:checkbox | libelle_academie:radio | libelle_departement:radio | libelle_commune:radio"
+          sort="alpha:asc"
+          url-sync url-params>
+        </dsfr-data-facets>
+
+        <p class="fr-text--xs fr-mt-2w fr-mb-0">
+          Les filtres se retrouvent dans l'adresse de la page : celle-ci est partageable
+          telle quelle. L'original n'a pas d'<code>urlsync</code> et ignore les paramètres
+          <code>refine.*</code> passés dans l'URL.
+        </p>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-9">
+
+        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+          <dsfr-data-kpi source="ips-f" value="count" format="nombre"
+            heading="Collèges" label="dans la sélection"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ips-f" value="ips:avg" format="decimal" decimals="1"
+            heading="IPS moyen" label="de la sélection (national : 104,7)"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ips-f" value="ips:min" format="decimal" decimals="1"
+            heading="IPS le plus bas" label="de la sélection"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ips-f" value="ips:max" format="decimal" decimals="1"
+            heading="IPS le plus élevé" label="de la sélection"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <!-- La carte. Trois écarts assumés avec l'original, tous des corrections :
+             1. elle n'est pas centrée sur la Suisse (l'original pose
+                location="5,47.35371,8.98682", soit le canton de Glaris) — le défaut
+                du gabarit, identique sur les quatre pages IPS ;
+             2. elle n'est pas vide au chargement : l'original conditionne sa couche
+                à un refine département OU commune, si bien que choisir une académie
+                n'affiche rien du tout ;
+             3. elle ENCODE l'IPS, qui est le sujet annoncé par le titre. L'original
+                affiche 6 971 épingles rouges identiques : il faut cliquer chaque
+                épingle pour lire la valeur.
+
+             `fit-zone="none"` : le jeu porte des points ultramarins (Guadeloupe 52,
+             Martinique 50, Guyane 38, La Réunion 87, Mayotte 22, Saint-Barthélemy,
+             Saint-Martin). Sans encart `insets`, aucun clip métropole n'est posé par
+             défaut ; `none` l'écrit explicitement pour qu'un filtre « Guadeloupe »
+             recadre bien sur la Guadeloupe (variante de BUG-004, déjà payée).
+
+             `breaks` implique `method="manual"` : les bornes sont calées sur des
+             seuils lisibles autour de la moyenne nationale (104,7), et non sur les
+             effectifs comme le ferait `quantile`. Une choroplèthe d'IPS a un centre
+             de lecture ; des classes à effectifs égaux le masqueraient. -->
+        <dsfr-data-map id="carte-ips"
+          name="Collèges de France et leur indice de position sociale, rentrée 2023-2024"
+          height="620px" tiles="ign-plan" tiles-style="muted"
+          insets="drom" fit-bounds fit-max-zoom="13">
+          <dsfr-data-map-layer id="couche-ips" source="ips-f" type="circle"
+            geo-field="position" radius="5" fill-opacity="0.9"
+            color-field="tranche_ips"
+            color-map="Moins de 90:#c9191e,90 à 100:#e4794a,100 à 110:#929292,110 à 125:#7ab1e8,125 et plus:#000091"
+            tooltip-field="appellation_officielle"
+            max-items="8000">
+          </dsfr-data-map-layer>
+          <!-- ⚠️ `for` d'une légende = l'id de la COUCHE (`dsfr-data-map-layer`), pas
+               celui de la carte — alors que le `for` du `dsfr-data-a11y` quelques
+               lignes plus bas désigne bien la CARTE. Deux `for` voisins, deux
+               référents différents ; se tromper rend la légende vide et `hidden`,
+               sans un mot en console. Constat PG-024. -->
+          <dsfr-data-map-legend for="couche-ips" label="Indice de position sociale"></dsfr-data-map-legend>
+          <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="360px">
+            <template>
+              <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur|secteur non renseigné}}</p>
+              <p class="fr-display--xs fr-mb-1v">{{ips:number:1|—}}</p>
+              <p class="fr-text--sm fr-mb-3v">Indice de position sociale, rentrée {{rentree_scolaire}}</p>
+              <p class="fr-text--sm fr-mb-1v">
+                <strong>{{libelle_commune|commune non renseignée}}</strong><br>
+                {{libelle_departement|département non renseigné}} — académie de {{libelle_academie|non renseignée}}
+              </p>
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+
+        <!-- Le tableau accessible et le CSV de la sélection. L'original n'a que le
+             CSV ; le tableau est un gain net, et il porte la même sélection. -->
+        <dsfr-data-a11y source="ips-f" for="carte-ips" table download
+          filename="ips-colleges-2023-2024.csv"
+          label="Données de la carte"
+          description="Un collège par ligne : appellation, IPS, commune, département, académie, secteur."
+          label-field="appellation_officielle"
+          value-field="ips, libelle_commune, libelle_departement, libelle_academie, secteur">
+        </dsfr-data-a11y>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">Ce que la page d'origine ne montre pas</h2>
+    <p class="fr-text--sm fr-mb-3w">
+      La page d'origine n'énonce aucun constat : ni définition, ni moyenne, ni comparaison.
+      Ces deux graphiques sont tirés du même jeu, sans requête supplémentaire — la source est
+      déjà entièrement chargée.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-5">
+        <h3 class="fr-h6">L'écart public / privé sous contrat</h3>
+
+        <dsfr-data-chart id="g-secteur" source="ips-par-secteur" type="bar" horizontal
+          label-field="secteur" value-field="ips_moyen" name='["IPS moyen"]'
+          databox databox-title="IPS moyen par secteur, rentrée 2023-2024"
+          databox-source="DEPP — donnees-ips-colleges, via data.education.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-secteur" source="ips-par-secteur" table download></dsfr-data-a11y>
+        <p class="fr-text--xs fr-mt-1w">
+          Sur la France entière, l'écart est de <strong>19,3 points</strong> (public 100,1 ;
+          privé sous contrat 119,4). C'est la variable la plus structurante de l'IPS — et
+          l'original n'offre aucun filtre sur elle, alors que le champ <code>secteur</code>
+          est dans le jeu. Ce graphique suit la sélection.
+        </p>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-7">
+        <h3 class="fr-h6">Les douze académies au plus fort IPS moyen</h3>
+        <dsfr-data-chart id="g-academie" source="ips-par-academie" type="bar" horizontal
+          label-field="libelle_academie" value-field="ips_moyen" name='["IPS moyen"]'
+          databox databox-title="IPS moyen par académie (sélection courante)"
+          databox-source="DEPP — donnees-ips-colleges, via data.education.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-academie" source="ips-par-academie" table download></dsfr-data-a11y>
+        <p class="fr-text--xs fr-mt-1w">
+          Ce graphique suit les filtres de la colonne de gauche : il se recalcule à chaque
+          sélection, sans requête réseau.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — IPS Collèges</h2>
+
+      <p class="fr-text--sm fr-mb-4w">
+        Page d'origine :
+        <a href="https://data.education.gouv.fr/pages/dataviz-ips-colleges/" target="_blank" rel="noopener external">/pages/dataviz-ips-colleges/</a>,
+        page AngularJS. Fiche d'audit : <code>docs/portail-education/dataviz-ips-colleges.md</code>.
+        <strong>Les quatre pages IPS du portail (Écoles, Collèges, Lycées, EREA) sont le même
+        fichier</strong>, à trois attributs près — même nom de contexte
+        (<code>frenipslyceesdataviz</code>, celui des lycées, recopié partout), même centrage
+        sur la Suisse, même CSS de quatre règles. Les défauts relevés ici sont donc les défauts
+        des quatre.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le chargement, tranché par la mesure.</strong> 6 971 lignes en
+              <strong>une requête de 0,42 s</strong> (<code>fetch-mode="export"</code>, 2,6 Mo)
+              contre ~70 allers-retours en série pour la pagination. C'est un attribut, et il
+              change toute l'architecture de la page : à partir de là, tout se dérive côté
+              client sans une requête de plus — les quatre KPI, les quatre facettes, la carte
+              et les deux graphiques.</li>
+            <li><strong>La discrétisation par expression.</strong> Découper l'IPS en cinq
+              tranches calées sur la moyenne nationale tient en une expression
+              <code>compute</code> — <code>when ips &lt; 90 then … else …</code> — évaluée par
+              ligne, sans requête. Et le détour a rapporté plus qu'il n'a coûté&nbsp;: la
+              tranche est devenue une <strong>facette</strong>, que l'original n'a pas et ne
+              pouvait pas avoir, puisque le champ n'existe pas dans le jeu.</li>
+            <li><strong>Les encarts ultramarins.</strong> <code>insets="drom"</code> : un
+              attribut, et les cinq DROM apparaissent en encarts pendant que le cadrage
+              principal reste sur la métropole. C'est aussi ce qui règle le
+              <code>fit-bounds</code> — voir à droite.</li>
+            <li><strong>Les 3 791 communes.</strong> Le défaut le plus grave de l'original —
+              une facette Commune plafonnée à 100 valeurs, d'Abbeville à Aramon — <em>disparaît
+              sans qu'on ait rien à faire</em> : il tenait au plafond de facettes de l'API v1,
+              or ici les facettes sont calculées côté client sur des données complètes.
+              Une décision d'architecture a réglé un défaut fonctionnel.</li>
+            <li><strong>L'URL partageable.</strong> <code>url-sync url-params</code> sur la
+              balise de facettes : deux attributs booléens, et « la carte des collèges de la
+              Somme » devient un lien qu'on peut envoyer. L'original n'a pas d'<code>urlsync</code>
+              et ignore les <code>refine.*</code> passés dans l'adresse.</li>
+            <li><strong>Le tableau accessible et le CSV.</strong> <code>dsfr-data-a11y</code>
+              avec <code>table download</code> donne les deux sur la sélection courante.
+              L'original n'a que le CSV.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong><code>max-records</code>, repayé une fois de plus.</strong> Repasser en
+              mode adaptateur réactive le plafond par défaut de 1 000, qui tronque
+              <strong>en silence</strong> : sans <code>max-records="8000"</code>, la page aurait
+              montré 1 000 collèges sur 6 971 sans une ligne en console. C'est le piège le plus
+              cher du dépôt, et il ne se voit que si l'on connaît le volume réel du jeu
+              <em>avant</em> d'écrire la balise.</li>
+            <li><strong>Le choix « export » coûte les facettes serveur.</strong>
+              <code>fetch-mode="export"</code> ne se combine pas avec <code>server-side</code>,
+              donc pas de <code>server-facets</code>. Ici l'arbitrage est tout bénéfice — le jeu
+              tient en 2,6 Mo et les facettes client sont <em>meilleures</em> que les facettes
+              serveur de l'original. Mais ce n'est vrai que parce que le jeu est petit :
+              sur les 279 318 lignes d'IPS Écoles, le même raisonnement donne la réponse inverse
+              (voir cette page-là). L'arbitrage est propre au volume, il ne se recopie pas.</li>
+            <li><strong><code>fill-field</code> ne colore que les polygones — et se tait
+              sur les points.</strong> Le chemin évident pour encoder l'IPS était
+              <code>fill-field="ips"</code> + <code>breaks</code> +
+              <code>selected-palette</code>, exactement ce que décrivent leurs JSDoc
+              (« remplissage en choroplèthe », « nombre de classes de la choroplèthe »).
+              Sur une couche <code>type="circle"</code>, les quatre attributs sont acceptés
+              puis <strong>ignorés</strong> : vérifié au source, la condition est
+              <code>this.fillField &amp;&amp; this.type === 'geoshape'</code>, aux deux endroits
+              qui comptent — le calcul des classes et la construction de la légende. Résultat
+              observé : 6 971 cercles tous bleu France, une légende vide rendue
+              <code>hidden</code>, <strong>zéro erreur console</strong> et
+              <code>getSkippedCount()</code> à 0. Rien ne dit que la moitié des attributs
+              écrits n'ont servi à rien. Voie native trouvée après coup — discrétiser en
+              <code>compute</code>, colorer en <code>color-field</code> +
+              <code>color-map</code>, qui sont catégoriels et fonctionnent sur les points.
+              Elle marche, mais elle n'est ni suggérée ni documentée à cet endroit. Constat
+              AM-065.</li>
+            <li><strong>Deux <code>for</code> voisins, deux référents.</strong>
+              <code>dsfr-data-map-legend for="…"</code> attend l'id de la <strong>couche</strong> ;
+              <code>dsfr-data-a11y for="…"</code>, six lignes plus bas, attend celui de la
+              <strong>carte</strong>. Y avoir mis l'id de la carte rend la légende vide et
+              <code>hidden</code>, sans un mot. Deuxième échec muet de la même page, sur le
+              même composant. Constat PG-024.</li>
+            <li><strong>Le <code>fit-bounds</code> et les DROM.</strong> Sans encart, le fit
+              est libre : il englobe la Guadeloupe et La Réunion, et la « carte de France »
+              s'ouvre sur une vue de l'Atlantique où la métropole est un pâté bleu — soit
+              exactement le défaut qu'on reprochait à l'original, obtenu par un autre chemin.
+              <code>insets="drom"</code> le corrige en posant tout seul un clip métropole.
+              C'est le bon comportement, mais il se déclenche à cause d'un <em>autre</em>
+              attribut que celui qu'on écrit : le couplage ne se voit qu'au navigateur.</li>
+            <li><strong>Le point décimal dans une infobulle.</strong> <code>{{ips}}</code>
+              affiche « 108.1 ». Le pipe <code>{{ips:number:1}}</code> rend « 108,1 » en fr-FR —
+              il existe, mais il ne s'invente pas : la grammaire des pipes de template
+              (<code>number</code>, <code>date</code>, <code>datetime</code>, <code>join</code>,
+              <code>url</code>) n'est pas celle de l'attribut <code>format</code> d'un KPI
+              (<code>nombre</code>, <code>decimal</code>, <code>compact</code>…). Deux
+              vocabulaires pour une même idée, dans la même page.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ods-dataset-context</code> + <code>ng-init refine.rentree_scolaire</code></td><td><code>dsfr-data-source</code> + <code>where</code> + <code>fetch-mode="export"</code></td><td>Équivalent, et une requête au lieu de trois</td></tr>
+            <tr><td><code>ods-facet name="libelle_academie"</code></td><td><code>dsfr-data-facets</code></td><td>Équivalent</td></tr>
+            <tr><td>liste maison <code>ods-adv-analysis</code> + <code>limitTo:nbdepts</code> + « Plus »</td><td>même <code>dsfr-data-facets</code></td><td>Nettement plus simple : la liste maison réimplémente une facette, et perd son compteur au passage</td></tr>
+            <tr><td><code>ods-facet name="libelle_commune"</code> (plafonnée à 100 valeurs)</td><td>même <code>dsfr-data-facets</code>, <code>display="…:radio"</code></td><td>Meilleur : 3 791 communes, avec recherche</td></tr>
+            <tr><td><code>ods-map location="5,47.35371,8.98682"</code></td><td><code>dsfr-data-map</code> (défauts : France, zoom 6)</td><td>Équivalent, et le centrage par défaut est déjà le bon</td></tr>
+            <tr><td><code>ods-map-layer show-if="…"</code> (épingles uniformes)</td><td><code>dsfr-data-map-layer</code> + <code>color-field</code> + <code>color-map</code>, tranche par <code>compute</code></td><td>Meilleur : la donnée du titre est enfin représentée — mais par un détour, <code>fill-field</code> ne colorant que les polygones</td></tr>
+            <tr><td>infobulle configurée au back-office (5 champs)</td><td><code>dsfr-data-map-popup</code> + <code>&lt;template&gt;</code></td><td>Équivalent, et la configuration est dans la page, pas dans un back-office</td></tr>
+            <tr><td><code>getDownloadURL('csv')</code></td><td><code>dsfr-data-a11y table download</code></td><td>Meilleur : le tableau accessible en plus</td></tr>
+            <tr><td>outils de dessin de zone, géocodeur « Trouver un lieu… »</td><td>—</td><td><strong>Écart assumé</strong> : fonctionnalités d'<code>ods-map</code> sans équivalent, remplacées par les facettes géographiques</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-map-legend</code>, <code>dsfr-data-kpi</code>, <code>url-sync</code>, <code>insets="drom"</code>, facette « Tranche d'IPS »</td><td>Sans équivalent côté Opendatasoft</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="fr-callout fr-icon-error-warning-line fr-mt-4w">
+        <h3 class="fr-callout__title fr-text--md">Ce que la reproduction a appris sur la page d'origine</h3>
+        <p class="fr-callout__text fr-text--sm">
+          Reproduire oblige à regarder la donnée, et c'est là que les défauts se voient.
+          <strong>Treize</strong> ont été relevés à l'audit ; quatre sont des chiffres, pas des
+          opinions : la facette Commune ne donne accès qu'à <strong>100 communes sur 3 791</strong> ;
+          <strong>14 collèges</strong> sont comptés dans le jeu mais inatteignables par tous les
+          filtres, si bien que la somme des facettes vaut 6 971 et non 6 985 ; la page est figée
+          sur 2023-2024 alors que le jeu contient <strong>2024-2025</strong> depuis février 2026 ;
+          et la carte reste <strong>vide</strong> quand on choisit une académie, parce que sa
+          couche exige un département ou une commune.
+        </p>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p>Reproduction <strong>immédiate</strong>, et supérieure à l'original sur cinq points
+          mesurables — sans que cela tienne à un tour de force : la carte est cadrée sur la
+          France parce que c'est le défaut du composant, les 3 791 communes sont là parce que
+          les données sont chargées entièrement, l'URL est partageable parce que
+          <code>url-sync</code> est un booléen. <strong>Ce qui a demandé du travail n'est pas
+          la reproduction, c'est la lecture du jeu</strong> : savoir qu'il y a 6 971 lignes
+          localisables et non 6 985, que le plafond <code>max-records</code> allait mordre, que
+          la moyenne est à 104,7 et qu'une discrétisation par quantiles l'aurait masquée.
+          La bibliothèque a opposé une seule résistance, mais elle est instructive&nbsp;: sur
+          les trois frictions rencontrées, <strong>trois ont échoué en silence</strong> —
+          <code>max-records</code> qui tronque, <code>fill-field</code> qui ne colore pas les
+          points, un <code>for</code> qui ne désigne pas ce qu'on croit. Aucune n'a produit
+          d'erreur console. C'est la famille de défauts la plus coûteuse relevée par ce banc,
+          et cette page en a rencontré trois d'affilée.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+
+<!-- dsfr-data : bundle complet (cartographie) -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.25.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

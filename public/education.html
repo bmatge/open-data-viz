@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalogue des visualisations — data.education.gouv.fr — open-data-viz</title>
+  <meta name="description" content="Second portail du banc d'essai : reproduction du catalogue de data-visualisations de data.education.gouv.fr avec dsfr-data.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Portail Bercy</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Portail Éducation</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Catalogue des visualisations — <span class="fr-text--regular">data.education.gouv.fr</span></h1>
+
+    <div class="fr-callout fr-icon-information-line fr-mb-4w">
+      <h2 class="fr-callout__title">Le second portail du banc d'essai</h2>
+      <p class="fr-callout__text fr-text--sm">
+        Le banc a d'abord porté sur
+        <a href="/">data.economie.gouv.fr</a> (26 entrées, 24 reproduites). Ce second
+        portail n'est pas là pour refaire la même démonstration&nbsp;: il est là pour
+        <strong>montrer où l'édifice est inégal</strong>. On y trouve ce que Bercy ne pouvait pas
+        donner — des mailles géographiques propres à l'éducation (académie, région académique),
+        des volumes d'un autre ordre (jusqu'à 354&nbsp;012 points sur une carte), du multi-sources
+        systématique, et surtout <strong>trois générations d'Opendatasoft superposées</strong> :
+        pages AngularJS, vues de jeu héritées, pages Studio. La facette
+        <em>Nature de la page d'origine</em> ci-dessous les sépare&nbsp;: c'est la différence
+        structurelle la plus nette avec le premier portail.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        <strong>36 entrées annoncées, 33 dataviz au mieux.</strong> Trois pages ne contiennent
+        aucune directive <code>ods-*</code>, aucun <code>iframe</code>, aucune requête vers
+        <code>/api/</code> — ce sont des galeries éditoriales de liens, relevées à l'audit
+        et classées « Analyse seule ».
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       Le pipeline, en entier. Trois différences avec le catalogue Bercy, toutes
+       relevées à l'audit du portail (lot 12) :
+
+       1. AUCUNE CLÉ. data.education.gouv.fr répond en Access-Control-Allow-Origin: *
+          sur ce jeu, sans apikey (vérifié à l'API). Pas de `api-key-ref` ici, alors
+          que le catalogue Bercy en exige une.
+       2. Deux graphies de la même thématique dans le jeu : « Éducation » 31 fois,
+          « Education » 2 fois (ids 4 et 5). Les pilules de l'original se scindent
+          donc en deux. Corrigé par `replace-fields`, en une comparaison stricte.
+       3. Le champ `image` mélange DEUX formes : 12 chemins relatifs et 24 URL
+          absolues, sur deux hôtes différents. Un template ne sait pas préfixer
+          conditionnellement ; `compute` le fait en une expression.
+       ========================================================================== -->
+
+  <dsfr-data-source id="catalogue-edu-brut"
+    api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="dataviz-a-la-une"
+    fetch-mode="export"
+    max-records="200"
+    order-by="id:desc">
+  </dsfr-data-source>
+
+  <!-- `replace-fields` compare la valeur ENTIÈRE (égalité stricte, pas de regex) :
+       c'est exactement ce qu'il faut ici, la graphie fautive est une valeur complète.
+       `compute` : littéraux texte entre quotes SIMPLES, séparateur d'assignations `;`
+       (PG-022 — une grammaire fausse est ignorée sans erreur). -->
+  <dsfr-data-normalize id="catalogue-edu" source="catalogue-edu-brut"
+    replace-fields="thematique:Education:Éducation"
+    compute="vignette = when contains(image, '//') then image else concat('https://data.education.gouv.fr', image)">
+  </dsfr-data-normalize>
+
+  <dsfr-data-source id="registre-edu" url="/data/registre-education.json"></dsfr-data-source>
+
+  <!-- Jointure sur `titre` et non sur `lien` : leçon payée sur le catalogue Bercy,
+       où deux entrées partageaient une même page et la relation 1-N doublait les
+       cartes. Les 36 titres du catalogue Éducation sont uniques (vérifié à l'API).
+       `prefix-right` ne s'applique QU'AUX champs en collision (vérifié au source,
+       `mergeRow`) : le registre ne publie donc que `titre` et des champs `repro_*`,
+       pour qu'aucun n'arrive préfixé dans le template. -->
+  <dsfr-data-join id="catalogue-edu-joint"
+    left="catalogue-edu" right="registre-edu"
+    on="titre" type="left" prefix-right="reg_">
+  </dsfr-data-join>
+
+  <div class="fr-container fr-mb-4w">
+    <dsfr-data-kpi-group cols="4" gap="md">
+      <dsfr-data-kpi source="catalogue-edu-joint" value="count" format="nombre"
+        heading="Entrées au catalogue" label="annoncées par le portail"></dsfr-data-kpi>
+      <dsfr-data-kpi source="catalogue-edu-joint" value="count" format="nombre"
+        where="repro_statut:eq:reproduite"
+        heading="Reproduites ici" label="une page dsfr-data et son analyse"></dsfr-data-kpi>
+      <dsfr-data-kpi source="catalogue-edu-joint" value="count" format="nombre"
+        where="repro_statut:eq:analyse"
+        heading="Analyses seules" label="galeries de liens, aucune dataviz"></dsfr-data-kpi>
+      <dsfr-data-kpi source="catalogue-edu-joint" value="count" format="nombre"
+        where="repro_statut:eq:a-faire"
+        heading="À reproduire" label="auditées, portage à venir"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="odv-dashboard">
+
+      <div class="odv-filtres">
+        <dsfr-data-search id="catalogue-edu-recherche" source="catalogue-edu-joint"
+          fields="titre, description"
+          label="Rechercher une visualisation"
+          placeholder="Rechercher une visualisation"
+          operator="words" count>
+        </dsfr-data-search>
+
+        <dsfr-data-facets id="catalogue-edu-filtre" source="catalogue-edu-recherche"
+          fields="repro_nature, repro_libelle, thematique, sous_thematique"
+          labels="repro_nature:Nature de la page d'origine | repro_libelle:État de la reproduction | thematique:Thématique | sous_thematique:Sous-thématique"
+          max-values="8">
+        </dsfr-data-facets>
+      </div>
+
+      <dsfr-data-display source="catalogue-edu-filtre" cols="3" pagination="12" uid-field="titre"
+        empty="Aucune visualisation ne correspond à ces critères.">
+        <template>
+          <div class="fr-card fr-enlarge-link">
+            <div class="fr-card__body">
+              <div class="fr-card__content">
+                <div class="fr-card__start">
+                  <ul class="fr-tags-group">
+                    <li><p class="fr-tag fr-tag--sm">{{thematique}}</p></li>
+                    <li><p class="fr-tag fr-tag--sm">{{repro_nature}}</p></li>
+                  </ul>
+                </div>
+                <h3 class="fr-card__title">
+                  <a href="{{repro_url}}" target="{{repro_cible}}">{{titre}}</a>
+                </h3>
+                <p class="fr-card__desc fr-text--sm">{{description}}</p>
+                <div class="fr-card__end">
+                  <p class="fr-badge fr-badge--sm {{repro_badge}} odv-carte-statut fr-mb-1v">{{repro_libelle}}</p>
+                  <p class="fr-text--xs fr-mb-0">{{repro_note}}</p>
+                </div>
+              </div>
+            </div>
+            <div class="fr-card__header">
+              <div class="fr-card__img">
+                <img class="fr-responsive-img odv-vignette"
+                     src="{{vignette|/assets/vignette-vide.svg}}" alt="" loading="lazy">
+              </div>
+            </div>
+          </div>
+        </template>
+      </dsfr-data-display>
+
+    </div>
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — page catalogue du portail Éducation</h2>
+
+      <p class="fr-text--sm fr-mb-4w">
+        La page d'origine est
+        <a href="https://data.education.gouv.fr/pages/dataviz-list/" target="_blank" rel="noopener external">/pages/dataviz-list/</a>,
+        une page AngularJS dont le template est archivé en
+        <code>docs/portail-education/_sources/_dataviz-list.html</code>. Elle lit le même jeu
+        <code>dataviz-a-la-une</code> que cette page-ci.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>La source, sans clé.</strong> Contrairement à Bercy, ce portail répond
+              <code>Access-Control-Allow-Origin: *</code> sur ce jeu <em>sans</em> <code>apikey</code>
+              (vérifié à l'API, en-têtes relevés). Le pipeline se réduit donc à
+              <code>api-type="opendatasoft"</code>, un <code>base-url</code>, un
+              <code>dataset-id</code> — et tout le chapitre « clé et préflight CORS », qui a été
+              le premier piège du portail Bercy, ne se pose pas.</li>
+            <li><strong>Le second catalogue n'a rien coûté.</strong> Le gabarit du premier
+              (source → jointure avec un registre local → recherche → facettes →
+              <code>dsfr-data-display</code>) s'est transposé tel quel. C'est le premier
+              enseignement du multi-portails&nbsp;: <em>ce qui a été payé une fois ne se
+              repaie pas</em>. La différence tient dans les trois corrections décrites à droite,
+              toutes en attributs.</li>
+            <li><strong>Les compteurs par statut.</strong> Quatre <code>dsfr-data-kpi</code>
+              partageant une même source, chacun avec son <code>where</code> côté client
+              (#674, livré en 0.24.0). Aucun second contexte, aucune requête supplémentaire.</li>
+            <li><strong>La facette qui n'existait pas dans l'original.</strong>
+              <em>Nature de la page d'origine</em> (AngularJS / vue de jeu héritée / Studio /
+              asset / hors portail) est une donnée de notre registre, pas du portail. Elle arrive
+              par <code>dsfr-data-join</code> et devient une facette au même titre que les champs
+              du jeu&nbsp;: la bibliothèque ne distingue pas la donnée jointe de la donnée source.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Le champ <code>image</code> mélange deux formes.</strong> Sur les
+              36 entrées, 12 portent un chemin relatif (<code>/assets/theme_image/…</code>) et
+              24 une URL absolue, sur <em>deux hôtes différents</em>
+              (<code>data.education.gouv.fr</code> et <code>dataeducation.opendatasoft.com</code>).
+              Un template ne sait pas préfixer conditionnellement&nbsp;: écrire
+              <code>src="https://data.education.gouv.fr{{image}}"</code> casse les 24 absolues.
+              Résolu en une expression <code>compute</code>&nbsp;:
+              <code>when contains(image, '//') then image else concat(…)</code>. C'est exactement
+              l'emploi pour lequel la grammaire v2 a été demandée par ce banc — mais il a fallu
+              <em>voir</em> le mélange&nbsp;: rien ne le signale, et la moitié des vignettes
+              seraient simplement restées vides.</li>
+            <li><strong>Deux graphies pour une même thématique.</strong> Le jeu porte
+              « Éducation » 31 fois et « Education » 2 fois. L'original affiche donc deux pilules
+              distinctes pour la même chose — un défaut de l'original, pas de la bibliothèque.
+              Corrigé ici par <code>replace-fields="thematique:Education:Éducation"</code>, dont la
+              comparaison est <em>stricte et porte sur la valeur entière</em>&nbsp;: c'est ce qui
+              convient à une graphie complète, et ce qui ne conviendrait pas à une correction
+              partielle (il n'y a pas de regex — pour cela, <code>compute</code> et
+              <code>replace()</code>).</li>
+            <li><strong><code>prefix-right</code> ne préfixe que les collisions.</strong>
+              Vérifié au source (<code>mergeRow</code>, <code>packages/shared/src/utils/join.ts</code>) :
+              un champ du côté droit n'est préfixé que s'il porte le même nom qu'un champ du côté
+              gauche. Un registre qui republierait <code>lien</code> ou <code>thematique</code>
+              les ferait donc arriver en <code>reg_lien</code> / <code>reg_thematique</code> dans le
+              template, alors que ses autres champs arrivent nus — un template moitié préfixé,
+              moitié non, sans que rien ne l'annonce. Contourné en discipline de nommage&nbsp;: le
+              registre ne publie que <code>titre</code> (la clé) et des champs <code>repro_*</code>.</li>
+            <li><strong>Le tri du catalogue est celui de l'original, faute de mieux.</strong>
+              Le jeu n'a pas de champ de classement éditorial&nbsp;: <code>id</code> décroissant
+              est le seul ordre stable. L'original fait pareil.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ods-dataset-context</code> (sans <code>ctx-apikey</code>)</td><td><code>dsfr-data-source api-type="opendatasoft"</code></td><td>Équivalent, et plus court : pas de clé sur ce portail</td></tr>
+            <tr><td><code>ods-results</code> + <code>ng-repeat</code></td><td><code>dsfr-data-display</code> + <code>&lt;template&gt;</code></td><td>Équivalent</td></tr>
+            <tr><td>pilules de thématique en <code>ng-click</code></td><td><code>dsfr-data-facets</code></td><td>Plus simple, et la double graphie est corrigée en amont</td></tr>
+            <tr><td>filtre plein texte maison</td><td><code>dsfr-data-search operator="words"</code></td><td>Plus simple</td></tr>
+            <tr><td>préfixage d'URL en expression Angular</td><td><code>dsfr-data-normalize compute</code></td><td>Équivalent depuis 0.24.0 (#671) ; impossible avant</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-join</code> + <code>dsfr-data-kpi where</code></td><td>Sans équivalent côté Opendatasoft</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p>Reproduction <strong>immédiate</strong>, et pour une raison qui est le vrai résultat de
+          ce lot&nbsp;: <strong>le gabarit du premier portail s'est transposé sans être retouché</strong>.
+          Le second catalogue a coûté un script de registre et trois attributs de correction de
+          données. Les trois frictions rencontrées ne viennent pas de la bibliothèque mais du jeu
+          — deux graphies, deux formes d'URL — et deux d'entre elles sont du genre qui
+          <em>ne se voit pas</em>&nbsp;: une vignette absente et une pilule en double ne lèvent
+          aucune erreur. C'est la famille de défauts la plus coûteuse relevée par ce banc, et elle
+          se manifeste ici dès la page d'accueil.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+
+<!-- dsfr-data : bundle « core » (pas de cartographie sur cette page) -->
+<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.25.0/dist/dsfr-data.core.umd.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
