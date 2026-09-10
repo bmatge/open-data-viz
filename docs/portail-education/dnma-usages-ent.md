@@ -605,63 +605,45 @@ Plus **une cinquième source pour la série temporelle** que l'original n'a pas 
    Wallis-et-Futuna et Saint-Pierre-et-Miquelon (règle 4 du lot 11).
    *À faire avant dépôt* : rejouer au navigateur pour confirmer que DSFR Chart ne normalise pas
    la clé de son côté.
-4. **Dériver l'« année scolaire » depuis une date, sans script — le détail technique.**
-   *Obstacle* : l'année scolaire (1ᵉʳ août → 31 juillet) n'est ni `year-of` ni `current-year` ;
-   `dsfr-data-normalize compute` gère l'arithmétique et la concaténation, **pas les conditions ni
-   les fonctions de date** (sa référence le dit : « Hors périmètre : conditions, fonctions »).
-   *Voies natives essayées* : (a) `operator="year-of"` — **faux ici**, il tronque à l'année civile
-   et couperait chaque année scolaire en deux ; (b) `operator="between"` avec deux contrôles d'UI,
-   ce que fait l'original en substance. C'est **la** voie, et elle est propre.
-   *Ce qu'il reste à écrire* : un `<select>` d'années scolaires dont chaque option porte la borne
-   basse, et un second contrôle pour la borne haute — du HTML, pas du contournement.
-   *Verdict* : **pas une limite.** L'original fait la même chose, en moins bien (trois années en
-   dur au lieu de sept, et une clause de champ injectée dans le paramètre `q`).
-2. **Le nom du service le plus utilisé dans un titre.**
-   *Obstacle* : `dsfr-data-kpi` affiche une **valeur numérique** ; `heading` et `label` sont des
-   chaînes statiques. Il n'y a pas de « KPI texte ».
-   *Voie native* : `<dsfr-data-display source="top-svc" cols="1">` avec
-   `<template><p class="fr-h4">{{service}}</p><p>{{visites:number}} visites</p></template>` —
-   `dsfr-data-display` interpole n'importe quel champ, y compris textuel, et `:number` formate.
-   *Verdict* : **voie native existante, simplement dans un autre composant que celui qu'on
-   cherchait.** À ne pas remonter comme un manque.
-3. **`type="map-aca"` et les libellés hors découpage.**
-   *Obstacle* : la facette contient `Etranger`, `Saint-Pierre-et-Miquelon`, `Wallis-et-Futuna`,
-   `Nouvelle-Calédonie`, `Polynésie Française`, qui ne sont pas des académies du découpage DSFR
-   Chart ; et la référence attend des **noms en majuscules** (`{"PARIS": 95}`) alors que ce jeu-ci
-   les stocke en casse normale accentuée — contrairement au jeu Capytale du même portail.
-   *Voie native* : `dsfr-data-normalize` pour la casse, et
-   `dsfr-data-chart.getSkippedCount()` pour savoir combien de lignes sont tombées.
-   *Statut* : **non vérifié au navigateur.** Ne pas conclure avant de l'avoir mesuré. Rappel :
-   l'original n'a **aucune** carte, donc même une carte imparfaite est un gain net.
-4. **Cinq contextes ODS → un seul `dsfr-data-context`.**
-   *Constat* : `sources` accepte plusieurs ids séparés par des espaces, et un unique
-   `dsfr-data-context-filter` diffuse à toutes les sources cibles avec un `whereKey` stable
-   fusionné en `AND`. La distinction national / local se fait en **laissant `s-profils-nat` hors
-   du `sources`** du contexte pour l'académie — mais alors elle sort aussi du filtre d'année.
-   *Voie native* : **deux contextes**, l'un `sources="s-profils-nat …"` portant seulement l'année,
-   l'autre `sources="s-profils …"` portant l'année et l'académie ; les deux avec
-   `url-param-map` distinct pour ne pas se marcher dessus dans l'URL.
-   *Verdict* : **c'est exactement le montage de l'original** (`ctxprofilsnational` sans refine),
-   en deux balises au lieu de cinq contextes imbriqués et d'une expression à effet de bord.
-5. **Les 24 sommes dans un `select` : lisibilité.**
-   *Obstacle* : l'attribut `select` fait ~1 200 caractères. C'est peu élégant dans du HTML.
-   *Mesuré* : 847 octets de réponse, **0,51 à 2,99 s** — la variance est réelle (première requête
-   à froid). C'est le seul appel de la page qui dépasse la demi-seconde.
-   *Verdict* : **arbitrage lisibilité contre nombre d'allers-retours**, et le dépôt a déjà tranché :
-   c'est presque toujours le nombre d'allers-retours qui coûte. 1 requête d'1 s vaut mieux que
-   10 requêtes de 120 ms lancées en rafale.
-6. **La rupture de série 2024-25 → 2025-26.**
-   *Constat* : ce n'est pas un problème de bibliothèque, c'est un problème de donnée. Mais la
-   transposition doit **le montrer** plutôt que de le laisser sous un bouton d'année : la série
-   hebdomadaire continue (5,5 Ko, 0,10 s) rend la rupture visible d'un coup d'œil, là où trois
-   boutons la cachent.
-7. **Ce que la transposition gagne** : 39 requêtes → 4 (mesuré) ; une série temporelle
-   hebdomadaire ; une carte académique et un podium ; les 24 services au lieu de 5 ; les 4
-   appareils au lieu de 3 ; le jeu `appareils` enfin exploité ; des compteurs et une cascade sur
-   la facette (`server-facets`) ; sept années au lieu de trois ; le « service le plus utilisé »
-   qui suit la donnée ; l'URL partageable ; un tableau accessible et un export sous chaque
-   graphique. **Quinze des vingt défauts relevés tombent d'eux-mêmes.**
-   Ce qu'elle perd : rien d'identifiable.
+### Arbitrages et non-problèmes (pour mémoire)
+
+- **Le nom du service le plus utilisé dans un titre.** `dsfr-data-kpi` n'affiche qu'une valeur
+  numérique (`heading` et `label` sont statiques) ; la voie native est
+  `<dsfr-data-display source="top-svc" cols="1">` avec
+  `<template><p class="fr-h4">{{service}}</p><p>{{visites:number}} visites</p></template>` —
+  le composant interpole n'importe quel champ, y compris textuel, et `:number` formate.
+  **Voie native existante, dans un autre composant que celui qu'on cherchait.** Ne pas remonter.
+- **Cinq contextes ODS → deux `dsfr-data-context`.** `sources` accepte plusieurs ids séparés par
+  des espaces, et un `dsfr-data-context-filter` diffuse à toutes les sources cibles avec un
+  `whereKey` stable fusionné en `AND`. La distinction national / local se fait avec **deux
+  contextes** : l'un `sources="s-profils-nat"` portant seulement l'année, l'autre
+  `sources="s-profils s-services s-appareils s-semaine s-aca"` portant l'année **et** l'académie,
+  avec des `url-param-map` distincts. C'est exactement le montage de l'original
+  (`ctxprofilsnational` sans refine), en deux balises au lieu de cinq contextes imbriqués et
+  d'une expression à effet de bord. **Pas une limite.**
+- **Les 24 sommes dans un `select`.** L'attribut fait ~1 200 caractères — peu élégant. Mesuré :
+  847 octets de réponse, **0,51 à 2,99 s** (variance réelle, première requête à froid) ; c'est le
+  seul appel de la page à dépasser la demi-seconde. **Arbitrage lisibilité contre nombre
+  d'allers-retours**, et le dépôt a déjà tranché : c'est presque toujours le nombre
+  d'allers-retours qui coûte. Une requête d'une seconde vaut mieux que dix de 120 ms en rafale.
+- **La rupture de série 2024-25 → 2025-26.** Problème de donnée, pas de bibliothèque. Mais la
+  transposition doit **la montrer** plutôt que de la laisser sous un bouton d'année : la série
+  hebdomadaire continue (5,5 Ko, 0,10 s) rend la rupture visible d'un coup d'oeil.
+- **`operator="between"` pour l'année scolaire** : la mécanique fonctionne parfaitement une fois
+  le `<select>` écrit à la main (bornes en `value`). C'est le **libellé** de l'opérateur qui
+  manque, pas la capacité — d'où le manque réel n° 1, qui porte sur l'ergonomie de déclaration,
+  pas sur la faisabilité.
+
+### Ce que la transposition gagne
+
+39 requêtes → 4 (mesuré) ; une série temporelle
+hebdomadaire ; une carte académique et un podium ; les 24 services au lieu de 5 ; les 4
+appareils au lieu de 3 ; le jeu `appareils` enfin exploité ; des compteurs et une cascade sur
+la facette (`server-facets`) ; sept années au lieu de trois ; le « service le plus utilisé »
+qui suit la donnée ; l'URL partageable ; un tableau accessible et un export sous chaque
+graphique. **Quinze des vingt défauts relevés tombent d'eux-mêmes.**
+Ce qu'elle perd : rien d'identifiable — hormis, tant que le manque réel n° 3 n'est pas traité,
+neuf académies sur la carte que la transposition ajoute (l'original n'en a aucune).
 
 ## Données à reproduire fidèlement
 

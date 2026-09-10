@@ -57,6 +57,13 @@ Aucune boucle dans le moteur de templates, donc aucun moyen de rendre « une pas
 thème » à partir d'un champ multivalué. Le pipe `join` (#663) produit une chaîne, pas N
 éléments. Pas de contournement propre — le motif est très courant sur les fiches.
 
+**Preuve au bundle publié** : la regex de bloc du moteur est
+`/\{\{#(if|unless)\s+…\}\}([\s\S]*?)\{\{\/\1\s*\}\}/g` — elle ne connaît **que**
+`if` et `unless`. Absente de 0.20.0, présente dès 0.22.0 (#664). Il n'y a donc pas de `#each`,
+et ce n'est pas un oubli de documentation.
+*Demande : `{{#each champ}}…{{/each}}`, ou un pipe `{{champ:tags}}` qui rende N éléments.*
+FEI porte **trois** champs multivalués qui structurent visuellement la fiche et le panneau.
+
 ## 5. Colorer une cellule selon un seuil dans `dsfr-data-list`
 
 **Établi par** : `capytale-usages.md`.
@@ -140,13 +147,73 @@ Même famille que PG-022 (grammaire fausse silencieuse) et que `max-records` qui
 dire. Une page peut être écrite juste, contre une doc juste, et ne rien faire.
 Demande : un avertissement de développement sur attribut inconnu d'un composant `dsfr-data`.
 
+## 13. Aucune maille géographique non française n'est livrée ni documentée
+
+**Établi par** : `fei-projets-europeens-donnees.md`.
+
+`packages/core/geo/` ne contient que `regions.json` et `departements.json` (#688). Le motif
+« fond administratif » du guide ne parle que de contours français. Le seul recours hors France
+est `map-monde`, c'est-à-dire le planisphère sans cadrage (entrée 8). La seule carte non
+française du portail oblige donc l'auteur à produire et maintenir son propre GeoJSON d'Europe.
+*Demande : `geo/europe.json` sur le modèle de #688, nom français en propriété.*
+
+## 14. Aucun référentiel « nom de pays en français → ISO 3166-1 alpha-2 »
+
+**Établi par** : `fei-projets-europeens-donnees.md`.
+
+`toIsoA2` convertit l'alpha-3 et le numérique, mais **ne connaît aucun nom**. Or aucun jeu
+français ne stocke des codes ISO : il stocke « Allemagne », « slovénie ». La table de 66 lignes
+écrite à la main dans le template ODS d'origine est la conséquence directe de ce manque, et
+chaque réutilisateur la réécrira.
+*Demande : `geo/pays-iso.json`, ou un `code-field-lookup="nom-fr"`.*
+
+## 15. Aucun opérateur d'« année scolaire »
+
+**Établi par** : `capytale-usages.md` et `dnma-usages-ent.md`.
+
+Tous les opérateurs de `dsfr-data-context-filter` raisonnent en année **civile** ou en fenêtre
+glissante. `year-of` est ici activement trompeur : il coupe l'année scolaire en deux, en
+silence. `between` fonctionne, mais impose un `<select>` dont les bornes sont écrites à la main.
+
+**L'année scolaire est l'unité de temps de tout ce portail** — c'est la différence structurelle
+la plus nette avec Bercy, qui n'a pas ce découpage. Rien dans le backlog ne l'aborde.
+*Demande : `operator="school-year"`, ou un `year-start-month` sur les opérateurs existants.*
+
+## 16. Les compteurs de facette ne veulent rien dire sur une table de mesures
+
+**Établi par** : `dnma-usages-ent.md`.
+
+La facette `academie` compte des lignes UAI × semaine : « Lille 326 879 » se lit comme un
+volume d'usage et classe Lille devant Versailles, **qui a pourtant plus de visites**. Aucun
+attribut ne pondère une facette par une mesure, ni ne masque un compte qui n'a pas de sens.
+
+C'est un écart de **modèle de donnée**, pas de fonctionnalité : les jeux de Bercy sont « une
+ligne = un objet », où le compte **est** l'information. Trois jeux de ce portail dépassent
+3 millions de lignes sur le modèle inverse (une ligne = une mesure datée).
+*Demande : `weight-field` sur `dsfr-data-facets`, ou un masquage automatique des compteurs
+assorti d'un avertissement.*
+
 ---
 
 ## Ce que ce résidu dit du banc d'essai
 
-Six des douze entrées (1, 2, 3, 6, 11, 12) sont des **asymétries ou des silences** : une
-capacité qui existe sur un composant et pas sur son voisin, une doc qui existe à un endroit et
-pas à l'autre, un échec qui ne se signale pas. Aucune n'est un « la bibliothèque ne sait pas
-faire ». C'est la différence de nature avec les 53 demandes du lot 10, qui portaient sur des
-fonctionnalités manquantes — et c'est ce qu'un second portail apporte : il ne redemande pas les
-mêmes fonctions, il montre où l'édifice est inégal.
+Le résidu se range en trois familles, et aucune ne ressemble aux 53 demandes du lot 10.
+
+**Des asymétries et des silences** (entrées 1, 2, 3, 6, 11, 12) : une capacité qui existe sur
+un composant et pas sur son voisin (`refine-on-click` sur la carte mais pas sur la liste ;
+`time-mode="cumulative"` sur la couche mais pas sur `query`), une documentation juste à un
+endroit et fausse à l'autre, un échec qui ne se signale pas. Aucune n'est un « la bibliothèque
+ne sait pas faire ». Un second portail ne redemande pas les mêmes fonctions : il montre où
+l'édifice est inégal.
+
+**Ce qui tient au domaine** (entrées 13, 14, 15) : l'éducation compte en **années scolaires**,
+et un de ses jeux regarde vers l'**Europe**. Ni l'un ni l'autre n'existait à Bercy. Ce ne sont
+pas des cas exotiques — l'année scolaire est l'unité de temps de tout le portail.
+
+**Ce qui tient au modèle de donnée** (entrée 16, et l'entrée 7 par ricochet) : Bercy publie des
+**objets** (une ligne = une entreprise, un point de vente, un marché), où compter les lignes
+répond à la question. Ce portail publie aussi des **mesures** (une ligne = un UAI × une
+semaine), où compter les lignes ne répond à rien et induit en erreur. Trois jeux dépassent
+3 millions de lignes sur ce modèle. C'est l'apport le moins prévisible du lot, et le plus
+structurant : il ne se corrige pas par un attribut de plus, il demande que les composants
+sachent qu'un compte peut être dénué de sens.

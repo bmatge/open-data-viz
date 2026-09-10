@@ -536,27 +536,32 @@ d'académie — ce que l'original ne fait pas.
    l'exclut pas formellement.
    *À juger contre l'original* : il oublie **14 académies sur 32** sans le dire. Trois valent
    mieux que quatorze — mais un manque silencieux reste un manque.
-2. **Mettre en évidence les mois d'été dans une série glissante.**
+### Arbitrages et non-problèmes (pour mémoire)
+
+- **Mettre en évidence les mois d'été dans une série glissante.**
    *Obstacle* : `highlight-index='[1,2,13,14,…]'` est **positionnel** ; sur une fenêtre de 36 mois
    qui glisse, les index changent tous les mois.
    *Voies natives essayées* : `reference-lines` (lignes verticales datées, ex.
    `[{"axis":"x","value":"2025-09","label":"Rentrée 2025"}]`) — durable et plus informatif ;
    ou un `series-field` sur une colonne calculée « période scolaire / été » via `compute`
-   (concaténation et arithmétique seulement — **pas de conditionnelle**, donc pas faisable ainsi).
+   (concaténation et arithmétique seulement — **pas de conditionnelle** en `compute` v1 ;
+  ce sera possible avec `when … then … else`, **#671**, v0.24.0).
    *Verdict* : **`reference-lines` est le bon équivalent, pas `highlight-index`.** L'intention de
    l'original (« les creux sont saisonniers ») est mieux servie par un repère de rentrée que par
    six barres grises invisibles.
-3. **Les trois liens « Nombre de visites / Répartition / Usages académiques ».**
+- **Les trois liens « Nombre de visites / Répartition / Usages académiques ».**
    *Constat* : ce sont des liens vers des pages d'actif du portail — du **chrome de plateforme**.
    Un site institutionnel les remplace par un lien vers le jeu et une mention de licence.
    **Ne pas les compter comme un manque de `dsfr-data`.**
-4. **Ce que la transposition gagne** : chaque chiffre est recalculé (donc juste, et juste
-   demain) ; le filtre académie pilote la page entière ; la carte est une vraie carte académique
-   avec légende et infobulles ; le classement et le podium sont des composants ; les échelles
-   partent de zéro ; l'URL est partageable ; chaque graphique a un tableau accessible et un export.
-   **Quatorze des vingt défauts relevés tombent d'eux-mêmes.** Ce qu'elle perd : la maîtrise
-   pixel du GIF, le cadrage éditorial des 18 académies choisies, et — tant que le point 1 n'est
-   pas traité — La Réunion, la Polynésie et l'AEFE sur la carte.
+### Ce que la transposition gagne
+
+Chaque chiffre est recalculé (donc juste, et juste
+demain) ; le filtre académie pilote la page entière ; la carte est une vraie carte académique
+avec légende et infobulles ; le classement et le podium sont des composants ; les échelles
+partent de zéro ; l'URL est partageable ; chaque graphique a un tableau accessible et un export.
+**Quatorze des vingt défauts relevés tombent d'eux-mêmes.** Ce qu'elle perd : la maîtrise
+pixel du GIF, le cadrage éditorial des 18 académies choisies, et — tant que le point 1 n'est
+pas traité — La Réunion, la Polynésie et l'AEFE sur la carte.
 
 ## Données à reproduire fidèlement
 
