@@ -393,7 +393,7 @@ croisement.
 | Filtre « Type d'accompagnement » (3 radios × 3 contextes) | `<dsfr-data-facets>` | `fields="dispositif, langue, type_etablissement, statut_public_prive, libelle_departement, libelle_academie"` (**virgules**), `labels="… \| …"` (**barres**), `display="dispositif:select \| langue:multiselect \| type_etablissement:select \| statut_public_prive:select \| libelle_departement:select \| libelle_academie:select"` (**barres**). `langue` en **`multiselect`** (dropdown à cases + « tout sélectionner ») parce que le champ est multivalué et que « LSF1 **ou** LSF2 » est une question légitime — `select` y imposerait un choix unique. Compteurs affichés par défaut, cascade native en mode local. **Et deux facettes que l'original n'avait pas** : type et statut. |
 | Listes Départements / Académies sur ctx6 | mêmes `<dsfr-data-facets>` | Rien de plus : la cascade est le défaut. |
 | `<ods-clear-all-filters>` sans `except` | rien à transposer | Pas de bouton global qui puisse détruire l'encodage de la carte. Les facettes `select` se vident par leur option vide. |
-| `ctx5` + tiroir + `refine-on-click-*` sur `uai` | `<dsfr-data-map-popup>` + `<template>` | `mode="panel-right"`, `title-field="nom_etablissement"`, `width="380px"`. `{{#if}}` règle les deux intitulés vides (défaut n° 7) **et** les 225 liens morts. `{{langue:join: et }}` rend « LSF1 et LSF2 » au lieu de « LSF1,LSF2 » (filtre `join` documenté dans `get_skill(dsfrDataMap,"guide")` § popup). `refine-on-click="uai"` existe au source mais **n'est pas publié** (changeset hors CHANGELOG, npm 0.22.0) — et le popup suffit. |
+| `ctx5` + tiroir + `refine-on-click-*` sur `uai` | `<dsfr-data-map-popup>` + `<template>` | `mode="panel-right"`, `title-field="nom_etablissement"`, `width="380px"`. `{{#if}}` règle les deux intitulés vides (défaut n° 7) **et** les 225 liens morts. `{{langue:join: et }}` rend « LSF1 et LSF2 » au lieu de « LSF1,LSF2 » (filtre `join` documenté dans `get_skill(dsfrDataMap,"guide")` § popup). `refine-on-click="uai"` (+ `context`, `label`) est **natif et publié depuis la 0.23.0** (#681, ADR-104 ; vérifié dans les bundles npm : absent en 0.20.0/0.21.0/0.22.0, présent en 0.23.0 = `latest`) — **le dépôt épingle encore `dsfr-data@0.20.0` sur ses 26 pages : montée de version à faire côté banc d'essai, pas un manque de la bibliothèque**. Pour la fiche, le popup suffit ; l'attribut sert ailleurs — voir « Limites », point 10. |
 | — (absent : les 152 orphelins) | couche de fond + KPI + phrase | La couche de fond porte **tous** les établissements : les orphelins deviennent visibles, en gris, avec une entrée de légende « Accompagnement non précisé ». C'est la correction la plus importante de la page. |
 | — (absent) | `<dsfr-data-search>` | `fields="nom_etablissement, libelle_departement, libelle_academie, libelle_region"`, `label`, `placeholder`, `count`. La recherche que le gabarit prévoyait et n'a pas branchée. |
 | — (absent) | `<dsfr-data-kpi>` × 3 | `value="count"` (source client), `heading`, `label`, `col`. 307 lieux · 57 PEJS · 87 LSF2. |
@@ -620,6 +620,32 @@ croisement.
    - La **légende paginée** : `dsfr-data-map-legend` rend une liste. **Écart assumé, et
      souhaitable** — c'est précisément le défaut n° 4.
    - Les **cinq contextes** : artefact du modèle ODS.
+
+10. **`refine-on-click` : natif depuis la 0.23.0 — et il donne une sortie au point 10 des
+    défauts (les 4 UAI en doublon).**
+    L'équivalent natif du `refine-on-click-context="ctx5"` d'ODS est `refine-on-click="uai"`
+    + `context="…"` + `label` sur `<dsfr-data-map-layer>`, avec l'événement
+    `dsfr-data-map-select` `{record, layerId, selected}`, le tag supprimable dans
+    `dsfr-data-context-tags`, l'URL portée par le contexte et le second clic qui désélectionne
+    (#681, ADR-104). Sans `context`, la clause `eq` part directement à `source` sous le
+    `whereKey` `map-select-<id>`.
+    **État de publication vérifié bundle par bundle** (`npm pack dsfr-data@<v>` puis lecture
+    de `package/dist/dsfr-data.map.esm.js`) : **absent en 0.20.0, 0.21.0 et 0.22.0, présent en
+    0.23.0**, qui est le `latest` npm, et plus aucun changeset en attente dans le dépôt
+    `dsfr-data`. **Le banc d'essai épingle encore `dsfr-data@0.20.0` sur ses 26 pages**
+    (`grep -rho "dsfr-data@[0-9.]*" public/`) : **montée de version à faire ici, pas un manque
+    de la bibliothèque.**
+    **Ce que ça change.** Pour la fiche, rien : `dsfr-data-map-popup` reste le bon outil.
+    Mais le défaut n° 10 de cette page — les **4 UAI en doublon** (lycées à deux sites ou avec
+    un pôle post-bac), deux points exactement superposés dont le tiroir ODS n'en montre qu'un
+    (`ods-results-max="1"` sur un refine `uai`) — trouve ici sa correction : avec
+    `refine-on-click="uai" context="sel"`, le clic filtre le `dsfr-data-list` sur cet UAI,
+    qui affiche alors **les deux lignes**. Le popup seul ne peut pas le faire, puisqu'il rend
+    l'enregistrement cliqué et lui seul.
+    ⚠️ **Cet attribut ne règle pas le point 2 ci-dessus** : `refine-on-click` filtre *depuis*
+    un clic, il ne donne pas à une couche son propre `where` amont. La voie pour la couche
+    PEJS reste `<dsfr-data-query source="f" where="dispositif:isnotnull">`.
+    **Non vérifié au navigateur** : suppose la montée en 0.23.0.
 
 ## Données à reproduire fidèlement
 

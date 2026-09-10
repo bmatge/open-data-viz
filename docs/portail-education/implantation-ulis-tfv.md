@@ -505,7 +505,10 @@ Tout attribut non vérifié est signalé comme tel.
    `dsfr-data`. **Le banc d'essai, lui, épingle encore `dsfr-data@0.20.0` sur ses 26 pages**
    (`grep -rho "dsfr-data@[0-9.]*" public/` → 26 occurrences de `0.20.0`) : l'attribut est
    donc indisponible *pour ce dépôt tant qu'il n'aura pas monté sa version*, ce qui est un
-   travail de banc d'essai et **pas un manque de la bibliothèque**.
+   travail de banc d'essai et **pas un manque de la bibliothèque**. ⚠️ Et le piège habituel
+   s'applique : en 0.20.0 les trois attributs sont **ignorés en silence** — pas d'erreur, pas
+   d'avertissement, juste un clic sans effet (constat convergent avec la fiche
+   [`offre-formation-langues.md`](offre-formation-langues.md)).
    **Ce que ça change ici.** Pour *afficher la fiche*, rien : `dsfr-data-map-popup` reste le
    bon outil, il montre le détail sans filtrer quoi que ce soit ni consommer un contexte de
    plus — le `ctx5` d'ODS était un contournement de l'absence de popup riche, pas une
