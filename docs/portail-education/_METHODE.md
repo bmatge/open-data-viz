@@ -62,6 +62,29 @@ est le template de la page catalogue elle-même, et `_catalogue-source.json` l'e
 `dataviz-a-la-une` qui la pilote (36 entrées, champs `id, thematique, sous_thematique, filtre,
 titre, description, image, lien`).
 
+## Les pages Studio — l'autre moitié du portail (trouvé au lot 12)
+
+Toutes les cibles du catalogue ne sont pas des pages AngularJS. Les URL en
+`/explore/assets/<slug>/view/` et `/p/<slug>/` sont des **pages Opendatasoft Studio**, la
+génération suivante. Elles n'ont pas de `$scope.blocks`. Leur configuration complète — blocs,
+filtres, couches de carte, KPI, graphiques, palettes, champs d'infobulle — s'obtient ainsi :
+
+```bash
+curl -s "https://data.education.gouv.fr/api/portal/v1.0/studio_pages/<slug>" | python3 -m json.tool
+```
+
+**C'est l'équivalent exact de `$scope.blocks` pour ces pages : s'en servir de la même manière**
+— pour nommer les champs, les formules et les paramètres, jamais pour décrire un rendu qui n'a
+pas été vu à l'écran.
+
+Deux pièges de repérage déjà payés :
+- Une URL de catalogue en `/explore/dataset/<jeu>/<vue>/` peut faire un **302** vers
+  `/explore/assets/<jeu>/`, la dataviz vivant en réalité à `/explore/assets/<autre-slug>/view/`.
+  Suivre les redirections (`curl -sIL`) avant de conclure sur la nature de la cible.
+- Les onglets **Tableau / Analyse / Export / API** des anciennes vues natives **n'existent plus**
+  sur ce portail (302 sur les six URL testées). Ne pas les compter comme une capacité d'ODS que
+  `dsfr-data` n'aurait pas : c'est du chrome de back-office, et il a disparu chez ODS aussi.
+
 ## API du portail
 
 Base : `https://data.education.gouv.fr/api/explore/v2.1`
