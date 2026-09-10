@@ -1,9 +1,9 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 33 demandes cadrées — 5 bugs,
-> 24 améliorations,
-> 4 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
+> 35 demandes cadrées — 5 bugs,
+> 25 améliorations,
+> 5 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## Comment lire ce rapport
@@ -53,7 +53,7 @@ apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux const
 (AM-017, AM-039) en sont sortis.
 
 Le dépôt est désormais monté en `dsfr-data@0.24.0`, et le registre en tire les conséquences :
-les jalons 0.21.1, 0.22.0, 0.23.0 et 0.24.0 ont comblé 49 des constats déposés,
+les jalons 0.21.1, 0.22.0, 0.23.0 et 0.24.0 ont comblé 50 des constats déposés,
 passés au statut `corrige` et sortis de ce rapport. Ce qui reste ci-dessous n'est ni livré ni
 planifié — à deux exceptions près, signalées comme telles : `fetch-mode="export"` (#689) et
 `require-where` (#690), prévus au jalon v0.25.0.
@@ -85,6 +85,7 @@ _10 demandes — S 6, M 3, L 1._
 | BUG-007 | `replace-fields` est silencieusement sans effet sur une valeur numérique | bug | S | 1 | Accepter |
 | AM-067 | Une facette bâtie sur une source pré-agrégée affiche « 1 » partout : aucun attribut ne lui désigne la colonne d'effectif | amelioration | S | 1 | Accepter |
 | BUG-010 | Un alias de `group-by` sans parenthèse est backquoté et vaut un HTTP 400 : le correctif #641 ne couvre que les expressions à fonction | bug | S | 1 | Accepter |
+| AM-068 | Le cumul est arrivé, son inverse manque : aucun moyen de retrouver le flux d'une série déjà cumulée | amelioration | S | 1 | Accepter |
 | AM-044 | Le compteur `count` de `dsfr-data-search` rend « 35305 resultats » : ni séparateur de milliers, ni accent | amelioration | S | 3 | Accepter |
 | AM-046 | Le cumul existe, mais seulement dans un `_bucketDate` privé de la couche de carte | amelioration | M | 2 | Accepter |
 | BUG-006 | Un champ multivalué : `dsfr-data-facets` éclate les valeurs, un `group-by` client compte les combinaisons | bug | M | 2 | Accepter |
@@ -92,7 +93,7 @@ _10 demandes — S 6, M 3, L 1._
 | AM-051 | Les compteurs de facette n'ont pas de sens sur une table de mesures, et rien ne le dit | amelioration | M | 2 | Accepter |
 | AM-056 | Changer le champ d'un filtre selon la source, et vider un groupe de filtres exclusifs | amelioration | M | 1 | Accepter |
 
-_10 demandes — S 5, M 5, L 0._
+_11 demandes — S 6, M 5, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -106,9 +107,10 @@ _10 demandes — S 5, M 5, L 0._
 | AM-059 | Colorer une cellule selon un seuil dans un tableau | amelioration | S | 2 | Étudier |
 | AM-060 | `color-map` n'existe que sur une couche de carte, pas sur `dsfr-data-chart` | amelioration | S | 2 | Accepter |
 | AM-065 | `dsfr-data-search count` n'a pas d'état vide : il affiche « 0 résultats » quand rien n'a été demandé | amelioration | S | 1 | Accepter |
+| PG-027 | L'adaptateur Opendatasoft backquote `group-by` mais pas `select` : un champ au nom non standard vaut un HTTP 400 | piege | S | 1 | Accepter |
 | AM-058 | Un filtre qui traverse un référentiel (académie → départements) | amelioration | M | 2 | Étudier |
 
-_9 demandes — S 8, M 1, L 0._
+_10 demandes — S 9, M 1, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -463,7 +465,7 @@ Durable : les jeux d'établissements, d'équipements et de points de service por
 
 ### Comment ça a été vérifié
 
-Rejoué au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges (dsfr-data 0.25.0). Avec `type="circle" fill-field="ips" breaks="90,100,110,125" selected-palette="divergentAscending"` : 6 971 chemins Leaflet rendus, `getLegendEntries()` = [{color:'#000091',label:''}], légende rendue avec l'attribut `hidden`, zéro erreur console, `getSkippedCount()` = 0. Après passage à `color-field="tranche_ips"` + `color-map` (tranche produite par `compute`) : `getLegendEntries()` renvoie les cinq classes attendues et la légende s'affiche. Condition lue au source, packages/core/src/components/dsfr-data-map-layer.ts lignes 658, 1101 et 1339.
+Rejoué au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges (dsfr-data 0.25.0). Avec `type="circle" fill-field="ips" breaks="90,100,110,125" selected-palette="divergentAscending"` : 6 971 chemins Leaflet rendus, `getLegendEntries()` = [{color:'#000091',label:''}], légende rendue avec l'attribut `hidden`, zéro erreur console, `getSkippedCount()` = 0. Après passage à `color-field="tranche_ips"` + `color-map` (tranche produite par `compute`) : `getLegendEntries()` renvoie les cinq classes attendues et la légende s'affiche. Condition lue au source, packages/core/src/components/dsfr-data-map-layer.ts lignes 658, 1101 et 1339. — **Rejoué contre dsfr-data 0.27.0 le 2026-09-10** : TIENT, et TOUJOURS EN SILENCE. `<dsfr-data-map-layer type="circle" fill-field="ips" breaks="70,80,90,100" selected-palette="divergentAscending">` sur le jeu des EREA : `getLegendEntries()` renvoie toujours [{color:'#000091',label:''}], aucune erreur de configuration, aucun message. L'épic 0.26.0 « les échecs se voient » (#727) ne couvre pas ce cas : il nomme les attributs qui désignent un CHAMP ABSENT et les attributs INCONNUS de la version chargée. Ici l'attribut est connu et le champ existe — c'est la COMBINAISON attribut × type de couche qui est inopérante, et cette famille-là reste muette. La demande garde donc tout son objet, et gagne un argument : la bibliothèque a montré en 0.26.0 qu'elle savait rendre ces échecs visibles.
 
 ### Demande
 
@@ -502,7 +504,7 @@ Durable, et structurel : c'est le contrat du data-bridge entre une source et ses
 
 ### Comment ça a été vérifié
 
-Rencontré au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges (dsfr-data 0.25.0), source `donnees-ips-colleges` en `fetch-mode="export"`. Avec `<dsfr-data-query id="ips-par-secteur" source="ips" group-by="secteur" aggregate="ips:avg:ips_moyen">` : `document.getElementById('ips').getData().length` = 2 au lieu de 6 971, le KPI « Collèges » affichait 2, et la couche avertissait « 2 ligne(s) sur 2 sans coordonnées exploitables ». Aucune erreur console, aucune erreur de configuration. La seule modification `source="ips"` → `source="ips-f"` (la facette en aval) ramène la source à 6 971 lignes et tous les afficheurs à leurs valeurs justes ; les deux mesures ont été prises dans la même session, sur la même page, sans autre changement. — Reproduit une seconde fois le 2026-09-10 sur /education/tne-dashboard, jeu `fr-en-tne_personnels_formes_par_departement_secteur_type_etablissement` : avec les deux queries branchées sur la source, `tne-totaux` rend `{d1:0, d2:0, p1:0, p2:0, nc:0, tot:0}` et le KPI affiche 0, tandis que la query `group-by="departement"` rend les douze valeurs justes (Aisne 13 811). L'interposition d'un `<dsfr-data-normalize>` vide ramène tout aux chiffres de référence (53 491 / 32 688 / 12 363 / 2 999 / 13 350 / 7 453).
+Rencontré au navigateur le 2026-09-10 sur /education/dataviz-ips-colleges (dsfr-data 0.25.0), source `donnees-ips-colleges` en `fetch-mode="export"`. Avec `<dsfr-data-query id="ips-par-secteur" source="ips" group-by="secteur" aggregate="ips:avg:ips_moyen">` : `document.getElementById('ips').getData().length` = 2 au lieu de 6 971, le KPI « Collèges » affichait 2, et la couche avertissait « 2 ligne(s) sur 2 sans coordonnées exploitables ». Aucune erreur console, aucune erreur de configuration. La seule modification `source="ips"` → `source="ips-f"` (la facette en aval) ramène la source à 6 971 lignes et tous les afficheurs à leurs valeurs justes ; les deux mesures ont été prises dans la même session, sur la même page, sans autre changement. — Reproduit une seconde fois le 2026-09-10 sur /education/tne-dashboard, jeu `fr-en-tne_personnels_formes_par_departement_secteur_type_etablissement` : avec les deux queries branchées sur la source, `tne-totaux` rend `{d1:0, d2:0, p1:0, p2:0, nc:0, tot:0}` et le KPI affiche 0, tandis que la query `group-by="departement"` rend les douze valeurs justes (Aisne 13 811). L'interposition d'un `<dsfr-data-normalize>` vide ramène tout aux chiffres de référence (53 491 / 32 688 / 12 363 / 2 999 / 13 350 / 7 453). — **Rejoué contre dsfr-data 0.27.0 le 2026-09-10** : TIENT. Source `donnees-ips-colleges` en `fetch-mode="export"` (6 971 lignes attendues) avec une `dsfr-data-query group-by="secteur"` branchée directement dessus : la source retombe à 2 lignes et le KPI `count` affiche 2. Aucun message. Mieux — ou pire : le bug a saboté la page de test écrite pour rejouer les AUTRES constats de cette session, en réécrivant la source que trois vérifications lisaient, ce qui a d'abord fait croire qu'`explode` et `{{#each}}` ne marchaient pas. Il a fallu réisoler chaque test derrière un `dsfr-data-normalize` vide. C'est une démonstration involontaire de l'impact : le motif « une source, plusieurs vues » est si banal qu'on le reproduit sans y penser, y compris en écrivant un harnais de vérification.
 
 ### Contournement actuel
 
@@ -548,7 +550,7 @@ Structurel : tout attribut multi-entrées.
 
 ### Comment ça a été vérifié
 
-Page de test (réseau cuivre, `server-facets`) : `display="region:select, departement:select"` → 0 select rendu ; `display="region:select | departement:select"` → 2 selects, 21 et 95 options. `split="risques_encourus:|"` → tableau (FP-010). `round="prix_moyen:2"` (virgule pour plusieurs champs) → 2.31 (AM-033).
+Page de test (réseau cuivre, `server-facets`) : `display="region:select, departement:select"` → 0 select rendu ; `display="region:select | departement:select"` → 2 selects, 21 et 95 options. `split="risques_encourus:|"` → tableau (FP-010). `round="prix_moyen:2"` (virgule pour plusieurs champs) → 2.31 (AM-033). — **Rejoué contre dsfr-data 0.27.0 le 2026-09-10** : PARTIELLEMENT CORRIGÉ, et sur le point qui comptait : l'échec n'est plus muet. `display="type_etablissement:select, libelle_region:select"` (virgules au lieu de barres) rend toujours zéro liste déroulante, mais émet désormais en console : « dsfr-data-facets[f1] : attribut "display" — les entrées semblent séparées par une virgule, or le séparateur attendu est la barre verticale. Forme attendue : "champ:valeur | champ2:valeur2" ». Le message nomme le composant, l'attribut, la valeur reçue et la forme attendue (#731, 0.26.0). Le piège subsiste sur les attributs non couverts par l'avertissement, mais le cas le plus fréquent est désormais visible.
 
 ### Contournement actuel
 
@@ -613,6 +615,8 @@ Appliquer `replace` / `replace-fields` aux valeurs numériques et booléennes, e
 
 Le motif « proposer une liste de valeurs avec leur effectif, obtenue en une seule requête agrégée » est la bonne architecture dès qu'on ne veut pas charger les lignes : c'est ce que fait cette page pour ses 104 départements (une requête de 93 ms au lieu de 28,9 Mo), et c'est aussi ce que l'original implémente à la main. La source renvoie alors une ligne par valeur, avec l'effectif dans une colonne (`count(*) as n`). `dsfr-data-facets` compte ses propres lignes : chaque département n'en ayant qu'une, la facette affiche « Nord 1 » là où il y a 1 268 écoles. Aucun attribut ne permet de lui désigner la colonne de poids — ni `count-field`, ni équivalent. Il ne reste qu'à poser `hide-counts`, c'est-à-dire à masquer une information qui a été calculée, transmise, et qui est dans la ligne. Le compteur est par ailleurs l'un des arguments de la facette face à un `select` nu.
 
+**Ce qui est vrai.** [object Object]
+
 ### Impact de l'erreur ou du manque
 
 Sur les jeux à gros volume, l'agrégation serveur est la seule architecture tenable pour proposer une liste de valeurs — et c'est justement là que la facette perd son compteur. Soit on affiche un chiffre faux, soit on masque un chiffre qu'on possède.
@@ -627,7 +631,7 @@ Durable : le motif « choisir d'abord, charger ensuite » est celui que `require
 
 ### Comment ça a été vérifié
 
-Relevé au navigateur le 2026-09-10 sur /education/dataviz-ips-ecoles. Source `donnees-ips-ecoles` agrégée par `group-by="libelle_departement"` + `select="libelle_departement, count(*) as n"` (104 lignes, une par département, `n` renseigné — vérifié dans la réponse API). La facette rend « Nord1, 1 resultat » ; l'export du même département renvoie 1 268 lignes, et le KPI branché en aval affiche bien 1 268. Absence de `count-field` vérifiée au source, packages/core/src/components/dsfr-data-facets.ts.
+Relevé au navigateur le 2026-09-10 sur /education/dataviz-ips-ecoles. Source `donnees-ips-ecoles` agrégée par `group-by="libelle_departement"` + `select="libelle_departement, count(*) as n"` (104 lignes, une par département, `n` renseigné — vérifié dans la réponse API). La facette rend « Nord1, 1 resultat » ; l'export du même département renvoie 1 268 lignes, et le KPI branché en aval affiche bien 1 268. Absence de `count-field` vérifiée au source, packages/core/src/components/dsfr-data-facets.ts. — **Rejoué contre dsfr-data 0.27.0 le 2026-09-10** : CORRIGÉ. `weight-field` est livré en 0.27.0 (#739), le jour même où ce constat a été écrit. Vérifié en page : `<dsfr-data-facets source="…agrégée" fields="libelle_departement" weight-field="n">` rend « Nord 1 268, total 1 268 » là où la même facette sans l'attribut affichait « Nord 1 ». Le `hide-counts` de dépit a été retiré de /education/dataviz-ips-ecoles. L'attribut est client uniquement : en `server-facets`, où la somme n'existe pas dans la réponse `/facets`, les compteurs sont masqués ET le composant le dit, plutôt que d'afficher un nombre de lignes sous un libellé de somme.
 
 ### Contournement actuel
 
@@ -670,7 +674,7 @@ Durable : le correctif est une ligne, et il complète un correctif déjà livré
 
 ### Comment ça a été vérifié
 
-Relevé au navigateur le 2026-09-10 sur /education/fei-chiffres-cles (dsfr-data 0.25.0). Avec `group-by="pays, iso2_pays, periode as an"`, l'URL émise est `…&group_by=pays,iso2_pays,`periode+as+an`&limit=100` (relevée au réseau, accents graves présents) → HTTP 400, source en erreur, message en console. La même requête sans accents graves répond 200 en curl, avec ou sans guillemets sur la valeur. Le comportement est lu au source : `isOdsqlExpression(field) { return field.includes('('); }` puis `escapeOdsqlGroupField`, packages/core/src/adapters/opendatasoft-adapter.ts l. 109-116. Dans la même page, `year(annee) as an` passe et rend les bons chiffres (513 435 inscrits DELF-DALF en 2025) : la bascule tient bien à la seule parenthèse.
+Relevé au navigateur le 2026-09-10 sur /education/fei-chiffres-cles (dsfr-data 0.25.0). Avec `group-by="pays, iso2_pays, periode as an"`, l'URL émise est `…&group_by=pays,iso2_pays,`periode+as+an`&limit=100` (relevée au réseau, accents graves présents) → HTTP 400, source en erreur, message en console. La même requête sans accents graves répond 200 en curl, avec ou sans guillemets sur la valeur. Le comportement est lu au source : `isOdsqlExpression(field) { return field.includes('('); }` puis `escapeOdsqlGroupField`, packages/core/src/adapters/opendatasoft-adapter.ts l. 109-116. Dans la même page, `year(annee) as an` passe et rend les bons chiffres (513 435 inscrits DELF-DALF en 2025) : la bascule tient bien à la seule parenthèse. — **Rejoué contre dsfr-data 0.27.0 le 2026-09-10** : TIENT. `group-by="pays, iso2_pays, periode as an"` part toujours en `group_by=pays,iso2_pays,`periode+as+an`` (accents graves relevés dans l'URL au réseau) → HTTP 400, source en erreur. L'échec reste franc, ce qui le distingue des deux précédents.
 
 ### Contournement actuel
 
@@ -686,6 +690,49 @@ Reconnaître comme expression tout élément de `group-by` contenant ` as ` (en 
 - [ ] `group-by="year(annee) as an"` continue de passer tel quel.
 - [ ] Un nom de champ à espaces sans ` as ` reste échappé (#289).
 - [ ] Un test couvre les trois formes.
+
+---
+
+## AM-068 — Le cumul est arrivé, son inverse manque : aucun moyen de retrouver le flux d'une série déjà cumulée
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-query`, `dsfr-data-normalize`
+**Rencontré sur** 1 page(s) : edu/tne-dashboard
+
+### Constat
+
+Le point n° 1 du résidu du lot 12 visait le cumul dans les deux sens. `running_sum` (#738, 0.27.0) comble le premier : cumuler une série qui ne l'est pas, ce que le tableau de bord TNE d'origine fait en douze expressions de template. Le second reste ouvert : passer d'une série CUMULÉE au flux de la période — « combien de visiteurs ce mois-ci » — suppose de soustraire la ligne précédente, c'est-à-dire `lag`, explicitement différé depuis la 0.24.0, et que `compute` exclut de son périmètre (« ni fenêtre, ni cumul, ni ligne précédente »). Le besoin n'est pas symétrique du premier par simple élégance : beaucoup de producteurs publient DÉJÀ des compteurs cumulés — c'est le cas des cinq jeux du programme TNE, dont toutes les métriques montent par construction — et la seule question intéressante qu'on leur pose est celle de leur incrément. Un tableau de bord qui ne sait pas dé-cumuler affiche des courbes qui montent toujours, et ne peut pas dire si le rythme ralentit.
+
+### Impact de l'erreur ou du manque
+
+Les compteurs cumulés sont un format de publication très répandu dans l'open data institutionnel. Sur ces jeux, toutes les courbes montent par construction, et la page ne peut pas montrer le rythme — la seule information que le lecteur cherche.
+
+### Objectif métier de la correction
+
+Qu'une série déjà cumulée puisse être rendue en flux de période.
+
+### Pérennité et reproductibilité du besoin
+
+Durable, et symétrique d'une capacité déjà livrée : le calcul et les garde-fous de `running_sum` sont réemployables tels quels.
+
+### Comment ça a été vérifié
+
+Vérifié en page le 2026-09-10 contre dsfr-data 0.27.0, sur `fr-en-tne_suivi_audiences`. `<dsfr-data-query order-by="mois_saisie:asc" aggregate="nombre_de_visiteurs_uniques_a_la_plateforme_tne:running_sum">` rend bien la série cumulée (909, 3 496, 6 771 … 1 923 385 au dernier mois) : le sens « cumuler » fonctionne. L'absence du sens inverse est lue au source : aucun `lag` ni équivalent dans `packages/core/src/utils/aggregations.ts` (les agrégats sont count, sum, avg, min, max, first, last, distinct, evolution, et running_sum côté query), et le JSDoc de `compute` exclut « valeurs agrégées, ligne précédente, cumul ». `champ:evolution` donne un taux global (dernière − première) / première, pas une série d'incréments.
+
+### Contournement actuel
+
+Aucun côté client. Il faut soit demander le flux au producteur, soit reconstruire la série hors de la page. Un pivot long → large puis `compute` (la voie suggérée pour `lag` en 0.24.0) permet la différence entre DEUX séries, pas entre deux lignes successives d'une même série.
+
+### Demande
+
+Un agrégat `diff` (ou `lag`) symétrique de `running_sum` sur `dsfr-data-query` : une ligne par ligne de sortie, chacune portant l'écart avec la précédente, calculé après `order-by`, côté client, avec le même avertissement en l'absence d'`order-by`.
+
+### Critères d'acceptation
+
+- [ ] `aggregate="champ:diff"` rend une ligne par ligne, portant l'écart avec la précédente.
+- [ ] La première ligne rend null, jamais 0.
+- [ ] Le calcul suit `order-by`, et son absence produit le même avertissement que `running_sum`.
+- [ ] Cumulable avec `running_sum` sur la même query sans interférence.
 
 ---
 
@@ -1244,6 +1291,49 @@ Propager l'état `idle` au compteur de `dsfr-data-search`, avec un libellé para
 - [ ] Sous `require-where` et sans filtre, le compteur n'affiche pas « 0 résultats ».
 - [ ] Le libellé de l'état d'attente est paramétrable, comme celui des autres afficheurs.
 - [ ] Poser un filtre rétablit le compteur normal.
+
+---
+
+## PG-027 — L'adaptateur Opendatasoft backquote `group-by` mais pas `select` : un champ au nom non standard vaut un HTTP 400
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement, dx`, `severity:basse`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : edu/cnr-education
+
+### Constat
+
+Le jeu du CNR Éducation publie un champ nommé littéralement `1_uai`. Ce n'est pas un identifiant ODSQL valide — il commence par un chiffre — et l'API le refuse s'il n'est pas entouré d'accents graves : « ODSQL syntax exception: unexpected _uai at position 1 ». Or l'adaptateur transmet le `select` tel quel, alors qu'il échappe les éléments du `group-by`. Un champ que le portail publie est donc inutilisable dans un `select` sans le backquoter à la main, geste que rien ne suggère. C'est le MIROIR de BUG-010 : dans `group-by`, l'adaptateur backquote TROP (un alias `x as y` est protégé comme un nom de champ et vaut un 400) ; dans `select`, il ne backquote PAS ASSEZ. Deux clauses voisines, deux traitements opposés, deux échecs symétriques — et l'auteur d'une page n'a aucun moyen de deviner lequel s'applique où.
+
+### Impact de l'erreur ou du manque
+
+Faible en fréquence — peu de jeux nomment un champ avec un chiffre en tête — mais total quand il survient : la page ne charge rien. L'échec est franc, donc diagnosticable ; le coût est le temps de comprendre que le nom du champ est en cause.
+
+### Objectif métier de la correction
+
+Qu'un champ publié par le portail soit utilisable dans un `select` sans échappement manuel.
+
+### Pérennité et reproductibilité du besoin
+
+Durable, et à traiter avec BUG-010 : c'est la même règle d'échappement, appliquée de façon cohérente aux deux clauses.
+
+### Comment ça a été vérifié
+
+Rencontré au navigateur le 2026-09-10 sur /education/cnr-education (dsfr-data 0.27.0). Avec `select="1_uai, etab_verif, …"` : HTTP 400 sur `/exports/json`, repli automatique sur `/records` qui échoue de même, source en erreur et les quatre KPI affichant « Erreur de chargement ». Recoupé à l'API en curl : `select=1_uai,etab_verif` → 400 avec le message ci-dessus ; `select=%601_uai%60,etab_verif` (backquoté) → 200. Contournement appliqué dans l'attribut : `select="`1_uai`, etab_verif, …"` → HTTP 200 et 6 024 lignes.
+
+### Contournement actuel
+
+Backquoter le champ dans l'attribut `select` de la page. Fonctionne (vérifié), mais suppose de savoir que l'échec vient de là : le message d'API parle de « position 1 », pas du nom du champ.
+
+### Demande
+
+Échapper les éléments du `select` comme ceux du `group-by` — un élément qui est un simple nom de champ (sans parenthèse, sans ` as `, sans opérateur) est backquoté ; les expressions passent telles quelles. La règle serait alors la même dans les deux clauses, ce qui réglerait aussi BUG-010 par symétrie.
+
+### Critères d'acceptation
+
+- [ ] `select="1_uai, etab_verif"` émet `select=`1_uai`,etab_verif` et répond 200.
+- [ ] Une expression (`sum(x) as v`, `year(d) as a`) continue de passer telle quelle.
+- [ ] Un nom de champ ordinaire n'est pas altéré au point de changer le nom de la colonne reçue.
+- [ ] Un test couvre les trois formes, dans `select` comme dans `group-by`.
 
 ---
 

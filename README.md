@@ -38,10 +38,13 @@ choix entre les deux mécanismes de filtrage) sont documentés dans
 
 ```
 public/
-  index.html              reproduction de la page catalogue (+ son analyse)
+  index.html              tableau de bord du banc (KPI + graphiques, + son analyse)
+  bercy.html              catalogue Bercy reproduit (+ son analyse)
+  education.html          catalogue Éducation reproduit (+ son analyse)
   synthese.html           synthèse transverse des analyses
   viz/<slug>.html         une page par dataviz reproduite
   data/registre.json      état de reproduction, joint au catalogue ODS
+  data/stats.json         statistiques du banc (build-stats.mjs), lu par index.html
   assets/
     cles.js               clé de lecture publique de l'API ODS du portail
     layout.js             en-tête et pied de page DSFR communs
@@ -50,6 +53,7 @@ public/
   retours.html            le registre, rendu avec les composants qu'il évalue
 scripts/
   build-registre.mjs      régénère public/data/registre.json depuis le catalogue vivant
+  build-stats.mjs         régénère public/data/stats.json (registres unis + scan des balises)
   build-retours.mjs       dérive l'export d'issues + la note du vault depuis retours.json
 export/
   issues-dsfr-data.md     demandes prêtes à déposer sur bmatge/dsfr-data (généré)
@@ -112,7 +116,7 @@ node scripts/build-retours.mjs      # -> export/issues-dsfr-data.md + note du va
 Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 
 - **15 entrées reproduites** (14 pages : le catalogue compte deux fois l'annuaire DGFiP) —
-  [catalogue](public/index.html) · [DECP augmenté](public/viz/decp-augmente.html) ·
+  [tableau de bord](public/index.html) · [catalogue Bercy](public/bercy.html) · [DECP augmenté](public/viz/decp-augmente.html) ·
   [Plan de relance](public/viz/plan-de-relance.html) · [Qualité Tourisme](public/viz/qualite-tourisme.html) ·
   [Tourisme & Handicap](public/viz/tourisme-et-handicap.html) ·
   [Rebâtir Notre-Dame](public/viz/entreprises-restauration-notre-dame.html) ·

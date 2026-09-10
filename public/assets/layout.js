@@ -6,7 +6,8 @@
   const BASELINE = 'Reproduire les catalogues de visualisations de data.economie.gouv.fr et data.education.gouv.fr avec dsfr-data';
 
   const LIENS = [
-    { href: '/', libelle: 'Portail Bercy' },
+    { href: '/', libelle: 'Accueil' },
+    { href: '/bercy', libelle: 'Portail Bercy' },
     { href: '/education', libelle: 'Portail Éducation' },
     { href: '/synthese', libelle: 'Synthèse' },
     { href: '/retours', libelle: 'Registre des retours' }
@@ -92,6 +93,9 @@
     </div>
     <div class="fr-footer__bottom">
       <ul class="fr-footer__bottom-list">
+        <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/">Accueil</a></li>
+        <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/bercy">Portail Bercy</a></li>
+        <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/education">Portail Éducation</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/synthese">Synthèse des analyses</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/retours">Registre des retours</a></li>
         <li class="fr-footer__bottom-item">
