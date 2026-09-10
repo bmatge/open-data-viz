@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>L'annuaire des bureaux des entreprises — open-data-viz</title>
+  <meta name="description" content="Reproduction avec dsfr-data de l'annuaire des bureaux des entreprises des lycées professionnels : 1 942 établissements, 1 381 métiers préparés.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/education">Portail Éducation</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Bureaux des entreprises</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>L'annuaire des bureaux des entreprises</h1>
+
+    <p class="fr-text--lead">
+      Chaque lycée professionnel dispose d'un <strong>bureau des entreprises</strong>, chargé de
+      faire le lien avec le monde économique local : recherche de stages, d'alternance,
+      d'intervenants. <strong>1 942 établissements</strong> en sont dotés — 1 709 publics et
+      233 privés, dans 33 académies. Ensemble, ils préparent à
+      <strong>1 381 métiers différents</strong> et délivrent <strong>355 diplômes</strong>.
+    </p>
+
+    <div class="fr-callout fr-icon-database-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-annuaire_bde_lycees_pro/"
+           target="_blank" rel="noopener external"><code>fr-en-annuaire_bde_lycees_pro</code></a>
+        — 1 942 lignes, 19 champs, lu sans clé. Trois champs sont <strong>multivalués</strong> :
+        <code>metiers_prepares</code> (1 381 valeurs distinctes),
+        <code>diplomes_prepares</code> (355) et <code>romesv3</code> (175 codes ROME).
+        C'est ce qui rend l'export lourd — <strong>12,0 Mo pour 1 942 lignes</strong>, soit
+        6 Ko par établissement, presque entièrement des listes de métiers.
+        <strong>10 établissements sont sans position</strong>.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        <strong>Cinq adresses de contact valent « #N/A »</strong> — la valeur d'erreur d'un
+        tableur, restée dans le champ <code>mail_bde</code>. Ce n'est pas une adresse manquante
+        (le champ serait vide) mais une adresse <em>fausse</em> : un lecteur qui la copie
+        n'obtient rien, et un traitement automatique qui teste « le champ est-il rempli ? »
+        conclut que oui. Elles sont écartées de l'affichage.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       Deuxième emploi d'`explode` (#736, 0.27.0), sur un jeu qui en a trois usages :
+       `metiers_prepares`, `diplomes_prepares` et `romesv3` sont tous des tableaux.
+       Sans lui, un « top des métiers » compterait les COMBINAISONS de métiers d'un
+       établissement — c'est-à-dire à peu près une par établissement, donc rien.
+
+       `select` : `romesv3` est écarté (175 codes techniques, redondants avec les
+       métiers en clair et coûteux à transporter). Le poids tombe de 12,0 Mo.
+       ========================================================================== -->
+
+  <dsfr-data-source id="bde" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-annuaire_bde_lycees_pro"
+    fetch-mode="export" max-records="3000"
+    where="position is not null"
+    select="numero_uai, appellation_officielle, adresse_uai, code_postal_uai, libelle_commune, libelle_departement, libelle_academie, libelle_region, mail_bde, telephone, web, secteur, metiers_prepares, diplomes_prepares, position">
+  </dsfr-data-source>
+
+  <!-- `replace-fields` sur la valeur d'erreur de tableur. Depuis la 0.26.0 (#730)
+       il agit aussi sur les colonnes non-texte ; ici le champ est un tableau de
+       chaînes, et c'est la valeur entière « #N/A » qui est visée. -->
+  <dsfr-data-normalize id="bde-n" source="bde"
+    replace-fields="mail_bde:#N/A:"
+    compute="offre = when len(metiers_prepares) = 0 then 'Non renseignée' when len(metiers_prepares) &lt; 10 then 'Moins de 10 métiers' when len(metiers_prepares) &lt; 30 then '10 à 30 métiers' else '30 métiers et plus'">
+  </dsfr-data-normalize>
+
+  <dsfr-data-search id="bde-q" source="bde-n"
+    fields="appellation_officielle, libelle_commune, numero_uai, metiers_prepares, diplomes_prepares"
+    label="Rechercher un lycée ou un métier"
+    placeholder="Nom, commune, code UAI, métier préparé…"
+    operator="words" count url-sync>
+  </dsfr-data-search>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+
+      <div class="fr-col-12 fr-col-md-3">
+        <h2 class="fr-h6">Filtrer</h2>
+        <dsfr-data-facets id="bde-f" source="bde-q"
+          fields="secteur, offre, diplomes_prepares, libelle_academie, libelle_region, libelle_departement"
+          labels="secteur:Secteur | offre:Étendue de l'offre | diplomes_prepares:Diplôme préparé | libelle_academie:Académie | libelle_region:Région | libelle_departement:Département"
+          display="secteur:radio-inline | offre:checkbox | diplomes_prepares:multiselect | libelle_academie:multiselect | libelle_region:multiselect | libelle_departement:radio"
+          searchable="diplomes_prepares, libelle_academie, libelle_region, libelle_departement"
+          disjunctive="diplomes_prepares, libelle_academie, libelle_region"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-9">
+
+        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+          <dsfr-data-kpi source="bde-f" value="count" format="nombre"
+            heading="Bureaux des entreprises" label="dans la sélection"></dsfr-data-kpi>
+          <dsfr-data-kpi source="bde-f" value="libelle_commune:distinct" format="nombre"
+            heading="Communes" label="équipées"></dsfr-data-kpi>
+          <dsfr-data-kpi source="bde-f" value="libelle_academie:distinct" format="nombre"
+            heading="Académies" label="représentées"></dsfr-data-kpi>
+          <dsfr-data-kpi source="bde-f" value="count:secteur:Privé" format="nombre"
+            heading="Privés" label="sur le total de la sélection"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <dsfr-data-map id="carte-bde"
+          name="Bureaux des entreprises des lycées professionnels"
+          height="600px" tiles="ign-plan" tiles-style="muted"
+          insets="drom,polynesie-francaise,nouvelle-caledonie" fit-bounds fit-max-zoom="13">
+          <dsfr-data-map-layer id="couche-bde" source="bde-f" type="circle"
+            geo-field="position" radius="5" fill-opacity="0.9"
+            color-field="secteur"
+            color-map="Public:#000091,Privé:#e4794a"
+            tooltip-field="appellation_officielle"
+            max-items="3000" cluster cluster-radius="45">
+          </dsfr-data-map-layer>
+          <dsfr-data-map-legend for="couche-bde" label="Secteur"></dsfr-data-map-legend>
+          <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="400px">
+            <template>
+              <p class="fr-badge fr-badge--sm fr-mb-3v">{{secteur}}</p>
+
+              <p class="fr-text--sm fr-mb-3v">
+                {{adresse_uai|}}<br>
+                <strong>{{code_postal_uai|}} {{libelle_commune}}</strong> — {{libelle_departement}}<br>
+                académie de {{libelle_academie}}
+              </p>
+
+              <!-- Le contact du bureau des entreprises : c'est l'objet même de
+                   l'annuaire. `mail_bde` est un TABLEAU (certains lycées en ont
+                   deux) : `{{#each}}` le rend en liste. -->
+              <p class="fr-text--sm fr-mb-1v"><strong>Contacter le bureau</strong></p>
+              {{#if mail_bde}}<ul class="fr-text--sm fr-mb-1v">{{#each mail_bde}}<li><a href="mailto:{{.}}">{{.}}</a></li>{{/each}}</ul>{{/if}}
+              {{#unless mail_bde}}<p class="fr-text--sm fr-mb-1v">Courriel non communiqué.</p>{{/unless}}
+              {{#if telephone}}<p class="fr-text--sm fr-mb-1v">{{telephone}}</p>{{/if}}
+              {{#if web}}<p class="fr-text--sm fr-mb-3v">
+                <a href="{{web:url}}" target="_blank" rel="noopener external">Site de l'établissement</a></p>{{/if}}
+
+              <p class="fr-text--sm fr-mb-1v"><strong>Diplômes préparés</strong></p>
+              {{#if diplomes_prepares}}<ul class="fr-text--sm fr-mb-3v">{{#each diplomes_prepares}}<li>{{.}}</li>{{/each}}</ul>{{/if}}
+              {{#unless diplomes_prepares}}<p class="fr-text--sm fr-mb-3v">Non renseignés.</p>{{/unless}}
+
+              <p class="fr-text--xs fr-mb-0">UAI {{numero_uai}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+
+        <dsfr-data-a11y source="bde-f" for="carte-bde" table download
+          filename="annuaire-bureaux-des-entreprises.csv"
+          label="Données de la carte"
+          description="Un bureau des entreprises par ligne : établissement, secteur, commune, académie, contact, diplômes."
+          label-field="appellation_officielle"
+          value-field="secteur, libelle_commune, libelle_departement, libelle_academie, mail_bde, telephone">
+        </dsfr-data-a11y>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <h2 class="fr-h5">Les diplômes les plus préparés</h2>
+        <dsfr-data-chart id="g-bde-dip" source="bde-dip" type="bar" horizontal
+          label-field="diplomes_prepares" value-field="n" name='["Établissements"]'
+          databox databox-title="Diplômes les plus préparés dans les lycées dotés d'un bureau des entreprises"
+          databox-source="Ministère de l'éducation nationale — fr-en-annuaire_bde_lycees_pro"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-bde-dip" source="bde-dip" table download></dsfr-data-a11y>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <h2 class="fr-h5">Les métiers les plus préparés</h2>
+        <dsfr-data-chart id="g-bde-met" source="bde-met" type="bar" horizontal
+          label-field="metiers_prepares" value-field="n" name='["Établissements"]'
+          databox databox-title="Métiers les plus préparés"
+          databox-source="Ministère de l'éducation nationale — fr-en-annuaire_bde_lycees_pro"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-bde-met" source="bde-met" table download></dsfr-data-a11y>
+        <p class="fr-text--xs fr-mt-1w">
+          Sur <strong>1 381 métiers</strong> déclarés. Ces deux graphiques n'auraient pas été
+          possibles avant la version publiée aujourd'hui : sans <code>explode</code>, un
+          regroupement compterait les <em>combinaisons</em> de métiers d'un établissement, donc
+          à peu près une par établissement.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <dsfr-data-query id="bde-dip" source="bde-f" explode="diplomes_prepares"
+    group-by="diplomes_prepares" aggregate="numero_uai:count:n"
+    order-by="n:desc" limit="15"></dsfr-data-query>
+  <dsfr-data-query id="bde-met" source="bde-f" explode="metiers_prepares"
+    group-by="metiers_prepares" aggregate="numero_uai:count:n"
+    order-by="n:desc" limit="15"></dsfr-data-query>
+
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">L'annuaire</h2>
+    <dsfr-data-list source="bde-f"
+      columns="appellation_officielle, secteur, libelle_commune, libelle_departement, libelle_academie, telephone"
+      search sort pagination="25">
+    </dsfr-data-list>
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="odv-analyse fr-py-8w" id="analyse">
+    <div class="fr-container">
+      <h2>Analyse de reproduction — bureaux des entreprises</h2>
+
+      <p class="fr-text--sm fr-mb-4w">
+        Cible d'origine : une <strong>vue de jeu héritée</strong>, slug <code>carte</code> — le
+        lien du catalogue fait un 302. Fiche d'audit :
+        <code>docs/portail-education/annuaire-bureaux-des-entreprises.md</code>.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong><code>explode</code>, deuxième emploi, et sur un jeu qui en a trois
+              usages.</strong> <code>metiers_prepares</code>, <code>diplomes_prepares</code> et
+              <code>romesv3</code> sont tous des tableaux. Deux graphiques, deux
+              <code>explode</code>, et les 1 381 métiers deviennent classables. Sans lui, un
+              regroupement aurait compté les combinaisons — c'est-à-dire à peu près une par
+              établissement.</li>
+            <li><strong>Chercher un métier dans la recherche plein texte.</strong>
+              <code>dsfr-data-search</code> accepte un champ multivalué dans ses
+              <code>fields</code> : taper « chaudronnier » trouve les lycées qui y préparent,
+              sans facette dédiée. C'est le geste le plus naturel pour un annuaire d'orientation,
+              et il tient dans un attribut.</li>
+            <li><strong>Le contact en liste.</strong> <code>mail_bde</code> est un tableau —
+              certains lycées ont deux adresses. <code>{{#each}}</code> les rend en liste de
+              liens ; un <code>join</code> aurait produit une chaîne inutilisable en
+              <code>mailto:</code>.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Cinq adresses valent « #N/A ».</strong> C'est la valeur d'erreur d'un
+              tableur, restée dans le champ. Elle est pire qu'une adresse manquante : le champ
+              est <em>rempli</em>, donc tout traitement qui teste la présence conclut que le
+              contact existe, et tout lecteur qui la copie n'obtient rien.
+              <code>replace-fields</code> la vide — et depuis la 0.26.0 (#730) l'attribut agit
+              aussi sur les colonnes non-texte, ce qui n'était pas le cas quand ce banc l'a
+              rencontré pour la première fois sur Euroscol. <strong>Troisième jeu de ce portail
+              où une valeur de tableur a survécu à la publication</strong>, après les « NA » des
+              internats et le « 2024- 2025 » du label Égalité.</li>
+            <li><strong>12 Mo pour 1 942 lignes.</strong> Six kilo-octets par établissement,
+              presque entièrement des listes de métiers répétées. Le <code>select</code> écarte
+              <code>romesv3</code> — 175 codes techniques redondants avec les métiers en clair —
+              mais l'essentiel du poids reste. C'est le cas où le format multivalué, très
+              pratique à interroger, coûte cher à transporter : un jeu de 1 942 lignes pèse plus
+              lourd que les 6 971 collèges de la page IPS.</li>
+            <li><strong>Un top des métiers difficile à lire.</strong> Les trois premiers —
+              « Marin soldat », « Matelot de la Flotte », « Matelot de la Marine nationale » —
+              sont à 861 établissements chacun, ce qui ne veut pas dire que 861 lycées préparent
+              à la marine : ce sont des libellés d'une même fiche ROME, attachée en bloc à un
+              grand nombre d'établissements. Le graphique est juste ; ce qu'il compte ne
+              correspond pas à ce qu'un lecteur suppose. La bibliothèque n'y peut rien — c'est la
+              nomenclature source qui est ainsi faite — mais c'est le genre de chiffre qu'il ne
+              faut pas commenter sans avoir regardé.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance vue de jeu → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Vue d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>contexte de la vue personnalisée</td><td><code>dsfr-data-source</code> + <code>select</code></td><td>Équivalent</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-query explode</code> ×2</td><td><strong>Sans équivalent</strong> : 1 381 métiers classables</td></tr>
+            <tr><td>recherche par nom</td><td><code>dsfr-data-search</code> incluant les métiers</td><td>Meilleur : on cherche un métier, pas seulement un lycée</td></tr>
+            <tr><td>contact affiché tel quel</td><td><code>replace-fields</code> + <code>{{#each}}</code></td><td>Meilleur : les « #N/A » disparaissent, les adresses multiples sont cliquables</td></tr>
+            <tr><td><code>ods-map</code></td><td><code>dsfr-data-map-layer</code> + <code>cluster</code> + encarts</td><td>Équivalent, DROM et Pacifique compris</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p>Reproduction <strong>immédiate</strong>. Ce que la page ajoute est simple et concret :
+          on peut <strong>chercher un métier</strong> et trouver les lycées qui y préparent, ce
+          que l'annuaire d'origine ne permet pas. La friction est ailleurs, et elle revient pour
+          la troisième fois sur ce portail : <strong>une valeur d'erreur de tableur a survécu
+          jusqu'à la publication</strong>. Un champ vide se repère ; un champ rempli de
+          « #N/A » se croit renseigné.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.27.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
