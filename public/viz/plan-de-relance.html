@@ -50,18 +50,32 @@
        Un seul fetch, puis tout se dérive côté client :
        source -> facettes -> (carte | 2 agrégations -> 2 graphiques | KPI)
 
-       Le fetch passe par /exports/json et non par /records : l'endpoint d'export
+       Le fetch passe par l'endpoint d'export et non par /records : l'export
        renvoie les 3 080 lignes EN UNE REQUÊTE, là où /records plafonne à 100 et
-       impose 31 allers-retours séquentiels (mesurés à 29 s de chargement).
+       impose 31 allers-retours séquentiels (mesure d'origine : concurrence 1,
+       28,9 s passées dans les requêtes, 29 s de chargement perçu).
+
+       Lot 13 — cette source était écrite en mode générique (`url=` vers
+       /exports/json + `params`), contournement d'AM-011 : c'était le seul moyen
+       d'obtenir la requête unique, et il coûtait le mode adaptateur lui-même
+       (plus de délégation serveur du where/order-by, plus de server-facets, plus
+       de meta.truncated, et une source qui n'annonçait plus quel jeu elle lit).
+       `fetch-mode="export"` (#689, dsfr-data 0.25.0) rend la même requête unique
+       EN restant en mode adaptateur : le `select` redevient un attribut, délégué
+       au portail. Conséquence directe : `max-records` s'applique de nouveau, et
+       son plafond par défaut (1 000) tronquerait les 3 080 lignes en silence —
+       d'où le max-records="3500" ci-dessous.
+
        Le `select` écartait `description_projet` (85 % du poids du jeu) : la relecture
        face au relevé du portail l'a réintégré, l'infobulle d'origine l'affiche.
        Re-mesuré (lot 9, réponse compressée) : 0,65 s pour 13 champs avec la
        description, contre 0,37 s sans — et non les 7,9 s notés au lot 1.
        ========================================================================== -->
 
-  <dsfr-data-source id="pdr"
-    url="https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/plan-de-relance/exports/json"
-    params='{"select":"entreprise, type_entreprise, siren, volet_relance, mesure, mesure_light, filiere, nom_region, nom_departement, nom_commune, code_postal, coordonnees_gps, description_projet"}'
+  <dsfr-data-source id="pdr" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="plan-de-relance"
+    fetch-mode="export" max-records="3500"
+    select="entreprise, type_entreprise, siren, volet_relance, mesure, mesure_light, filiere, nom_region, nom_departement, nom_commune, code_postal, coordonnees_gps, description_projet"
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
@@ -194,9 +208,11 @@
               elles). Le poids n'y était pour rien&nbsp;: alléger le transfert d'un facteur 3,7 n'a fait
               gagner aucune seconde. La sortie est ailleurs — Opendatasoft expose
               <code>/exports/json</code>, qui renvoie le jeu <em>entier</em> en une requête et accepte un
-              <code>select</code>. La source est donc écrite en mode générique&nbsp;:
-              <strong>1 requête, 0,62&nbsp;s, 185&nbsp;Ko</strong> au lieu de 31 requêtes, 31&nbsp;s et
-              3,4&nbsp;Mo. Rien d'autre n'a changé dans la page.</li>
+              <code>select</code>&nbsp;: <strong>1 requête, 0,62&nbsp;s, 185&nbsp;Ko</strong> au lieu de
+              31 requêtes, 31&nbsp;s et 3,4&nbsp;Mo. Rien d'autre n'a changé dans la page. Il a d'abord
+              fallu y aller en mode générique (<code>url=</code> + <code>params</code>)&nbsp;; depuis
+              <code>dsfr-data</code> 0.25.0 (#689), <code>fetch-mode="export"</code> donne la même
+              requête unique en restant en mode adaptateur, et c'est ce que la page emploie.</li>
             <li><strong>La carte.</strong> <code>ods-map</code> + <code>ods-map-layer-group</code> +
               <code>ods-map-layer</code> avec ses quinze attributs devient
               <code>dsfr-data-map</code> + <code>dsfr-data-map-layer</code>. Le
@@ -222,10 +238,15 @@
             <li><strong>Le bon endpoint ne se devine pas.</strong> Rien, dans les attributs de
               <code>dsfr-data-source</code>, ne suggère que le mode adaptateur va enchaîner 31 requêtes
               là où l'API sait tout renvoyer d'un coup. Il a fallu chronométrer pour le découvrir, et
-              renoncer au mode adaptateur pour y échapper — on y perd la délégation serveur du
+              renoncer au mode adaptateur pour y échapper — on y perdait la délégation serveur du
               <code>where</code>, sans conséquence ici puisque toute la page travaille côté client.
               C'est la demande la plus rentable du registre&nbsp;: que l'adaptateur choisisse
-              <code>/exports/json</code> quand il charge tout (AM-011).</li>
+              <code>/exports/json</code> quand il charge tout (AM-011). <strong>Elle est
+              exaucée&nbsp;:</strong> <code>fetch-mode="export"</code> (0.25.0, #689) fait la requête
+              unique <em>sans</em> quitter le mode adaptateur, et la source de cette page est
+              redevenue une source adaptateur. Le renoncement n'a plus lieu d'être — restent le
+              choix explicite de l'attribut, et le plafond <code>max-records</code> qui redevient
+              actif avec lui.</li>
             <li><strong>Un champ texte long coûte cher — mais moins qu'on ne l'a cru.</strong>
               <code>description_projet</code> pèse à lui seul 85&nbsp;% du jeu&nbsp;: 1,3&nbsp;Mo
               avec, 185&nbsp;Ko sans. Au lot&nbsp;1 il avait été retiré de la source (7,9&nbsp;s
@@ -306,12 +327,13 @@
           </ul>
 
           <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.24.0</h4>
+            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
             <p class="fr-text--sm">
-              12 des frictions décrites ci-dessus ont été comblées par la bibliothèque
+              13 des frictions décrites ci-dessus ont été comblées par la bibliothèque
               <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
+              du banc d'essai&nbsp;; le code de la page porte encore ses contournements, qui ne sont simplement plus
+              nécessaires — à l'exception d'AM-011, dont le contournement a été retiré au lot 13&nbsp;:
+              la source est repassée en mode adaptateur avec <code>fetch-mode="export"</code>. Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
             </p>
             <ul class="fr-text--sm">
               <li><strong>AM-005</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code>&nbsp;: plus de «&nbsp;Série N&nbsp;» en légende pour un groupe sans valeur.</li>
@@ -326,6 +348,7 @@
               <li><strong>LIM-009</strong> — <strong>0.22.0</strong> (#685)&nbsp;: composant <code>dsfr-data-map-legend</code>, dérivé du rendu réel de la couche — ce n'était donc pas une limite dure.</li>
               <li><strong>AM-006</strong> — <strong>0.23.0</strong> (#679)&nbsp;: <code>dsfr-data-context-tags</code> reprend les filtres des facettes, et <code>clear-all</code> les efface tous.</li>
               <li><strong>AM-004</strong> — <strong>0.24.0</strong> (#672)&nbsp;: agrégat <code>distinct</code> (<code>value="champ:distinct"</code>), délégué à Opendatasoft en <code>count(distinct …)</code>.</li>
+              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du portail, en une requête et <em>sans</em> quitter le mode adaptateur. Le contournement par source générique a été retiré de cette page.</li>
             </ul>
           </div>
         </div>
@@ -343,7 +366,7 @@
             <tr><td>fond <code>jawg.light</code></td><td><code>tiles="ign-plan"</code></td><td>Avantage&nbsp;: fond souverain par défaut</td></tr>
             <tr><td>—</td><td><code>insets="drom"</code></td><td>Sans équivalent&nbsp;: gain net</td></tr>
             <tr><td><code>ods-facets</code> (serveur)</td><td><code>dsfr-data-facets</code> (client, par choix)</td><td>Plus réactif&nbsp;; <code>server-facets</code> disponible si besoin</td></tr>
-            <tr><td>contexte ODS paginé à 100</td><td><code>/exports/json</code> en source générique</td><td>1 requête au lieu de 31&nbsp;: 31&nbsp;s → 0,6&nbsp;s</td></tr>
+            <tr><td>contexte ODS paginé à 100</td><td><code>fetch-mode="export"</code> (0.25.0&nbsp;; source générique auparavant)</td><td>1 requête au lieu de 31&nbsp;: 31&nbsp;s → 0,6&nbsp;s</td></tr>
             <tr><td>—</td><td><code>bbox</code> sur la couche</td><td>Chargement par viewport&nbsp;: sans équivalent ici</td></tr>
             <tr><td><code>series-breakdown</code> + <code>stacked</code></td><td><code>group-by</code> à 2 champs + <code>series-field</code></td><td>Équivalent</td></tr>
             <tr><td><code>ods-filter-summary</code></td><td>—</td><td>Manquant avec <code>dsfr-data-facets</code></td></tr>
