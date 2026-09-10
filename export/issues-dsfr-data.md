@@ -1,9 +1,9 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 26 demandes cadrées — 3 bugs,
-> 22 améliorations,
-> 1 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
+> 25 demandes cadrées — 3 bugs,
+> 20 améliorations,
+> 2 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## Comment lire ce rapport
@@ -53,7 +53,7 @@ apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux const
 (AM-017, AM-039) en sont sortis.
 
 Le dépôt est désormais monté en `dsfr-data@0.24.0`, et le registre en tire les conséquences :
-les jalons 0.21.1, 0.22.0, 0.23.0 et 0.24.0 ont comblé 47 des constats déposés,
+les jalons 0.21.1, 0.22.0, 0.23.0 et 0.24.0 ont comblé 49 des constats déposés,
 passés au statut `corrige` et sortis de ce rapport. Ce qui reste ci-dessous n'est ni livré ni
 planifié — à deux exceptions près, signalées comme telles : `fetch-mode="export"` (#689) et
 `require-where` (#690), prévus au jalon v0.25.0.
@@ -94,25 +94,24 @@ _8 demandes — S 3, M 5, L 0._
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
 | AM-054 | Aucune maille géographique non française, ni référentiel de noms de pays en français | amelioration | S | 1 | Accepter |
-| AM-035 | Un graphique n'a pas d'état « vide tant qu'aucun filtre n'est posé » | amelioration | S | 1 | Accepter |
+| PG-016 | Le tri des facettes est global, pas par champ | piege | S | 2 | Accepter |
+| LIM-011 | `color-map` sépare ses paires par une virgule, que des valeurs métier contiennent | amelioration | S | 3 | Accepter |
 | AM-057 | La valeur courante d'un filtre n'est pas interpolable dans du texte | amelioration | S | 1 | Accepter |
 | AM-059 | Colorer une cellule selon un seuil dans un tableau | amelioration | S | 2 | Étudier |
-| AM-060 | `color-map` n'existe que sur une couche de carte, et sa grammaire sépare par des virgules | amelioration | S | 3 | Accepter |
-| AM-011 | L'adaptateur Opendatasoft devrait charger par `/exports/json`, pas par 31 requêtes paginées | amelioration | M | 13 | À discuter (contournement en une ligne) |
+| AM-060 | `color-map` n'existe que sur une couche de carte, pas sur `dsfr-data-chart` | amelioration | S | 2 | Accepter |
 | AM-058 | Un filtre qui traverse un référentiel (académie → départements) | amelioration | M | 2 | Étudier |
 
-_7 demandes — S 5, M 2, L 0._
+_7 demandes — S 6, M 1, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
 | AM-062 | Aucune position documentée sur l'encastrement en iframe | amelioration | S | 1 | Accepter |
-| AM-013 | L'interface des facettes se rend là où la balise est écrite, pas là où on la veut | amelioration | M | 8 | Refusé côté lib (a11y) ; remède = AM-001 + convention |
 | AM-061 | Contrôles de carte : bascule du fond, plein écran, capture | amelioration | M | 2 | Étudier |
 | AM-037 | Pas de treemap | amelioration | L | 1 | Transférer à DSFR Chart |
 
-_4 demandes — S 1, M 2, L 1._
+_3 demandes — S 1, M 1, L 1._
 
 ## Les demandes
 
@@ -750,45 +749,91 @@ Relevé sur la seule carte non française du portail (44 projets européens). La
 
 ---
 
-## AM-035 — Un graphique n'a pas d'état « vide tant qu'aucun filtre n'est posé »
+## PG-016 — Le tri des facettes est global, pas par champ
 
 **Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
-**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-chart`
-**Rencontré sur** 1 page(s) : impot-sur-le-revenu
+**Labels suggérés** : `enhancement, dx`, `severity:basse`, `dsfr-data-facets`
+**Rencontré sur** 2 page(s) : prix-des-carburants, entreprise-patrimoine-vivant
 
 ### Constat
 
-Sur un jeu où l'agrégat global n'a pas de sens (additionner toutes les cases d'une déclaration de revenus), la page s'ouvre sur une courbe absurde tant que l'utilisateur n'a rien choisi. Le composant dessine ce qu'il reçoit ; rien ne permet de dire « attends un filtre ».
+`sort="count|alpha"` s'applique à toutes les facettes du composant ; le portail trie régions et départements en alphanumérique et carburants par effectif dans la même barre. Sur EPV, une gamme de prix ne peut pas suivre l'ordre des montants (`static-values` masquerait les compteurs).
 
-**Ce qui est vrai.** Non corrigé, mais cadré : prévu au jalon v0.25.0 avec `require-where` (#690, épic #700) — aucune requête tant qu'aucun filtre n'est posé, état `idle` rendu en message DSFR sur les afficheurs. Absent de 0.24.0, la version chargée par le dépôt.
+**Ce qui est vrai.** Partiellement traité par #645, livré en 0.21.1 : le tri des facettes adopte la grammaire `critère:sens` (`sort="count:desc"`), ce qui lève l'ambiguïté du tiret (PG-012).
+
+**Ce qui reste vrai.** Le tri demeure global : `_resolveSort()` lit un seul `sort` pour tout le composant (vérifié au source, `dsfr-data-facets.ts`, et dans le bundle publié 0.24.0). La grammaire par champ `champ:tri | champ2:tri`, déjà en usage pour `labels` et `display`, n'existe pas — une barre ne peut toujours pas trier les départements en alphanumérique et les carburants par effectif.
 
 ### Impact de l'erreur ou du manque
 
-Une page d'exploration s'ouvre sur un agrégat absurde tant qu'aucun filtre n'est posé.
+Une page qui veut trier une facette par ordre alphabétique et une autre par compte doit écrire deux composants de facettes, ou renoncer.
 
 ### Objectif métier de la correction
 
-Un état vide explicite.
+Trier chaque facette selon ce qui a du sens pour son champ.
 
 ### Pérennité et reproductibilité du besoin
 
-Récurrent sur les pages d'exploration.
+Structurel, et la grammaire existe déjà : `champ:valeur | champ2:valeur` est celle de `labels` et `display` sur le même composant. C'est une extension, pas une conception.
 
 ### Comment ça a été vérifié
 
-Page impot-sur-le-revenu sans paramètre : KPI « pic de déclarants » = max de toutes les cases confondues, courbe sur 19 388 lignes hétérogènes.
+`dsfr-data-facets.ts`, propriété `sort` (l. 70) et `_sortValues` (l. 648), sans grammaire par champ.
 
 ### Contournement actuel
 
-Liens d'exemple (`?nom=1AJ`) et texte d'aide ; `url-params` sur les facettes pour que le catalogue pointe directement sur une case.
+Aucun : choisir le tri dominant, ou deux composants de facettes.
 
 ### Demande
 
-Un attribut `require-filter` (ou `empty-until-filtered`) sur les composants d'affichage, avec un message DSFR à la place du rendu.
+Accepter la grammaire `champ:tri | champ2:tri` déjà utilisée par `labels` et `display`.
 
 ### Critères d'acceptation
 
-- [ ] `require-filter` sur les composants d'affichage : message DSFR tant qu'aucun filtre amont n'est actif.
+- [ ] `sort="academie:alpha:asc | type:count:desc"` trie chaque facette séparément.
+- [ ] Un `sort` sans nom de champ garde le comportement global actuel.
+- [ ] Une grammaire invalide produit un avertissement, pas un silence (PG-022).
+
+---
+
+## LIM-011 — `color-map` sépare ses paires par une virgule, que des valeurs métier contiennent
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map-layer`
+**Rencontré sur** 3 page(s) : entreprise-patrimoine-vivant, edu/generation-2024, edu/label-egalite-fille-garcon
+
+### Constat
+
+`_parseColorMap` découpe sur « , » : une valeur qui contient une virgule ne peut pas recevoir de couleur. **Requalifié de `limite-dure` en `amelioration` le 2026-09-10** : ce n'est pas une contrainte extérieure mais un choix de grammaire, et #676 a précisément montré la voie en ajoutant l'échappement percent (`%3A`, `%7C`, `%2C`, `%25`) à `replace` et `replace-fields`. Le même échappement réglerait ce cas.
+
+### Impact de l'erreur ou du manque
+
+Un jeu dont les libellés contiennent une virgule ne peut pas être coloré du tout, et rien ne le signale — la carte sort monochrome.
+
+### Objectif métier de la correction
+
+Colorer par une modalité dont le libellé contient une virgule.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : les nomenclatures métier énumèrent (« A, B et C »). Deux portails sur deux l'ont rencontré. Le mécanisme d'échappement existe déjà depuis #676.
+
+### Comment ça a été vérifié
+
+Deux portails, deux jeux. Bercy : `dsfr-data-map-layer.ts` l. 290, couleur #639F6A appliquée seulement après renommage de « Equipements Industriels, Médicaux, Mécaniques ». Éducation (lot 12) : le champ `type` de `fr-en-etablissements-labellises-generation-2024` compte **39 valeurs réelles dont plusieurs contiennent une virgule** — aucune n'est cartographiable. Le découpage sur « , » est inchangé dans le bundle publié 0.25.0.
+
+### Contournement actuel
+
+Renommer la valeur en amont par `dsfr-data-normalize replace-fields`.
+
+### Demande
+
+Accepter l'échappement percent dans `color-map`, avec la même convention que `replace-fields` depuis #676.
+
+### Critères d'acceptation
+
+- [ ] `color-map="Equipements Industriels%2C Médicaux:#639F6A"` applique la couleur.
+- [ ] La convention est celle de `replace-fields` (#676), documentée au même endroit.
+- [ ] Une grammaire invalide produit un avertissement, pas un silence (cf. PG-022).
 
 ---
 
@@ -868,15 +913,15 @@ Un `threshold-*` sur une colonne de `dsfr-data-list`, ou la possibilité d'alime
 
 ---
 
-## AM-060 — `color-map` n'existe que sur une couche de carte, et sa grammaire sépare par des virgules
+## AM-060 — `color-map` n'existe que sur une couche de carte, pas sur `dsfr-data-chart`
 
 **Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Accepter
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-chart`, `dsfr-data-map-layer`
-**Rencontré sur** 3 page(s) : edu/portrait-de-territoire-sports, edu/generation-2024, edu/label-egalite-fille-garcon
+**Rencontré sur** 2 page(s) : edu/portrait-de-territoire-sports, edu/label-egalite-fille-garcon
 
 ### Constat
 
-Deux points sur le même attribut. **Un** : `color-map` est porté par la couche de carte, pas par `dsfr-data-chart` — une même modalité ne peut donc pas garder sa couleur entre la carte et le graphique de la même page, ce qui est pourtant la première attente d'un tableau de bord. **Deux** : sa grammaire sépare les paires par des virgules, or des valeurs métier en contiennent.
+`color-map` est porté par `dsfr-data-map-layer`, pas par `dsfr-data-chart` : une même modalité ne peut pas garder sa couleur entre la carte et le graphique de la même page, ce qui est la première attente d'un tableau de bord. (Le second point de la rédaction initiale — le séparateur virgule — a été **fusionné dans LIM-011**, qui le portait déjà depuis le portail Bercy : règle « fusionner avant d'ajouter ».)
 
 ### Impact de l'erreur ou du manque
 
@@ -892,7 +937,7 @@ Structurel : les libellés métier contiennent des virgules, et les tableaux de 
 
 ### Comment ça a été vérifié
 
-Relevé sur Génération 2024, dont le champ `type` compte **39 valeurs réelles dont plusieurs contiennent une virgule** : la grammaire ne permet pas de les cartographier. Le besoin de couleur partagée carte/graphique vient de « Portrait de territoire » ; le besoin de `color-map` tout court est établi sur le Label égalité, où trois niveaux de labellisation doivent être distingués.
+Relevé sur « Portrait de territoire », dont l'original code la même modalité de deux couleurs différentes entre sa carte et ses graphiques. Grep sur `packages/core/src` : `color-map` n'apparaît que dans `dsfr-data-map-layer.ts`.
 
 ### Demande
 
@@ -903,48 +948,6 @@ Relevé sur Génération 2024, dont le champ `type` compte **39 valeurs réelles
 - [ ] `color-map` est accepté par `dsfr-data-chart` avec la même grammaire que sur la couche.
 - [ ] Une valeur contenant une virgule est cartographiable (séparateur ou échappement).
 - [ ] Une grammaire invalide produit un avertissement, pas un silence (cf. PG-022).
-
----
-
-## AM-011 — L'adaptateur Opendatasoft devrait charger par `/exports/json`, pas par 31 requêtes paginées
-
-**Priorité** P3 · **Effort estimé** M (un à trois jours) · **Décision proposée** À discuter (contournement en une ligne)
-**Labels suggérés** : `enhancement`, `severity:haute`, `opendatasoft-adapter`, `dsfr-data-source`
-**Rencontré sur** 13 page(s) : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, comptabilite-generale, prix-des-carburants, fiscalite-locale, entreprise-patrimoine-vivant, annuaire-services-dgfip, barometre-france-num, signalconso, rappelconso, centres-controle-technique
-
-### Constat
-
-En mode adaptateur, un chargement complet passe par `/records` avec `limit=100` et un `offset` croissant : la boucle de `fetchAll` est strictement séquentielle (packages/core/src/adapters/opendatasoft-adapter.ts:121). Pour 3 080 lignes, cela fait 31 allers-retours l'un après l'autre. Or Opendatasoft expose `/exports/json`, qui renvoie le jeu entier en une requête, accepte `select`, et répond en CORS `*`.
-
-**Ce qui est vrai.** Non corrigé, mais cadré : prévu au jalon v0.25.0 avec `fetch-mode="export"` (#689, épic #699), qui charge par `/exports/json` en une requête, avec repli automatique sur `/records` et `meta.truncated` obtenu par `limit+1` faute de `total_count`. Absent de 0.24.0, la version chargée par le dépôt : le contournement par source générique reste nécessaire aujourd'hui.
-
-### Impact de l'erreur ou du manque
-
-31 requêtes séquentielles pour 3 080 lignes (31 s) là où `/exports/json` coûte 0,6 s.
-
-### Objectif métier de la correction
-
-Un chargement complet rapide par défaut.
-
-### Pérennité et reproductibilité du besoin
-
-Structurel, mais contournable par `url=` sur l'export.
-
-### Comment ça a été vérifié
-
-Chronométrage en navigateur sur la même page : 31 requêtes, concurrence maximale 1, durée moyenne 931 ms (max 3 721 ms — la pagination profonde se dégrade), 28,9 s passées dans les requêtes contre 37 ms entre elles. Le poids n'y est pour rien : un `select` divisant le transfert par 3,7 n'a fait gagner aucune seconde. La même page basculée sur `/exports/json` : 1 requête, 0,62 s, 185 Ko. Lot 3 : `/exports/json` avec `group_by=postes, year(annee) as an` sur 517 489 lignes renvoie les 264 groupes en 0,50 s.
-
-### Contournement actuel
-
-Écrire la source en mode générique (`url=` vers `/exports/json` + `params` pour le `select`) au lieu du mode adaptateur. On y perd la délégation serveur du `where`/`order-by` — sans conséquence quand toute la page travaille côté client.
-
-### Demande
-
-Quand la source demande un chargement complet (pas de `server-side`, pas de pagination), utiliser `/exports/json` plutôt que la boucle sur `/records`. L'endpoint accepte AUSSI `group_by`, `select` et `where` : il couvre donc à la fois le chargement de lignes et les agrégations, et règle du même coup BUG-001. À défaut, paralléliser les pages une fois `total_count` connu : 8 requêtes concurrentes prennent 0,44 s contre 2,4 s en série.
-
-### Critères d'acceptation
-
-- [ ] Sans `server-side`, l'adaptateur ODS charge par `/exports/json` avec `select`/`where`, et retombe sur `/records` si l'export échoue.
 
 ---
 
@@ -1020,50 +1023,6 @@ Une position documentée sur l'encastrement, et sur ce qu'il advient des mention
 
 - [ ] Le guide dit quand encastrer, quand intégrer les balises, et ce que devient l'accessibilité.
 - [ ] Le cas « site tiers hors DSFR » est traité explicitement.
-
----
-
-## AM-013 — L'interface des facettes se rend là où la balise est écrite, pas là où on la veut
-
-**Priorité** P4 · **Effort estimé** M (un à trois jours) · **Décision proposée** Refusé côté lib (a11y) ; remède = AM-001 + convention
-**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-facets`, `dsfr-data-search`
-**Rencontré sur** 8 page(s) : plan-de-relance, qualite-tourisme, tourisme-et-handicap, restauration-notre-dame, prix-des-carburants, entreprise-patrimoine-vivant, annuaire-services-dgfip, centres-controle-technique
-
-### Constat
-
-Le câblage du pipeline se fait par `id`, indépendamment de la position dans le DOM — c'est la bonne propriété. Mais `dsfr-data-facets` et `dsfr-data-search` rendent leur interface à l'endroit exact où la balise est écrite. Sur un tableau de bord à colonne de filtres, ils doivent donc être physiquement dans cette colonne, alors que les `dsfr-data-query` qui les consomment s'écrivent plus haut. L'ordre du fichier cesse de refléter l'ordre du pipeline.
-
-Décision du lot 11 (relecture dsfr-data) : choix de conception, pas un manque. Facettes et recherche sont des composants visuels en light DOM ; le motif « orchestrateur invisible + UI libre câblée par `id` » existe déjà, c'est le contexte. Un `render-into` déplacerait focus, `aria-controls` et régions live (risque a11y). Le remède à « l'ordre du fichier ne reflète plus le pipeline » est AM-001, plus une convention de lecture (bloc pipeline commenté en tête, UI dans la mise en page).
-
-**Ce qui est vrai.** Refusé côté bibliothèque, explicitement et avec motif (#692, 0.21.1) : un attribut `render-into` a été écarté comme contraire au choix de conception du light DOM, et pour le risque d'accessibilité que porte un rendu délégué. La contrainte reste donc entière — écrire la balise là où son interface doit apparaître —, mais ce n'est plus une demande en attente : c'est une décision.
-
-### Impact de l'erreur ou du manque
-
-Les facettes se rendent où la balise est écrite ; mise en page contrainte.
-
-### Objectif métier de la correction
-
-Découpler déclaration et affichage.
-
-### Pérennité et reproductibilité du besoin
-
-Récurrent.
-
-### Comment ça a été vérifié
-
-Constaté sur les quatre pages à colonne de filtres du dépôt. Première écriture de la page Plan de relance : les facettes déclarées dans le bloc de pipeline s'affichaient au-dessus du conteneur, hors de la colonne.
-
-### Contournement actuel
-
-Déclarer les composants d'interface dans le conteneur voulu et les référencer par `id` depuis le bloc de pipeline. Ça marche, mais la lecture du fichier en souffre.
-
-### Demande
-
-Un attribut de rendu délégué (par exemple `render-into="#mon-conteneur"`) qui découplerait le point de déclaration du point d'affichage, comme le `for` de `dsfr-data-a11y` le fait déjà pour sa cible.
-
-### Critères d'acceptation
-
-- [ ] `render-into="#cible"` sur facettes et recherche déplace le rendu sans changer le câblage.
 
 ---
 
