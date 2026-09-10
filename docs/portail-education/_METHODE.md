@@ -85,6 +85,48 @@ Deux pièges de repérage déjà payés :
   sur ce portail (302 sur les six URL testées). Ne pas les compter comme une capacité d'ODS que
   `dsfr-data` n'aurait pas : c'est du chrome de back-office, et il a disparu chez ODS aussi.
 
+## Les vues personnalisées héritées — la TROISIÈME famille (trouvée au lot 12)
+
+Une cible qui n'est ni une page `/pages/` ni une page Studio n'est pas pour autant morte.
+`GET /api/portal/v1.0/studio_pages/?limit=100` liste **23** pages Studio ; quatre cibles du
+catalogue (ids **10, 23, 24, 30**) n'y figurent pas et redirigent pourtant en 302 vers leur page
+d'actif. Ce sont des **vues personnalisées ODS héritées** (« custom views ») : du template
+AngularJS `ods-*`, stocké **dans les métadonnées du jeu**, rendu par le visualiseur d'actif.
+
+**Trois choses à savoir, chacune payée une fois :**
+
+1. **L'URL vivante est celle de l'actif « Visualization »**, donnée en tête de la description du
+   jeu (`<div class="ods-asset-customview-crosslink">`) :
+   `/explore/assets/visualisation-<slug>/view/`. Le lien du catalogue **n'est pas mort** — il
+   mène à l'actif, qui mène à la vue. Le récupérer ainsi :
+   ```bash
+   curl -s "…/api/explore/v2.1/catalog/datasets/<jeu>" | python3 -c \
+     "import json,sys;print(json.load(sys.stdin)['metas']['default']['description'][:400])"
+   ```
+2. **`/api/datasets/1.0/<jeu>/` expurge `extra_metas`** : la configuration n'y est pas. Elle est
+   dans l'attribut `ctx-dataset-schema` de la page **embed**, qui **ne redirige pas** :
+   ```bash
+   curl -sL --compressed "https://data.education.gouv.fr/explore/embed/dataset/<jeu>/<slug-de-vue>/" \
+     | grep -o 'ctx-dataset-schema="[^>]*"'
+   ```
+   C'est du JSON doublement échappé (entités HTML **et** `\{` `\}` d'AngularJS) : désechapper en
+   Python/Node (`html.unescape`, puis `.replace('\\{','{')`, puis `JSONDecoder().raw_decode`).
+   Utile dedans : `extra_metas.visualization.custom_view_html` / `…_css` / `…_title` /
+   `map_tooltip_html`, et `extra_metas.asset_content_configuration.facets`.
+3. **Le slug de vue n'est pas toujours `custom`.** Il est dans
+   `extra_metas.visualization.custom_view_slug` et vaut aussi bien `carte`
+   (`fr-en-annuaire_bde_lycees_pro`) que `carte-personnalisee`
+   (`fr-en-etablissements-labellises-euroscol`). Un mauvais slug renvoie **404**, pas une
+   redirection : essayer les trois avant de conclure.
+
+Configurations déjà archivées : `_sources/<jeu>.customview.json` (4 fichiers, relevés 2026-09-10).
+
+**Deux distinctions à tenir dans les fiches** — la colonne de facettes à gauche, le compteur de
+résultats, la recherche libre, les outils de dessin (polygone/rectangle/cercle), le sélecteur de
+fond et la géolocalisation appartiennent au **visualiseur d'actif**, pas à la vue. Ils
+apparaissent ou non selon le jeu (seul Euroscol rend les facettes, sur les quatre). C'est du
+chrome de portail open data : **ne pas le compter comme un manque de `dsfr-data`**.
+
 ## API du portail
 
 Base : `https://data.education.gouv.fr/api/explore/v2.1`

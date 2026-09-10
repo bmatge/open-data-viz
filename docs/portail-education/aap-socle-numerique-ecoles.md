@@ -63,7 +63,8 @@ collectivités **622 Ko en 0,42 s** · écoles **1 436 Ko en 1,01 s**.
 - **Ce qui n'est pas dans l'objet** :
   - **aucun total national** : ni les 103 M€, ni les 12 670 écoles n'apparaissent nulle part ;
   - **aucun montant par école ni par classe** — la seule grandeur comparable entre un
-    département rural et la Seine-Saint-Denis, et elle n'est pas calculée ;
+    département rural et la Seine-Saint-Denis, et elle n'est pas calculée (`dsfr-data`
+    la rend en une balise, voir Limites n° 4) ;
   - **aucun taux de couverture** subvention / dépense (52,5 % au national), alors que les
     deux nombres sont affichés l'un sous l'autre dans chaque infobulle ;
   - **aucune vue à la maille communale**, alors que la donnée est communale : elle n'est
@@ -344,7 +345,7 @@ dépend), avec un GeoJSON régional + départemental servi statiquement par le d
 | `regions-dataset="georef-france-region" regions-domain="public.opendatasoft.com"` | `<dsfr-data-source id="geo-reg" url="/data/geo/regions.geojson" transform="features">` (statique, DROM inclus) |
 | `ods-analysis-serie-montant="SUM(montant_de_la_subvention)" ods-analysis-x="code_region"` | `<dsfr-data-query id="q-reg" source="coll" group-by="code_region" aggregate="montant_de_la_subvention:sum:subv, depenses_realisees_par_la_collectivite:sum:dep, nombre_d_ecoles:sum:ecoles, nombre_de_communes:sum:communes">` — **un seul `group-by` sur un champ brut**, donc pas de fonction ODSQL : le piège PG-014 (`year(…)` entouré d'accents graves → 400) ne s'applique pas |
 | `ng-repeat` + `ng-init` de ternaires bâtissant `colorsreg` | **rien** : `breaks="1000000,5000000,10000000"` sur la couche. Les seuils sont écrits **une seule fois**, et la légende les relit |
-| `ods-map-layer display="categories" color-by-field="reg_code" color-categories="colorsreg"` | `<dsfr-data-join>` puis `<dsfr-data-map-layer type="geoshape" geo-field="geometry" fill-field="subv" breaks="1000000,5000000,10000000">` |
+| `ods-map-layer display="categories" color-by-field="reg_code" color-categories="colorsreg"` | `<dsfr-data-join left="geo-reg" right="q-reg" on="code=code_region">` (grammaire `on` lue au JSDoc : clé commune `on="code"`, clés différentes `on="gauche=droite"`, multi-clé `on="a,b"` ; `type` par défaut `left`) puis `<dsfr-data-map-layer type="geoshape" geo-field="geometry" fill-field="subv" breaks="1000000,5000000,10000000">` |
 | `color-categories-other="lightgrey"` | comportement natif : une ligne sans valeur numérique n'est pas colorée (à vérifier au navigateur pour les régions non appariées) |
 | `shape-opacity="0.95"` | `fill-opacity="0.6"` (défaut) — le 0,95 est un défaut, on ne le reproduit pas |
 | légende HTML écrite à la main (2 fois, 2 jeux de seuils) | `<dsfr-data-map-legend for="…" label="Subventions accordées aux collectivités (€)">` — libellés dérivés des `breaks` (« Jusqu'à 1 000 000 », « De 1 000 000 à 5 000 000 », …, formatés `fr-FR`) |
@@ -389,9 +390,11 @@ dépend), avec un GeoJSON régional + départemental servi statiquement par le d
              nombre_d_ecoles:sum:ecoles,
              nombre_de_communes:sum:communes"></dsfr-data-query>
 
-<!-- Géométrie + agrégat sur la même ligne : l'infobulle n'a plus rien à demander au serveur. -->
-<dsfr-data-join id="reg-geo" source="geo-reg" with="q-reg" on="code" to="code_region"></dsfr-data-join>
-<dsfr-data-join id="dep-geo" source="geo-dep" with="q-dep" on="code" to="code_departement"></dsfr-data-join>
+<!-- Géométrie + agrégat sur la même ligne : l'infobulle n'a plus rien à demander au serveur.
+     Grammaire de `on` (JSDoc) : clé commune `on="code"`, clés différentes
+     `on="gauche=droite"`, multi-clé `on="a,b"`. Type par défaut : `left`. -->
+<dsfr-data-join id="reg-geo" left="geo-reg" right="q-reg" on="code=code_region"></dsfr-data-join>
+<dsfr-data-join id="dep-geo" left="geo-dep" right="q-dep" on="code=code_departement"></dsfr-data-join>
 
 <dsfr-data-search id="eco-q" source="eco"
   fields="nom_de_l_ecole, nom_de_la_commune_uai, uai"
@@ -503,19 +506,34 @@ dépend), avec un GeoJSON régional + départemental servi statiquement par le d
    *Contournement* : compléter le fichier (les contours DROM sont dans `georef-france-region`
    et pèsent peu), puis `insets="drom"` sur la carte.
    *Verdict* : **travail de données, pas limite de bibliothèque.**
-4. **Ni « montant par école », ni « taux de couverture » comme champ dérivé.**
-   *Obstacle* : `dsfr-data-query aggregate` fait des agrégats (`sum`, `count`, `avg`…), pas
-   un ratio entre deux agrégats. `dsfr-data-normalize` fait de l'arrondi et du nettoyage,
-   pas du calcul.
-   *Voie native essayée* : `aggregate="montant_de_la_subvention:avg:…"` donne la moyenne
-   par **convention**, pas par école. Aucune combinaison d'attributs ne donne `subv/ecoles`.
-   *Contournement* : source générique ODSQL (`url=` + `params` avec
-   `select=sum(montant_de_la_subvention)/sum(nombre_d_ecoles) as euro_par_ecole&group_by=code_region`),
-   qui **n'écoute plus le contexte** — le contournement des `group-by` à fonction (PG-014)
-   s'applique ici de la même façon.
-   *Verdict* : **manque réel, à remonter** — un champ calculé (`compute="ratio=a/b"`) sur
-   `dsfr-data-query` ou `dsfr-data-normalize`. Non bloquant : l'original ne le fait pas non
-   plus, et la source générique le rend en une balise si on accepte de figer le filtrage.
+4. **« Montant par école » et « taux de couverture » : la voie native existe, elle
+   s'appelle `compute`.**
+   *Obstacle apparent* : `dsfr-data-query aggregate` fait des agrégats (`sum`, `count`,
+   `avg`…) et **pas** un ratio entre deux agrégats. `aggregate="montant_de_la_subvention:avg:…"`
+   donne la moyenne par **convention**, pas par école.
+   *Voie native trouvée en relisant le JSDoc* (et non la fiche du composant) :
+   `dsfr-data-normalize` a un attribut **`compute`** —
+   « Colonnes calculées (ligne à ligne, sur valeurs brutes). Format :
+   `"cible = expression; cible2 = expression2"`. Supporte l'arithmétique (+ - * /), la
+   concaténation texte […] et les parenthèses. **Hors périmètre : conditions, fonctions,
+   calculs sur valeurs agrégées.** »
+   La restriction « calculs sur valeurs agrégées » vise le composant lui-même : il n'agrège
+   pas. **Mais placé en aval d'un `dsfr-data-query`, il voit des lignes ordinaires** dont
+   les champs `subv`, `dep`, `ecoles` sont déjà les sommes. D'où :
+   ```html
+   <dsfr-data-query id="q-reg" source="coll" group-by="code_region"
+     aggregate="montant_de_la_subvention:sum:subv, nombre_d_ecoles:sum:ecoles, …"></dsfr-data-query>
+   <dsfr-data-normalize id="q-reg-c" source="q-reg"
+     compute="euro_par_ecole = subv / ecoles; couverture = subv * 100 / dep"></dsfr-data-normalize>
+   ```
+   puis `fill-field="euro_par_ecole"` sur la couche : **la carte normalisée que l'original
+   n'a pas**, sans requête supplémentaire.
+   *Verdict* : **ce n'était pas un manque.** Rectification écrite ici avant publication —
+   c'est le troisième réflexe du dépôt (chercher l'architecture native avant d'écrire
+   qu'une chose est impossible). **Non exécuté** : à confirmer au navigateur, en
+   particulier l'ordre `query` → `normalize` et le nom des champs agrégés vus par
+   `compute`. Le repli, si l'enchaînement ne passe pas, reste la source générique ODSQL
+   (`select=sum(a)/sum(b) as r&group_by=…`), qui n'écoute plus le contexte (PG-014).
 5. **12 624 points sur une couche non clusterisée.**
    *Obstacle* : `max-items` vaut 5 000 par défaut → bandeau de troncature (PG-013).
    *Voies natives* : `max-items="15000"` (marqueurs `circle`, pas de `divIcon` : le DOM
