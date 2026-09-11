@@ -306,12 +306,63 @@
         </p>
       </div>
     </div>
+
+    <h3 class="fr-h6 fr-mt-4w">Le flux mensuel, retrouvé par différence</h3>
+    <dsfr-data-chart id="g-flux" source="tne-audiences-f" type="bar"
+      label-field="mois_saisie"
+      value-field="nombre_de_connexion_a_la_plateforme_tne__diff"
+      value-field-2="nombre_de_visiteurs_uniques_a_la_plateforme_tne__diff"
+      name='["Connexions du mois","Visiteurs uniques du mois"]'
+      databox databox-title="Connexions et visiteurs uniques par mois, écart avec le mois précédent"
+      databox-source="Réseau Canopé — fr-en-tne_suivi_audiences, via data.education.gouv.fr ; écart calculé dans la page"
+      databox-download>
+    </dsfr-data-chart>
+    <dsfr-data-a11y for="g-flux" source="tne-audiences-f" table download></dsfr-data-a11y>
+    <p class="fr-text--xs fr-mt-1w">
+      La même donnée que la courbe de gauche, <strong>dérivée</strong> : ce que chaque mois a
+      ajouté, au lieu du total depuis 2020. C'est la question qu'on pose naturellement à un
+      compteur cumulé, et elle est restée sans réponse jusqu'à la <strong>0.29</strong>
+      (<code>aggregate="…:diff"</code>, <a href="https://github.com/bmatge/dsfr-data/pull/799"
+      target="_blank" rel="noopener external">#799</a>). Octobre 2020, premier mois publié, n'a
+      pas de barre : son incrément est inconnu, et <code>diff</code> rend <code>null</code>
+      plutôt que zéro. Ni le tableau de bord d'origine ni le portail ne montrent cette vue.
+    </p>
+    <div class="fr-alert fr-alert--warning fr-alert--sm fr-mt-2w fr-mb-4w">
+      <p class="fr-text--sm">
+        <strong>Deux défauts du jeu que seule la vue dérivée fait voir.</strong> Une courbe cumulée
+        monte toujours&nbsp;: elle cache ce qui se passe entre deux points. Dès qu'on affiche les
+        écarts, deux anomalies sautent aux yeux — et aucune ne se voit sur les deux graphiques
+        ci-dessus.
+      </p>
+      <ul class="fr-text--sm">
+        <li><strong>Deux barres négatives sur les visiteurs uniques</strong>, en 09/2024
+          (80&nbsp;549 → 79&nbsp;166) et en 03/2025 (95&nbsp;672 → 94&nbsp;383). Un compteur
+          cumulé de visiteurs <em>uniques</em> ne peut pas décroître&nbsp;: ces deux mois sont des
+          révisions à la baisse du producteur. L'encadré en tête de page annonce pourtant que
+          «&nbsp;tous ces chiffres sont des cumuls depuis 2020&nbsp;»&nbsp;: c'est vrai de la
+          forme, pas de la série.</li>
+        <li><strong>Le mois 01/2024 est publié deux fois</strong>, une fois avec ses valeurs
+          (147&nbsp;145 connexions) et une fois <em>entièrement vide</em> — vérifié à l'API, 50
+          lignes pour 49 mois. La ligne vide coupe la série&nbsp;: <code>diff</code> rend
+          <code>null</code> pour elle <em>et</em> pour la suivante, d'où le trou de deux barres au
+          début de 2024. Le défaut est dans le jeu, pas dans le calcul&nbsp;; les courbes cumulées
+          le traversaient sans rien montrer.</li>
+      </ul>
+    </div>
   </div>
 
   <!-- ================= Le pipeline de dérivation ================= -->
 
+  <!-- `diff` (#775, livré en 0.29.0) : l'écart de chaque ligne avec la
+       précédente, calculé APRÈS `order-by`, jamais délégué. C'est l'inverse de
+       `running_sum` (0.27.0), et c'est le sens qui manquait ici — la page reçoit
+       des compteurs DÉJÀ cumulés (constat AM-068). La première ligne vaut `null`,
+       jamais 0 : octobre 2020 est le premier mois publié, son incrément est
+       inconnu, pas nul. L'agrégat ajoute une colonne `…__diff` sans toucher aux
+       lignes : les deux graphiques de cumul ci-dessus lisent la même query. -->
   <dsfr-data-query id="tne-audiences-f" source="tne-audiences"
-    order-by="mois_saisie:asc"></dsfr-data-query>
+    order-by="mois_saisie:asc"
+    aggregate="nombre_de_connexion_a_la_plateforme_tne:diff, nombre_de_visiteurs_uniques_a_la_plateforme_tne:diff"></dsfr-data-query>
 
   <dsfr-data-query id="tne-dept" source="tne-formes" group-by="departement"
     aggregate="nombre_total_de_participants:sum:n" order-by="n:desc"></dsfr-data-query>
@@ -399,13 +450,18 @@
               <code>order-by</code>, toujours côté client — aucune API ne le traduit — avec un
               avertissement console si l'<code>order-by</code> manque, où le résultat n'aurait
               pas de sens. C'est ce que le tableau de bord d'origine fait en <strong>douze
-              expressions de template</strong>. <strong>Le second sens n'existe toujours
-              pas</strong> : <code>lag</code>, la valeur de la ligne précédente, est
-              explicitement différé depuis la 0.24.0, et <code>compute</code> exclut de son
-              périmètre « fenêtre, cumul, ligne précédente ». Sur cette page dont les données
-              arrivent <em>déjà</em> cumulées, c'est précisément le sens manquant qui serait
-              utile : la question la plus naturelle qu'on pose à une série cumulée est celle de
-              son incrément, et elle reste sans réponse. Constat AM-068.</li>
+              expressions de template</strong>. <strong>Le second sens a été livré en
+              0.29.0</strong> (<code>aggregate="champ:diff"</code>,
+              <a href="https://github.com/bmatge/dsfr-data/pull/799" target="_blank"
+              rel="noopener external">#799</a>, constat AM-068) : mêmes règles que le cumul —
+              après <code>order-by</code>, jamais délégué —, et la première ligne à
+              <code>null</code> plutôt qu'à zéro, un incrément inconnu n'étant pas un incrément
+              nul. Le graphique « flux mensuel » ci-dessus en sort. <strong>Ce qu'il a révélé
+              vaut mieux que la fonction elle-même</strong> : deux baisses d'un compteur de
+              visiteurs <em>uniques</em> — impossibles sur un cumul, donc des révisions — et un
+              mois publié en double dont l'exemplaire vide coupe la série. Les deux vivaient
+              depuis le lot 14 sous des courbes qui montaient bien sagement. Une série cumulée
+              ne se relit pas ; sa dérivée, si.</li>
             <li><strong>La carte départementale n'a pas été refaite en carte.</strong> L'original
               dessine un SVG de douze départements en aplats de quatre rangs de couleur, contours
               blancs filaires — illisible comme carte, et faux comme échelle (l'Aisne et la
@@ -468,7 +524,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.29.1/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

@@ -30,7 +30,7 @@ npm run dev        # idem, avec --watch
 ```
 
 Aucune dépendance : le serveur est un `node:http` de 80 lignes qui sert `public/`.
-DSFR, DSFR Chart et `dsfr-data@0.28.0` sont chargés depuis jsDelivr — c'est
+DSFR, DSFR Chart et `dsfr-data@0.29.1` sont chargés depuis jsDelivr — c'est
 volontaire, l'argument à démontrer étant « une balise, un CDN, et ça marche ».
 
 ## Structure
@@ -181,6 +181,18 @@ portail compte des onglets (`scripts/build-registre-sports.mjs`). Douze constats
 qui fige une page sur « Chargement… » (BUG-015) et deux pièges des pages à deux contextes — et huit fusions.
 Au passage, la **0.29 de `dsfr-data` a été vérifiée avant sa publication** : un bundle construit depuis
 `origin/main` rejoue les 63 pages existantes sans régression (`docs/montee-0.29.md`).
+
+**Lot 20 — la 0.29, vérifiée avant sa sortie puis consommée.** Les 14 changesets en attente ont été
+construits depuis `origin/main` et servis à la place du CDN (`RECETTE_BUNDLE`) **la veille de la
+publication** : aucune régression sur les 63 pages, et deux défauts trouvés dans du code pas encore
+publié — une légende qui contredit son graphique (BUG-016) et un avertissement neuf qui part sur une
+jointure légitime (AM-080). Déposés dans la nuit, **les deux sont entrés dans la 0.29.0** (#815, #817).
+Le dépôt est ensuite monté en 0.29.0 puis 0.29.1, et la version a été **consommée** : six résumés de
+carte faux devenus justes (4,27 % → 5,6 % sur les collèges), neuf composants retirés du portrait de
+territoire, quatre contournements d'adaptateur rendus à la voie native. Au passage, deux chiffres faux
+du banc lui-même et deux défauts du jeu TNE, plus un bug neuf de la 0.29 déposé le jour même (BUG-017,
+#825 : le plein écran casse une carte à encarts). **24 constats déposés passent en « corrigé »**, aucun
+n'est en attente de dépôt. Bilan détaillé : [`docs/montee-0.29.md`](docs/montee-0.29.md).
 
 Les trois reconstitutions du lot 6 (Signal Conso, Rappel Conso, contrôle technique) ont une page
 officielle en 404 et un identifiant de jeu périmé, mais la donnée existe toujours — parfois mise à

@@ -125,7 +125,7 @@
        profondeur du jeu. 370 semaines, quelques kilo-octets, un aller-retour. -->
   <dsfr-data-source id="dnma-sem" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
-    group-by="debutsemaine" order-by="debutsemaine"
+    group-by="date_format(debutsemaine, 'yyyy-MM-dd') as semaine" order-by="semaine"
     select="sum(visites_eleve) as eleves, sum(visites_parent) as parents, sum(visites_enseignant) as enseignants"
     max-records="600">
   </dsfr-data-source>
@@ -133,13 +133,17 @@
   <!-- Source dédiée à la facette d'académie : `select` d'un seul champ et
        `max-records="1"` — les valeurs viennent de l'endpoint /facets, pas des
        lignes, donc on ne rapatrie rien. -->
-  <!-- `debutsemaine` sort en ISO complet (« 2019-09-02T00:00:00+00:00 ») : 365 étiquettes
-       d'axe illisibles. Le raccourci naturel — group-by="date_format(debutsemaine,
-       'yyyy-MM-dd') as semaine" — provoque un HTTP 400 : voir l'analyse en bas de page.
-       `replace()` en aval fait le même travail, côté client. -->
-  <dsfr-data-normalize id="dnma-sem-n" source="dnma-sem"
-    compute="semaine = replace(debutsemaine, 'T00:00:00+00:00', '')">
-  </dsfr-data-normalize>
+  <!-- `debutsemaine` sort en ISO complet (« 2019-09-02T00:00:00+00:00 ») : 365
+       étiquettes d'axe illisibles. Le raccourci naturel —
+       group-by="date_format(debutsemaine, 'yyyy-MM-dd') as semaine" — rendait un
+       HTTP 400 jusqu'en 0.28 : l'adaptateur découpait `group-by` sur TOUTES les
+       virgules, y compris celle de la fonction, puis backquotait le second
+       morceau (BUG-011). Le contournement était un `replace()` côté client.
+       ⚠️ Contournement RETIRÉ au lot 20 : #796, livré en 0.29.0, ignore les
+       virgules entre parenthèses et entre quotes. Le regroupement se fait
+       maintenant côté serveur, et le `dsfr-data-normalize` intermédiaire a
+       disparu. Vérifié à l'API : l'expression nue rend 200 et des semaines
+       « 2019-09-02 » ; la forme backquotée d'avant rend une ODSQLSyntaxError. -->
 
   <dsfr-data-source id="dnma-fac" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
@@ -285,14 +289,14 @@
       Un basculement de cette ampleur en un an relève du changement de méthode de mesure, pas de
       l'usage.
     </p>
-    <dsfr-data-chart id="g-dnma-sem" source="dnma-sem-n" type="line"
+    <dsfr-data-chart id="g-dnma-sem" source="dnma-sem" type="line"
       label-field="semaine"
       value-field="eleves:Élèves" value-fields="parents:Parents, enseignants:Enseignants"
       databox databox-title="Visites ENT hebdomadaires par profil, depuis septembre 2019"
       databox-source="DNE — fr-en-dnma-par-uai-profils, Licence Ouverte 2.0"
       databox-download databox-screenshot>
     </dsfr-data-chart>
-    <dsfr-data-a11y for="g-dnma-sem" source="dnma-sem-n" table download
+    <dsfr-data-a11y for="g-dnma-sem" source="dnma-sem" table download
       label-field="semaine" value-field="eleves, parents, enseignants"></dsfr-data-a11y>
   </div>
 
@@ -488,10 +492,17 @@
               <strong>C'est le frère jumeau de BUG-010</strong> : là où l'alias sans parenthèse
               était backquoté à tort, c'est ici la virgule d'argument qui est prise pour un
               séparateur de champs. Contourné par un <code>compute="semaine =
-              replace(debutsemaine, 'T00:00:00+00:00', '')"</code> en aval, qui fait le même
-              travail côté client — mais le contournement <strong>cesse de marcher</strong> dès
-              qu'on veut un vrai regroupement de date (par mois, par trimestre), qui n'a pas
-              d'équivalent client.</li>
+              replace(debutsemaine, 'T00:00:00+00:00', '')"</code> en aval, qui faisait le même
+              travail côté client — mais le contournement <strong>cessait de marcher</strong> dès
+              qu'on voulait un vrai regroupement de date (par mois, par trimestre), qui n'a pas
+              d'équivalent client.
+              <br><strong>Corrigé en 0.29.0</strong>
+              (<a href="https://github.com/bmatge/dsfr-data/pull/796" target="_blank" rel="noopener external">#796</a>)
+              : le découpeur ignore désormais les virgules entre parenthèses et entre quotes, et
+              le même correctif règle BUG-010 et PG-027 — trois symptômes, un seul choix
+              d'implémentation. Le contournement a été retiré au lot 20 : le regroupement
+              hebdomadaire se fait côté serveur, et le <code>dsfr-data-normalize</code>
+              intermédiaire a disparu de la page.</li>
             <li><strong>Une source d'agrégats se croit tronquée.</strong> Une
               <code>dsfr-data-source</code> qui porte un <code>select</code> de sommes
               <em>sans</em> <code>group-by</code> ne renvoie qu'une ligne, mais l'API publie le
@@ -546,8 +557,9 @@
           échelle. C'est un résidu propre à ce portail : les jeux de Bercy sont « une ligne = un
           objet », ceux-ci sont « une ligne = un établissement × une semaine ».
           S'y ajoutent deux frictions neuves, toutes deux liées à l'agrégation serveur :
-          <strong>une virgule d'argument dans <code>group-by</code> vaut un HTTP 400</strong>
-          (frère de BUG-010), et <strong>une source d'agrégats sans <code>group-by</code>
+          <strong>une virgule d'argument dans <code>group-by</code> valait un HTTP 400</strong>
+          (frère de BUG-010, corrigé en 0.29.0 par #796 — la page est repassée en voie native),
+          et <strong>une source d'agrégats sans <code>group-by</code>
           s'annonce tronquée</strong> alors qu'elle est complète.</p>
       </div>
     </div>
@@ -559,7 +571,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.29.1/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

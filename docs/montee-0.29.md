@@ -1,4 +1,45 @@
-# Montée en `dsfr-data` 0.29 — ce qui change pour le dépôt
+# Montée en `dsfr-data` 0.29 — bilan
+
+> **Fait le 2026-09-12.** La 0.29.0 a été publiée le 2026-09-11 à 22 h 02 UTC. Les 64 balises du
+> dépôt sont montées, les 66 pages rejouées à la recette, et le registre passé à jour :
+> **24 constats déposés sont corrigés**, aucun ne reste en attente de dépôt, 11 restent ouverts.
+>
+> Ce document gardait, avant publication, le plan de ce qu'il faudrait faire ; il garde maintenant
+> ce qui a été fait et ce qui a été vérifié. La partie « avant publication » est conservée telle
+> quelle plus bas : c'est la trace de ce qu'une vérification anticipée permet de savoir.
+
+## Résultat de la montée (0.28.0 → 0.29.0, CDN)
+
+- **64 pages sur 66 identiques** à la recette. Les deux écarts sont des KPI de
+  `tedi-robots-telepresence`, dus à une donnée republiée (jeu quotidien), pas à la version :
+  vérifié en rejouant la page sous les deux bundles dans la même minute.
+- **Zéro erreur de configuration**, et les trois erreurs console préexistantes sont inchangées.
+  Une erreur 404 apparue une fois sur `accessibilite-equipements-sportifs` ne s'est pas
+  reproduite : passagère, pas une régression.
+- **BUG-016 vérifié en production** : le contrôle `legendesFausses` de la recette passe de
+  **15 pastilles contraires à 0** sur les cinq graphiques à `color-map`.
+- **BUG-012 vérifié en page** : plus aucun faux avertissement de dépréciation sur les quatre
+  pages concernées.
+- **AM-080 vérifié en page** : plus aucun avertissement de jointure sur `/sports/portrait-federation`.
+- La 0.29.0 contient aussi ce qui n'était pas dans les 14 changesets lus la veille :
+  `dsfr-data-concat` (#807, AM-074), le correctif de regroupement délégué (#811, BUG-009),
+  le colonnage responsive `per-row` / `span` (#814, #819 — `cols` gardé tel quel), et les deux
+  correctifs déposés dans la nuit : la légende sous `databox` (#815) et la jointure-filtre (#817).
+
+## Ce qui reste ouvert après la 0.29.0, vérifié contre le bundle publié
+
+| Constat | Ce qui manque encore |
+|---|---|
+| AM-077 | Le compteur de `dsfr-data-display` : `${totalItems} resultat`, sans accent ni formateur ; `count-label` n'existe que sur la recherche |
+| AM-078 | Aucun agrégat de part du total (`running_sum` et `diff` seulement) |
+| AM-079 | Le résumé d'une carte de volumes : ni mode `sum` calculé, ni `none` |
+| AM-081 | Aucun libellé de valeur sur une facette : un code ne peut pas être présenté par son nom |
+| AM-063, AM-055, BUG-008 | Inchangés |
+| BUG-015, PG-028, PG-029, PG-030 | Relevés au lot 19, non traités par la 0.29 |
+
+---
+
+# Ce qui suit est le plan écrit AVANT la publication
 
 > Relevé du **2026-09-11**, avant publication. La 0.29 n'est pas sur npm (dernière publiée :
 > 0.28.1) ; elle est sur `origin/main` de `bmatge/dsfr-data` sous forme de **14 changesets**

@@ -95,6 +95,21 @@
     max-records="200">
   </dsfr-data-source>
 
+  <!-- Fusion des graphies, EN AMONT de tout le reste. Jusqu'en 0.28,
+       `replace-fields` traversait un champ multivalué sans rien faire et sans
+       rien dire : il fallait éclater d'abord (`explode`), remplacer sur les
+       valeurs scalaires, puis regrouper une seconde fois — ce qui ne corrigeait
+       que les agrégats et laissait les FACETTES afficher 36 pays pour 33 réels.
+       ⚠️ Depuis #774 (0.29.0), le remplacement s'applique élément par élément
+       sur un tableau, longueur conservée, sans dédoublonnage. Posé ici, il
+       corrige d'un coup les facettes, les KPI, les cartes, la liste ET les
+       graphiques. Limite documentée : le remplacement s'exécute avant `split`
+       et ne verrait donc pas un tableau fabriqué par lui — ici les tableaux
+       viennent de l'API v2.1, le cas ne se pose pas. -->
+  <dsfr-data-normalize id="ini-n" source="ini"
+    replace-fields="pays:slovénie:Slovénie | pays:Royaume-Uni / Angleterre:Royaume-Uni | pays:Royaume-Uni / Ecosse:Royaume-Uni | public_cible:citoyens /grand public:citoyens / grand public | public_cible:cadres educatifs:cadres éducatifs">
+  </dsfr-data-normalize>
+
   <dsfr-data-source id="ini-detail" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-initiatives_donnees_europe"
     require-where max-records="10">
@@ -102,7 +117,7 @@
 
   <dsfr-data-context id="ini-ctx-detail" sources="ini-detail"></dsfr-data-context>
 
-  <dsfr-data-search id="ini-q" source="ini"
+  <dsfr-data-search id="ini-q" source="ini-n"
     fields="initiative_projet, descriptif_fr, insititution_s, financement"
     label="Rechercher un projet" placeholder="Titre, description, institution, financement…"
     operator="words" count url-sync>
@@ -121,10 +136,10 @@
           sort="alpha:asc" max-values="40" url-sync url-params>
         </dsfr-data-facets>
         <p class="fr-hint-text">
-          Les compteurs de <code>pays</code> et de <code>public_cible</code> affichent les
-          valeurs <strong>brutes</strong> du jeu, doublons de casse compris : 36 pays pour
-          33 réels, 21 publics pour 19. Les graphiques ci-dessous, eux, fusionnent les
-          graphies — pourquoi la facette ne le fait pas est expliqué dans l'analyse.
+          Les graphies en double du jeu (<code>slovénie</code> / <code>Slovénie</code>,
+          deux Royaume-Uni, <code>cadres educatifs</code>) sont fusionnées <strong>en amont</strong>
+          depuis la 0.29 : facettes, compteurs et graphiques comptent la même chose. Jusque-là,
+          les facettes affichaient 36 pays pour 33 réels et 21 publics pour 19 — voir l'analyse.
         </p>
       </div>
 
@@ -179,29 +194,20 @@
 
   <!-- Comptages par valeur multivaluée. `explode` produit une ligne par valeur —
        sans lui, un projet à six pays compterait comme la modalité
-       « Danemark,Norvège,Portugal,… ». Puis `replace-fields` fusionne les
-       graphies (il s'applique aux valeurs SCALAIRES issues de l'éclatement,
-       pas au champ tableau d'origine), et un second regroupement additionne. -->
+       « Danemark,Norvège,Portugal,… ». Les graphies sont déjà fusionnées en
+       amont (`ini-n`), donc un seul regroupement suffit : les trois chaînes
+       explode → remplacement → second regroupement ont été retirées au lot 20. -->
   <dsfr-data-normalize id="ini-fn" source="ini-f"></dsfr-data-normalize>
 
-  <dsfr-data-query id="ini-pays-brut" source="ini-fn" explode="pays" group-by="pays"
-    aggregate="pays:count:n"></dsfr-data-query>
-  <dsfr-data-normalize id="ini-pays-n" source="ini-pays-brut"
-    replace-fields="pays:slovénie:Slovénie | pays:Royaume-Uni / Angleterre:Royaume-Uni | pays:Royaume-Uni / Ecosse:Royaume-Uni">
-  </dsfr-data-normalize>
-  <dsfr-data-query id="ini-pays" source="ini-pays-n" group-by="pays"
-    aggregate="n:sum:projets" order-by="projets:desc"></dsfr-data-query>
+  <dsfr-data-query id="ini-pays" source="ini-fn" explode="pays" group-by="pays"
+    aggregate="pays:count:projets" order-by="projets:desc"></dsfr-data-query>
 
   <dsfr-data-query id="ini-theme" source="ini-fn" explode="theme" group-by="theme"
     aggregate="theme:count:projets" order-by="projets:desc"></dsfr-data-query>
 
-  <dsfr-data-query id="ini-public-brut" source="ini-fn" explode="public_cible"
-    group-by="public_cible" aggregate="public_cible:count:n"></dsfr-data-query>
-  <dsfr-data-normalize id="ini-public-n" source="ini-public-brut"
-    replace-fields="public_cible:citoyens /grand public:citoyens / grand public | public_cible:cadres educatifs:cadres éducatifs">
-  </dsfr-data-normalize>
-  <dsfr-data-query id="ini-public" source="ini-public-n" group-by="public_cible"
-    aggregate="n:sum:projets" order-by="projets:desc"></dsfr-data-query>
+  <dsfr-data-query id="ini-public" source="ini-fn" explode="public_cible"
+    group-by="public_cible" aggregate="public_cible:count:projets"
+    order-by="projets:desc"></dsfr-data-query>
 
   <div class="fr-container fr-mb-8w">
     <h2 class="fr-h5">Les publics visés</h2>
@@ -349,20 +355,32 @@
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong><code>replace-fields</code> ne touche pas un champ multivalué.</strong>
-              C'est la friction principale de cette page, et elle tombe exactement sur les trois
-              champs à nettoyer. Vérifié au source : le remplacement ne s'applique qu'aux
-              valeurs de type chaîne, nombre ou booléen — un tableau est laissé intact, sans
-              erreur ni avertissement. Or <code>pays</code> est un tableau, et c'est lui qui
-              porte <code>Slovénie</code> / <code>slovénie</code>. <strong>Le contournement
-              trouvé</strong> : éclater d'abord (<code>explode</code> dans une
-              <code>dsfr-data-query</code>), ce qui produit des valeurs scalaires, appliquer
-              <code>replace-fields</code> dessus, puis regrouper une seconde fois pour
-              additionner les graphies fusionnées. Trois composants au lieu d'un.
-              <strong>Et il ne marche que pour les agrégats</strong> : les
-              <em>facettes</em>, qui lisent le champ tableau d'origine, continuent d'afficher
-              36 pays pour 33 réels — c'est-à-dire précisément le défaut de l'original, que
-              cette page ne corrige donc qu'à moitié.</li>
+            <li><strong><code>replace-fields</code> ne touchait pas un champ multivalué —
+              corrigé en 0.29.</strong> C'était la friction principale de cette page, et elle
+              tombait exactement sur les trois champs à nettoyer. Vérifié au source à l'époque :
+              le remplacement ne s'appliquait qu'aux valeurs de type chaîne, nombre ou booléen —
+              un tableau était laissé intact, sans erreur ni avertissement. Or <code>pays</code>
+              est un tableau, et c'est lui qui porte <code>Slovénie</code> /
+              <code>slovénie</code>. <strong>Le contournement</strong> consistait à éclater
+              d'abord (<code>explode</code> dans une <code>dsfr-data-query</code>), appliquer
+              <code>replace-fields</code> sur les valeurs scalaires obtenues, puis regrouper une
+              seconde fois : trois composants au lieu d'un, et <strong>seulement pour les
+              agrégats</strong> — les <em>facettes</em>, qui lisent le champ tableau d'origine,
+              affichaient 36 pays pour 33 réels, c'est-à-dire précisément le défaut de
+              l'original.
+              <br><strong>Corrigé par
+              <a href="https://github.com/bmatge/dsfr-data/pull/774" target="_blank" rel="noopener external">#774</a>
+              (0.29.0)</strong> : le remplacement s'applique élément par élément sur un tableau,
+              longueur conservée. Au lot 20, la page a donc remonté un seul
+              <code>dsfr-data-normalize</code> <em>en amont de la recherche et des facettes</em>,
+              et <strong>quatre composants ont disparu</strong> (deux normalisations et deux
+              regroupements de rattrapage). Le gain n'est pas seulement la concision&nbsp;: la
+              correction vaut maintenant pour <em>toute</em> la page. Vérifié au navigateur —
+              facettes et graphiques s'accordent, « Slovénie » 4 en une seule entrée,
+              « Royaume-Uni » 5 fusionné depuis deux graphies, « cadres éducatifs » 8 ;
+              33 pays et 19 publics distincts, contre 36 et 21 auparavant.
+              <strong>La demi-correction est devenue entière</strong>, et c'est la leçon : un
+              nettoyage posé au bon endroit du pipeline vaut pour tous ses consommateurs.</li>
             <li><strong>Les blocs de gabarit ne s'imbriquent pas, et l'échec est
               silencieux.</strong> Le panneau de détail avait d'abord été écrit
               <code>{{#if theme}}…{{#each theme}}…{{/each}}…{{/if}}</code>, pour reproduire les
@@ -458,7 +476,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.29.1/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>
