@@ -87,15 +87,13 @@
     max-records="2000">
   </dsfr-data-source>
 
-  <!-- ⚠️ Le champ garde son nom d'origine, `pays_centre`, alors qu'un
-       `pays_centre as pays` aurait harmonisé le gabarit des sept sources.
-       Impossible : l'adaptateur backquote tout élément de `group-by` qui ne
-       contient pas de PARENTHÈSE — un alias simple `champ as alias` part donc en
-       `` `pays_centre as pays` ``, que l'API refuse en 400. Voir BUG-010 ; c'est
-       la moitié non couverte du correctif #641.
-       Accessoirement, garder le nom d'origine est plus honnête : c'est le pays
-       du CENTRE DE PASSATION, pas la nationalité du candidat, et l'original
-       intitule son axe « Pays » sans le dire. -->
+  <!-- Le champ garde son nom d'origine, `pays_centre`. Ce n'est plus une
+       contrainte depuis la 0.29.0 (#796 : un alias sans fonction n'est plus
+       backquoté) — `pays_centre as pays` passerait. C'est désormais un CHOIX
+       ÉDITORIAL, et la raison qui était accessoire devient la seule : c'est le
+       pays du CENTRE DE PASSATION, pas la nationalité du candidat, et
+       l'original intitule son axe « Pays » sans le dire. Renommer alignerait le
+       gabarit au prix de la justesse du libellé. -->
   <dsfr-data-source id="tcf" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-tcf_inscrits_centres"
     group-by="pays_centre, iso2_pays, year(annee) as an"
@@ -113,27 +111,33 @@
 
   <!-- ENIC-NARIC : ici `annee` est un TEXTE, pas une date — troisième typage du
        même concept dans neuf jeux du même producteur. Pas de `year()`, donc pas
-       de parenthèse, donc pas d'alias possible (BUG-010) : le champ est groupé
-       tel quel. -->
+       de parenthèse : jusqu'en 0.28, l'adaptateur backquotait l'élément entier
+       et l'API répondait 400 (BUG-010), le champ restait donc groupé tel quel.
+       ⚠️ Alias RÉTABLI au lot 20 : #796, livré en 0.29.0, ne backquote plus un
+       alias sans fonction. Les sept sources exposent enfin la même colonne `an`.
+       Vérifié à l'API : `group_by=pays, iso2_pays, annee as an` → HTTP 200 ;
+       la même expression backquotée → HTTP 400. -->
   <dsfr-data-source id="enic" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-reconnaissance_diplomes_comparabilite"
-    group-by="pays, iso2_pays, annee"
+    group-by="pays, iso2_pays, annee as an"
     select="iso2_pays, sum(dossiers_expertises) as v"
     max-records="2000">
   </dsfr-data-source>
 
   <!-- Assistants : `periode`, un ENTIER. Quatrième variante du même concept.
-       Là non plus l'alias n'est pas possible (BUG-010). -->
+       L'alias était impossible jusqu'en 0.28 (BUG-010) ; rétabli au lot 20
+       (#796). Le filtre de contexte continue de viser `periode`, le champ du
+       jeu : un `where` s'applique AVANT le `group_by`, l'alias ne le gêne pas. -->
   <dsfr-data-source id="asfr" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-assistants_langue_francaise"
-    group-by="pays, iso2_pays, periode"
+    group-by="pays, iso2_pays, periode as an"
     select="iso2_pays, sum(postes_offerts) as v"
     max-records="2000">
   </dsfr-data-source>
 
   <dsfr-data-source id="aslve" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-assistants_langues_vivantes_etrangeres"
-    group-by="pays, iso2_pays, periode"
+    group-by="pays, iso2_pays, periode as an"
     select="iso2_pays, sum(postes_offerts) as v"
     max-records="2000">
   </dsfr-data-source>
@@ -425,16 +429,25 @@
               quand on croit tester le premier piège. <strong>Deux pièges qui se déguisent l'un en
               l'autre</strong> : il s'en est fallu d'un curl pour re-classer à tort en « toujours
               cassé » une capacité qui marche.</li>
-            <li><strong>Un alias de <code>group-by</code> est refusé s'il ne contient pas de
-              parenthèse.</strong> Le moyen naturel d'harmoniser sept jeux qui nomment
-              différemment la même chose est l'aliasing ODSQL :
-              <code>pays_centre as pays</code>, <code>periode as an</code>. Il est impossible.
-              L'adaptateur décide qu'un élément de <code>group-by</code> est une expression
-              <em>s'il contient une parenthèse ouvrante</em> — c'est littéralement
-              <code>field.includes('(')</code> au source. <code>year(annee) as an</code> passe donc,
-              et <code>periode as an</code> part backquoté en <code>`periode as an`</code>, que
-              l'API refuse en 400. Le correctif #641 a réglé la moitié du problème qu'il visait :
-              celle qui portait une fonction. Constat BUG-010.</li>
+            <li><strong>Un alias de <code>group-by</code> était refusé s'il ne contenait pas de
+              parenthèse — corrigé en 0.29.</strong> Le moyen naturel d'harmoniser sept jeux qui
+              nomment différemment la même chose est l'aliasing ODSQL :
+              <code>pays_centre as pays</code>, <code>periode as an</code>. C'était impossible :
+              l'adaptateur décidait qu'un élément de <code>group-by</code> est une expression
+              <em>s'il contient une parenthèse ouvrante</em> — littéralement
+              <code>field.includes('(')</code> au source. <code>year(annee) as an</code> passait
+              donc, et <code>periode as an</code> partait backquoté en
+              <code>`periode as an`</code>, que l'API refuse en 400 ; le correctif #641 n'avait
+              réglé que la moitié portant une fonction. Constat BUG-010, corrigé par
+              <a href="https://github.com/bmatge/dsfr-data/pull/796" target="_blank" rel="noopener external">#796</a>
+              (0.29.0), qui a réglé d'un coup les trois symptômes du même découpeur : cet alias,
+              la virgule à l'intérieur d'une fonction (BUG-011) et le <code>select</code> non
+              échappé (PG-027). <strong>Rétabli ici au lot 20</strong> : ENIC-NARIC groupe
+              <code>annee as an</code>, les deux jeux d'assistants <code>periode as an</code>, et
+              les sept sources exposent enfin la même colonne. Vérifié à l'API : l'expression nue
+              rend 200, la même backquotée 400. Seul <code>pays_centre</code> garde son nom, et
+              c'est maintenant un choix éditorial — le centre de passation n'est pas la
+              nationalité.</li>
             <li><strong>Le <code>where</code> d'un contexte ne connaît pas les alias
               d'agrégat.</strong> Premier montage : un seul filtre sur <code>an</code>, l'alias
               commun. Il envoie <code>where=an = "2025"</code> et vaut un 400 sur les sept sources —
@@ -505,7 +518,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.28.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.29.1/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>
