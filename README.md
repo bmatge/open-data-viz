@@ -1,7 +1,10 @@
 # open-data-viz
 
-**Le catalogue de visualisations de [data.economie.gouv.fr](https://data.economie.gouv.fr/pages/catalogue-visualisations/),
-rejoué avec [`dsfr-data`](https://github.com/bmatge/dsfr-data) (ChartsBuilder).**
+**Les visualisations de trois portails Opendatasoft de l'État —
+[data.economie.gouv.fr](https://data.economie.gouv.fr/pages/catalogue-visualisations/),
+[data.education.gouv.fr](https://data.education.gouv.fr/pages/dataviz-list/) et
+[data.sports.gouv.fr](https://data.sports.gouv.fr/pages/accueil/) —
+rejouées avec [`dsfr-data`](https://github.com/bmatge/dsfr-data) (ChartsBuilder).**
 
 Ce dépôt est un **banc d'essai**, pas un produit. Il répond à une question :
 
@@ -27,7 +30,7 @@ npm run dev        # idem, avec --watch
 ```
 
 Aucune dépendance : le serveur est un `node:http` de 80 lignes qui sert `public/`.
-DSFR, DSFR Chart et `dsfr-data@0.20.0` sont chargés depuis jsDelivr — c'est
+DSFR, DSFR Chart et `dsfr-data@0.28.0` sont chargés depuis jsDelivr — c'est
 volontaire, l'argument à démontrer étant « une balise, un CDN, et ça marche ».
 
 ## Structure
@@ -41,8 +44,11 @@ public/
   index.html              tableau de bord du banc (KPI + graphiques, + son analyse)
   bercy.html              catalogue Bercy reproduit (+ son analyse)
   education.html          catalogue Éducation reproduit (+ son analyse)
+  sports.html             accueil du portail Sports + registre par onglet (+ son analyse)
   synthese.html           synthèse transverse des analyses
-  viz/<slug>.html         une page par dataviz reproduite
+  viz/<slug>.html         une page par dataviz reproduite (Bercy)
+  education/<slug>.html   une page par dataviz reproduite (Éducation)
+  sports/<slug>.html      une page par portrait Sports, un onglet fr-tabs par onglet d'origine
   data/registre.json      état de reproduction, joint au catalogue ODS
   data/stats.json         statistiques du banc (build-stats.mjs), lu par index.html
   assets/
@@ -53,7 +59,10 @@ public/
   retours.html            le registre, rendu avec les composants qu'il évalue
 scripts/
   build-registre.mjs      régénère public/data/registre.json depuis le catalogue vivant
+  build-registre-education.mjs / build-registre-sports.mjs   idem pour les deux autres portails
   build-stats.mjs         régénère public/data/stats.json (registres unis + scan des balises)
+  recette-pages.mjs       relève chaque page au navigateur (onglets compris) ; RECETTE_BUNDLE
+                          rejoue les pages contre un bundle dsfr-data construit, non publié
   build-retours.mjs       dérive l'export d'issues + la note du vault depuis retours.json
 export/
   issues-dsfr-data.md     demandes prêtes à déposer sur bmatge/dsfr-data (généré)
@@ -163,6 +172,15 @@ une voie native (BUG-005, le refine d'une facette date), un piège transverse (P
 d'attributs), dix pages corrigées (compteur de recherche, arrondi, format compact, select des facettes,
 fond de carte atténué par CSS, GeoJSON statique, palette des cartes, jointure sans `normalize`), cinq
 règles de lecture ajoutées au `CLAUDE.md`. Le registre passe à 116 constats, dont 12 faux problèmes.
+
+**Lot 19 — un troisième portail, data.sports.gouv.fr.** Pas de catalogue : l'accueil propose deux
+générateurs de fiche à onglets, un [portrait de territoire](public/sports/portrait-territoire.html)
+(6 onglets, 29 jeux) et un [portrait de fédération](public/sports/portrait-federation.html)
+(5 onglets, 13 jeux). Les **11 onglets sont reproduits**, chiffres recoupés à l'API ; le registre du
+portail compte des onglets (`scripts/build-registre-sports.mjs`). Douze constats neufs — dont un bug
+qui fige une page sur « Chargement… » (BUG-015) et deux pièges des pages à deux contextes — et huit fusions.
+Au passage, la **0.29 de `dsfr-data` a été vérifiée avant sa publication** : un bundle construit depuis
+`origin/main` rejoue les 63 pages existantes sans régression (`docs/montee-0.29.md`).
 
 Les trois reconstitutions du lot 6 (Signal Conso, Rappel Conso, contrôle technique) ont une page
 officielle en 404 et un identifiant de jeu périmé, mais la donnée existe toujours — parfois mise à
