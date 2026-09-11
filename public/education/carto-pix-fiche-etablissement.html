@@ -98,7 +98,8 @@
     where="position is not null">
   </dsfr-data-source>
 
-  <dsfr-data-context id="pix-ctx" sources="pix" url-sync>
+  <dsfr-data-context id="pix-ctx" sources="pix" url-sync
+    url-param-map="secteur:secteur | academie:academie_nom | region:libelle_region | departement:departement_nom">
     <dsfr-data-context-filter field="annee" operator="eq" ui="pix-annee"
       label="Année" default="2025"></dsfr-data-context-filter>
   </dsfr-data-context>
@@ -143,14 +144,30 @@
 
       <div class="fr-col-12 fr-col-md-3">
         <h2 class="fr-h6">Filtrer</h2>
-        <dsfr-data-facets id="pix-f" source="pix-q"
-          fields="secteur, tranche_envoi, academie_nom, libelle_region, departement_nom"
-          labels="secteur:Secteur | tranche_envoi:Taux d'envoi | academie_nom:Académie | libelle_region:Région | departement_nom:Département"
-          display="secteur:radio-inline | tranche_envoi:checkbox | academie_nom:multiselect | libelle_region:multiselect | departement_nom:radio"
+        <!-- Deux balises de facettes, et la raison est structurelle (BUG-013, #773).
+             Les quatre champs qui existent SUR LA SOURCE passent par le contexte
+             (`context="pix-ctx"`, ADR-104) : c'est le contexte qui porte l'URL, ce qui
+             ferme la collision de paramètres qu'une facette autonome ouvrait à côté de
+             lui. Mais `tranche_envoi` est CALCULÉ par le `dsfr-data-normalize` en aval :
+             le confier au contexte fait diffuser `where tranche_envoi = …` vers la source
+             Opendatasoft, où la colonne n'existe pas — HTTP 400 (échec franc, vérifié au
+             navigateur). Il reste donc en facette autonome sur `pix-q`, filtrée côté
+             client, avec un `url-param-map` qui borne explicitement sa lecture d'URL. -->
+        <dsfr-data-facets id="pix-f" source="pix-q" context="pix-ctx"
+          fields="secteur, academie_nom, libelle_region, departement_nom"
+          labels="secteur:Secteur | academie_nom:Académie | libelle_region:Région | departement_nom:Département"
+          display="secteur:radio-inline | academie_nom:multiselect | libelle_region:multiselect | departement_nom:radio"
           searchable="academie_nom, libelle_region, departement_nom"
           disjunctive="academie_nom, libelle_region"
           sort="academie_nom:alpha:asc | libelle_region:alpha:asc | departement_nom:alpha:asc"
-          url-param-map="secteur:secteur | envoi:tranche_envoi | academie:academie_nom | region:libelle_region | departement:departement_nom"
+          max-values="8">
+        </dsfr-data-facets>
+
+        <dsfr-data-facets id="pix-f-calc" source="pix-f"
+          fields="tranche_envoi"
+          labels="tranche_envoi:Taux d'envoi"
+          display="tranche_envoi:checkbox"
+          url-param-map="envoi:tranche_envoi"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
       </div>
@@ -158,13 +175,13 @@
       <div class="fr-col-12 fr-col-md-9">
 
         <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
-          <dsfr-data-kpi source="pix-f" value="count" format="nombre"
+          <dsfr-data-kpi source="pix-f-calc" value="count" format="nombre"
             heading="Établissements" label="ayant ouvert une campagne"></dsfr-data-kpi>
-          <dsfr-data-kpi source="pix-f" value="total_participations:sum" format="compact"
+          <dsfr-data-kpi source="pix-f-calc" value="total_participations:sum" format="compact"
             heading="Participations" label="aux campagnes de l'année"></dsfr-data-kpi>
-          <dsfr-data-kpi source="pix-f" value="total_partipants:sum" format="compact"
+          <dsfr-data-kpi source="pix-f-calc" value="total_partipants:sum" format="compact"
             heading="Participants" label="élèves distincts"></dsfr-data-kpi>
-          <dsfr-data-kpi source="pix-f"
+          <dsfr-data-kpi source="pix-f-calc"
             value="total_participations_avec_envoi:sum / total_participations:sum"
             format="pourcentage" decimals="1"
             heading="Taux d'envoi" label="participations effectivement transmises"></dsfr-data-kpi>
@@ -174,7 +191,7 @@
           name="Établissements ayant ouvert une campagne Pix"
           height="600px" tiles="ign-plan" tiles-style="muted"
           insets="drom" fit-bounds fit-max-zoom="13">
-          <dsfr-data-map-layer id="couche-pix" source="pix-f" type="circle"
+          <dsfr-data-map-layer id="couche-pix" source="pix-f-calc" type="circle"
             geo-field="position" radius="5" fill-opacity="0.9"
             color-field="tranche_envoi"
             color-map="Moins de 70 %:#c9191e,70 à 85 %:#e4794a,85 à 95 %:#7ab1e8,95 % et plus:#000091,Non calculable:#929292"
@@ -204,7 +221,7 @@
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="pix-f" for="carte-pix" table download
+        <dsfr-data-a11y source="pix-f-calc" for="carte-pix" table download
           filename="pix-participations-par-etablissement.csv"
           label="Données de la carte"
           description="Un établissement par ligne : nom, secteur, participations, participants, taux d'envoi, commune, académie."
@@ -247,10 +264,10 @@
     </div>
   </div>
 
-  <dsfr-data-query id="pix-aca" source="pix-f" group-by="academie_nom"
+  <dsfr-data-query id="pix-aca" source="pix-f-calc" group-by="academie_nom"
     aggregate="total_participations:sum:p" where="academie_nom:isnotnull"
     order-by="p:desc" limit="20"></dsfr-data-query>
-  <dsfr-data-query id="pix-envoi" source="pix-f" group-by="tranche_envoi"
+  <dsfr-data-query id="pix-envoi" source="pix-f-calc" group-by="tranche_envoi"
     aggregate="uai:count:n" order-by="n:desc"></dsfr-data-query>
 
   <!-- ====================== Analyse de reproduction ====================== -->
@@ -321,25 +338,34 @@
               parce que ce sont celles que porte le jeu correctement géocodé. La page dit ce
               qu'elle montre&nbsp;; elle ne prétend pas rejouer la fiche établissement du portail,
               qui repose sur les quatre autres contextes.</li>
-            <li><strong>Le sélecteur d'année vidait la page, et rien ne le disait (trouvé au lot 18).</strong>
+            <li><strong>Le sélecteur d'année vidait la page — et la cause était mon câblage, pas la bibliothèque.</strong>
               Choisir une autre année que celle par défaut rendait <strong>zéro</strong> partout&nbsp;:
               KPI à 0, carte vide, tableau vide — alors que le compteur de
-              <code>dsfr-data-search</code>, juste en amont, annonçait bien «&nbsp;10 186 résultats&nbsp;»
-              et que la requête partait correctement
-              (<code>where=position is not null AND annee = "2023"</code>, HTTP 200, 10 186 lignes
-              vérifiées à l'API). La cause est une <strong>collision d'URL entre deux composants qui la
-              possèdent tous les deux</strong>&nbsp;: le <code>dsfr-data-context url-sync</code> écrit
-              <code>?annee=2025</code>, et <code>dsfr-data-facets url-params</code> lit
-              <em>tout</em> paramètre d'URL dont le nom est une colonne des données — pas seulement ses
-              propres <code>fields</code> — et en fait une sélection de facette. La sélection cachée
-              <code>annee = "2025"</code> est posée une fois pour toutes au premier chargement&nbsp;;
-              quand la source recharge en 2023, elle ne correspond plus à rien et vide le pipeline en
-              silence. <strong>Isolé par bissection au navigateur</strong>&nbsp;: retirer
-              <code>url-params</code> fait revenir les 10 186. Le correctif retenu ici garde la
-              fonctionnalité — un <code>url-param-map</code> qui nomme explicitement les cinq
-              paramètres de la facette, ce qui bascule la lecture en mode «&nbsp;liste blanche&nbsp;».
-              La restriction de #312 («&nbsp;seuls les params correspondant aux champs CONNUS&nbsp;»)
-              est trop large&nbsp;: «&nbsp;connu&nbsp;» y comprend toutes les clés des données.</li>
+              <code>dsfr-data-search</code> annonçait bien «&nbsp;10 186 résultats&nbsp;» et que la
+              requête partait correctement (HTTP 200, 10 186 lignes vérifiées à l'API). J'avais
+              conclu à une collision d'URL inhérente entre deux composants qui la possèdent tous
+              les deux, et déposé un bug. <strong>La relecture du mainteneur (issue #773) a montré
+              que la voie native existait et que je ne l'avais pas empruntée</strong>&nbsp;: j'avais
+              branché la facette en <em>autonome</em> à côté d'un <code>dsfr-data-context</code>,
+              alors que le motif livré en 0.23.0 impose <code>context="id"</code> — en mode contexte,
+              la lecture d'URL de la facette est neutralisée et c'est le contexte qui la porte.
+              Corrigé et vérifié au navigateur&nbsp;: l'année 2023 rend 10 186 établissements,
+              5,7&nbsp;M de participations et 80,2&nbsp;% de taux d'envoi, sans erreur console.</li>
+            <li><strong>Mais le mode contexte bute sur les champs calculés, et c'est pourquoi la page
+              porte deux balises de facettes.</strong> <code>tranche_envoi</code> n'existe pas dans le
+              jeu&nbsp;: il est fabriqué par le <code>dsfr-data-normalize compute</code> en aval de la
+              source. Le confier au contexte fait diffuser
+              <code>where tranche_envoi = "Moins de 70 %"</code> vers la source Opendatasoft, où la
+              colonne est inconnue — <strong>HTTP 400</strong>. L'échec est <em>franc</em>, ce qui vaut
+              mieux qu'un silence, mais il rend le mode contexte inapplicable dès qu'une facette porte
+              une tranche calculée. Les quatre champs réels passent donc par
+              <code>context="pix-ctx"</code>, et <code>tranche_envoi</code> reste en facette autonome
+              chaînée en aval, bornée par un <code>url-param-map</code>. Vérifié&nbsp;: cocher
+              «&nbsp;moins de 70&nbsp;%&nbsp;» rend 3 694 établissements à 54,7&nbsp;% de taux d'envoi,
+              URL <code>?annee=2023&amp;envoi=Moins+de+70+%25</code>, zéro erreur console. Ce que la
+              bibliothèque doit encore corriger n'est plus le blocage mais la largeur de sa liste
+              blanche&nbsp;: <code>knownFields</code> accepte <em>toute</em> colonne des données comme
+              paramètre d'URL, pas seulement les champs de facette.</li>
           </ul>
         </div>
       </div>
