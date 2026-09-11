@@ -3,12 +3,13 @@
    (differe), qui trouve donc un DOM complet a instrumenter. */
 (() => {
   const TITRE = 'open-data-viz';
-  const BASELINE = 'Reproduire les catalogues de visualisations de data.economie.gouv.fr et data.education.gouv.fr avec dsfr-data';
+  const BASELINE = 'Reproduire les visualisations de data.economie.gouv.fr, data.education.gouv.fr et data.sports.gouv.fr avec dsfr-data';
 
   const LIENS = [
     { href: '/', libelle: 'Accueil' },
     { href: '/bercy', libelle: 'Portail Bercy' },
     { href: '/education', libelle: 'Portail Éducation' },
+    { href: '/sports', libelle: 'Portail Sports' },
     { href: '/synthese', libelle: 'Synthèse' },
     { href: '/retours', libelle: 'Registre des retours' }
   ];
@@ -71,7 +72,10 @@
              target="_blank" rel="noopener external">data.economie.gouv.fr</a>
           et
           <a class="fr-footer__content-link" href="https://data.education.gouv.fr/pages/dataviz-list/"
-             target="_blank" rel="noopener external">data.education.gouv.fr</a>
+             target="_blank" rel="noopener external">data.education.gouv.fr</a>,
+          ou des portraits de
+          <a class="fr-footer__content-link" href="https://data.sports.gouv.fr/pages/accueil/"
+             target="_blank" rel="noopener external">data.sports.gouv.fr</a>
           avec les composants <code>dsfr-data</code> (ChartsBuilder), puis documente ce qui a été
           simple ou coûteux. Les données sont lues en direct sur l'API Opendatasoft des portails.
         </p>
@@ -88,6 +92,9 @@
           <li class="fr-footer__content-item">
             <a class="fr-footer__content-link" href="https://data.education.gouv.fr" target="_blank" rel="noopener external">data.education.gouv.fr</a>
           </li>
+          <li class="fr-footer__content-item">
+            <a class="fr-footer__content-link" href="https://data.sports.gouv.fr" target="_blank" rel="noopener external">data.sports.gouv.fr</a>
+          </li>
         </ul>
       </div>
     </div>
@@ -96,6 +103,7 @@
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/">Accueil</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/bercy">Portail Bercy</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/education">Portail Éducation</a></li>
+        <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/sports">Portail Sports</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/synthese">Synthèse des analyses</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/retours">Registre des retours</a></li>
         <li class="fr-footer__bottom-item">

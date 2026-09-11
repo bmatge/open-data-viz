@@ -1,12 +1,13 @@
 # CLAUDE.md — open-data-viz
 
-Banc d'essai : reproduire le catalogue de visualisations de **data.economie.gouv.fr**
-(Opendatasoft / Huwise) avec **`dsfr-data`** (ChartsBuilder), et documenter page par page
-ce qui a été simple ou coûteux.
+Banc d'essai : reproduire les visualisations de trois portails Opendatasoft de l'État —
+**data.economie.gouv.fr**, **data.education.gouv.fr**, **data.sports.gouv.fr** (lot 19) — avec
+**`dsfr-data`** (ChartsBuilder), et documenter page par page ce qui a été simple ou coûteux.
 
 Lire `README.md` d'abord (objectif, structure, avancement), puis `ARCHITECTURE.md`
 (couplages non-évidents du repo — [[ADR-053]]). **Avant de toucher une page, lire sa fiche
-d'audit visuel dans `docs/portail/`** : c'est la référence de fidélité des données.
+d'audit visuel dans `docs/portail/`, `docs/portail-education/` ou `docs/portail-sports/`** :
+c'est la référence de fidélité des données.
 
 ## Décisions de cadrage (arrêtées en session d'ouverture, 2026-09-09)
 
@@ -123,6 +124,13 @@ d'audit visuel dans `docs/portail/`** : c'est la référence de fidélité des d
 | Croire un écart de recette sur un rendu différé | `scripts/recette-pages.mjs` a produit **trois faux positifs en une journée**, dont un qui a failli faire annuler une montée de version saine : cartes et graphiques se rendent **à la visibilité**, donc une mesure prise trop tôt voit du vide. La recette attend désormais la stabilisation du DOM, et le compte de conteneurs de carte y est **indicatif, jamais bloquant**. Avant de conclure à une régression sur un compte de cartes ou une erreur console isolée : recharger, faire défiler jusqu'à l'élément, et vérifier à la main. Une recette qui crie au loup cesse d'être crue. |
 | Reproduire sans avoir lu `docs/portail/<page>.md` | Trois chiffres faux et deux mauvais jeux au lot 9. Lire la fiche d'audit ET le `$scope.blocks` avant d'écrire. |
 | Un lien 404 ou « hors périmètre » dans le catalogue | Ne prouve ni que le jeu a disparu ni que la dataviz est irreproductible : le champ `datasets` de l'entrée dit ce qu'il faut ; 10 des 11 « hors périmètre » ont été traités au lot 8. Ne prouve pas que le jeu a disparu : chercher dans `/api/explore/v2.1/catalog/exports/json` et dans les descriptions des jeux voisins, qui pointent souvent la page vivante (LIM-006). |
+| Deux contextes `url-sync` qui partagent un nom de champ | Ils s'échangent leurs paramètres au rechargement, sans message : un seul contexte dans l'URL (PG-028). |
+| Deux contextes sur un même `<select>` | Le filtre lit son contrôle au montage, le pré-remplissage d'URL n'émet rien : déclarer le contexte synchronisé **en premier** (PG-029). |
+| Jointure dont une entrée est en `require-where` | Peut rester sur « Chargement… » indéfiniment selon l'ordre du DOM : déclarer les autres entrées avant (BUG-015, en 0.28 comme en 0.29). |
+| Filtre de contexte sur un champ entier (ODS) | Émet `champ = "01"` en texte : aucune ligne pour un code à zéro de tête. Relever le type du champ dans chaque jeu (PG-030). |
+| `dsfr-data-facets context` pour un sélecteur | La voie native (AM-043), **sauf** si la clé change de nom selon le jeu (AM-056) ou s'il faut afficher un nom pour un code (AM-081) : alors `<select>` généré + un `context-filter` par nom. Le dire en page. |
+| Quota `data.sports.gouv.fr` | 5 000 requêtes/jour/IP en anonyme (reset 00:00 UTC) ; un portrait en tire des dizaines par chargement. Surveiller `x-ratelimit-remaining` avant de conclure qu'une page « ne charge plus ». |
+| Version pas encore publiée | Ne pas conclure sur un changeset : construire `origin/main` (`git archive` + `vite-node scripts/build-lib.ts`) et rejouer avec `RECETTE_BUNDLE=<dist>`. Méthode et résultats : `docs/montee-0.29.md`. |
 
 ## Spécifications des composants
 

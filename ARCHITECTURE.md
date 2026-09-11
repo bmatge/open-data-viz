@@ -13,7 +13,9 @@ pipeline de données en balises HTML — `dsfr-data-source` → transformateurs
 `-kpi`). Les composants sont des **frères** reliés par `id`/`source`, jamais imbriqués : la
 position dans le DOM ne détermine que l'endroit du rendu, pas le câblage.
 
-Les données viennent en direct de l'API OpenDataSoft Explore v2.1 de `data.economie.gouv.fr`.
+Les données viennent en direct de l'API OpenDataSoft Explore v2.1 de trois portails —
+`data.economie.gouv.fr`, `data.education.gouv.fr`, `data.sports.gouv.fr` — et de quelques
+portails voisins qu'ils fédèrent (`equipements.sports.gouv.fr`, `public.opendatasoft.com`).
 Rien n'est mis en cache côté serveur, rien n'est copié dans le repo : une page qui affiche des
 chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 
@@ -23,6 +25,7 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 - Tableau de bord (accueil) : `public/index.html` — trois sources sur `data/stats.json` via `transform`
 - Page catalogue Bercy : `public/bercy.html` (le pipeline commence à la `dsfr-data-source`)
 - Page catalogue Éducation : `public/education.html`
+- Page portail Sports : `public/sports.html` (pas de catalogue vivant, registre seul)
 - Une page dataviz : `public/viz/plan-de-relance.html` — modèle de référence, tout y est
 - Synthèse transverse : `public/synthese.html`
 - Registre d'avancement : `scripts/build-registre.mjs:33` (table `STATUTS`)
@@ -34,14 +37,16 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 |---|---|---|
 | Serveur statique | Sert `public/`, URLs propres, `/healthz` | `server.js` |
 | Tableau de bord | Le banc mesuré par lui-même (avancement, usage des composants, constats) | `public/index.html` |
-| Pages catalogue | Reproduisent les pages d'accueil ODS + badges d'avancement | `public/bercy.html`, `public/education.html` |
-| Pages dataviz | Une par visualisation reproduite, avec sa section `#analyse` | `public/viz/*.html` |
+| Pages catalogue | Reproduisent les pages d'accueil ODS + badges d'avancement | `public/bercy.html`, `public/education.html`, `public/sports.html` |
+| Pages dataviz | Une par visualisation reproduite, avec sa section `#analyse` | `public/viz/*.html`, `public/education/*.html` |
+| Pages portraits | Une par portrait Sports, un `fr-tabs` = un panneau par onglet d'origine | `public/sports/*.html` |
 | Synthèse | Agrège les analyses + tableau de bord d'avancement | `public/synthese.html` |
-| Registre d'avancement | État de reproduction, joint au catalogue ODS | `public/data/registre.json` |
+| Registres d'avancement | État de reproduction, joint au catalogue ODS (Bercy, Éducation) ou seul (Sports) | `public/data/registre{,-education,-sports}.json` |
 | Registre des retours | Constats sur ChartsBuilder, un objet par constat | `public/data/retours.json` |
 | Page des retours | Le registre rendu avec les composants qu'il évalue | `public/retours.html` |
-| Générateur de registre | Reconstruit le registre depuis le catalogue vivant | `scripts/build-registre.mjs` |
-| Générateur de statistiques | Unit les deux registres + scanne les balises des pages | `scripts/build-stats.mjs` |
+| Générateurs de registre | Reconstruisent chaque registre (les deux premiers depuis le catalogue vivant) | `scripts/build-registre{,-education,-sports}.mjs` |
+| Recette | Relève chaque page au navigateur, onglets compris ; peut substituer un bundle local | `scripts/recette-pages.mjs` |
+| Générateur de statistiques | Unit les trois registres + scanne les balises des pages | `scripts/build-stats.mjs` |
 | Clés d'API | Clé de lecture publique du portail | `public/assets/cles.js` |
 | Habillage | En-tête / pied de page DSFR injectés | `public/assets/layout.js` |
 
@@ -78,6 +83,22 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
   `where` à N sources qui refont leur requête (DECP : 994 000 lignes, seuls des agrégats
   descendent). Choisir selon la taille du jeu, pas selon le confort d'écriture.
 
+- **Le portail Sports n'a pas de catalogue, et son registre compte des onglets.** Son accueil
+  est une page statique à trois parcours ; `public/data/registre-sports.json` est donc écrit en
+  entier par `scripts/build-registre-sports.mjs` (table `ONGLETS`), sans jointure. Une entrée =
+  un onglet d'un portrait, parce que c'est à cette maille que jeux, graphiques et KPI changent.
+  ⇒ Les totaux de l'accueil additionnent des entrées de catalogue et des onglets : c'est dit
+  sous le KPI, ne pas l'oublier en citant un chiffre.
+
+- **Les panneaux `fr-tabs` masqués ne se rendent pas.** Cartes et graphiques attendent la
+  visibilité ; un onglet fermé n'a encore rien dessiné. La recette ouvre donc chaque
+  `.fr-tabs__tab` tour à tour avant de relever ; une vérification manuelle doit faire de même.
+
+- **Le quota de `data.sports.gouv.fr` est celui de l'auditeur.** 5 000 requêtes par jour et par
+  IP en anonyme (remise à zéro à minuit UTC). Un portrait en tire des dizaines par chargement :
+  une recette complète répétée plusieurs fois dans la journée l'épuise. Surveiller
+  `x-ratelimit-remaining` avant de conclure qu'une page « ne charge plus ».
+
 ## 5. Effets de bord & I/O
 
 - **DB / migrations** : aucune. Aucun état serveur.
@@ -85,7 +106,7 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
   `public/data/registre.json` par `scripts/build-registre.mjs`, et
   `export/issues-dsfr-data.md` + la note du vault par `scripts/build-retours.mjs`.
   `public/data/retours.json` est écrit à la main : c'est une source, pas une sortie.
-- **Réseau** : lectures anonymes sur `data.economie.gouv.fr` (API Explore v2.1, CORS `*`) ;
+- **Réseau** : lectures sur les trois portails (API Explore v2.1, CORS `*` ; clé publique pour Bercy) ;
   jsDelivr pour DSFR / DSFR Chart / dsfr-data ; tuiles IGN pour les cartes. Aucune écriture.
 - **Crons / queues** : aucun. Le TTL de 30 jours du prototype est géré par `spawn` sur le VPS.
 

@@ -7,6 +7,8 @@
 //   public/data/registre.json            les 30 contenus du catalogue Bercy
 //                                        (dont 26 types « Visualisation »)
 //   public/data/registre-education.json  les 36 entrees du catalogue Education
+//   public/data/registre-sports.json     les 12 onglets du portail Sports (lot 19 :
+//                                        pas de catalogue vivant, un onglet = une entree)
 //   public/**/*.html                     les pages du depot, scannees a la balise
 //
 // SORTIE : un OBJET a trois tableaux. `dsfr-data-source url=` sait descendre
@@ -61,12 +63,13 @@ async function pagesHtml(dossier = PUBLIC) {
   return sorties.sort();
 }
 
-// ── 1. Avancement : union des deux registres ────────────────────────────────
+// ── 1. Avancement : union des trois registres ────────────────────────────────
 const bercy = await lireJson('registre.json');
 const education = await lireJson('registre-education.json');
+const sports = await lireJson('registre-sports.json');
 
 const avancement = [];
-for (const [portail, entrees] of [['Bercy', bercy], ['Éducation', education]]) {
+for (const [portail, entrees] of [['Bercy', bercy], ['Éducation', education], ['Sports', sports]]) {
   const paquets = new Map();
   for (const e of entrees) {
     const cle = e.repro_statut;
@@ -112,9 +115,9 @@ const retours = await lireJson('retours.json');
 const total = (rows, f = (r) => r.n) => rows.reduce((s, r) => s + f(r), 0);
 
 const chiffres = [
-  ['entrees', 'Entrées aux deux catalogues', avancement.length ? total(avancement) : 0],
+  ['entrees', 'Entrées aux trois catalogues', avancement.length ? total(avancement) : 0],
   ['reproduites', 'Dataviz reproduites', total(avancement.filter((a) => a.statut === 'reproduite'))],
-  ['portails', 'Portails Opendatasoft', 2],
+  ['portails', 'Portails Opendatasoft', 3],
   ['pages', 'Pages HTML du dépôt', fichiers.length],
   ['composants', 'Composants dsfr-data distincts', composants.length],
   ['balises', 'Balises dsfr-data posées', total(composants, (c) => c.occurrences)],
