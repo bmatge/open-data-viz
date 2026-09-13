@@ -194,6 +194,15 @@ du banc lui-même et deux défauts du jeu TNE, plus un bug neuf de la 0.29 dépo
 #825 : le plein écran casse une carte à encarts). **24 constats déposés passent en « corrigé »**, aucun
 n'est en attente de dépôt. Bilan détaillé : [`docs/montee-0.29.md`](docs/montee-0.29.md).
 
+**Revue critique (2026-09-13, [#24](https://github.com/bmatge/open-data-viz/issues/24)).** Les 66 pages
+relues sur trois angles — qualité du code, performance, ergonomie — après une passe de mesures
+(`scripts/metriques-pages.mjs` : requêtes, octets, délais, débordement mobile, deux largeurs).
+244 constats sourcés, 25 de sévérité haute, tous les hauts revérifiés : **56 pages débordent sur
+téléphone pour deux causes CSS**, six chiffres faux en production, un serveur qui meurt sur `/%` et ne
+compresse rien, 14 pages qui chargent un bundle inutile, et des pages qui gardent leurs béquilles après
+que la bibliothèque a livré. Rapport et plan d'action en trois vagues :
+[`docs/revue-critique-2026-09.md`](docs/revue-critique-2026-09.md).
+
 Les trois reconstitutions du lot 6 (Signal Conso, Rappel Conso, contrôle technique) ont une page
 officielle en 404 et un identifiant de jeu périmé, mais la donnée existe toujours — parfois mise à
 jour le jour même — sous un autre nom. Rappel Conso a en plus une variante fidèle à sa page vivante,
