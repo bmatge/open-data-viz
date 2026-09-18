@@ -25,6 +25,11 @@
        ================================================================== */
     :root { --odv-nat: #413592; --odv-prof: #e1000f; --odv-vert: #18753c; }
 
+    /* La barre de filtres est collante : sans compensation, une ancre ou un
+       défilement amène la cible SOUS la barre, qui intercepte alors le clic.
+       Mesuré au navigateur : le clic sur le rail partait dans la barre. */
+    html { scroll-padding-top: 8rem; }
+
     /* ---- barre de filtres, collante ---- */
     .odv-filtres {
       background: var(--background-alt-grey);
@@ -93,15 +98,25 @@
     .odv-resultats .fr-btn { font-size: .75rem; padding: .125rem .5rem; min-height: 1.75rem; }
     .odv-resultats .dsfr-data-display .fr-col-12 { margin-bottom: 0; }
 
+    /* l'élément actif du rail est marqué par le composant (aria-pressed) */
+    .odv-rail .fr-btn { font-size: .75rem; padding: .125rem .5rem; min-height: 1.75rem; }
+    .odv-rail [aria-pressed="true"] { background: var(--background-open-blue-france); }
+    .odv-rail [aria-pressed="true"] + * .odv-chap,
+    .odv-rail .odv-chap:has(+ [aria-pressed="true"]) { border-left: 4px solid var(--odv-nat); }
+
     /* ---- panneau de détail ---- */
     .odv-detail { border: 1px solid var(--border-default-grey); padding: 1.25rem; }
 
     /* ---- tuiles de chapitre ---- */
     .odv-chap {
       display: flex; justify-content: space-between; gap: .75rem; align-items: baseline;
-      border: 1px solid var(--border-default-grey); padding: .875rem 1rem; height: 100%;
+      border: 1px solid var(--border-default-grey); padding: .875rem 1rem;
       font-size: .875rem;
     }
+    /* Dans la grille de la section A la tuile remplit sa cellule ; dans le rail
+       elle ne doit PAS le faire, sinon elle recouvre le bouton « Filtrer sur … »
+       que `refine-on-click` ajoute après elle (constaté : clic intercepté). */
+    .odv-chapitres-grille .odv-chap { height: 100%; }
     .odv-chap__n { font-weight: 700; color: var(--text-mention-grey); }
 
     @media (max-width: 48em) {
@@ -469,6 +484,19 @@
     </dsfr-data-display>
   </section>
 
+  <!-- Le rail des chapitres pilote la vue : `chapitre` n'existe pas sur
+       `questions-reponses`, donc le contexte ne peut pas le pousser aux sources de
+       scores. Il filtre une source `corr` dédiée, jointe en INNER au calcul
+       d'écarts déjà fait : seules les questions du chapitre choisi survivent.
+       Une requête de plus (119 lignes), et la section A n'est pas touchée. -->
+  <dsfr-data-source id="corr-b" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bfn-table-de-correspondance"
+    fetch-mode="export" max-records="500"
+    select="code_unifie, chapitre" api-key-ref="ods-mef">
+  </dsfr-data-source>
+  <dsfr-data-context id="ctx-chapitre" sources="corr-b"></dsfr-data-context>
+  <dsfr-data-join id="ecarts-chap" left="ecarts" right="corr-b" on="code_unifie" type="inner"></dsfr-data-join>
+
   <!-- ====================== DIRECTION B — UN CHAPITRE, UN ÉCRAN ======================
        La maquette dessinait un graphique par question du chapitre. C'est LIM-004 :
        on ne génère pas N graphiques depuis N lignes. Mais la maquette fournit
@@ -492,7 +520,8 @@
     <div class="fr-grid-row fr-grid-row--gutters">
       <div class="fr-col-12 fr-col-md-4">
         <h3 class="fr-text--sm fr-mb-1w"><strong>Les 12 chapitres</strong></h3>
-        <dsfr-data-display source="chapitres" per-row="1" class="odv-sans-compteur fr-mb-2w">
+        <dsfr-data-display source="chapitres" per-row="1" class="odv-sans-compteur odv-rail fr-mb-2w"
+          refine-on-click="chapitre" context="ctx-chapitre" label="Chapitre">
           <template>
             <div class="odv-chap">
               <span>{{chapitre}}</span>
@@ -500,6 +529,7 @@
             </div>
           </template>
         </dsfr-data-display>
+        <dsfr-data-context-tags for="ctx-chapitre" class="fr-mb-2w"></dsfr-data-context-tags>
         <ul class="fr-btns-group fr-btns-group--sm">
           <li><a class="fr-btn fr-btn--tertiary-no-outline" href="https://data.economie.gouv.fr/explore/dataset/questions-reponses/" target="_blank" rel="noopener external">Liens vers les données brutes</a></li>
           <li><a class="fr-btn fr-btn--tertiary-no-outline" href="https://www.francenum.gouv.fr/" target="_blank" rel="noopener external">Méthodologie de l'enquête</a></li>
@@ -507,11 +537,12 @@
       </div>
 
       <div class="fr-col-12 fr-col-md-8">
-        <dsfr-data-facets id="chap-filtre" source="ecarts"
-          fields="chapitre" display="chapitre:select" labels="chapitre:Chapitre affiché"
-          span="chapitre:12" no-reset>
-        </dsfr-data-facets>
-        <dsfr-data-query id="chap-questions" source="chap-filtre" order-by="ecart_abs:desc"></dsfr-data-query>
+        <p class="fr-text--sm fr-hint-text fr-mb-1w">
+          <dsfr-data-context-value for="ctx-chapitre" field="chapitre"
+            template="Chapitre affiché : {{chapitre}}"
+            fallback="Tous les chapitres — cliquez-en un dans le rail pour le déplier seul."></dsfr-data-context-value>
+        </p>
+        <dsfr-data-query id="chap-questions" source="ecarts-chap" order-by="ecart_abs:desc"></dsfr-data-query>
 
         <div class="odv-bars fr-mt-2w">
           <dsfr-data-display source="chap-questions" pagination="12" class="odv-sans-compteur">
