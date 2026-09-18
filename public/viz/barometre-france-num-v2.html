@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Baromètre France Num — refonte — open-data-viz</title>
+  <meta name="description" content="Refonte du Baromètre France Num : trois régimes d'accès (synthèse de profil, lecture par chapitre, explorateur comparatif) sur un même profil partagé région × secteur × taille.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.economie.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/cles.js"></script>
+
+  <style>
+    /* ------------------------------------------------------------------
+       Barres d'écart (diverging) — reprises du fil de fer de la phase 2.
+       La ligne de référence verticale est la valeur nationale ; le
+       remplissage part d'elle vers la droite (au-dessus) ou vers la
+       gauche (en dessous). Les couleurs ne sont PAS « positif = vert » :
+       elles suivent `sens_de_l_augmentation` du jeu, parce qu'être
+       au-dessus de la moyenne sur une question défavorable n'est pas
+       une bonne nouvelle (cf. #analyse).
+       ------------------------------------------------------------------ */
+    .odv-gap__row {
+      display: grid;
+      grid-template-columns: minmax(0, 20rem) minmax(0, 1fr) 5.5rem;
+      gap: 1rem;
+      align-items: center;
+      padding: .75rem 0;
+      border-bottom: 1px solid var(--border-default-grey);
+    }
+    .odv-gap__lab { font-size: .875rem; line-height: 1.3; }
+    .odv-gap__lab em {
+      font-style: normal;
+      display: block;
+      font-size: .75rem;
+      color: var(--text-mention-grey);
+    }
+    .odv-gap__track {
+      position: relative;
+      height: 1.5rem;
+      background: var(--background-alt-grey);
+      min-width: 0;
+    }
+    .odv-gap__ref {
+      position: absolute;
+      top: -.25rem;
+      bottom: -.25rem;
+      left: 50%;
+      width: 2px;
+      background: #413592; /* violet « vue d'ensemble » de l'original */
+    }
+    .odv-gap__fill { position: absolute; top: 0; bottom: 0; }
+    .odv-gap__fill[data-ton="defavorable"] { background: var(--background-flat-error); }
+    .odv-gap__fill[data-ton="favorable"]   { background: var(--background-flat-success); }
+    .odv-gap__fill[data-ton="neutre"]      { background: var(--background-flat-grey); }
+    .odv-gap__val { font-size: .9375rem; font-weight: 700; text-align: right; }
+
+    @media (max-width: 48em) {
+      .odv-gap__row { grid-template-columns: minmax(0, 1fr) 4.5rem; }
+      .odv-gap__track { grid-column: 1 / -1; }
+    }
+
+    /* BUG-018 (revue critique 2026-09) : le <summary> de dsfr-data-a11y est en
+       content-box et déborde de 16 px sur téléphone. Mesuré ici aussi (390 px),
+       corrigé ici en attendant la bibliothèque. */
+    dsfr-data-a11y summary { box-sizing: border-box; }
+
+    /* `dsfr-data-display` rend un compteur « N resultats » (sans accent) qu'aucun
+       attribut ne désactive — contrairement à `dsfr-data-search`, qui a
+       `count-label`. Le titre de la section le dit déjà (AM-034/AM-044). */
+    #ecarts-liste > p.fr-text--sm:first-child { display: none; }
+
+    /* Les composants sans style d'hôte ont besoin d'un display explicite.
+       Ne JAMAIS poser ça sur dsfr-data-kpi-group, qui est `grid` (PG-011). */
+    dsfr-data-display, dsfr-data-chart { display: block; }
+  </style>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/bercy">Portail Bercy</a></li>
+          <li><a class="fr-breadcrumb__link" href="/viz/barometre-france-num.html">Baromètre France Num</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Refonte</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Baromètre France Num — refonte</h1>
+
+    <div class="fr-callout fr-icon-draft-line fr-mb-4w">
+      <h2 class="fr-callout__title fr-text--md">Cette page n'est pas une reproduction</h2>
+      <p class="fr-callout__text fr-text--sm">
+        La <a href="/viz/barometre-france-num.html">reproduction fidèle</a> reste en place, avec son
+        analyse&nbsp;: c'est elle qui mesure ce que <code>dsfr-data</code> coûte pour refaire la page
+        d'origine. Celle-ci pose une autre question&nbsp;: <strong>que devient la dataviz quand on
+        cesse de recopier le modèle Opendatasoft&nbsp;?</strong> Mêmes jeux, mêmes chiffres, mais
+        trois régimes d'accès au lieu d'un scroll de douze accordéons&nbsp;: une synthèse de profil,
+        une lecture par chapitre, un explorateur comparatif — reliés par un
+        <strong>profil partagé</strong> (région × secteur × taille) synchronisé dans l'URL.
+      </p>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       ARCHITECTURE — trois régimes, un profil, quatre requêtes au chargement.
+
+       Le point qui rend la refonte possible tient en une observation sur le jeu :
+       la vue nationale n'est PAS un agrégat à calculer, c'est une valeur
+       littérale (`region = "Toutes régions"`). National et profil sont donc deux
+       sous-ensembles du même jeu, appariables par jointure — au lieu des deux
+       requêtes + calcul de delta que la maquette de phase 2 avait anticipés.
+
+       Relevé à l'API le 2026-09-18 : 516 lignes pour les deux vues de l'édition
+       2025 (103 questions), une requête d'export, 0,235 s.
+
+       Plafond à ne pas oublier : `/records` tronque une requête groupée à
+       **100 groupes** (BUG-001) — la même requête y rendait `total_count = 100`
+       pile. D'où `fetch-mode="export"` PLUS un `max-records` explicite, faute de
+       quoi le défaut de 1 000 tronquerait en silence (piège payé deux fois au
+       lot 13).
+       ========================================================================== -->
+
+  <!-- Table de correspondance : libellés, chapitres, et surtout le SENS -->
+  <dsfr-data-source id="corr" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bfn-table-de-correspondance"
+    fetch-mode="export" max-records="500"
+    select="code_unifie, libelle_unifie, chapitre, ordre_chapitre, sens_de_l_augmentation, descriptif_de_question"
+    order-by="ordre_chapitre, code_unifie"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Vue NATIONALE de l'édition courante : where figé, hors contexte.
+       Les trois questions « écho du profil » sont exclues ici et non en aval :
+       201 Secteur, 202 Taille, 203 Région. Filtrer sur la Bretagne met
+       mécaniquement « Bretagne » à 100 % contre 5,1 % au national, soit un écart
+       de +94,9 points qui trusterait le classement sans rien dire. -->
+  <dsfr-data-source id="nat" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses"
+    fetch-mode="export" max-records="5000"
+    select="sum(score) as score_nat"
+    group-by="code_unifie, libelle_reponse"
+    where='region = "Toutes régions" and secteur = "Tous secteurs" and taille = "Toutes tailles" and year(annee) = 2025 and libelle_reponse != "Sans réponse" and not (code_unifie in (201, 202, 203))'
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Vue du PROFIL : même requête, mais pilotée par le contexte. Sans filtre,
+       elle est identique à la nationale — et tous les écarts valent zéro, ce que
+       la page dit explicitement plutôt que d'afficher un classement de zéros. -->
+  <dsfr-data-source id="prof" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses"
+    fetch-mode="export" max-records="5000"
+    select="sum(score) as score_prof"
+    group-by="code_unifie, libelle_reponse"
+    where='year(annee) = 2025 and libelle_reponse != "Sans réponse" and not (code_unifie in (201, 202, 203))'
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Le profil partagé. UN SEUL contexte dans l'URL (PG-028 : deux contextes
+       url-sync qui partagent un nom de champ s'échangent leurs paramètres au
+       rechargement, sans message). -->
+  <dsfr-data-context id="profil" sources="prof" url-sync>
+    <dsfr-data-context-filter field="region"  ui="f-region"  default="Toutes régions"></dsfr-data-context-filter>
+    <dsfr-data-context-filter field="secteur" ui="f-secteur" default="Tous secteurs"></dsfr-data-context-filter>
+    <dsfr-data-context-filter field="taille"  ui="f-taille"  default="Toutes tailles"></dsfr-data-context-filter>
+  </dsfr-data-context>
+
+  <!-- Appariement des deux vues sur la clé composée question × réponse.
+       `on` multi-clé : les deux colonnes de score portent des noms distincts
+       (score_nat / score_prof) dès le select ODSQL, donc pas de collision à
+       préfixer — on lit l'écart directement. -->
+  <dsfr-data-join id="apparie" left="prof" right="nat" on="code_unifie,libelle_reponse" type="inner"></dsfr-data-join>
+
+  <!-- L'écart, et son TON. `compute` (when/then/else) fait les deux sans script.
+       Le ton ne découle pas du signe : il croise le signe avec
+       `sens_de_l_augmentation` (97 questions « fav », 5 « défav », 17 neutres).
+       Être 8 points au-dessus de la moyenne sur « le numérique me fait perdre
+       du temps » n'est pas un succès. -->
+  <dsfr-data-join id="apparie-lib" left="apparie" right="corr" on="code_unifie" type="left"></dsfr-data-join>
+
+  <dsfr-data-normalize id="ecarts" source="apparie-lib"
+    numeric="score_nat, score_prof"
+    compute="ecart = score_prof - score_nat;
+             ecart_abs = abs(score_prof - score_nat);
+             ton = when sens_de_l_augmentation = 'ni fav, ni défav' then 'neutre'
+                   when sens_de_l_augmentation = 'défav' and score_prof > score_nat then 'defavorable'
+                   when sens_de_l_augmentation = 'défav' and score_prof <= score_nat then 'favorable'
+                   when score_prof > score_nat then 'favorable'
+                   else 'defavorable';
+             largeur = round(abs(score_prof - score_nat) * 4);
+             depart = when score_prof >= score_nat then 50 else 50 - round(abs(score_prof - score_nat) * 4);
+             ecart_txt = replace(concat(when score_prof >= score_nat then '+' else '', round(score_prof - score_nat, 1)), '.', ',')">
+  </dsfr-data-normalize>
+
+  <!-- ====================== RÉGIME 1 — SYNTHÈSE D'ABORD ====================== -->
+  <section class="fr-container fr-mb-6w">
+    <h2 class="fr-h3">Le baromètre de mon entreprise</h2>
+    <p class="fr-text--sm fr-hint-text fr-mb-2w">
+      Choisissez un profil&nbsp;: la page dit immédiatement où il se situe par rapport à la
+      moyenne nationale, sur les 103 questions de l'édition 2025.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-2w">
+      <div class="fr-col-12 fr-col-md-4">
+        <div class="fr-select-group">
+          <label class="fr-label" for="f-region">Région</label>
+          <select class="fr-select" id="f-region">
+            <option value="Toutes régions">Toutes régions</option>
+            <option value="Auvergne-Rhône-Alpes">Auvergne-Rhône-Alpes</option>
+            <option value="Bourgogne-Franche-Comté">Bourgogne-Franche-Comté</option>
+            <option value="Bretagne">Bretagne</option>
+            <option value="Centre-Val de Loire">Centre-Val de Loire</option>
+            <option value="Grand Est">Grand Est</option>
+            <option value="Hauts-de-France">Hauts-de-France</option>
+            <option value="Normandie">Normandie</option>
+            <option value="Nouvelle-Aquitaine">Nouvelle-Aquitaine</option>
+            <option value="Occitanie">Occitanie</option>
+            <option value="Pays de la Loire">Pays de la Loire</option>
+            <option value="Provence-Alpes-Côte d’Azur">Provence-Alpes-Côte d’Azur</option>
+            <option value="Provence Alpes Côte d’Azur + Corse">Provence Alpes Côte d’Azur + Corse</option>
+            <option value="Île-de-France">Île-de-France</option>
+          </select>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-4">
+        <div class="fr-select-group">
+          <label class="fr-label" for="f-secteur">Secteur d'activité</label>
+          <select class="fr-select" id="f-secteur">
+            <option value="Tous secteurs">Tous secteurs</option>
+            <option value="Activités financières - Assurances">Activités financières - Assurances</option>
+            <option value="Agriculture">Agriculture</option>
+            <option value="Bâtiment - Construction">Bâtiment - Construction</option>
+            <option value="Commerce (détail et gros)">Commerce (détail et gros)</option>
+            <option value="Hébergement - Restauration">Hébergement - Restauration</option>
+            <option value="Industrie">Industrie</option>
+            <option value="Nouvelles technologies - Information - Communication">Nouvelles technologies - Information - Communication</option>
+            <option value="Services spécialisés - Techniques">Services spécialisés - Techniques</option>
+            <option value="Services à la personne">Services à la personne</option>
+            <option value="Transport - Logistique">Transport - Logistique</option>
+            <option value="Z - Autre">Autre</option>
+          </select>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-4">
+        <div class="fr-select-group">
+          <label class="fr-label" for="f-taille">Taille de l'entreprise</label>
+          <select class="fr-select" id="f-taille">
+            <option value="Toutes tailles">Toutes tailles</option>
+            <option value="0 salarié">0 salarié</option>
+            <option value="1 à 9 salariés">1 à 9 salariés</option>
+            <option value="10 à 49 salariés">10 à 49 salariés</option>
+            <option value="50 à 249 salariés">50 à 249 salariés</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <dsfr-data-context-tags for="profil" class="fr-mb-2w"></dsfr-data-context-tags>
+
+    <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-3w">
+      <p class="fr-text--sm">
+        Les résultats régionaux ne sont pas représentatifs avant 2023, et le cumul de plusieurs
+        filtres réduit d'autant l'échantillon. Cette page ne compare que l'édition 2025.
+      </p>
+    </div>
+
+    <!-- Quatre repères. Ils remplacent le « Score moyen » de la reproduction, qui
+         moyennait 1 065 parts de répondants à des questions différentes — une
+         moyenne de pourcentages sans signification statistique (cf. #analyse).
+         Ceux-ci sont des COMPTES, pas des moyennes : on peut les défendre. -->
+    <dsfr-data-query id="q-dessus" source="ecarts" where="ecart:gt:0"></dsfr-data-query>
+    <dsfr-data-query id="q-dessous" source="ecarts" where="ecart:lt:0"></dsfr-data-query>
+    <dsfr-data-query id="q-questions" source="ecarts" group-by="code_unifie"></dsfr-data-query>
+
+    <dsfr-data-kpi-group per-row="2 md:4" class="fr-mb-4w">
+      <dsfr-data-kpi source="q-questions" value="count"
+        label="Questions comparées" description="édition 2025, hors questions d'identité"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ecarts" value="count"
+        label="Points de comparaison" description="un par couple question × réponse"></dsfr-data-kpi>
+      <dsfr-data-kpi source="q-dessus" value="count"
+        label="Au-dessus du national" description="points de comparaison"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ecarts" value="ecart_abs:max" format="decimal" decimals="1" unit="pts"
+        label="Écart le plus marqué" description="en points de pourcentage"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <h3 class="fr-h5">Là où ce profil s'écarte le plus de la moyenne</h3>
+    <p class="fr-text--sm fr-hint-text">
+      Les dix plus forts écarts, en points de pourcentage. La barre verticale marque le niveau
+      national&nbsp;; la couleur suit le <em>sens</em> déclaré de la question, pas le signe de
+      l'écart.
+    </p>
+
+    <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-2w">
+      <p class="fr-text--sm">Tant que les trois listes restent sur «&nbsp;Toutes&nbsp;», le profil <em>est</em>
+      la France entière&nbsp;: tous les écarts valent alors zéro, ce qui est exact et sans intérêt.
+      Choisissez une région, un secteur ou une taille.</p>
+    </div>
+
+    <dsfr-data-query id="top-ecarts" source="ecarts" order-by="ecart_abs:desc" limit="10"></dsfr-data-query>
+
+    <dsfr-data-display id="ecarts-liste" source="top-ecarts">
+      <template>
+        <div class="odv-gap__row">
+          <div class="odv-gap__lab">
+            {{libelle_unifie}}
+            <em>{{libelle_reponse}} · {{chapitre}}</em>
+          </div>
+          <div class="odv-gap__track">
+            <div class="odv-gap__ref"></div>
+            <div class="odv-gap__fill" data-ton="{{ton}}" style="left:{{depart}}%; width:{{largeur}}%"></div>
+          </div>
+          <div class="odv-gap__val">{{ecart_txt}}</div>
+        </div>
+      </template>
+    </dsfr-data-display>
+
+    <dsfr-data-a11y source="top-ecarts"
+      columns="libelle_unifie, libelle_reponse, score_nat, score_prof, ecart"
+      caption="Écarts au national du profil choisi, édition 2025"></dsfr-data-a11y>
+  </section>
+
+  <!-- ====================== RÉGIME 2 — UN CHAPITRE, UN ÉCRAN ====================== -->
+  <section class="fr-container fr-mb-6w">
+    <h2 class="fr-h3">Lire l'enquête, chapitre par chapitre</h2>
+    <p class="fr-text--sm fr-hint-text fr-mb-2w">
+      Douze chapitres dans l'ordre de l'enquête. Un seul à la fois&nbsp;: l'écran se charge en
+      entier, au lieu des douze accordéons fermés de l'original — dont l'ouverture coûtait 5 à
+      10&nbsp;s chacun.
+    </p>
+
+    <!-- Source dédiée : filtrer `corr` ici casserait les libellés du classement d'écarts,
+         qui en dépendent par jointure. 119 lignes, une requête d'export. -->
+    <dsfr-data-source id="corr-chap" api-type="opendatasoft"
+      base-url="https://data.economie.gouv.fr" dataset-id="bfn-table-de-correspondance"
+      fetch-mode="export" max-records="500"
+      select="code_unifie, libelle_unifie, chapitre, descriptif_de_question"
+      order-by="code_unifie" api-key-ref="ods-mef">
+    </dsfr-data-source>
+    <dsfr-data-context id="ctx-chapitre" sources="corr-chap">
+      <dsfr-data-context-filter field="chapitre" ui="f-chapitre" default="Perception du numérique"></dsfr-data-context-filter>
+    </dsfr-data-context>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-2w">
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="fr-select-group">
+          <label class="fr-label" for="f-chapitre">Chapitre de l'enquête</label>
+          <select class="fr-select" id="f-chapitre">
+            <option value="TPE PME interrogées">TPE PME interrogées</option>
+            <option value="Perception du numérique">Perception du numérique</option>
+            <option value="Promotion et développement commercial sur internet">Promotion et développement commercial sur internet</option>
+            <option value="Gestion et pilotage de l’entreprise avec le numérique">Gestion et pilotage de l’entreprise avec le numérique</option>
+            <option value="Intelligence artificielle">Intelligence artificielle</option>
+            <option value="Cybersécurité">Cybersécurité</option>
+            <option value="Connectivité">Connectivité</option>
+            <option value="Sobriété numérique">Sobriété numérique</option>
+            <option value="Modes d’acquisition et d’installation">Modes d’acquisition et d’installation</option>
+            <option value="Dépenses et projets numériques">Dépenses et projets numériques</option>
+            <option value="Compétences numériques et accompagnement">Compétences numériques et accompagnement</option>
+            <option value="Typologie des entreprises interrogées">Typologie des entreprises interrogées</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pas de group-by : `corr-chap` a deja une ligne par question, et grouper
+         ferait tomber `descriptif_de_question`, qui n'est pas dans la clé. -->
+    <dsfr-data-query id="questions-du-chapitre" source="corr-chap" order-by="code_unifie:asc"></dsfr-data-query>
+
+    <dsfr-data-display source="questions-du-chapitre" per-row="1 md:2" class="fr-mt-2w">
+      <template>
+        <div class="fr-card fr-card--no-arrow fr-mb-2w">
+          <div class="fr-card__body">
+            <div class="fr-card__content">
+              <h3 class="fr-card__title fr-text--md">{{libelle_unifie}}</h3>
+              <p class="fr-card__desc fr-text--sm">{{descriptif_de_question}}</p>
+              <div class="fr-card__start">
+                <p class="fr-badge fr-badge--sm fr-badge--info">question {{code_unifie}}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </dsfr-data-display>
+  </section>
+
+  <!-- ====================== RÉGIME 3 — EXPLORATEUR COMPARATIF ====================== -->
+  <section class="fr-container fr-mb-6w">
+    <h2 class="fr-h3">Chercher une question, puis comparer</h2>
+    <p class="fr-text--sm fr-hint-text fr-mb-2w">
+      Les 119 questions de la table de correspondance, atteignables par mots-clés — «&nbsp;authentification&nbsp;»,
+      «&nbsp;site internet&nbsp;», «&nbsp;facture&nbsp;» — plutôt que par un menu déroulant de 119 lignes.
+    </p>
+
+    <dsfr-data-search id="recherche-question" source="corr" count
+      count-label="question" placeholder="Rechercher parmi les 119 questions…"
+      label="Rechercher une question">
+    </dsfr-data-search>
+
+    <dsfr-data-list source="recherche-question"
+      columns="code_unifie:Code, libelle_unifie:Question, chapitre:Chapitre, sens_de_l_augmentation:Sens"
+      sort search pagination="20" class="fr-mt-2w">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ====================== ANALYSE ====================== -->
+  <section class="fr-container fr-mb-6w" id="analyse">
+    <h2 class="fr-h3">Analyse</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Cette page n'est pas une reproduction&nbsp;: son analyse ne mesure donc pas une fidélité,
+      mais ce que la bibliothèque permet quand on cesse de transposer le modèle Opendatasoft.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mt-2w">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qui a été simple</h3>
+        <ul class="fr-text--sm">
+          <li><strong>Le classement des écarts tient en une requête.</strong> La maquette de
+            phase 2 annonçait «&nbsp;deux requêtes et un calcul de delta&nbsp;». C'était compter
+            sans une propriété du jeu&nbsp;: la vue nationale n'est pas un agrégat mais une
+            <em>valeur littérale</em> (<code>region = "Toutes régions"</code>). National et profil
+            sont deux sous-ensembles du même jeu&nbsp;: <strong>516 lignes, une requête d'export,
+            0,235&nbsp;s</strong> pour les 103 questions de l'édition (relevé à l'API le
+            2026-09-18).</li>
+          <li><strong>L'écart et sa couleur se calculent sans une ligne de JavaScript.</strong>
+            <code>dsfr-data-normalize compute</code> avec <code>when/then/else</code> dérive en
+            une passe l'écart, sa valeur absolue pour le tri, la largeur de barre, son point de
+            départ et le libellé signé.</li>
+          <li><strong>Les trois sélecteurs de profil sont natifs.</strong> Le jeu déclare ses
+            facettes (région 14, secteur 12, taille 5)&nbsp;: <code>server-facets</code> +
+            <code>context</code> les peuple et les diffuse. La reproduction, elle, génère encore
+            ses <code>&lt;select&gt;</code> hors ligne — c'était justifié avant 0.23, plus
+            maintenant (AM-043).</li>
+        </ul>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qui a coincé</h3>
+        <ul class="fr-text--sm">
+          <li><strong>Un classement d'écarts naïf est faux, et spectaculairement.</strong> Le plus
+            fort écart d'un profil breton est <strong>+94,9 points</strong> sur la question
+            «&nbsp;Région&nbsp;»&nbsp;: filtrer sur la Bretagne y met «&nbsp;Bretagne&nbsp;» à
+            100&nbsp;% contre 5,1&nbsp;% au national. Trois questions (201 Secteur, 202 Taille,
+            203 Région) sont l'<em>écho du filtre</em> et doivent être exclues. Aucune ne peut
+            l'être par un attribut&nbsp;: c'est une connaissance du jeu, écrite en dur dans le
+            <code>where</code>.</li>
+          <li><strong>Le signe de l'écart ne dit pas si c'est une bonne nouvelle.</strong> Être
+            au-dessus de la moyenne sur «&nbsp;le numérique me fait perdre plus de temps qu'il
+            ne m'en fait gagner&nbsp;» est un mauvais résultat. Le jeu porte heureusement
+            <code>sens_de_l_augmentation</code> (97 <em>fav</em>, 5 <em>défav</em>, 17 neutres) —
+            sans lui, la moitié des couleurs aurait menti.</li>
+          <li><strong>Les libellés de réponse changent d'une édition à l'autre.</strong> La même
+            question 802 répond «&nbsp;J'en ai&nbsp;» en 2024 et «&nbsp;Oui&nbsp;» en 2025. Toute
+            série pluriannuelle groupée par <code>libelle_reponse</code> se scinde donc en deux
+            séries sans prévenir. C'est la raison pour laquelle cette page ne compare qu'une
+            édition.</li>
+          <li><strong>La barre divergente n'est pas un composant.</strong> Elle est rendue par
+            <code>dsfr-data-display</code> et un gabarit HTML, avec le positionnement en CSS.
+            DSFR Chart n'a pas de graphique en écart à une référence.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="fr-table fr-table--bordered fr-mt-4w">
+      <table>
+        <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+        <thead>
+          <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>3 <code>ods-select</code> région / secteur / taille</td><td><code>dsfr-data-facets server-facets context</code></td><td>Natif (AM-043) — plus de <code>select</code> généré</td></tr>
+          <tr><td>vue d'ensemble vs vue filtrée, par question</td><td>2 sources + <code>dsfr-data-join</code> multi-clé</td><td>Une requête au lieu de N</td></tr>
+          <tr><td>—&nbsp;(absent de l'original)</td><td><code>normalize compute</code> + <code>display</code></td><td>Classement des écarts, sans script</td></tr>
+          <tr><td>menu déroulant de 119 questions</td><td><code>dsfr-data-search</code> + <code>dsfr-data-list</code></td><td>Recherche par mots</td></tr>
+          <tr><td>12 accordéons ouverts à la demande</td><td><code>facets chapitre:select</code> + <code>display</code></td><td>Un chapitre à la fois, chargé en entier</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="odv-verdict fr-mt-4w">
+      <p class="fr-text--lead fr-mb-1v">Verdict</p>
+      <p><strong>La contrainte qui pesait sur la reproduction venait du modèle, pas de la
+        bibliothèque.</strong> La page d'origine tient tout à un contexte unique et déroule
+        119 questions dans douze accordéons&nbsp;; la reproduction a hérité de ce modèle et de
+        son coût. En repartant du besoin — «&nbsp;où se situe mon entreprise&nbsp;?&nbsp;» — la
+        même donnée se rend en quatre requêtes, et le classement des écarts, que l'original ne
+        propose pas, s'obtient sans une ligne de JavaScript.</p>
+      <p>Ce qui reste vrai&nbsp;: <strong>la connaissance du jeu ne se délègue pas.</strong>
+        Trois des constats les plus coûteux de cette page — les questions d'identité qui
+        truquent le classement, le sens qui décide de la couleur, les libellés de réponse qui
+        changent d'édition — ne sont ni des manques de <code>dsfr-data</code> ni des bugs&nbsp;:
+        ce sont des propriétés du jeu qu'aucun attribut ne peut deviner. Le composant calcule
+        ce qu'on lui demande&nbsp;; il ne sait pas qu'un écart de +94,9 points est une
+        tautologie.</p>
+    </div>
+  </section>
+
+  <section class="fr-container fr-mb-6w" id="hypotheses">
+    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Ces données se présentent de beaucoup de façons. Voici les choix faits ici, et pourquoi.
+      Ils sont discutables&nbsp;: ils sont écrits pour pouvoir l'être.
+    </p>
+
+    <ol class="fr-text--sm">
+      <li class="fr-mb-2w"><strong>Le classement porte sur des couples question&nbsp;× réponse, pas sur des
+        questions.</strong> C'est le choix structurant, et il remplace le «&nbsp;Score moyen&nbsp;» de la
+        reproduction. Une question du baromètre n'a pas <em>un</em> score&nbsp;: elle a un score par
+        réponse possible. Résumer «&nbsp;Authentification multi-facteurs&nbsp;» par un chiffre unique
+        supposerait de choisir laquelle de ses réponses compte — un arbitrage que le jeu ne porte
+        pas. On énonce donc l'écart au niveau où il existe&nbsp;: «&nbsp;<em>J'en ai</em>, -8,8&nbsp;pts&nbsp;».
+        C'est plus verbeux et c'est vrai. <strong>L'alternative écartée&nbsp;:</strong> moyenner les
+        réponses d'une question pour obtenir un score par question — c'est exactement l'erreur du
+        «&nbsp;Score moyen&nbsp;», à une échelle plus petite.</li>
+
+      <li class="fr-mb-2w"><strong>Une seule édition, 2025.</strong> Pas par paresse&nbsp;: les libellés de
+        réponse changent d'une édition à l'autre — la question 802 répond «&nbsp;J'en ai&nbsp;» en 2024
+        et «&nbsp;Oui&nbsp;» en 2025. Une série pluriannuelle groupée par réponse se scinderait donc en
+        deux séries sans le dire. Comparer deux éditions demande une table de correspondance des
+        <em>réponses</em>, que ce jeu n'expose pas. <strong>Conséquence assumée&nbsp;:</strong> cette page
+        ne montre pas d'évolution, là où c'est le propre de l'original.</li>
+
+      <li class="fr-mb-2w"><strong>L'écart plutôt que la valeur.</strong> C'est le message de la page
+        d'origine elle-même&nbsp;: «&nbsp;c'est la comparaison, pas la valeur isolée, qui fait sens&nbsp;».
+        Un taux de 28,3&nbsp;% ne dit rien sans son référent&nbsp;; «&nbsp;8,8&nbsp;points sous la moyenne&nbsp;»
+        dit quelque chose. D'où la barre divergente, dont la ligne verticale <em>est</em> le national.</li>
+
+      <li class="fr-mb-2w"><strong>La couleur suit le sens déclaré, jamais le signe.</strong> Le jeu porte
+        <code>sens_de_l_augmentation</code>&nbsp;: 97 questions où monter est favorable, 5 où c'est
+        défavorable, 17 neutres. Colorer «&nbsp;au-dessus = vert&nbsp;» aurait félicité un territoire de
+        trouver que le numérique lui fait perdre du temps. Les 17 neutres (durée de vie, type
+        d'activité) restent <strong>grises</strong>&nbsp;: leur écart est un fait, pas une performance.</li>
+
+      <li class="fr-mb-2w"><strong>Trois questions sont exclues du classement&nbsp;: 201 Secteur, 202 Taille,
+        203 Région.</strong> Elles décrivent l'échantillon, donc filtrer sur la Bretagne y met
+        «&nbsp;Bretagne&nbsp;» à 100&nbsp;% contre 5,1&nbsp;% au national — un écart de +94,9 points qui n'est
+        qu'un reflet du filtre. Elles restent lisibles dans le régime «&nbsp;chapitre&nbsp;», où elles ont
+        leur sens. <strong>Ce qui n'est pas exclu&nbsp;:</strong> 204 à 206 (type d'activité, durée de vie,
+        projets), qui sont de vraies questions&nbsp;; qu'une région ait des entreprises plus anciennes
+        est un résultat, pas une tautologie.</li>
+
+      <li class="fr-mb-2w"><strong>Dix écarts affichés, pas cinq.</strong> La maquette en proposait cinq.
+        Dix tiennent dans la même hauteur, et surtout le dixième (autour de 5 points) montre où la
+        série s'aplatit — ce qui empêche de lire le premier comme une anomalie isolée.</li>
+
+      <li class="fr-mb-2w"><strong>Aucun indicateur de synthèse globale.</strong> Il serait facile d'afficher
+        un «&nbsp;indice de maturité numérique du profil&nbsp;». Il serait faux&nbsp;: il faudrait pondérer
+        des questions hétérogènes selon une échelle que personne n'a définie. Les quatre repères sont
+        donc des <strong>comptes</strong> (questions comparées, points de comparaison, combien au-dessus,
+        écart maximal), pas des moyennes. Un compte se défend&nbsp;; une moyenne de pourcentages de
+        questions différentes, non.</li>
+
+      <li class="fr-mb-2w"><strong>Les barres sont à l'échelle de 4&nbsp;% de largeur par point d'écart</strong>,
+        soit environ 36&nbsp;% de la piste pour le plus fort écart observé (8,8&nbsp;pts). Échelle fixe et
+        non relative au maximum&nbsp;: en changeant de profil, les barres restent comparables entre elles
+        d'un profil à l'autre, au prix d'une piste peu remplie sur les profils homogènes.</li>
+
+      <li><strong>Le chapitre ouvert par défaut est «&nbsp;Perception du numérique&nbsp;»</strong>, et non le
+        premier de l'enquête («&nbsp;TPE PME interrogées&nbsp;», qui décrit l'échantillon). Ouvrir sur la
+        méthodologie serait fidèle à l'ordre du rapport et décourageant à la lecture.</li>
+    </ol>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.29.1/dist/dsfr-data.core.umd.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
