@@ -1127,19 +1127,44 @@
     "date": "2026-09-09"
   },
   {
-    "id": "LIM-004",
-    "titre": "Une page éditoriale n'est pas un tableau de bord",
-    "type": "limite-dure",
-    "severite": "basse",
-    "composants": [],
-    "dataviz": [
-      "barometre-france-num"
+    "id": "FP-013",
+    "titre": "« On ne peut pas produire N graphiques depuis N lignes »",
+    "type": "faux-probleme",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-display",
+      "dsfr-data-query",
+      "dsfr-data-chart"
     ],
-    "constat": "La page du Baromètre est un rapport d'enquête mis en pages : sommaire, sections dépliables, seize graphiques commentés, un texte d'analyse entre chacun. Une bibliothèque de dataviz fournit les vues, pas la mise en page d'un rapport. Reproduire à l'identique reviendrait à écrire seize blocs de HTML éditorial — travail légitime, mais qui n'apprend rien sur l'outil.",
-    "verifie": "28 200 caractères de template, dont l'essentiel est du texte et de la structure (`ods-sommaire`, `ods-expand-section`, `ods-page-title`, `ods-presentation`) et non de la configuration de graphiques.",
-    "contournement": "Assumer un autre parti pris : un explorateur filtrable plutôt qu'un rapport figé. C'est ce que fait cette page, et il couvre les six millésimes là où l'original s'arrête aux jeux codés en dur.",
+    "dataviz": [
+      "barometre-france-num",
+      "barometre-france-num-v2"
+    ],
+    "constat": "J'avais écrit (LIM-004) qu'une bibliothèque de dataviz ne sait pas répéter un composant : `dsfr-data-display` ne répétait qu'un gabarit HTML inerte, donc pas de graphique par ligne d'une table de correspondance, et pas de type de graphique choisi depuis une valeur de champ. C'est ce qui a fait renoncer à la structure de l'original — dont le template enchaîne pourtant exactement cela — et borner chaque graphique de chapitre aux douze écarts les plus marqués.",
+    "correction": "Le motif fonctionne déjà, en 0.30.0, sans nouveau composant. Le gabarit de `dsfr-data-display` est rendu par `.innerHTML` (`packages/core/src/components/dsfr-data-display.ts:419-423`) : les `dsfr-data-*` qu'il contient sont de vrais custom elements, rehaussés à l'insertion. Le sous-ensemble par instance vient de l'id interpolé : une `dsfr-data-query id=\"q-{{code}}\" where=\"code:eq:{{code}}\"` par ligne, dont le graphique de la même ligne est le seul consommateur. Et le type se choisit depuis un champ par simple interpolation, `type=\"{{pres}}\"` — le recodage d'un libellé métier vers un type se faisant en amont par `dsfr-data-normalize compute` (`when`/`then`/`else`).",
+    "reste_vrai": "Trois des quatre capacités que je donnais pour manquantes sont couvertes ; ce qui résiste — l'imbrication d'un répéteur dans un répéteur, et deux défauts d'exploitation — est désormais porté par LIM-004, réécrit pour ne plus dire que cela.",
+    "verifie": "Rejoué moi-même sur dsfr-data 0.30.0, Chromium headless (`repeat-scale.mjs`, avec `repeat-test.html` et `repeat-test.mjs`, dans le scratchpad de session `/private/tmp/claude-501/-Users-bertrand-Developer-GitHub-open-data-viz/a08a3654-76db-4205-b0e0-66de41710184/scratchpad/`) : 119 `dsfr-data-chart` et 119 canvas rendus en 414 ms, 120 `dsfr-data-query` montées, deux types de graphiques choisis depuis le champ, zéro erreur console et aucun `data-dsfr-config-error` ; ré-émission de la source de scores → les 119 queries ré-émettent en 31 ms. Ni documenté ni testé, ce qui explique l'angle mort : `tests/dsfr-data-display.test.ts` (596 lignes) ne place aucun composant `dsfr-data-*` dans un gabarit, la fiche `specs/components/dsfr-data-display.html` n'en montre aucun, et la skill range `display` parmi les afficheurs, « feuilles » du pipeline qui « n'émettent pas de données » (`skills/dsfr-data/SKILL.md:23`). La règle du dépôt — chercher l'architecture native avant d'écrire qu'une chose est impossible — n'a pas été appliquée : la fiche du composant a été lue, le rendu du gabarit non.",
+    "statut": "retire",
+    "date": "2026-09-18"
+  },
+  {
+    "id": "LIM-004",
+    "titre": "Un répéteur ne s'imbrique pas, et se recrée en entier",
+    "type": "limite-dure",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-display"
+    ],
+    "dataviz": [
+      "barometre-france-num",
+      "barometre-france-num-v2"
+    ],
+    "constat": "Répéter un composant de dataviz sur les lignes d'une source marche (FP-013 : c'était l'essentiel de ce que cette entrée donnait pour impossible). Ce qui reste hors de portée est plus étroit. **L'imbrication** d'abord : un répéteur dans le gabarit d'un répéteur ne fonctionne pas, la substitution étant une passe unique qui ne rescanne pas son résultat (`packages/core/src/utils/template-expression.ts:337-357`) — les `{{}}` du gabarit intérieur sont consommés avec la ligne extérieure, qui ne connaît pas ces champs, et sortent vides. Conséquence concrète : le mode « Barres horizontales (1 graphe par année) » de l'original, qui enchaîne deux `ng-repeat`, ne se transpose pas tel quel. **Deux défauts d'exploitation** ensuite : toute ré-émission de la source répétée détruit et recrée les N instances au lieu de les réconcilier ; et l'instance sortante purge le cache de l'id qu'une nouvelle instance porte déjà (`clearDataCache(this.id)` au `disconnectedCallback`, `packages/core/src/utils/transformer-mixin.ts:446-454`), si bien qu'un consommateur monté après coup sur cet id lit du vide.",
+    "verifie": "Même campagne que FP-013, dsfr-data 0.30.0, Chromium headless (`repeat-scale.mjs`). Imbrication : un `dsfr-data-display` placé dans le gabarit d'un autre rend `[|]` pour chacun de ses 10 éléments — libellé et code vides, aucune erreur console. Recréation : changer une valeur de la source répétée détruit et remonte les 119 instances, 666 ms de synchrone ; `__dsfrDataCache` ne contient alors plus aucune clé `q-…`, et un `dsfr-data-kpi` monté ensuite sur `q-001` affiche « — ». Côté original, le template de la page Baromètre (récupéré par `$scope.blocks`, 28 157 caractères, relevé le 2026-09-18) fait tenir ~119 graphiques sur 8 déclarations `<ods-chart>` (10 `<ods-chart-query>`, 10 `<ods-chart-serie>`) : 4 `ng-repeat`, dont `(i,question) in values.questions`, et 4 `ng-if` sur `question.presentation_2024` couvrant 5 valeurs de présentation ; seules 3 questions sont citées en dur (`code_unifie == '001'`, `'002'`, `'003'`). Le jeu `bfn-table-de-correspondance` compte 119 lignes à l'API v2.1, mais le contexte de la page filtre `NOT libelle_2025:NULL or NOT libelle_2024:NULL` : le rendu porte donc sur un sous-ensemble des 119, pas sur les 119.",
+    "contournement": "Pour l'imbrication : aplatir en amont plutôt que d'imbriquer — une ligne par couple (chapitre, question), ou un `dsfr-data-display` par chapitre écrit à plat. Pour la recréation : ne pas faire varier la source répétée. Une table de correspondance est fixe ; ce sont les scores qui bougent, et leur ré-émission ne coûte que le refiltre (31 ms pour 119 queries).",
     "statut": "acte",
-    "date": "2026-09-09"
+    "date": "2026-09-18",
+    "demande": "Pouvoir répéter un *composant* sur les lignes d'une source sans ces deux angles morts : un scope par instance dans le gabarit, pour qu'un répéteur imbriqué reçoive sa propre ligne au lieu de celle du répéteur extérieur ; et une réconciliation par clé à la ré-émission plutôt qu'une destruction-recréation des N instances — à défaut, ne pas purger le cache d'un id au `disconnectedCallback` quand une instance vivante porte déjà cet id."
   },
   {
     "id": "LIM-005",
