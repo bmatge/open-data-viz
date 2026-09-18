@@ -6,7 +6,8 @@
 //
 // Tests : bug008 (clés de carte hors référentiel), bug015 (jointure require-where selon
 // l'ordre du DOM), bug017 (plein écran + encarts), bug018 (summary content-box, + LIM-012),
-// lim004 (répéteur imbriqué), lim001 (nombre de requêtes du Plan de relance).
+// lim004 (répéteur imbriqué), lim001 (nombre de requêtes du Plan de relance),
+// overlays (databox + reference-lines/targets, groupe null dans a11y, millésimes numériques).
 import { ouvrir } from './harness.mjs';
 
 const [test] = process.argv.slice(2);
@@ -97,6 +98,42 @@ const tests = {
       console.log('  console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 160)).slice(0, 6));
       await t.fermer();
     }
+  },
+
+  // Trois faits relevés par le chantier 4 (skill métier), rejoués en isolant la variable.
+  async overlays() {
+    const t = await ouvrir('/_test/overlays.html', { bundle });
+    await attendre(6000);
+    const r = await t.page.evaluate(() => {
+      const ov = (id) => {
+        const el = document.getElementById(id);
+        return {
+          reflines: el.querySelectorAll('svg.dsfr-data-chart__reflines').length,
+          targets: el.querySelectorAll('svg.dsfr-data-chart__targets').length,
+          marqueurs: el.querySelectorAll('.dsfr-data-chart__target-marker').length,
+          conteneur: el.querySelector('.dsfr-data-chart__wrapper') ? 'wrapper' : el.querySelector('.dsfr-data-chart__databox-wrapper') ? 'databox-wrapper' : 'aucun',
+          x: el.querySelector('line-chart')?.getAttribute('x'),
+          legende: el.innerText.includes('Trajectoire') || el.innerText.includes('projet'),
+        };
+      };
+      const cellules = (id) => [...document.getElementById(id).querySelectorAll('tbody tr')].map((tr) => [...tr.children].map((c) => c.textContent.trim()).join(' | '));
+      const ticks = (id) => {
+        const c = document.getElementById(id).querySelector('canvas');
+        const ch = window.Chart?.getChart?.(c);
+        return ch ? ch.scales.x.ticks.map((tk) => tk.label) : 'Chart global indisponible';
+      };
+      return {
+        sans: ov('g-sans'), avec: ov('g-avec'),
+        nul: { axeX: document.getElementById('g-null').querySelector('bar-chart')?.getAttribute('x'), table: cellules('a-null') },
+        anneesNum: { xTransmis: document.getElementById('g-num').querySelector('line-chart')?.getAttribute('x'), ticks: ticks('g-num'), table: cellules('a-num') },
+        anneesTxt: { xTransmis: document.getElementById('g-txt').querySelector('line-chart')?.getAttribute('x'), ticks: ticks('g-txt'), table: cellules('a-txt') },
+      };
+    });
+    console.log('version', await t.version());
+    console.log(JSON.stringify(r, null, 1));
+    console.log('console :', t.logs.filter((l) => /overlay|introuvable|dsfr-data-chart|error/i.test(l.texte) || l.type === 'error').map((l) => l.type + ': ' + l.texte.slice(0, 200)));
+    await t.page.screenshot({ path: `capture-overlays-${v}.png`, fullPage: true });
+    await t.fermer();
   },
 
   async bug018() {
