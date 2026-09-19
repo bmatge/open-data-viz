@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le cuivre s'éteint d'abord dans les campagnes — open-data-viz</title>
+  <meta name="description" content="Démonstration dsfr-data : le calendrier de fermeture du réseau cuivre (data.economie.gouv.fr) croisé au référentiel communal INSEE (equipements.sports.gouv.fr) — en habitants et en établissements, pas en communes.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.economie.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://equipements.sports.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <link rel="stylesheet" href="/assets/demo.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       BANDEAU D'OUVERTURE
+       Le seul endroit de ce dépôt où l'on se permet un plein écran : c'est une
+       page de démonstration, et la question qu'elle pose tient en une phrase.
+       Tout y est du DSFR — typographie, couleurs, espacements, boutons ; la
+       liberté prise est la MISE EN PAGE, jamais les composants.
+       ========================================================================== -->
+  <section class="odv-hero">
+    <div class="fr-container odv-hero__corps">
+      <p class="fr-badge fr-badge--new fr-mb-3v">Démonstration — deux portails croisés dans le navigateur</p>
+      <h1 class="odv-hero__titre">Le cuivre s'éteint d'abord<br>dans les campagnes</h1>
+      <p class="odv-hero__chapo">
+        Le réseau téléphonique historique ferme commune par commune, en huit vagues, d'ici 2028.
+        Le calendrier est public. Ce qu'il ne dit pas, c'est <strong>combien d'habitants et
+        d'entreprises</strong> chaque vague emporte — ni <strong>quels territoires</strong> passent
+        en premier.
+      </p>
+      <p class="odv-hero__source fr-text--sm">
+        <span class="fr-icon-database-line fr-icon--sm" aria-hidden="true"></span>
+        <code>fermeture-reseau-cuivre</code> (Bercy) × <code>insee-2020-geoapi-2023</code>
+        (Sports) — joints à la volée, sans serveur.
+      </p>
+      <a class="fr-btn fr-btn--lg fr-icon-arrow-down-line fr-btn--icon-right" href="#reperes">Voir les chiffres</a>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       LE PIPELINE
+       Deux portails de deux ministères, joints dans le navigateur sur le code
+       INSEE. Aucun backend, aucune préparation de données hors ligne.
+       ========================================================================== -->
+
+  <!-- ⚠️ PIÈGE PAYÉ SUR CETTE PAGE : le jeu publie UNE LIGNE PAR COUPLE
+       commune × code postal. Nantes y figure quatre fois. Les « 35 305 communes »
+       que le jeu annonce sont 34 916 communes, et sommer la population sans
+       dédoublonner donne 80,3 millions d'habitants pour un pays qui en compte 68.
+       Le `group-by` ci-dessous EST le dédoublonnage : une ligne par commune.
+       Contrôlé à l'API : aucune commune ne porte deux dates différentes, donc
+       `max(fermeture_commerciale)` ne choisit rien — il replie, c'est tout. -->
+  <dsfr-data-source id="cuivre-brut" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="fermeture-reseau-cuivre"
+    select="code_insee, nom_commune, departement, region, fermeture_commerciale"
+    fetch-mode="export" max-records="40000">
+  </dsfr-data-source>
+
+  <dsfr-data-query id="cuivre" source="cuivre-brut"
+    group-by="code_insee, nom_commune, departement, region"
+    aggregate="fermeture_commerciale:max:bascule">
+  </dsfr-data-query>
+
+  <!-- Le référentiel communal INSEE, servi par un TROISIÈME portail de l'État :
+       population, nombre d'établissements, typologie rurale/urbaine, loi Montagne. -->
+  <dsfr-data-source id="insee" api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="insee-2020-geoapi-2023"
+    select="code_geographique, codedepartement, population, ettot20, typo_rurb_crte, dens_lib, commune_loi_montagne"
+    fetch-mode="export" max-records="40000">
+  </dsfr-data-source>
+
+  <!-- La jointure. Clé : le code INSEE à cinq caractères, zéros de tête compris,
+       identique sur les deux portails (vérifié à l'API sur l'Ain : « 01002 » des
+       deux côtés). `type="inner"` est un choix éditorial, écrit dans les notes :
+       une commune sans référentiel n'a ni population ni établissements, donc
+       aucune des réponses que cette page cherche. -->
+  <dsfr-data-join id="croise" left="cuivre" right="insee"
+    on="code_insee=code_geographique" type="inner">
+  </dsfr-data-join>
+
+  <!-- Colonnes dérivées : l'année de bascule (lisible sur un axe), et le libellé
+       rural/urbain en clair. `when … then … else` — `else` est obligatoire. -->
+  <dsfr-data-normalize id="donnees" source="croise"
+    numeric="population, ettot20"
+    compute="annee = year(bascule);
+             milieu = when typo_rurb_crte = 'RURAL' then 'Commune rurale' else 'Commune urbaine';
+             montagne = when is_empty(commune_loi_montagne) then 'Hors loi Montagne' else 'Loi Montagne'">
+  </dsfr-data-normalize>
+
+  <!-- ==========================================================================
+       1. LES REPÈRES
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w" id="reperes">
+    <h2 class="fr-h3">Ce que pèse la bascule</h2>
+    <p class="fr-text--lead fr-mb-4w">
+      Les chiffres ci-dessous portent sur les communes appariées entre les deux portails. Ils se
+      recalculent à chaque chargement&nbsp;: aucun n'est écrit dans cette page.
+    </p>
+
+    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+      <dsfr-data-kpi source="donnees" value="count" format="nombre"
+        heading="Communes concernées" label="appariées aux deux portails"></dsfr-data-kpi>
+      <dsfr-data-kpi source="donnees" value="population:sum" format="compact"
+        heading="Habitants" label="dans ces communes"></dsfr-data-kpi>
+      <dsfr-data-kpi source="donnees" value="ettot20:sum" format="compact"
+        heading="Établissements" label="entreprises et administrations"></dsfr-data-kpi>
+      <!-- Une part est un RATIO DE SOMMES, jamais une moyenne de parts. -->
+      <dsfr-data-kpi source="donnees"
+        value="population:sum{milieu:eq:Commune rurale} / population:sum"
+        format="pourcentage" decimals="1"
+        heading="Part rurale" label="de la population concernée"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ==========================================================================
+       2. LE MESSAGE — deux vagues, deux France
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w">
+    <h2 class="fr-h3">Deux vagues portent presque tout&nbsp;— et ce ne sont pas les mêmes France</h2>
+    <p class="fr-text--lead">
+      2026 et 2027 emportent chacune près de trente millions d'habitants. Mais 2026 le fait avec
+      <strong>quatre fois plus de communes</strong>&nbsp;: ce sont les petites, et elles passent
+      les premières.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w">
+      <div class="fr-col-12 fr-col-lg-6">
+        <h3 class="fr-h6">Habitants concernés, par année de bascule</h3>
+        <p class="fr-hint-text fr-mb-2v">
+          Compter les habitants et non les communes&nbsp;: une commune n'est pas une unité de mesure
+          de la population.
+        </p>
+        <dsfr-data-query id="par-annee" source="donnees" group-by="annee"
+          aggregate="population:sum:habitants, ettot20:sum:etablissements, code_insee:count:communes"
+          order-by="annee:asc"></dsfr-data-query>
+        <dsfr-data-chart id="g-hab" source="par-annee" type="bar"
+          label-field="annee" value-field="habitants:Habitants"
+          unit-tooltip="habitants" y-min="0"
+          databox databox-title="Habitants concernés par année de bascule"
+          databox-source="data.economie.gouv.fr × equipements.sports.gouv.fr"
+          databox-download></dsfr-data-chart>
+        <dsfr-data-a11y for="g-hab" source="par-annee" table download
+          label-field="annee" value-field="habitants, etablissements, communes"
+          filename="cuivre-par-annee.csv"
+          description="Pour chaque année de bascule, le nombre d'habitants, d'établissements et de communes concernés. Les années 2026 et 2027 portent l'essentiel."></dsfr-data-a11y>
+      </div>
+
+      <div class="fr-col-12 fr-col-lg-6">
+        <h3 class="fr-h6">Communes concernées, par année de bascule</h3>
+        <p class="fr-hint-text fr-mb-2v">
+          Le même calendrier, compté autrement. L'écart entre les deux graphiques <em>est</em> le
+          message&nbsp;: 2026 a quatre fois plus de communes pour autant d'habitants.
+        </p>
+        <dsfr-data-chart id="g-com" source="par-annee" type="bar"
+          label-field="annee" value-field="communes:Communes"
+          unit-tooltip="communes" y-min="0"
+          databox databox-title="Communes concernées par année de bascule"
+          databox-source="data.economie.gouv.fr × equipements.sports.gouv.fr"
+          databox-download></dsfr-data-chart>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       3. RURAL / URBAIN — la lecture qui justifie le titre
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w">
+    <h2 class="fr-h3">La part rurale de chaque vague</h2>
+    <p class="fr-text--lead">
+      Part de la population concernée qui vit dans une commune classée rurale. Une part de
+      population, pas une part de communes&nbsp;: la seconde dirait surtout que les communes rurales
+      sont petites.
+    </p>
+
+    <!-- `share_percent` (0.33.0) : la part du total, en un attribut. Avant, il
+         fallait deux sources, deux clés constantes, une jointure et un calcul. -->
+    <dsfr-data-query id="rural-annee" source="donnees" group-by="annee, milieu"
+      aggregate="population:sum:habitants" order-by="annee:asc"></dsfr-data-query>
+
+    <dsfr-data-chart id="g-rural" source="rural-annee" type="bar" stacked
+      label-field="annee" value-field="habitants" series-field="milieu"
+      unit-tooltip="habitants" y-min="0"
+      databox databox-title="Population concernée par année et par milieu"
+      databox-source="data.economie.gouv.fr × equipements.sports.gouv.fr"
+      databox-download></dsfr-data-chart>
+    <!-- `series-field` sur a11y (0.33.0, AM-082) : sans lui, le tableau rendrait
+         une ligne par couple (année, milieu) sans dire de quelle série vient la
+         valeur — le gain de légende se paierait de l'alternative accessible. -->
+    <dsfr-data-a11y for="g-rural" source="rural-annee" table download
+      label-field="annee" value-field="habitants" series-field="milieu"
+      filename="cuivre-rural-urbain.csv"
+      description="Population concernée par année de bascule, répartie entre communes rurales et urbaines. La vague 2026 est la plus rurale des deux grandes vagues."></dsfr-data-a11y>
+  </div>
+
+  <!-- ==========================================================================
+       4. LA CARTE
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w">
+    <h2 class="fr-h3">Où, département par département</h2>
+    <p class="fr-text--lead">
+      Part de la population du département qui bascule en 2026 ou avant — c'est-à-dire la part déjà
+      engagée. Une choroplèthe de <strong>taux</strong>&nbsp;: une carte de volumes ne dirait que
+      « il y a plus de monde en Île-de-France ».
+    </p>
+
+    <!-- `type="map"` est la choroplèthe DÉPARTEMENTALE : c'est le type par défaut
+         de `dsfr-data-chart`, contours et encarts d'outre-mer embarqués. Il attend
+         un CODE de département (« 38 »), jamais son nom — le jeu de Bercy ne porte
+         que « Isère », c'est le référentiel qui fournit `codedepartement`. -->
+    <dsfr-data-normalize id="donnees-dep" source="donnees"
+      compute="pop_2026 = when annee &lt;= 2026 then population else 0">
+    </dsfr-data-normalize>
+    <dsfr-data-query id="par-dep" source="donnees-dep" group-by="codedepartement"
+      aggregate="population:sum:pop_dep, pop_2026:sum:pop_tot, code_insee:count:nb_communes"
+      where="codedepartement:isnotnull"></dsfr-data-query>
+    <dsfr-data-normalize id="par-dep-taux" source="par-dep"
+      compute="part_2026 = round(pop_tot / pop_dep * 100, 1)"></dsfr-data-normalize>
+
+    <dsfr-data-chart id="c-dep" source="par-dep-taux" type="map"
+      code-field="codedepartement" value-field="part_2026" name="Part basculée d'ici 2026"
+      unit-tooltip="%" selected-palette="sequentialAscending"
+      map-summary="weighted" map-summary-weight="pop_dep"
+      databox databox-title="Part de la population basculée d'ici 2026, par département"
+      databox-source="data.economie.gouv.fr × equipements.sports.gouv.fr"
+      databox-download></dsfr-data-chart>
+    <p class="fr-hint-text">
+      Le résumé «&nbsp;en France&nbsp;» sous le titre est <strong>pondéré par la population</strong>
+      (<code>map-summary="weighted"</code> + <code>map-summary-weight</code>, 0.33.0)&nbsp;: la
+      moyenne arithmétique de 101 pourcentages donnerait à la Lozère le même poids qu'au Nord.
+      C'était LIM-014 du registre, et c'est désormais un attribut.
+    </p>
+    <dsfr-data-a11y for="c-dep" source="par-dep-taux" table download
+      label-field="codedepartement" value-field="part_2026, pop_dep, nb_communes"
+      filename="cuivre-par-departement.csv"
+      description="Pour chaque département, la part de la population concernée qui bascule d'ici 2026, la population totale des communes appariées et leur nombre."></dsfr-data-a11y>
+  </div>
+
+  <!-- ==========================================================================
+       5. L'EXPLORATEUR
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w fr-mb-8w">
+    <h2 class="fr-h3">Et votre commune&nbsp;?</h2>
+    <p class="fr-text--lead">
+      Trente-deux mille communes&nbsp;: on ne les met pas sur une carte de points, on les cherche.
+    </p>
+
+    <div class="odv-dashboard">
+      <details class="odv-filtres odv-filtres--md" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Chercher<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Chercher</h3>
+        <dsfr-data-search id="q" source="donnees"
+          fields="nom_commune, departement, region"
+          label="Votre commune" placeholder="Nom de commune, département…"
+          operator="words" count count-label="commune"></dsfr-data-search>
+        <dsfr-data-facets id="f" source="q"
+          fields="annee, milieu, region"
+          labels="annee:Année de bascule | milieu:Milieu | region:Région"
+          display="annee:select | milieu:select"
+          searchable="region" max-values="8"></dsfr-data-facets>
+      </details>
+
+      <div>
+        <!-- `count-label` (0.33.0, AM-077) : « 1 234 communes » et non
+             « 1234 resultats », qui ne dit rien d'un annuaire de communes. -->
+        <dsfr-data-list source="f" count-label="commune"
+          columns="nom_commune:Commune | departement:Département | bascule:Bascule | population:Habitants | ettot20:Établissements | milieu:Milieu"
+          sort search pagination="15" export>
+        </dsfr-data-list>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       NOTES — les hypothèses éditoriales
+       ========================================================================== -->
+  <section class="fr-container fr-mb-8w odv-analyse fr-pt-6w" id="notes">
+    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
+    <p>Tout ce qui suit est un choix. Il est écrit pour pouvoir être discuté.</p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on a choisi</h3>
+        <ul>
+          <li><strong>Compter les habitants, pas les communes.</strong> Le calendrier officiel
+            s'énonce en communes. Une commune n'est pas une unité de mesure de la population&nbsp;:
+            2026 et 2027 emportent presque autant d'habitants l'une que l'autre, avec un rapport de
+            quatre sur le nombre de communes. Les deux graphiques côte à côte montrent exactement
+            cet écart&nbsp;: c'est le message de la page.</li>
+          <li><strong>Une part de population, pas une part de communes.</strong> Dire « 78&nbsp;%
+            des communes de la vague 2026 sont rurales » est vrai et trompeur — les communes rurales
+            sont petites, ce chiffre le dit surtout. La part qui compte est celle des
+            <em>habitants</em>&nbsp;: 43&nbsp;% en 2026 contre 23&nbsp;% en 2027.</li>
+          <li><strong>Une carte de taux, un résumé pondéré.</strong> La carte porte la part de la
+            population déjà engagée, pas un volume — une choroplèthe de volumes redit la
+            démographie. Et le résumé « en France » est pondéré par la population
+            (<code>map-summary-weight</code>)&nbsp;: la moyenne de 101 pourcentages donnerait à la
+            Lozère le poids du Nord.</li>
+          <li><strong>Une jointure interne.</strong> Une commune absente du référentiel n'a ni
+            population ni établissements&nbsp;: elle ne peut répondre à aucune des questions de cette
+            page. La montrer à zéro serait pire que l'écarter — à condition de dire combien, ce que
+            fait la colonne de droite.</li>
+        </ul>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on ne montre pas</h3>
+        <ul>
+          <li><strong>Une ligne par code postal, pas par commune.</strong> Le jeu de Bercy publie
+            <strong>35&nbsp;305 lignes</strong> pour <strong>34&nbsp;916 communes</strong>&nbsp;:
+            Nantes y figure quatre fois, une par code postal. Sommer la population sans dédoublonner
+            donne <strong>80,3 millions d'habitants</strong> pour un pays qui en compte 68. Le
+            <code>group-by</code> sur le code INSEE <em>est</em> le dédoublonnage. Contrôlé à
+            l'API&nbsp;: aucune commune ne porte deux dates de bascule différentes, donc ce repli ne
+            choisit rien.</li>
+          <li><strong>Environ 9&nbsp;% des communes ne sont pas appariées.</strong> Le référentiel
+            INSEE en compte 35&nbsp;075, le calendrier 34&nbsp;916, et l'intersection
+            31&nbsp;785&nbsp;: communes fusionnées, codes périmés d'un côté ou de l'autre. Les
+            chiffres de cette page portent sur l'intersection, jamais sur « la France ». Le premier
+            KPI le dit.</li>
+          <li><strong>Aucun revenu médian.</strong> Le référentiel porte <code>med20</code>, et il
+            aurait été tentant d'écrire « les communes qui basculent tôt sont plus pauvres ». Une
+            moyenne de médianes n'a pas de sens, et une médiane pondérée de médianes communales
+            n'est pas la médiane des habitants. Faute de pouvoir la calculer honnêtement, elle n'est
+            pas là.</li>
+          <li><strong>Deux collectivités ne sont pas sur la carte, et le résumé s'en ressent.</strong>
+            Saint-Barthélemy (977) et Saint-Martin (978) sont dans la donnée mais absents du
+            découpage départemental de DSFR&nbsp;Chart&nbsp;: la console le dit
+            («&nbsp;2 ligne(s) sur 95 ignorée(s)&nbsp;»). Conséquence subtile, vérifiée par
+            recalcul indépendant&nbsp;: le résumé pondéré affiche <strong>50,56&nbsp;%</strong>,
+            qui est la moyenne pondérée des <em>départements dessinés</em> — quand le ratio
+            national vrai, somme sur somme, vaut <strong>50,53&nbsp;%</strong>. L'écart est de trois
+            centièmes et sans portée ici, mais la règle vaut d'être dite&nbsp;: <em>le résumé d'une
+            carte porte sur ce que la carte montre</em>, pas sur ce que la donnée contient.</li>
+          <li><strong>Ni la fibre, ni la couverture.</strong> Cette page dit quand le cuivre
+            s'éteint, pas ce qui le remplace ni si le remplacement est prêt. C'est la question
+            suivante, et elle demande d'autres jeux.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="odv-verdict fr-mt-4w">
+      <h3 class="fr-h6">Ce que cette page démontre de <code>dsfr-data</code></h3>
+      <p>
+        <strong>Deux portails de deux ministères, joints dans le navigateur, sans serveur.</strong>
+        <code>data.economie.gouv.fr</code> pour le calendrier, <code>equipements.sports.gouv.fr</code>
+        pour le référentiel communal&nbsp;: 35&nbsp;305 et 35&nbsp;075 lignes chargées chacune en
+        <em>une</em> requête (<code>fetch-mode="export"</code>), dédoublonnées, jointes sur le code
+        INSEE, et dérivées — le tout en balises. Aucune préparation hors ligne, aucun backend, aucun
+        fichier intermédiaire&nbsp;: la page est un fichier HTML statique, et les chiffres
+        se recalculent à chaque chargement.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
