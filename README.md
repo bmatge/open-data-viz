@@ -30,7 +30,7 @@ npm run dev        # idem, avec --watch
 ```
 
 Aucune dépendance : le serveur est un `node:http` de 80 lignes qui sert `public/`.
-DSFR, DSFR Chart et `dsfr-data@0.29.1` sont chargés depuis jsDelivr — c'est
+DSFR, DSFR Chart et `dsfr-data@0.31.0` sont chargés depuis jsDelivr — c'est
 volontaire, l'argument à démontrer étant « une balise, un CDN, et ça marche ».
 
 ## Structure
@@ -202,6 +202,22 @@ téléphone pour deux causes CSS**, six chiffres faux en production, un serveur 
 compresse rien, 14 pages qui chargent un bundle inutile, et des pages qui gardent leurs béquilles après
 que la bibliothèque a livré. Rapport et plan d'action en trois vagues :
 [`docs/revue-critique-2026-09.md`](docs/revue-critique-2026-09.md).
+
+**Vague 1 de la revue critique (2026-09-19, [#24](https://github.com/bmatge/open-data-viz/issues/24)).**
+Les cinq quick wins du plan d'action, exécutés et mesurés. **Deux règles CSS, et le débordement
+mobile passe de 56 pages sur 67 à zéro** (relevé au navigateur à 390 px, avant et après) : la
+première est à nous (`1fr` vaut `minmax(auto, 1fr)`), la seconde à la bibliothèque (BUG-018,
+déposé en #898 — vérifié absent du paquet publié 0.31.0, la rustine reste). **Les six chiffres
+faux corrigés**, et aucun n'était un bug de `dsfr-data` : neuf départements à zéro en silence
+(clé par le code là où deux jeux sur quatre l'écrivent à deux caractères), deux séries de
+`bar-line` échangées, « 14 régions » pour 18 (un `count` sur une query `limit="14"`), sept parts
+recopiées de la page voisine, « 57 lignes sans position » pour 32, et quatre chiffres figés dans
+le chapô d'un jeu quotidien. **Le serveur ne meurt plus sur `/%`** (`decodeURIComponent` hors de
+tout `try`, reproduit avant / retenté après), compresse (`retours.json` 436 → 120 Ko en brotli)
+et répond 304. Onze pages passent au bundle `core`, trois cessent de charger DSFR Chart, Capytale
+passe de 14 requêtes à 3, `/retours` de 115 248 px de haut à 13 380. **Deux points de la revue se
+sont avérés caducs** : le troisième débordement annoncé sur les 61 pages à tableaux n'apparaît pas
+(zéro page sur 67), et le gain du `select` sur `ips-colleges` est de 14 % et non de 4,9 Mo.
 
 Les trois reconstitutions du lot 6 (Signal Conso, Rappel Conso, contrôle technique) ont une page
 officielle en 404 et un identifiant de jeu périmé, mais la donnée existe toujours — parfois mise à
