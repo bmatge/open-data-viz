@@ -11,6 +11,7 @@
 //
 // Dette de preuve (open-data-viz#39, rejouée le 2026-09-19 contre la 0.31.0) :
 //   am056   une clé, deux noms de champ : la voie native marche, et ce qu'elle coûte
+//   am055   cadrage d'une map-monde : les attributs du map-chart reellement instancie
 //   am063   échelle logarithmique : trois orthographes, et l'arbitrage dsfr-data / dsfr-chart
 //   am081   libellé de valeur sur une facette : trois formes, toutes rendent le code
 //   bug009  query group-by sur une source partagée, forme immédiate ET forme tardive (#853)
@@ -167,6 +168,24 @@ const tests = {
     await attendre(4000);
     console.log('Nouvelle-Aquitaine  :', JSON.stringify(await lire()));
     console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 160)).slice(0, 6));
+    await t.fermer();
+  },
+
+  // AM-055 : cadrage d'une map-monde. Arbitrage dsfr-data / dsfr-chart : on releve
+  // les attributs de l'element map-chart REELLEMENT instancie.
+  async am055() {
+    const t = await ouvrir('/_test/am055.html', { bundle });
+    await attendre(8000);
+    const r = await t.page.evaluate(() => {
+      const lire = (id) => ({
+        elementsInstancies: [...new Set([...document.getElementById(id).querySelectorAll('*')].map((e) => e.tagName.toLowerCase()).filter((n) => n.includes('-')))],
+        attributsDuMapChart: [...(document.getElementById(id).querySelector('map-chart')?.attributes ?? [])].map((a) => a.name),
+      });
+      return { nu: lire('g1'), avecCadrage: lire('g2'), attributsRetenus: [...document.getElementById('g2').attributes].map((a) => a.name) };
+    });
+    console.log('version', await t.version());
+    console.log(JSON.stringify(r, null, 1));
+    console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 200)).slice(0, 8));
     await t.fermer();
   },
 
