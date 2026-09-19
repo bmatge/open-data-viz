@@ -30,7 +30,7 @@ npm run dev        # idem, avec --watch
 ```
 
 Aucune dépendance : le serveur est un `node:http` de 80 lignes qui sert `public/`.
-DSFR, DSFR Chart et `dsfr-data@0.31.0` sont chargés depuis jsDelivr — c'est
+DSFR, DSFR Chart et `dsfr-data@0.32.0` sont chargés depuis jsDelivr — c'est
 volontaire, l'argument à démontrer étant « une balise, un CDN, et ça marche ».
 
 ## Structure
