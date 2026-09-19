@@ -126,4 +126,56 @@
 
   poser('site-header', entete);
   poser('site-footer', pied);
+
+  /* ------------------------------------------ Colonne de filtres repliable */
+  /* Sur telephone, la colonne de filtres s'empile au-dessus des donnees : le
+     premier chiffre de la page tombait entre 1 et 5 ecrans de defilement
+     (mesure du 2026-09-19 a 390 x 780). Le panneau se replie donc sous le point
+     de rupture ou `.odv-dashboard` passe en deux colonnes -- 62em, la meme
+     valeur qu'en CSS, tenue ici en une constante pour qu'elles ne divergent pas.
+
+     On pose l'attribut `open` plutot que de forcer l'ouverture en CSS : Chrome
+     masque le contenu d'un <details> ferme par `::details-content`, qu'aucune
+     regle sur l'enfant ne defait. Le HTML porte `open` par defaut, donc une page
+     sans JavaScript garde ses filtres deployes -- degradation vers l'etat
+     d'avant, jamais vers des filtres inatteignables. */
+  const DEUX_COLONNES = window.matchMedia('(min-width: 62em)');
+
+  const panneaux = [...document.querySelectorAll('details.odv-filtres')];
+
+  /* Replie, le panneau doit dire ce qu'il cache : sans ce compte, l'utilisateur
+     qui a filtre puis referme ne voit plus que sa page est filtree. Les filtres
+     actifs se lisent sur les controles rendus par dsfr-data (cases cochees,
+     selects renseignes, champ de recherche non vide). */
+  const compter = (panneau) => {
+    const coches = panneau.querySelectorAll('input[type="checkbox"]:checked, input[type="radio"]:checked:not([value=""])').length;
+    const selects = [...panneau.querySelectorAll('select')].filter((s) => s.value && s.value !== '').length;
+    const textes = [...panneau.querySelectorAll('input[type="search"], input[type="text"]')].filter((i) => i.value.trim() !== '').length;
+    return coches + selects + textes;
+  };
+
+  const rafraichirCompte = (panneau) => {
+    const cible = panneau.querySelector('.odv-filtres__compte');
+    if (!cible) return;
+    const n = compter(panneau);
+    cible.textContent = n ? ` (${n} actif${n > 1 ? 's' : ''})` : '';
+  };
+
+  const appliquer = () => {
+    for (const panneau of panneaux) {
+      panneau.open = DEUX_COLONNES.matches;
+      rafraichirCompte(panneau);
+    }
+  };
+
+  if (panneaux.length) {
+    appliquer();
+    DEUX_COLONNES.addEventListener('change', appliquer);
+    /* Les facettes se rendent apres coup et se re-rendent a chaque refiltre :
+       on ecoute le panneau plutot que de compter une fois pour toutes. */
+    for (const panneau of panneaux) {
+      panneau.addEventListener('change', () => rafraichirCompte(panneau));
+      panneau.addEventListener('input', () => rafraichirCompte(panneau));
+    }
+  }
 })();
