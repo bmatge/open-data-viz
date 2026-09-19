@@ -147,6 +147,24 @@ Les fiches de référence `dsfr-data` s'obtiennent via le serveur MCP **ChartsBu
 (`list_skills`, `get_skill(id, section)`). Ne pas deviner un attribut : le vérifier.
 Le code source fait autorité en dernier ressort : `~/Developer/GitHub/dsfr-data`.
 
+## Skills
+
+Deux skills, servies par le même canal, à lire dans cet ordre avant d'écrire une page :
+
+1. **`datavizMetier`** — le sens avant la syntaxe : quelle question et pour quel lecteur, quelle
+   forme, échelles honnêtes (moyenne de taux, résumé de carte pondéré), sens des variations
+   (`sens_de_l_augmentation`), phrase de lecture, tableau équivalent comme lecture, ce qu'on ne
+   montre pas (groupe null, troncature, échantillon). Chaque règle est un cas de ce dépôt (le
+   « Score moyen » du Baromètre, LIM-014, AM-027…) traduit en geste `dsfr-data`, et se termine par
+   une grille de relecture en douze points. `get_skill("datavizMetier")` via le MCP ; source unique
+   `~/Developer/GitHub/dsfr-data/skills/dataviz-metier/` (ADR-136), **aucune copie ici**. Pour la
+   charger automatiquement dans toute session : `npm run skills:install -- --global` dans
+   `dsfr-data`.
+2. **`dsfr-data`** (skill technique, générée depuis le code) — la grammaire des attributs.
+
+Quand une page du banc apprend une règle éditoriale nouvelle, elle se consigne d'abord ici
+(registre, `verifie` obligatoire), puis remonte dans le skill par PR sur `dsfr-data`.
+
 ## Le portail d'origine
 
 Le source AngularJS de n'importe quelle page du portail se récupère ainsi :
