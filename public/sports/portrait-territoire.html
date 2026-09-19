@@ -1029,9 +1029,7 @@
   <!-- La normalisation du taux APRÈS la jointure, pas avant : un
        transformateur à droite d'une jointure dont la gauche attend un filtre
        fige l'afficheur sur « Chargement… » (voir plus haut). -->
-  <dsfr-data-join id="j-bpj-j" left="t-reg" right="s-bpj" on="reg_code" type="inner"></dsfr-data-join>
-  <dsfr-data-normalize id="j-bpj-t" source="j-bpj-j" compute="taux = replace(taux_emploi_sortants, ',', '.')"></dsfr-data-normalize>
-  <dsfr-data-normalize id="j-bpj" source="j-bpj-t" numeric="taux"></dsfr-data-normalize>
+  <dsfr-data-join id="j-bpj" left="t-reg" right="s-bpj-n" on="reg_code" type="inner"></dsfr-data-join>
   <dsfr-data-join id="j-bpjm" left="t-reg" right="s-bpjm" on="reg_code" type="inner"></dsfr-data-join>
   <dsfr-data-query id="s-bpjm-fr" source="s-bpjm" where="reg_code:eq:FR"></dsfr-data-query>
 
@@ -1049,9 +1047,7 @@
 
   <!-- Comparaison : la région du territoire de comparaison, mêmes jointures. -->
   <dsfr-data-join id="jc-prat" left="c-reg" right="s-prat" on="reg_code" type="inner"></dsfr-data-join>
-  <dsfr-data-join id="jc-bpj-j" left="c-reg" right="s-bpj" on="reg_code" type="inner"></dsfr-data-join>
-  <dsfr-data-normalize id="jc-bpj-t" source="jc-bpj-j" compute="taux = replace(taux_emploi_sortants, ',', '.')"></dsfr-data-normalize>
-  <dsfr-data-normalize id="jc-bpj" source="jc-bpj-t" numeric="taux"></dsfr-data-normalize>
+  <dsfr-data-join id="jc-bpj" left="c-reg" right="s-bpj-n" on="reg_code" type="inner"></dsfr-data-join>
 
   <!-- ====================== Analyse de reproduction ====================== -->
   <section class="odv-analyse fr-py-8w" id="analyse">
@@ -1140,16 +1136,22 @@
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Une jointure qui reste sur « Chargement… », selon l'ordre du DOM.</strong>
-              Le référentiel de région porte <code>require-where</code> : au niveau France, il attend.
-              Une jointure dont une entrée attend et dont l'autre charge relaie le <em>dernier</em>
-              événement reçu ; si c'est le chargement, rien ne le lève jamais. Six KPI, un podium
-              et deux graphiques restaient figés, quand la jointure jumelle du comparateur, écrite
-              pareil mais placée plus bas, affichait son message d'attente. Rejoué sur la 0.29
-              construite : identique. Contourné en déclarant les jeux régionaux <em>avant</em> le
-              référentiel, et en normalisant le taux BPJEPS <em>après</em> la jointure plutôt
-              qu'avant — un transformateur à droite suffisait à refiger l'afficheur. Fragile, et
-              rien ne le signale (BUG-015).</li>
+            <li><strong>Une jointure qui restait sur « Chargement… », selon l'ordre du DOM — corrigé
+              depuis.</strong> Le référentiel de région porte <code>require-where</code> : au niveau
+              France, il attend. Une jointure dont une entrée attend et dont l'autre charge relayait
+              le <em>dernier</em> événement reçu ; si c'était le chargement, rien ne le levait jamais.
+              Six KPI, un podium et deux graphiques restaient figés, quand la jointure jumelle du
+              comparateur, écrite pareil mais placée plus bas, affichait son message d'attente. La
+              seule différence entre la page qui marchait et celle qui bloquait était l'ordre de deux
+              balises, sans message ni erreur console. Déposé en <code>dsfr-data#897</code>,
+              <strong>corrigé en 0.32.0</strong> : un transformateur à plusieurs entrées dérive
+              désormais son état de <em>toutes</em> ses entrées — erreur d'abord, puis attente, puis
+              chargement. Le contournement a été retiré de cette page : les deux jointures BPJEPS
+              joignent la source déjà normalisée au lieu de redupliquer la normalisation derrière
+              elles, soit <strong>quatre <code>dsfr-data-normalize</code> en moins</strong>, à
+              chiffres rigoureusement identiques (Bretagne : 86,8 % d'insertion, 553 diplômes,
+              recalculés à l'API). Ce qui reste vrai : la délégation ne revient pas quand une chaîne
+              redevient exclusive (BUG-015).</li>
             <li><strong>Deux listes écrites à la main, faute de facette qui convienne.</strong>
               18 régions et 101 départements en <code>&lt;option&gt;</code> générées depuis l'API.
               <code>dsfr-data-facets context="…"</code> (0.23.0) peuple un sélecteur depuis la donnée,
@@ -1269,10 +1271,13 @@
           rigoureusement identiques. C'est le meilleur résumé de ce que vaut un registre de
           constats : ce qui était un contournement au lot 19 est redevenu une ligne d'attribut au
           lot 20.</p>
-        <p>Ce qui résiste est ailleurs, et plus gênant : <strong>un pipeline correct peut rester
-          figé sur « Chargement… »</strong> selon l'ordre de ses balises, et
-          <strong>une page à deux contextes ne sait pas partager l'URL</strong>. Les deux se
-          contournent ; aucun ne se voit avant d'avoir cherché pourquoi.</p>
+        <p>Des deux choses qui résistaient — <strong>un pipeline correct figé sur
+          « Chargement… »</strong> selon l'ordre de ses balises, et <strong>une page à deux contextes
+          qui ne sait pas partager l'URL</strong> —, la première est tombée : déposée en
+          <code>dsfr-data#897</code>, corrigée en 0.32.0, contournement retiré. La seconde attend la
+          0.33.0 (<code>dsfr-data#942</code>, PG-028). C'est le motif que ce banc observe depuis vingt
+          lots : <em>ce qui était un contournement devient une ligne d'attribut</em> — à condition
+          d'avoir écrit le constat, avec la preuve qui l'établit, au moment où il coûtait.</p>
       </div>
     </div>
   </section>
@@ -1284,7 +1289,7 @@
 
 <script src="/assets/layout.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.31.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.32.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

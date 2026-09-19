@@ -123,6 +123,22 @@ const tests = {
           conteneur: el.querySelector('.dsfr-data-chart__wrapper') ? 'wrapper' : el.querySelector('.dsfr-data-chart__databox-wrapper') ? 'databox-wrapper' : 'aucun',
           x: el.querySelector('line-chart')?.getAttribute('x'),
           legende: el.innerText.includes('Trajectoire') || el.innerText.includes('projet'),
+          // BUG-019 : les overlays etaient CONSTRUITS et comptes, mais peints SOUS la
+          // carte de la DataBox. Les compter ne prouve donc rien. Ce que le correctif
+          // (dsfr-data#903) enonce : l'overlay est pose dans le PREMIER ANCETRE
+          // POSITIONNE du canvas, donc dans son contexte d'empilement, donc peint
+          // apres lui. C'est cela qu'on mesure -- et c'est vrai ou faux, pas approximatif.
+          empilement: (() => {
+            const svg = el.querySelector('svg.dsfr-data-chart__reflines');
+            const cv = el.querySelector('canvas');
+            if (!svg || !cv) return 'pas de couple svg/canvas';
+            let a = cv.parentElement;
+            while (a && getComputedStyle(a).position === 'static') a = a.parentElement;
+            const memeContexte = svg.parentElement === a;
+            const apres = cv.compareDocumentPosition(svg) & Node.DOCUMENT_POSITION_FOLLOWING;
+            return (memeContexte ? 'meme contexte' : 'contexte separe (' + (svg.parentElement?.className || '?') + ' vs ' + (a?.className || '?') + ')')
+              + ', ' + (apres ? 'peint apres le canvas' : 'peint avant le canvas');
+          })(),
         };
       };
       const cellules = (id) => [...document.getElementById(id).querySelectorAll('tbody tr')].map((tr) => [...tr.children].map((c) => c.textContent.trim()).join(' | '));
