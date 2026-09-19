@@ -80,6 +80,13 @@ c'est la référence de fidélité des données.
   écrite, elle devient une entrée `faux-probleme` (ce que je croyais / ce qui est vrai /
   ce qui reste vrai / comment je l'ai vérifié), et l'analyse de la page concernée est
   réécrite. La trace de la correction fait partie du livrable.
+- **Une mise à jour de statut obéit à la même règle qu'une entrée : pas de preuve rejouée,
+  pas de mise à jour.** « Corrigé », « non traité par la 0.29.0 », « toujours absent » sont des
+  affirmations comme les autres. BUG-008 est resté « ouvert » trois versions mineures après sa
+  correction (0.26.0) parce qu'une revue de version l'avait déclaré « non traité » sans le
+  rejouer, alors que l'entrée portait encore « NON REJOUÉ AU NAVIGATEUR » (FP-014). Rejouer
+  (`scripts/rejeu-findings/`, page minimale, bundle du CDN **et** paquet npm à comparer), puis
+  écrire la preuve datée — ou laisser la dette visible.
 
 ## Pièges déjà payés (ne pas les repayer)
 
@@ -105,7 +112,7 @@ c'est la référence de fidélité des données.
 | Flottant IEEE dans un tableau a11y | `dsfr-data-normalize round="champ:2"` en amont. Le point décimal reste (AM-033). |
 | Milliards dans un KPI | `format="compact"` (absent du JSDoc du KPI) + facteur d'échelle dans le `select` ODSQL (`sum(x)*1000`). L'unité va dans `label` (AM-031). |
 | Facette serveur sur un champ date | `server-facets` affiche bien les années (FP-011) mais le refine `champ = "2022"` est typé texte → 400 silencieux (BUG-005). Pas de facette date en mode serveur tant que ce n'est pas corrigé. |
-| Version de `dsfr-data` épinglée | Le dépôt est monté en **0.29.0** (2026-09-12, 64 balises). Une capacité peut être native, publiée, et **absente du bundle chargé** — auquel cas ses attributs sont ignorés **sans erreur console**. Avant de conclure à un manque : chercher dans le source, puis vérifier dans quelle version publiée l'attribut apparaît (`npm pack dsfr-data@<v>` + grep dans `package/dist/`). Quatre verdicts (ADR-109) : capacité native (faux problème) / native mais postérieure à la version épinglée (montée de version) / livrée sur `origin/main` mais pas encore publiée (attendre, et le dire ainsi) / absente du source (demande à la bibliothèque). |
+| Version de `dsfr-data` épinglée | Le dépôt est monté en **0.29.1** (2026-09-12, 64 balises) ; la **0.30.0 est publiée depuis le 2026-09-14** et aucune page ne la charge — elle règle BUG-017 (plein écran + encarts) et la forme tardive de BUG-009 (montée : #35). Une capacité peut être native, publiée, et **absente du bundle chargé** — auquel cas ses attributs sont ignorés **sans erreur console**. Avant de conclure à un manque : chercher dans le source, puis vérifier dans quelle version publiée l'attribut apparaît (`npm pack dsfr-data@<v>` + grep dans `package/dist/`). Quatre verdicts (ADR-109) : capacité native (faux problème) / native mais postérieure à la version épinglée (montée de version) / livrée sur `origin/main` mais pas encore publiée (attendre, et le dire ainsi) / absente du source (demande à la bibliothèque). |
 | Fond de carte trop chargé | **Périmé — `tiles-style="muted"` existe depuis 0.22.0** (#686), vérifié dans le bundle publié (absent en 0.20.0). La classe `odv-fond-attenue` de `site.css` devient inutile une fois le dépôt monté en 0.23.0 (AM-017, résolu côté bibliothèque). |
 | Contours administratifs décoratifs | Pas dans DSFR Chart (SVG, pas GeoJSON). GeoJSON simplifié statique `public/data/geo/regions-simplifiees.geojson` + `transform="features"` + `geo-field="geometry"` ; métropole seulement (AM-016). |
 | `name` d'un `dsfr-data-chart` | Chaîne simple partout. La forme `'["…"]'` s'affiche littéralement sur les cartes (AM-023). |

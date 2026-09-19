@@ -39,9 +39,9 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-15 critiques ont été **retirées** au fil du
+16 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
-`faux-probleme` du registre), et 92
+`faux-probleme` du registre), et 94
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
 registre, avec ce qui en demeure vrai). Ce rapport ne liste que ce qui a résisté à la vérification.
 
@@ -53,7 +53,7 @@ apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux const
 (AM-017, AM-039) en sont sortis.
 
 Le dépôt est désormais monté en `dsfr-data@0.28.0`, et le registre en tire les conséquences :
-les jalons 0.21.1 à 0.28.0 ont comblé 92 des constats déposés,
+les jalons 0.21.1 à 0.28.0 ont comblé 94 des constats déposés,
 passés au statut `corrige` et sortis de ce rapport. Chaque constat restant a été **rejoué contre
 la 0.28.0** avant d'entrer ici : ce qui suit n'est ni livré ni planifié à la date de ce rapport.
 
