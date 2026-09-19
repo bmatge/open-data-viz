@@ -8,6 +8,14 @@
 // l'ordre du DOM), bug017 (plein écran + encarts), bug018 (summary content-box, + LIM-012),
 // lim004 (répéteur imbriqué), lim001 (nombre de requêtes du Plan de relance),
 // overlays (databox + reference-lines/targets, groupe null dans a11y, millésimes numériques).
+//
+// Dette de preuve (open-data-viz#39, rejouée le 2026-09-19 contre la 0.31.0) :
+//   am056   une clé, deux noms de champ : la voie native marche, et ce qu'elle coûte
+//   am063   échelle logarithmique : trois orthographes, et l'arbitrage dsfr-data / dsfr-chart
+//   am081   libellé de valeur sur une facette : trois formes, toutes rendent le code
+//   bug009  query group-by sur une source partagée, forme immédiate ET forme tardive (#853)
+//   pg028   deux contextes url-sync sur le même nom de champ : l'URL n'en garde qu'un
+//   pg029   deux contextes sur un même <select> : l'ordre de déclaration décide
 import { ouvrir } from './harness.mjs';
 
 const [test] = process.argv.slice(2);
@@ -134,6 +142,141 @@ const tests = {
     console.log('console :', t.logs.filter((l) => /overlay|introuvable|dsfr-data-chart|error/i.test(l.texte) || l.type === 'error').map((l) => l.type + ': ' + l.texte.slice(0, 200)));
     await t.page.screenshot({ path: `capture-overlays-${v}.png`, fullPage: true });
     await t.fermer();
+  },
+
+  // ── Dette de preuve (open-data-viz#39) : six entrees etablies au source ou au
+  // JSDoc, jamais rejouees au navigateur. Rejouees ici contre la 0.31.0.
+
+  // AM-056 : une cle, deux noms de champ selon le jeu. La voie native est un
+  // context-filter par jeu sur le meme `ui` — verifie qu'elle marche.
+  async am056() {
+    const t = await ouvrir('/_test/am056.html', { bundle });
+    await attendre(3000);
+    const lire = () => t.page.evaluate(() => ({
+      es: document.getElementById('k-es').innerText.replace(/\s+/g, ' ').trim(),
+      insee: document.getElementById('k-insee').innerText.replace(/\s+/g, ' ').trim(),
+      tags: document.getElementById('tags').innerText.replace(/\s+/g, ' ').trim(),
+      requetes: performance.getEntriesByType('resource').filter((r) => /equipements\.sports/.test(r.name)).length,
+    }));
+    console.log('version', await t.version());
+    console.log('au chargement (require-where) :', JSON.stringify(await lire()));
+    await t.page.selectOption('#sel', 'Bretagne');
+    await attendre(4000);
+    console.log('Bretagne            :', JSON.stringify(await lire()));
+    await t.page.selectOption('#sel', 'Nouvelle-Aquitaine');
+    await attendre(4000);
+    console.log('Nouvelle-Aquitaine  :', JSON.stringify(await lire()));
+    console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 160)).slice(0, 6));
+    await t.fermer();
+  },
+
+  // AM-063 : echelle logarithmique. Trois orthographes essayees + inspection de
+  // l'objet Chart.js reellement construit par DSFR Chart.
+  async am063() {
+    const t = await ouvrir('/_test/am063.html', { bundle });
+    await attendre(6000);
+    const r = await t.page.evaluate(() => {
+      const ech = (id) => {
+        const c = document.getElementById(id).querySelector('canvas');
+        const ch = window.Chart?.getChart?.(c);
+        return ch ? { typeAxeY: ch.scales.y?.type, min: ch.scales.y?.min, max: ch.scales.y?.max } : 'Chart global indisponible';
+      };
+      return {
+        defaut: ech('g1'),
+        avecLog: ech('g2'),
+        attributsRetenus: [...document.getElementById('g2').attributes].map((a) => a.name),
+        barChartAttrs: [...(document.getElementById('g2').querySelector('bar-chart')?.attributes ?? [])].map((a) => a.name),
+      };
+    });
+    console.log('version', await t.version());
+    console.log(JSON.stringify(r, null, 1));
+    console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 200)).slice(0, 8));
+    await t.fermer();
+  },
+
+  // AM-081 : libelle de valeur sur une facette. Trois formes, dont un attribut
+  // invente — pour verifier qu'il est ignore EN SILENCE.
+  async am081() {
+    const t = await ouvrir('/_test/am081.html', { bundle });
+    await attendre(6000);
+    const r = await t.page.evaluate(() => {
+      const vals = (id) => [...document.getElementById(id).querySelectorAll('label, .fr-label, legend')].map((e) => e.textContent.trim()).filter(Boolean).slice(0, 12);
+      return { f1: vals('f1'), f2: vals('f2'), f3: vals('f3') };
+    });
+    console.log('version', await t.version());
+    console.log(JSON.stringify(r, null, 1));
+    console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 200)).slice(0, 8));
+    await t.fermer();
+  },
+
+  // BUG-009 : une query group-by branchee sur une source partagee. Forme immediate
+  // ET forme TARDIVE (#853, livree en 0.30.0) : la query ajoutee au DOM apres coup.
+  async bug009() {
+    const t = await ouvrir('/_test/bug009.html', { bundle });
+    await attendre(6000);
+    const avant = await t.page.evaluate(() => ({
+      kpiSource: document.getElementById('k').innerText.replace(/\s+/g, ' ').trim(),
+      lignesListe: document.querySelectorAll('#d .l').length,
+      premieres: [...document.querySelectorAll('#d .l')].map((e) => e.textContent.trim()).slice(0, 3),
+      kpiQuery: document.getElementById('kq').innerText.replace(/\s+/g, ' ').trim(),
+    }));
+    console.log('version', await t.version());
+    console.log('avant la query tardive :', JSON.stringify(avant));
+    await attendre(7000); // la seconde query est injectee a t+4 s
+    const apres = await t.page.evaluate(() => ({
+      kpiSource: document.getElementById('k').innerText.replace(/\s+/g, ' ').trim(),
+      lignesListe: document.querySelectorAll('#d .l').length,
+      premieres: [...document.querySelectorAll('#d .l')].map((e) => e.textContent.trim()).slice(0, 3),
+      kpiQuery: document.getElementById('kq').innerText.replace(/\s+/g, ' ').trim(),
+      kpiQueryTardive: document.getElementById('kq2')?.innerText.replace(/\s+/g, ' ').trim() ?? 'absent',
+    }));
+    console.log('apres la query tardive :', JSON.stringify(apres));
+    console.log('console :', t.logs.filter((l) => l.type !== 'log' || /partag|source|group/i.test(l.texte)).map((l) => l.type + ': ' + l.texte.slice(0, 200)).slice(0, 10));
+    await t.fermer();
+  },
+
+  // PG-028 : deux contextes url-sync sur le MEME nom de champ. On choisit deux
+  // regions differentes, on releve l'URL, on la recharge.
+  async pg028() {
+    const t = await ouvrir('/_test/pg028-a.html', { bundle });
+    await attendre(3000);
+    await t.page.selectOption('#sel-ref', 'Bretagne');
+    await attendre(2500);
+    await t.page.selectOption('#sel-cmp', 'Normandie');
+    await attendre(4000);
+    const etat = () => t.page.evaluate(() => ({
+      url: location.search,
+      selRef: document.getElementById('sel-ref').value,
+      selCmp: document.getElementById('sel-cmp').value,
+      kRef: document.getElementById('k-ref').innerText.replace(/\s+/g, ' ').trim(),
+      kCmp: document.getElementById('k-cmp').innerText.replace(/\s+/g, ' ').trim(),
+    }));
+    console.log('version', await t.version());
+    const a = await etat();
+    console.log('apres les deux choix :', JSON.stringify(a));
+    await t.page.goto('http://localhost:3000/_test/pg028-a.html' + a.url, { waitUntil: 'domcontentloaded' });
+    await attendre(6000);
+    console.log('apres rechargement   :', JSON.stringify(await etat()));
+    console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 200)).slice(0, 8));
+    await t.fermer();
+  },
+
+  // PG-029 : deux contextes sur un meme <select>, l'un url-sync l'autre non.
+  // L'ordre de declaration decide si le lien profond s'applique aux deux.
+  async pg029() {
+    for (const ordre of ['plain-dabord', 'sync-dabord']) {
+      const t = await ouvrir(`/_test/pg029-${ordre}.html?reg_nom=Bretagne`, { bundle });
+      await attendre(7000);
+      const r = await t.page.evaluate(() => ({
+        select: document.getElementById('sel').value,
+        a: document.getElementById('k-a').innerText.replace(/\s+/g, ' ').trim(),
+        b: document.getElementById('k-b').innerText.replace(/\s+/g, ' ').trim(),
+        requetes: performance.getEntriesByType('resource').filter((r) => /where=/.test(r.name)).map((r) => decodeURIComponent(r.name).match(/where=[^&]*/)?.[0]).filter(Boolean),
+      }));
+      console.log(ordre.padEnd(14), '| version', await t.version(), '|', JSON.stringify(r));
+      console.log('   console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 160)).slice(0, 4));
+      await t.fermer();
+    }
   },
 
   async bug018() {
