@@ -25,18 +25,25 @@
        registre, pas des choix de mise en forme.
        ------------------------------------------------------------------ */
 
-    /* BUG-018 : le <summary> de dsfr-data-a11y est en content-box et
-       déborde de 16 px sur téléphone. Mesuré sur cette page. */
-    dsfr-data-a11y summary { box-sizing: border-box; }
+    /* Deux règles ont disparu d'ici le 2026-09-19, et pour deux raisons opposées.
+       La rustine BUG-018 (`dsfr-data-a11y summary { box-sizing: border-box }`)
+       est devenue inutile : le composant pose la règle lui-même depuis la 0.32.0.
+       Le masquage du compteur « N resultats » (AM-034/AM-044) est devenu SANS
+       OBJET : les douze `dsfr-data-display` de cette page sont des
+       `dsfr-data-repeat`, et `repeat` est transparent — aucun compteur, aucun
+       `role`, aucun `aria-live`. On ne masque plus ce qui n'est plus émis. */
 
-    /* AM-034/AM-044 : dsfr-data-display rend un compteur « N resultats »
-       (sans accent) qu'aucun attribut ne désactive — contrairement à
-       dsfr-data-search, qui a count-label depuis la 0.29.0. */
-    .odv-sans-compteur > .dsfr-data-display > p.fr-text--sm { display: none; }
+    /* PG-011 : ce composant n'a pas de style d'hôte. */
+    dsfr-data-chart { display: block; }
 
-
-    /* PG-011 : ces deux composants n'ont pas de style d'hôte. */
-    dsfr-data-display, dsfr-data-chart { display: block; }
+    /* `lazy` n'estampe le graphique d'une ligne qu'a son approche du viewport, et
+       il NE RESERVE PAS la hauteur a la place de l'auteur (JSDoc de l'attribut).
+       Sans cette reserve, chaque ligne mesure la hauteur de son seul titre --
+       24 px mesures --, la page est fausse de bout en bout, et le defilement
+       depasse les lignes avant qu'elles aient grandi : 4 graphiques estampes sur
+       103 apres un defilement complet. La reserve est posee sur NOTRE conteneur
+       de gabarit, pas sur le DOM interne du composant (la lecon de BUG-018). */
+    .odv-question { min-height: 24rem; }
   </style>
 </head>
 <body>
@@ -162,6 +169,11 @@
              valeurs_txt = concat(p_txt, ' % contre ', n_txt, ' %');
              ecart_txt = replace(concat(when score_prof >= score_nat then '+' else '−', abs(round(score_prof - score_nat, 1))), '.', ',')">
   </dsfr-data-normalize>
+  <!-- Source scopée par `dsfr-data-repeat` (0.32.0, #891). La partition préserve
+       l'ordre des lignes : trier UNE fois par `libelle_reponse` ici vaut le
+       `order-by` que portait chacune des 103 requêtes par question. -->
+  <dsfr-data-query id="ecarts-tri" source="ecarts" order-by="libelle_reponse:asc"></dsfr-data-query>
+
   <dsfr-data-query id="top-ecarts" source="ecarts" order-by="ecart_abs:desc" limit="6"></dsfr-data-query>
 
   <!-- ---------- Ce qui bouge le plus, au national ----------
@@ -462,26 +474,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-2-liste" source="q-ch-2" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-2-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc2`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-2-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc2" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc2}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-2" table download
               label="TPE PME interrogées — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -498,26 +517,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-5-liste" source="q-ch-5" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-5-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc5`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-5-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc5" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc5}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-5" table download
               label="Perception du numérique — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -534,26 +560,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-6-liste" source="q-ch-6" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-6-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc6`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-6-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc6" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc6}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-6" table download
               label="Promotion et développement commercial sur internet — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -570,26 +603,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-7-liste" source="q-ch-7" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-7-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc7`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-7-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc7" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc7}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-7" table download
               label="Gestion et pilotage de l’entreprise avec le numérique — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -606,26 +646,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-8-liste" source="q-ch-8" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-8-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc8`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-8-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc8" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc8}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-8" table download
               label="Intelligence artificielle — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -642,26 +689,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-9-liste" source="q-ch-9" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-9-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc9`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-9-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc9" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc9}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-9" table download
               label="Cybersécurité — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -678,26 +732,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-10-liste" source="q-ch-10" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-10-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc10`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-10-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc10" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc10}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-10" table download
               label="Connectivité — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -714,26 +775,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-11-liste" source="q-ch-11" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-11-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc11`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-11-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc11" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc11}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-11" table download
               label="Sobriété numérique — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -750,26 +818,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-12-liste" source="q-ch-12" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-12-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc12`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-12-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc12" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc12}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-12" table download
               label="Modes d’acquisition et d’installation — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -786,26 +861,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-13-liste" source="q-ch-13" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-13-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc13`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-13-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc13" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc13}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-13" table download
               label="Dépenses et projets numériques — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -822,26 +904,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-14-liste" source="q-ch-14" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-14-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc14`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-14-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc14" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc14}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-14" table download
               label="Compétences numériques et accompagnement — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -858,26 +947,33 @@
             <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
             <dsfr-data-query id="q-ch-15-liste" source="q-ch-15" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
 
-            <!-- Un graphique PAR QUESTION, comme l'original. Le gabarit d'un
-                 `dsfr-data-display` peut contenir des composants `dsfr-data-*` :
-                 son rendu passe par `.innerHTML`, donc ils sont rehaussés. La
-                 `dsfr-data-query` interpolée donne à chaque instance SON
-                 sous-ensemble. Mesuré en 0.30.0 : 119 graphiques en 410 ms.
-                 Bénéfice second : le libellé de l'axe n'est plus que la réponse,
-                 donc plus de rognage par la gauche. -->
-            <dsfr-data-display source="q-ch-15-liste" class="odv-sans-compteur">
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc15`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-15-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc15" lazy>
               <template>
+                <div class="odv-question">
                 <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
-                <dsfr-data-query id="qq-{{code_unifie}}" source="ecarts"
-                  where="code_unifie:eq:{{code_unifie}}" order-by="libelle_reponse:asc"></dsfr-data-query>
-                <dsfr-data-chart source="qq-{{code_unifie}}" type="bar" horizontal
+                <dsfr-data-chart source="{{$scope.sc15}}" type="bar" horizontal
                   label-field="libelle_reponse"
                   value-field="score_nat:France entière" value-fields="score_prof:Profil filtré"
                   color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
                   databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
                   databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
               </template>
-            </dsfr-data-display>
+            </dsfr-data-repeat>
             <dsfr-data-a11y source="q-ch-15" table download
               label="Typologie des entreprises interrogées — profil et national"
               label-field="etiquette" value-field="score_prof, score_nat, ecart"
@@ -1160,12 +1256,36 @@
       <div class="fr-col-12 fr-col-md-6">
         <h3 class="fr-h6">Ce qui a coincé</h3>
         <ul class="fr-text--sm">
-          <li><strong>Un graphique par question n'existe pas.</strong> La maquette de phase 2
-            dessinait, pour chaque question d'un chapitre, un graphique France/profil. C'est
-            <strong>LIM-004</strong>&nbsp;: <code>dsfr-data-display</code> répète un gabarit HTML,
-            pas un composant de dataviz — on ne génère pas N graphiques depuis N lignes. Les
-            barres de cette page sont donc du CSS dans un gabarit, pas des DSFR Chart. C'est la
-            partie de la maquette qui ne se transpose pas.</li>
+          <li><strong>« Un graphique par question n'existe pas » — le faux problème le plus
+            coûteux de ce dépôt, et il a été écrit ici.</strong> Cette page a longtemps porté
+            <strong>LIM-004</strong>&nbsp;: <em>« <code>dsfr-data-display</code> répète un gabarit
+            HTML, pas un composant de dataviz — on ne génère pas N graphiques depuis N lignes »</em>,
+            d'où des barres en CSS. C'était faux&nbsp;: le gabarit d'un <code>display</code> passe par
+            <code>innerHTML</code>, donc les <em>custom elements</em> y sont rehaussés — 119
+            graphiques justes en 410&nbsp;ms. La page a d'abord été reprise sur ce motif. Elle
+            l'est <strong>une seconde fois</strong> aujourd'hui, sur la voie devenue native&nbsp;:
+            <code>dsfr-data-repeat</code> et son attribut <code>scopes</code> (0.32.0, ADR-135).
+            <code>scopes="ecarts-tri:code_unifie:sc2"</code> partitionne la source <em>en une
+            passe</em> et émet un id par ligne répétée, lu par <code>{{$scope.sc2}}</code>&nbsp;:
+            <strong>plus une seule <code>dsfr-data-query</code> interpolée</strong>, là où le motif
+            précédent en instanciait une par question, dont chacune refiltrait la source entière.
+            Mesuré au navigateur sur cette page&nbsp;: <strong>127 requêtes dans le document
+            → 28</strong>, <strong>126 avertissements console → 27</strong>, et les valeurs des
+            graphiques <strong>identiques au bit près</strong> (mêmes libellés, même ordre, mêmes
+            nombres) — le tri unique en amont par <code>libelle_reponse</code> reproduit exactement
+            le <code>order-by</code> que portait chacune des requêtes supprimées.</li>
+          <li><strong>Et la page dessinait 103 graphiques pour un lecteur qui en voit dix.</strong>
+            Les chapitres sont des accordéons DSFR d'un même groupe&nbsp;: <strong>un seul est
+            ouvert à la fois</strong>. L'attribut <code>lazy</code> n'estampe les composants d'une
+            ligne qu'à son approche du viewport&nbsp;: <strong>103 canvas au chargement → 3</strong>,
+            et 8 après ouverture du premier chapitre. Les titres, eux, sont rendus d'emblée — le
+            plan de la page et son sommaire ne dépendent pas du défilement.
+            <strong>Le piège, et il est dans le JSDoc&nbsp;: <code>lazy</code> ne réserve pas la
+            hauteur à la place de l'auteur.</strong> Sans réserve, chaque ligne mesure la hauteur
+            de son seul titre — 24&nbsp;px mesurés — et le défilement dépasse les lignes avant
+            qu'elles aient grandi&nbsp;: 4&nbsp;graphiques estampés sur 103 après un défilement
+            complet. Une <code>min-height</code> sur <em>notre</em> conteneur de gabarit — pas sur
+            le DOM interne du composant, c'est la leçon de BUG-018 — et le compte est bon.</li>
           <li><strong>Un classement d'écarts naïf est faux, et spectaculairement.</strong> Le plus
             fort écart d'un profil breton est <strong>+94,9 points</strong> sur la question
             «&nbsp;Région&nbsp;»&nbsp;: filtrer sur la Bretagne y met «&nbsp;Bretagne&nbsp;» à
