@@ -139,9 +139,18 @@
      regle sur l'enfant ne defait. Le HTML porte `open` par defaut, donc une page
      sans JavaScript garde ses filtres deployes -- degradation vers l'etat
      d'avant, jamais vers des filtres inatteignables. */
-  const DEUX_COLONNES = window.matchMedia('(min-width: 62em)');
+  /* Deux points de rupture, parce que les pages ont deux grilles : les pages
+     Bercy passent en deux colonnes a 62em (`.odv-dashboard`), les pages
+     Education et Sports a 48em (`fr-col-md-3`). Le repli doit cesser quand la
+     place arrive, pas a une valeur unique choisie pour la commodite du script. */
+  const RUPTURES = {
+    lg: window.matchMedia('(min-width: 62em)'),
+    md: window.matchMedia('(min-width: 48em)'),
+  };
 
   const panneaux = [...document.querySelectorAll('details.odv-filtres')];
+
+  const ruptureDe = (panneau) => panneau.classList.contains('odv-filtres--md') ? RUPTURES.md : RUPTURES.lg;
 
   /* Replie, le panneau doit dire ce qu'il cache : sans ce compte, l'utilisateur
      qui a filtre puis referme ne voit plus que sa page est filtree. Les filtres
@@ -163,14 +172,14 @@
 
   const appliquer = () => {
     for (const panneau of panneaux) {
-      panneau.open = DEUX_COLONNES.matches;
+      panneau.open = ruptureDe(panneau).matches;
       rafraichirCompte(panneau);
     }
   };
 
   if (panneaux.length) {
     appliquer();
-    DEUX_COLONNES.addEventListener('change', appliquer);
+    for (const mq of Object.values(RUPTURES)) mq.addEventListener('change', appliquer);
     /* Les facettes se rendent apres coup et se re-rendent a chaque refiltre :
        on ecoute le panneau plutot que de compter une fois pour toutes. */
     for (const panneau of panneaux) {
