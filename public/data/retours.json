@@ -509,13 +509,16 @@
       "dsfr-data-join"
     ],
     "dataviz": [
-      "catalogue"
+      "catalogue",
+      "demo/cuivre-qui-bascule",
+      "demo/ips-college-territoire"
     ],
     "constat": "Deux entrées du catalogue pointent la même page : joindre sur `lien` produit une relation 1-N, deux cartes en double et un total de 28 au lieu de 26. Le composant fait ce qu'on lui demande ; c'est la donnée qui piège.",
-    "verifie": "Compteur de résultats passé de 28 à 26 après bascule de `on=\"lien\"` vers `on=\"titre\"`.",
+    "verifie": "Compteur de résultats passé de 28 à 26 après bascule de `on=\"lien\"` vers `on=\"titre\"`. — **Deux occurrences de plus, le 2026-09-19, sur les deux pages de démonstration, et sous une forme que le constat d'origine ne décrivait pas : ce n'est pas la clé qui est mauvaise, c'est le jeu de DROITE qui publie plusieurs lignes par clé sans que rien ne le dise.** (1) `fermeture-reseau-cuivre` (Bercy) publie **une ligne par couple commune × code postal** : 35 305 lignes pour **34 916 communes**, Nantes y figurant quatre fois. Joint tel quel au référentiel communal, il gonfle la population de **80,3 millions d'habitants pour un pays qui en compte 68**. (2) `data-es-par-commune` (Sports) porte **huit codes communes en double** (69019, 69024, 69066… — des communes du Rhône, `nb_equip` identique). Joint en `left` aux collèges, il affichait **7 001 collèges pour 6 979 réels** — une erreur de 0,3 %, du bon ordre de grandeur, donc **invisible sans recalcul indépendant** (ADR-122 ; c'est l'écart avec le calcul hors ligne qui l'a révélée, pas un message). Dans les deux cas la correction est la même et tient en une balise : un `dsfr-data-query group-by=\"<clé>\"` en amont de la jointure — le `group-by` EST le dédoublonnage. Contrôlé à l'API pour le cuivre : aucune commune ne porte deux dates de bascule différentes, donc le repli ne choisit rien.",
     "contournement": "Joindre sur un champ réellement unique.",
     "statut": "acte",
-    "date": "2026-09-09"
+    "date": "2026-09-09",
+    "reste_vrai": "La règle à retenir n'est pas « vérifier la clé » mais **« vérifier l'unicité du côté droit »** : `select code, count(*) group_by code` à l'API avant toute jointure. Une relation 1-N ne se voit pas — elle ne produit ni erreur, ni avertissement, ni valeur aberrante : seulement un compte trop grand du bon ordre de grandeur. Seul un recalcul indépendant la révèle."
   },
   {
     "id": "PG-002",
@@ -4493,5 +4496,26 @@
     "date": "2026-09-19",
     "correction": "dsfr-data#917, livré en 0.32.0 : `process.env.NODE_ENV` est posé avant l'appel à `build()`, ce qui choisit enfin la condition d'export de Lit. Les bundles perdent 14 à 15 Ko.",
     "reste_vrai": "Un drapeau de build qui réécrit le CODE produit (`define`) ne choisit pas la CONDITION D'EXPORT par laquelle le bundler résout une dépendance : ce sont deux mécanismes distincts, et le second se pilote par l'environnement du processus de build."
+  },
+  {
+    "id": "AV-031",
+    "titre": "Trois portails de l'État joints dans le navigateur, sans serveur ni fichier intermédiaire",
+    "type": "avantage",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-source",
+      "dsfr-data-join",
+      "dsfr-data-query",
+      "dsfr-data-normalize"
+    ],
+    "dataviz": [
+      "demo/cuivre-qui-bascule",
+      "demo/ips-college-territoire"
+    ],
+    "constat": "Les deux pages de démonstration croisent des jeux qui ne vivent pas sur le même portail, et dont aucun producteur n'a prévu qu'ils se rencontrent : `fermeture-reseau-cuivre` (data.economie.gouv.fr), `insee-2020-geoapi-2023` (equipements.sports.gouv.fr), `donnees-ips-colleges` (data.education.gouv.fr) et `data-es-par-commune` (data.sports.gouv.fr). Le rapprochement se fait sur le code INSEE à cinq caractères, identique d'un portail à l'autre, en `dsfr-data-join` — deux jointures en chaîne pour la seconde page. Il n'y a ni backend, ni ETL, ni fichier préparé hors ligne : les pages sont deux fichiers HTML statiques, et les agrégats se recalculent à chaque chargement. C'est l'argument du dépôt poussé un cran plus loin que la reproduction : non seulement « une balise, un CDN, et ça marche », mais « et ça croise ce que personne n'avait croisé ».",
+    "verifie": "Mesuré au navigateur le 2026-09-19 contre `dsfr-data@0.33.0`. Page 1 : 35 305 + 35 075 lignes chargées en une requête chacune (`fetch-mode=\"export\"`), dédoublonnées, jointes, dérivées — 31 785 communes appariées, 63,7 M d'habitants, 2,1 M d'établissements, 33,2 % de population rurale, en 18 s sur une connexion domestique, zéro erreur console. Page 2 : 6 987 + 35 075 + 28 474 lignes, deux jointures en chaîne — 6 979 collèges, IPS moyen 100,2 (public) et 120,3 (privé sous contrat), zéro erreur. **Les quatre KPI de chaque page ont été recalculés indépendamment en Python depuis les mêmes exports** (ADR-122) : valeurs identiques au chiffre près, y compris le résumé pondéré de la carte (50,56).",
+    "reste_vrai": "Le prix est le volume transféré : chaque page rapatrie l'intégralité des jeux croisés, soit ~100 000 lignes pour la seconde. C'est tenable ici parce que les `select` sont étroits et les jeux modestes ; ce ne le serait pas sur un jeu de plusieurs millions de lignes, où il faudrait agréger côté serveur avant de joindre. Et le résumé pondéré d'une carte porte sur les territoires **dessinés**, pas sur la donnée : 50,56 % affiché contre 50,53 % de ratio national vrai, l'écart venant des deux collectivités absentes du découpage.",
+    "statut": "acte",
+    "date": "2026-09-19"
   }
 ]

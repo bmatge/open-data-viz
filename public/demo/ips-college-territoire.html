@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ce qui décide de l'indice social d'un collège — open-data-viz</title>
+  <meta name="description" content="Démonstration dsfr-data : l'indice de position sociale des collèges (data.education.gouv.fr) croisé au revenu communal (equipements.sports.gouv.fr) et à l'offre d'équipements sportifs (data.sports.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.education.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://equipements.sports.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://data.sports.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <link rel="stylesheet" href="/assets/demo.css">
+  <script src="/assets/cles.js"></script>
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <section class="odv-hero">
+    <div class="fr-container odv-hero__corps">
+      <p class="fr-badge fr-badge--new fr-mb-3v">Démonstration — trois portails croisés dans le navigateur</p>
+      <h1 class="odv-hero__titre">Ce qui décide de l'indice<br>social d'un collège</h1>
+      <p class="odv-hero__chapo">
+        L'Éducation nationale publie, pour chacun des 6&nbsp;987 collèges, un indice de position
+        sociale. On le croise ici à <strong>ce qui entoure l'établissement</strong>&nbsp;: le revenu
+        de sa commune, sa densité, et l'offre d'équipements sportifs. Trois candidats — <strong>un
+        seul explique vraiment</strong>, et ce n'est pas celui qu'on croit.
+      </p>
+      <p class="odv-hero__source fr-text--sm">
+        <span class="fr-icon-database-line fr-icon--sm" aria-hidden="true"></span>
+        <code>donnees-ips-colleges</code> (Éducation) × <code>insee-2020-geoapi-2023</code> (Sports)
+        × <code>data-es-par-commune</code> (Sports) — joints à la volée, sans serveur.
+      </p>
+      <a class="fr-btn fr-btn--lg fr-icon-arrow-down-line fr-btn--icon-right" href="#reperes">Voir les chiffres</a>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       LE PIPELINE — trois jeux, deux jointures, une clé : le code commune INSEE
+       ========================================================================== -->
+
+  <dsfr-data-source id="ips-brut" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-colleges"
+    select="uai, appellation_officielle, secteur, ips, code_commune, libelle_commune, code_departement, libelle_departement, libelle_academie"
+    where="rentree_scolaire = '2024-2025'"
+    fetch-mode="export" max-records="10000">
+  </dsfr-data-source>
+
+  <!-- Le groupe null du code commune : 3 collèges sur 6 987 n'en portent pas.
+       On les ÉCARTE (ils ne peuvent être croisés à rien) et on le dit dans les
+       notes — nommer n'est pas écarter, les deux sont des choix (PG-015). -->
+  <dsfr-data-query id="ips" source="ips-brut" where="code_commune:isnotnull"></dsfr-data-query>
+
+  <dsfr-data-source id="insee" api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="insee-2020-geoapi-2023"
+    select="code_geographique, nomcommune, population, med20, dens_lib, typo_rurb_crte"
+    fetch-mode="export" max-records="40000">
+  </dsfr-data-source>
+
+  <dsfr-data-source id="equip-brut" api-type="opendatasoft"
+    base-url="https://data.sports.gouv.fr" dataset-id="data-es-par-commune"
+    select="new_code, nb_equip"
+    fetch-mode="export" max-records="40000">
+  </dsfr-data-source>
+
+  <!-- ⚠️ PIÈGE PAYÉ ICI, ET C'EST LA DEUXIÈME FOIS SUR CES DEUX PAGES : ce jeu
+       porte HUIT codes communes en double (69019, 69024, 69066… — des communes
+       du Rhône, valeurs identiques). Joint tel quel en `left`, il dupliquait les
+       collèges de ces communes : 7 001 collèges affichés pour 6 979 réels, et
+       l'erreur est du bon ordre de grandeur, donc invisible. Le `group-by` EST
+       le dédoublonnage. Règle : avant toute jointure, vérifier que la clé est
+       unique du côté DROIT — une relation 1-N ne se voit pas, elle se compte. -->
+  <dsfr-data-query id="equip" source="equip-brut" group-by="new_code"
+    aggregate="nb_equip:max:nb_equip"></dsfr-data-query>
+
+  <!-- Deux jointures en chaîne sur le code commune à cinq caractères, identique
+       sur les trois portails (vérifié à l'API : « 01002 » partout). -->
+  <dsfr-data-join id="j1" left="ips" right="insee"
+    on="code_commune=code_geographique" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="j2" left="j1" right="equip"
+    on="code_commune=new_code" type="left"></dsfr-data-join>
+
+  <!-- Les tranches. Écrites en seuils explicites plutôt qu'en déciles calculés :
+       une tranche lisible par le lecteur vaut mieux qu'un décile exact qu'il ne
+       peut pas situer. `else` est obligatoire dans un `when`. -->
+  <dsfr-data-normalize id="donnees" source="j2"
+    numeric="ips, med20, population, nb_equip"
+    compute="equip_10k = when population > 0 then round(nb_equip / population * 10000, 1) else null;
+             revenu = when is_empty(med20) then 'Revenu non renseigné'
+                      when med20 &lt; 19000 then 'Moins de 19 000 €'
+                      when med20 &lt; 21000 then '19 000 à 21 000 €'
+                      when med20 &lt; 23000 then '21 000 à 23 000 €'
+                      when med20 &lt; 26000 then '23 000 à 26 000 €'
+                      else '26 000 € et plus';
+             offre = when is_empty(equip_10k) then 'Non renseignée'
+                     when equip_10k &lt; 25 then 'Moins de 25'
+                     when equip_10k &lt; 45 then '25 à 45'
+                     when equip_10k &lt; 75 then '45 à 75'
+                     else '75 et plus';
+             densite = coalesce(dens_lib, 'Non renseignée')">
+  </dsfr-data-normalize>
+
+  <!-- ==========================================================================
+       1. LES REPÈRES
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w" id="reperes">
+    <h2 class="fr-h3">Les repères</h2>
+    <p class="fr-text--lead fr-mb-4w">
+      Rentrée 2024-2025. L'indice de position sociale (IPS) résume l'origine sociale des élèves d'un
+      établissement&nbsp;: plus il est élevé, plus le public est favorisé. La moyenne nationale est
+      calée autour de 100.
+    </p>
+
+    <dsfr-data-kpi-group cols="4" gap="md">
+      <dsfr-data-kpi source="donnees" value="count" format="nombre"
+        heading="Collèges" label="rentrée 2024-2025, croisés à leur commune"></dsfr-data-kpi>
+      <dsfr-data-kpi source="donnees" value="ips:avg" format="nombre" decimals="1"
+        where="secteur:eq:public"
+        heading="IPS moyen — public" label="collèges publics"></dsfr-data-kpi>
+      <dsfr-data-kpi source="donnees" value="ips:avg" format="nombre" decimals="1"
+        where="secteur:eq:privé sous contrat"
+        heading="IPS moyen — privé sous contrat" label="collèges privés"></dsfr-data-kpi>
+      <dsfr-data-kpi source="donnees" value="count" format="nombre"
+        where="secteur:eq:privé sous contrat"
+        heading="Dont privés sous contrat" label="sur l'ensemble"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ==========================================================================
+       2. PREMIER CANDIDAT — le secteur
+       ========================================================================== -->
+  <div class="odv-bande">
+    <div class="fr-container">
+      <p class="fr-badge fr-badge--info fr-mb-2v">Premier candidat</p>
+      <h2 class="fr-h3">Le secteur&nbsp;: vingt points d'écart</h2>
+      <p class="fr-text--lead">
+        C'est le facteur le plus massif du jeu, et il ne demande aucun croisement pour apparaître.
+        Il est montré <strong>d'abord</strong> pour cette raison&nbsp;: tout ce qui suit se lit en
+        gardant cet écart en tête.
+      </p>
+
+      <dsfr-data-query id="par-secteur" source="donnees" group-by="secteur"
+        aggregate="ips:avg:ips_moyen, uai:count:colleges" order-by="ips_moyen:desc"></dsfr-data-query>
+      <dsfr-data-normalize id="par-secteur-r" source="par-secteur"
+        round="ips_moyen:1"></dsfr-data-normalize>
+
+      <dsfr-data-chart id="g-secteur" source="par-secteur-r" type="bar" horizontal
+        label-field="secteur" value-field="ips_moyen:IPS moyen"
+        unit-tooltip="points" y-min="0"
+        databox databox-title="IPS moyen par secteur, rentrée 2024-2025"
+        databox-source="data.education.gouv.fr — donnees-ips-colleges"
+        databox-download></dsfr-data-chart>
+      <dsfr-data-a11y for="g-secteur" source="par-secteur-r" table download
+        label-field="secteur" value-field="ips_moyen, colleges"
+        filename="ips-par-secteur.csv"
+        description="IPS moyen et nombre de collèges par secteur à la rentrée 2024-2025. L'écart entre public et privé sous contrat est d'environ vingt points."></dsfr-data-a11y>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       3. DEUXIÈME CANDIDAT — le revenu de la commune
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Deuxième candidat</p>
+    <h2 class="fr-h3">Le revenu de la commune&nbsp;: une pente nette, et pas une explication</h2>
+    <p class="fr-text--lead">
+      L'IPS monte avec le revenu médian de la commune d'implantation — c'est attendu, et c'est
+      visible. Mais la pente ne <em>détermine</em> pas&nbsp;: à revenu communal égal, l'écart entre
+      deux collèges reste considérable.
+    </p>
+
+    <dsfr-data-query id="par-revenu" source="donnees" group-by="revenu, secteur"
+      aggregate="ips:avg:ips_moyen, uai:count:colleges"
+      where="revenu:neq:Revenu non renseigné"></dsfr-data-query>
+    <dsfr-data-normalize id="par-revenu-r" source="par-revenu"
+      round="ips_moyen:1"></dsfr-data-normalize>
+
+    <dsfr-data-chart id="g-revenu" source="par-revenu-r" type="bar"
+      label-field="revenu" value-field="ips_moyen" series-field="secteur"
+      unit-tooltip="points IPS" y-min="0"
+      databox databox-title="IPS moyen par tranche de revenu médian communal et par secteur"
+      databox-source="data.education.gouv.fr × equipements.sports.gouv.fr"
+      databox-download></dsfr-data-chart>
+    <p class="fr-hint-text">
+      Les tranches sont des seuils lisibles, pas des déciles&nbsp;: un lecteur sait où il se situe
+      dans «&nbsp;21&nbsp;000 à 23&nbsp;000&nbsp;€&nbsp;», pas dans «&nbsp;4<sup>e</sup>
+      décile&nbsp;». <strong>Les deux séries ne se croisent jamais</strong>&nbsp;: dans chaque
+      tranche de revenu, le privé sous contrat reste au-dessus du public.
+    </p>
+    <dsfr-data-a11y for="g-revenu" source="par-revenu-r" table download
+      label-field="revenu" value-field="ips_moyen" series-field="secteur"
+      filename="ips-par-revenu.csv"
+      description="IPS moyen par tranche de revenu médian de la commune d'implantation, séparément pour le public et le privé sous contrat. L'IPS croît avec le revenu, et l'écart entre secteurs subsiste dans chaque tranche."></dsfr-data-a11y>
+  </div>
+
+  <!-- ==========================================================================
+       4. TROISIÈME CANDIDAT — les équipements sportifs. Le non-résultat.
+       ========================================================================== -->
+  <div class="odv-bande">
+    <div class="fr-container">
+      <p class="fr-badge fr-badge--success fr-mb-2v">Troisième candidat — et bonne nouvelle</p>
+      <h2 class="fr-h3">Les équipements sportifs ne suivent pas l'indice social</h2>
+      <p class="fr-text--lead">
+        On pouvait s'attendre à ce que les communes les plus favorisées soient aussi les mieux
+        équipées. <strong>Ce n'est pas le cas</strong>&nbsp;: l'IPS moyen est à peu près le même
+        quelle que soit la densité d'équipements. C'est un non-résultat, et il se publie — une
+        page honnête montre aussi ce qui ne corrèle pas.
+      </p>
+
+      <dsfr-data-query id="par-offre" source="donnees" group-by="offre"
+        aggregate="ips:avg:ips_moyen, uai:count:colleges"
+        where="offre:neq:Non renseignée"></dsfr-data-query>
+      <dsfr-data-normalize id="par-offre-r" source="par-offre"
+        round="ips_moyen:1"></dsfr-data-normalize>
+
+      <dsfr-data-chart id="g-offre" source="par-offre-r" type="bar"
+        label-field="offre" value-field="ips_moyen:IPS moyen"
+        unit-tooltip="points IPS" y-min="0"
+        databox databox-title="IPS moyen selon l'offre d'équipements sportifs de la commune"
+        databox-source="data.education.gouv.fr × data.sports.gouv.fr × equipements.sports.gouv.fr"
+        databox-download></dsfr-data-chart>
+      <p class="fr-hint-text">
+        Équipements sportifs pour 10&nbsp;000 habitants de la commune d'implantation.
+        <strong>L'axe part de zéro</strong> — c'est ce qui rend le non-résultat lisible&nbsp;:
+        tronqué à 95, le même graphique inventerait une pente.
+      </p>
+      <dsfr-data-a11y for="g-offre" source="par-offre-r" table download
+        label-field="offre" value-field="ips_moyen, colleges"
+        filename="ips-par-equipements.csv"
+        description="IPS moyen des collèges selon le nombre d'équipements sportifs pour 10 000 habitants de leur commune. Les quatre tranches sont pratiquement au même niveau."></dsfr-data-a11y>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       5. LA DENSITÉ — le résultat contre-intuitif
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w">
+    <h2 class="fr-h3">Et la densité&nbsp;? Ce sont les <em>ceintures</em> urbaines qui mènent</h2>
+    <p class="fr-text--lead">
+      Pas les grands centres. Les communes périurbaines — celles qui entourent les grandes villes —
+      affichent l'IPS moyen le plus élevé, devant les grands centres urbains eux-mêmes. Le gradient
+      n'est pas «&nbsp;ville contre campagne&nbsp;»&nbsp;: il est en couronne.
+    </p>
+
+    <dsfr-data-query id="par-densite" source="donnees" group-by="densite"
+      aggregate="ips:avg:ips_moyen, uai:count:colleges" order-by="ips_moyen:desc"></dsfr-data-query>
+    <dsfr-data-normalize id="par-densite-r" source="par-densite"
+      round="ips_moyen:1"></dsfr-data-normalize>
+
+    <dsfr-data-chart id="g-densite" source="par-densite-r" type="bar" horizontal
+      label-field="densite" value-field="ips_moyen:IPS moyen"
+      unit-tooltip="points IPS" y-min="0"
+      databox databox-title="IPS moyen par classe de densité communale"
+      databox-source="data.education.gouv.fr × equipements.sports.gouv.fr"
+      databox-download></dsfr-data-chart>
+    <!-- `empty-label` sur a11y (0.33.0, AM-085) : quelques communes n'ont pas de
+         classe de densité. Sans lui, le tableau rendrait une ligne « | 90,0 » —
+         une valeur sans son nom pour un lecteur d'écran. -->
+    <dsfr-data-a11y for="g-densite" source="par-densite-r" table download
+      label-field="densite" value-field="ips_moyen, colleges" empty-label="Densité non renseignée"
+      filename="ips-par-densite.csv"
+      description="IPS moyen par classe de densité de la commune d'implantation. Les ceintures urbaines devancent les grands centres urbains."></dsfr-data-a11y>
+  </div>
+
+  <!-- ==========================================================================
+       6. L'EXPLORATEUR
+       ========================================================================== -->
+  <div class="fr-container fr-mt-8w fr-mb-8w">
+    <h2 class="fr-h3">Et votre collège&nbsp;?</h2>
+    <p class="fr-text--lead">
+      Sept mille établissements&nbsp;: on ne les met pas sur un nuage de points, on les cherche.
+    </p>
+
+    <div class="odv-dashboard">
+      <details class="odv-filtres odv-filtres--md" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Chercher<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Chercher</h3>
+        <dsfr-data-search id="q" source="donnees"
+          fields="appellation_officielle, libelle_commune, libelle_departement, libelle_academie"
+          label="Votre collège" placeholder="Nom, commune, département…"
+          operator="words" count count-label="collège"></dsfr-data-search>
+        <dsfr-data-facets id="f" source="q"
+          fields="secteur, densite, revenu, libelle_academie"
+          labels="secteur:Secteur | densite:Densité de la commune | revenu:Revenu médian communal | libelle_academie:Académie"
+          display="secteur:select"
+          searchable="libelle_academie" max-values="8"></dsfr-data-facets>
+      </details>
+
+      <div>
+        <dsfr-data-list source="f" count-label="collège"
+          columns="appellation_officielle:Collège | libelle_commune:Commune | libelle_departement:Département | secteur:Secteur | ips:IPS | med20:Revenu médian communal | equip_10k:Équipements / 10 000 hab."
+          sort search pagination="15" export>
+        </dsfr-data-list>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       NOTES
+       ========================================================================== -->
+  <section class="fr-container fr-mb-8w odv-analyse fr-pt-6w" id="notes">
+    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
+    <p>Tout ce qui suit est un choix. Il est écrit pour pouvoir être discuté.</p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on a choisi</h3>
+        <ul>
+          <li><strong>Montrer le secteur en premier.</strong> C'est le facteur le plus massif, et il
+            n'a besoin d'aucun croisement. Le mettre après les autres aurait laissé croire que le
+            revenu communal explique ce que le secteur explique déjà.</li>
+          <li><strong>Séparer les deux secteurs dans le graphique du revenu.</strong> Agrégés, ils
+            auraient produit une pente unique plus raide que la réalité — un effet de composition&nbsp;:
+            le privé est surreprésenté dans les communes aisées. Séparés, on voit que
+            <em>les deux courbes montent, et ne se croisent jamais</em>.</li>
+          <li><strong>Des tranches lisibles, pas des déciles.</strong> Un décile est exact et
+            incompréhensible&nbsp;: un lecteur sait où il se situe dans «&nbsp;21&nbsp;000 à
+            23&nbsp;000&nbsp;€&nbsp;», pas dans «&nbsp;4<sup>e</sup> décile&nbsp;».</li>
+          <li><strong>Un axe qui part de zéro sur le graphique des équipements.</strong> C'est ce
+            qui rend le non-résultat lisible. Tronqué à 95, le même graphique inventerait une pente
+            là où l'écart réel est de l'ordre du point.</li>
+          <li><strong>Publier un non-résultat.</strong> L'absence de lien entre l'offre
+            d'équipements sportifs et l'indice social est le bloc le moins spectaculaire de cette
+            page, et l'un des plus utiles&nbsp;: c'est un fait sur l'équipement du territoire.</li>
+        </ul>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on ne montre pas</h3>
+        <ul>
+          <li><strong>L'IPS moyen n'est pas pondéré par les effectifs</strong>, parce que le jeu ne
+            les porte pas. Un collège de 900 élèves y pèse autant qu'un collège de 150. C'est la
+            limite la plus sérieuse de cette page&nbsp;: elle tire probablement les moyennes rurales
+            vers le haut, les petits établissements étant surreprésentés en nombre. On aurait pu
+            s'en taire&nbsp;; on préfère l'écrire.</li>
+          <li><strong>Aucun coefficient de corrélation affiché.</strong> Les liens sont montrés par
+            tranches, pas par un <em>r</em>&nbsp;: un coefficient se lit mal, se cite mal, et laisse
+            croire à une causalité. Pour mémoire, mesurés hors ligne sur les mêmes données&nbsp;:
+            <strong>0,63</strong> entre IPS et revenu communal, <strong>−0,04</strong> entre IPS et
+            équipements. Le second est la raison d'être du bloc vert.</li>
+          <li><strong>Trois collèges sans code commune</strong> sont écartés&nbsp;: ils ne peuvent
+            être croisés à rien. Les collèges dont la commune est absente du référentiel le sont
+            aussi — 99,9&nbsp;% des établissements sont appariés, le premier KPI donne le compte
+            exact.</li>
+          <li><strong>Ni causalité, ni palmarès.</strong> Cette page ne dit pas que le revenu d'une
+            commune <em>produit</em> l'indice social d'un collège, ni qu'un collège vaut mieux qu'un
+            autre. L'IPS décrit un public, pas une qualité d'enseignement.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="odv-verdict fr-mt-4w">
+      <h3 class="fr-h6">Ce que cette page démontre de <code>dsfr-data</code></h3>
+      <p>
+        <strong>Trois jeux, trois portails, deux jointures en chaîne — en balises.</strong>
+        L'Éducation nationale pour l'indice, le référentiel communal INSEE pour le revenu et la
+        densité, le portail Sports pour les équipements&nbsp;: 6&nbsp;987, 35&nbsp;075 et
+        28&nbsp;474 lignes chargées chacune en <em>une</em> requête, jointes sur le code commune,
+        puis découpées en tranches par <code>compute</code>. Les moyennes, les comptes et les
+        tranches sont calculés dans le navigateur, à chaque chargement. Aucun backend, aucun fichier
+        intermédiaire, aucun chiffre écrit dans la page.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

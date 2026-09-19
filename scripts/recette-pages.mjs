@@ -71,7 +71,8 @@ if (process.argv[2] === '--diff') {
 const pw = await import(join(homedir(), 'Developer/GitHub/dsfr-data/node_modules/playwright/index.js'));
 const { chromium } = pw.default ?? pw;
 
-// Trois portails : public/viz (Bercy), public/education, public/sports (lot 19).
+// Trois portails : public/viz (Bercy), public/education, public/sports (lot 19),
+// plus public/demo (les pages de demonstration, qui croisent plusieurs portails).
 const html = (dossier, prefixe) => {
   try {
     return readdirSync(dossier).filter((f) => f.endsWith('.html')).map((f) => prefixe + f);
@@ -85,6 +86,7 @@ const pages = [
   ...html('public/viz', '/viz/'),
   ...html('public/education', '/education/'),
   ...html('public/sports', '/sports/'),
+  ...html('public/demo', '/demo/'),
 ]
   .filter((p) => !motifs.length || motifs.some((m) => p.includes(m)))
   .sort();
