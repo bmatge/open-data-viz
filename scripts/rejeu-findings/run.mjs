@@ -110,6 +110,68 @@ const tests = {
   },
 
   // Trois faits relevés par le chantier 4 (skill métier), rejoués en isolant la variable.
+  // BUG-022 / AM-086 : la pastille et le libelle de l'infobulle d'un graphique
+  // multiserie. Trois cas sur la MEME donnee -- avec color-map, sans, et en
+  // format large -- et trois releves de couleur independants : pastille de
+  // legende, PIXELS PEINTS dans le canvas, `data-color` de la pastille
+  // d'infobulle. Compter les series ne prouve rien ici : c'est la couleur et le
+  // libelle qui mentent, et seul l'oeil ou un echantillon de pixels le voit.
+  async tooltip() {
+    const t = await ouvrir('/_test/tooltip-series.html', { bundle });
+    await attendre(5000);
+    console.log('version', await t.version());
+    for (const id of ['a', 'b', 'c']) {
+      await t.page.evaluate((i) => document.getElementById(i).scrollIntoView({ block: 'center' }), id);
+      await attendre(1200);
+      const box = await t.page.evaluate((i) => {
+        const c = document.querySelector('#' + i + ' canvas');
+        if (!c) return null;
+        const r = c.getBoundingClientRect();
+        return { x: r.x, y: r.y, w: r.width, h: r.height };
+      }, id);
+      if (!box) { console.log(id, '— pas de canvas'); continue; }
+      // balayage : l'infobulle ne s'ouvre que sur un segment de barre
+      let vu = null;
+      const points = [];
+      for (let fx = 0.15; fx <= 0.95; fx += 0.08) for (const fy of [0.9, 0.75, 0.6, 0.45, 0.3]) points.push([fx, fy]);
+      for (const [fx, fy] of points) {
+        await t.page.mouse.move(box.x + box.w * fx, box.y + box.h * fy);
+        await attendre(140);
+        vu = await t.page.evaluate(() => {
+          const tt = [...document.querySelectorAll('.tooltip')].find((e) => e.textContent.trim().length > 5);
+          if (!tt) return null;
+          return {
+            libelles: [...tt.querySelectorAll('.tooltip_place')].map((p) => p.textContent.trim()),
+            pastilles: [...tt.querySelectorAll('.tooltip_dot')].map((d) => d.getAttribute('data-color')),
+          };
+        });
+        if (vu) break;
+      }
+      const rendu = await t.page.evaluate((i) => {
+        const el = document.getElementById(i);
+        const bc = [...el.querySelectorAll('*')].find((e) => e.tagName.includes('-CHART'));
+        const legende = [...el.querySelectorAll('[class*="legend"] [style*="background"]')]
+          .map((e) => getComputedStyle(e).backgroundColor);
+        const cv = el.querySelector('canvas');
+        const ctx = cv.getContext('2d');
+        const vus = {};
+        for (let x = Math.floor(cv.width * 0.3); x < cv.width * 0.95; x += 6)
+          for (let y = Math.floor(cv.height * 0.25); y < cv.height * 0.95; y += 6) {
+            const d = ctx.getImageData(x, y, 1, 1).data;
+            if (d[3] > 200) { const k = `${d[0]},${d[1]},${d[2]}`; vus[k] = (vus[k] || 0) + 1; }
+          }
+        return {
+          name: bc?.getAttribute('name'),
+          legende: [...new Set(legende)].slice(0, 3),
+          peint: Object.entries(vus).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([c]) => c),
+        };
+      }, id);
+      console.log(id, '| tracé', JSON.stringify(rendu));
+      console.log('   infobulle', JSON.stringify(vu));
+    }
+    await t.fermer();
+  },
+
   async overlays() {
     const t = await ouvrir('/_test/overlays.html', { bundle });
     await attendre(6000);
