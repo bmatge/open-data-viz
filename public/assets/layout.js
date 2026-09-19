@@ -10,6 +10,7 @@
     { href: '/bercy', libelle: 'Portail Bercy' },
     { href: '/education', libelle: 'Portail Éducation' },
     { href: '/sports', libelle: 'Portail Sports' },
+    { href: '/demo', libelle: 'Démonstrations' },
     { href: '/synthese', libelle: 'Synthèse' },
     { href: '/retours', libelle: 'Registre des retours' }
   ];
@@ -17,9 +18,19 @@
   const courant = window.location.pathname.replace(/\/$/, '') || '/';
 
   const navigation = LIENS.map(({ href, libelle, externe }) => {
-    const actif = !externe && href.replace(/\/$/, '') === courant ? ' aria-current="page"' : '';
-    const cible = externe ? ' target="_blank" rel="noopener external"' : '';
-    return `<li class="fr-nav__item"><a class="fr-nav__link" href="${href}"${actif}${cible}>${libelle}</a></li>`;
+    // Une entree de menu est courante pour sa page ET pour ses sous-pages : les
+    // demonstrations vivent dans un sous-dossier, et l'egalite stricte ne
+    // marquait donc jamais « Demonstrations » sur /demo/cuivre-qui-bascule.
+    // La racine est un cas a part : elle n'est courante que pour elle-meme,
+    // sinon elle le serait partout. Elle ne l'etait d'ailleurs nulle part
+    // jusqu'ici -- `'/'.replace(/\/$/, '')` vaut '', qui n'egalait aucun chemin.
+    const cible = href === '/' ? '/' : href.replace(/\/$/, '');
+    const dansLaSection = cible === '/'
+      ? courant === '/'
+      : courant === cible || courant.startsWith(cible + '/');
+    const actif = !externe && dansLaSection ? ' aria-current="page"' : '';
+    const attrsExterne = externe ? ' target="_blank" rel="noopener external"' : '';
+    return `<li class="fr-nav__item"><a class="fr-nav__link" href="${href}"${actif}${attrsExterne}>${libelle}</a></li>`;
   }).join('');
 
   const entete = `
@@ -104,6 +115,7 @@
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/bercy">Portail Bercy</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/education">Portail Éducation</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/sports">Portail Sports</a></li>
+        <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/demo">Démonstrations</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/synthese">Synthèse des analyses</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/retours">Registre des retours</a></li>
         <li class="fr-footer__bottom-item">
