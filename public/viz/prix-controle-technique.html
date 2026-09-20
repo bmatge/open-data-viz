@@ -34,76 +34,134 @@
 
     <h1>Prix des contrôles techniques</h1>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-8">
-        <details class="fr-callout fr-icon-database-line odv-contexte">
+    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
 <p class="fr-callout__text fr-text--sm">
-            <a href="https://data.economie.gouv.fr/explore/dataset/prix-controle-technique/"
-               target="_blank" rel="noopener external"><code>prix-controle-technique</code></a>
-            — 145&nbsp;146 tarifs, soit un par centre agréé, catégorie de véhicule et énergie (prix de la
-            visite, fourchette de la contre-visite, dates d'application), actualisés chaque jour par la
-            DGCCRF. Le catalogue renvoie à
-            <a href="https://prix.conso.gouv.fr/controle-technique" target="_blank" rel="noopener external">prix.conso.gouv.fr</a>
-            (département, commune, types de véhicule, énergies, carte des centres avec leurs tarifs) et
-            référence un jeu <code>controle_techn</code> qui n'existe plus&nbsp;: celui-ci est son successeur.
-            L'<a href="/viz/centres-controle-technique">annuaire des centres</a> du lot 6 n'affiche aucun prix.
-          </p>
+        <a href="https://data.economie.gouv.fr/explore/dataset/prix-controle-technique/"
+           target="_blank" rel="noopener external"><code>prix-controle-technique</code></a>
+        — 145&nbsp;593 tarifs, soit un par centre agréé, catégorie de véhicule et énergie (prix de la
+        visite, fourchette de la contre-visite, dates d'application), actualisés chaque jour par la
+        DGCCRF. Le catalogue renvoie à
+        <a href="https://prix.conso.gouv.fr/controle-technique" target="_blank" rel="noopener external">prix.conso.gouv.fr</a>
+        (département, commune, types de véhicule, énergies, carte des centres avec leurs tarifs) et
+        référence un jeu <code>controle_techn</code> qui n'existe plus&nbsp;: celui-ci est son successeur.
+        L'<a href="/viz/centres-controle-technique">annuaire des centres</a> du lot 6 n'affiche aucun prix.
+        <strong>1&nbsp;463 tarifs à 0&nbsp;€</strong> (285 centres) sont écartés de toute la page&nbsp;:
+        une visite gratuite n'existe pas, c'est un prix non déclaré.
+      </p>
     </details>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <dsfr-data-kpi source="ct-total" value="p:max" format="decimal"
-          heading="Prix moyen de la visite" label="€, dans le périmètre courant" icon="fr-icon-car-line">
-        </dsfr-data-kpi>
-      </div>
-    </div>
   </div>
 
   <!-- ==========================================================================
        Le jeu n'a AUCUNE facette déclarée au back-office : server-facets est
        inutilisable. Les deux filtres passent par un contexte et des <select>,
-       diffusés à trois sources : la liste paginée (serveur), la moyenne par
-       département (agrégée) et le compteur.
+       diffusés à quatre sources : la liste paginée (serveur), la moyenne par
+       département, la moyenne par énergie et les compteurs.
+
+       `where="prix_visite > 0"` sur chaque source : 1 463 tarifs à 0 € (vérifié à
+       l'API le 2026-09-20) — sans lui, la page s'ouvrait sur trente « 0 € » et
+       la moyenne nationale perdait 0,87 €. Un where STATIQUE ne compte pas pour
+       `require-where` : la liste et la carte attendent bien un geste du lecteur.
        ========================================================================== -->
 
+  <!-- `require-where` : sans recherche ni filtre, les trente tarifs les moins
+       chers de France n'ont aucun sens (ils étaient tous à 0 €). La liste et la
+       carte attendent une commune, un département ou un type de véhicule. -->
   <dsfr-data-source id="ct" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="prix-controle-technique"
-    api-key-ref="ods-mef" server-side page-size="30"
+    api-key-ref="ods-mef" server-side page-size="30" require-where
+    where="prix_visite > 0"
     select="cct_siret, cct_denomination, cct_adresse, cct_code_postal, cct_commune, nom_departement, latitude, longitude, cat_vehicule_libelle, cat_energie_libelle, prix_visite, prix_contre_visite_mini, prix_contre_visite_maxi, date_application_visite"
     order-by="prix_visite:asc">
   </dsfr-data-source>
 
+  <!-- Les alias du select nomment les colonnes du tableau accessible : le
+       tableau lit les clés des lignes, `p` et `n` y devenaient des en-têtes.
+
+       `limit="200"`, pas 100 : le jeu compte 101 départements (96 métropole et
+       Corse, 5 DROM). Avec `limit="100"` et un tri croissant, le 101e — la
+       Haute-Savoie, le plus cher, 109,86 € — manquait sur la carte SANS
+       AVERTISSEMENT depuis la création de la page. `total_count` d'un group_by
+       vaut la taille de page (LIM-002) : il ne pouvait pas le dire. -->
   <dsfr-data-source id="ct-dept" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="prix-controle-technique"
-    api-key-ref="ods-mef"
-    select="code_departement, nom_departement, avg(prix_visite) as p, count(*) as n"
-    group-by="code_departement, nom_departement" order-by="p:asc" limit="100">
+    api-key-ref="ods-mef" where="prix_visite > 0"
+    select="code_departement, nom_departement, avg(prix_visite) as prix_moyen, count(*) as tarifs"
+    group-by="code_departement, nom_departement" order-by="prix_moyen:asc" limit="200">
   </dsfr-data-source>
+  <!-- L'arrondi est pour l'infobulle ; le résumé « en France » se calcule sur
+       la colonne non arrondie (`map-summary-field`), pondéré par le nombre de
+       tarifs — c'est alors le même chiffre que le compteur. -->
+  <dsfr-data-normalize id="ct-dept-aff" source="ct-dept"
+    compute="prix_affiche = round(prix_moyen, 2)"></dsfr-data-normalize>
 
   <dsfr-data-source id="ct-total" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="prix-controle-technique"
-    api-key-ref="ods-mef" select="avg(prix_visite) as p, count(*) as n" limit="1">
+    api-key-ref="ods-mef" where="prix_visite > 0"
+    select="avg(prix_visite) as p, median(prix_visite) as med, count(*) as n" limit="1">
   </dsfr-data-source>
 
-  <dsfr-data-context id="ctx-ct" sources="ct ct-dept ct-total">
+  <!-- Le filtre « énergie » ne s'applique pas à cette source (apply-to du
+       filtre) : un graphique par énergie qui ne montrerait que l'énergie choisie
+       n'apprendrait rien. -->
+  <dsfr-data-source id="ct-energie" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="prix-controle-technique"
+    api-key-ref="ods-mef" where="prix_visite > 0"
+    select="cat_energie_libelle, avg(prix_visite) as prix_moyen, count(*) as tarifs"
+    group-by="cat_energie_libelle" order-by="prix_moyen:asc" limit="10">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="ct-energie-aff" source="ct-energie" round="prix_moyen:2"></dsfr-data-normalize>
+
+  <dsfr-data-context id="ctx-ct" sources="ct ct-dept ct-total ct-energie">
     <dsfr-data-context-filter field="cat_vehicule_libelle" operator="eq" ui="filtre-vehicule" label="Véhicule"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="cat_energie_libelle" operator="eq" ui="filtre-energie" label="Énergie"></dsfr-data-context-filter>
+    <dsfr-data-context-filter field="cat_energie_libelle" operator="eq" ui="filtre-energie" label="Énergie"
+      apply-to="ct ct-dept ct-total"></dsfr-data-context-filter>
   </dsfr-data-context>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
+  <!-- Socle du gabarit (famille A) : la recherche pilote la page, elle sort de
+       la colonne de filtres pour un bandeau pleine largeur. Tant que rien n'est
+       cherché ni filtré, le compteur cède la place au message d'attente. -->
+  <section class="odv-bandeau">
+    <div class="fr-container">
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="ct-q" source="ct" server-search count count-label="tarif"
+          label="Trouver un centre" placeholder="Commune, code postal, département ou nom du centre…"
+          idle-message="Cherchez une commune, un code postal ou un département — ou choisissez un type de véhicule.">
+        </dsfr-data-search>
+      </div>
+    </div>
+  </section>
 
+  <div class="fr-container fr-mb-8w">
+    <!-- Les compteurs suivent les filtres : pleine largeur, comme la recherche.
+         Ils ne suivent PAS la recherche (une recherche serveur ne parle qu'à sa
+         source) : la phrase le dit. -->
+    <div class="odv-viz" data-code="Trois compteurs qui suivent le type de véhicule et l'énergie">
+    <p class="odv-lecture">Ce que coûte une visite pour
+      <strong><dsfr-data-context-value for="ctx-ct" field="cat_vehicule_libelle" fallback="tous types de véhicules confondus"></dsfr-data-context-value></strong>,
+      <strong><dsfr-data-context-value for="ctx-ct" field="cat_energie_libelle" fallback="toutes énergies"></dsfr-data-context-value></strong>,
+      en France entière&nbsp;: la moyenne, le prix que la moitié des centres ne dépasse pas, et le
+      nombre de tarifs qui les fondent. La recherche ne s'applique pas à ces chiffres.</p>
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="ct-total" value="p:max" format="euro" decimals="2"
+        heading="Prix moyen de la visite" label="moyenne des tarifs de la sélection" icon="fr-icon-car-line" col="4"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ct-total" value="med:max" format="euro" decimals="0"
+        heading="Prix médian" label="la moitié des tarifs sont à ce prix ou moins" col="4"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ct-total" value="n:max" format="nombre"
+        heading="Base" label="tarifs déclarés (hors 0 €)" col="4"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+    </div>
+
+    <!-- Les filtres sont alignés sur la carte qu'ils pilotent, pas sur la page. -->
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-          Trouver un centre<span class="odv-filtres__compte"></span>
+          Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Trouver un centre</h2>
+        <h2 class="fr-h6">Filtrer</h2>
 
-        <dsfr-data-search id="ct-q" source="ct" server-search count count-label="tarif"
-          label="Commune, code postal, département ou centre" placeholder="Ex. : Frans, 01480, Ain…">
-        </dsfr-data-search>
-
-        <div class="fr-select-group fr-mt-2w">
+        <div class="odv-viz" data-code="Deux listes écrites à la main, lues par un contexte">
+        <div class="fr-select-group">
           <label class="fr-label" for="filtre-vehicule">Type de véhicule</label>
           <select class="fr-select" id="filtre-vehicule">
             <option value="">Tous les types</option>
@@ -132,71 +190,105 @@
           </select>
         </div>
         <dsfr-data-context-tags for="ctx-ct"></dsfr-data-context-tags>
+        </div>
         <p class="fr-text--xs fr-hint-text fr-mt-2w">
           Sans type ni énergie, la moyenne mélange voitures, motos et camping-cars&nbsp;: choisissez les deux
-          pour un prix comparable.
+          pour un prix comparable. Le jeu ne déclare aucune facette&nbsp;: ces listes sont écrites à la main.
         </p>
       </details>
 
       <div class="fr-col-12 fr-col-lg-9">
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Prix moyen de la visite, par département">
-              <dsfr-data-chart id="g-dept" source="ct-dept" type="map"
-                code-field="code_departement" value-field="p" name="Prix moyen de la visite (€)" unit-tooltip=" €"
-                databox databox-title="Prix moyen de la visite, par département"
-                databox-source="DGCCRF — prix-controle-technique, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-dept" source="ct-dept" table download></dsfr-data-a11y>
+        <div class="odv-viz" data-code="Carte des centres trouvés, fiche tarifaire en panneau latéral">
+        <h2 class="fr-h4">Les centres trouvés, du moins cher au plus cher</h2>
+        <p class="odv-lecture">La carte montre les <strong>30 tarifs les moins chers</strong> de la
+          recherche, un point par tarif&nbsp;: un centre qui déclare plusieurs catégories apparaît
+          plusieurs fois au même endroit. Les pages suivantes sont sous la liste.</p>
+        <dsfr-data-map name="Centres de contrôle technique de la page courante" tiles-style="muted"
+          center="46.55,2.5" zoom="5" height="480px" tiles="ign-plan" fit-bounds>
+          <dsfr-data-map-layer source="ct-q" type="circle" radius="7"
+            lat-field="latitude" lon-field="longitude" color="#000091"
+            tooltip-field="cct_denomination">
+          </dsfr-data-map-layer>
+          <dsfr-data-map-popup mode="panel-right" title-field="cct_denomination" width="340px">
+            <template>
+              <p class="fr-text--sm fr-mb-1v">{{cct_adresse|}}</p>
+              <p class="fr-text--sm fr-mb-2v"><strong>{{cct_code_postal}} {{cct_commune}}</strong> — {{nom_departement}}</p>
+              <p class="fr-text--sm fr-mb-1v">{{cat_vehicule_libelle}}, {{cat_energie_libelle}}</p>
+              <p class="fr-text--sm fr-mb-1v">Visite&nbsp;: <strong>{{prix_visite:number}} €</strong></p>
+              <p class="fr-text--sm fr-mb-1v">Contre-visite&nbsp;: {{prix_contre_visite_mini:number|—}} à {{prix_contre_visite_maxi:number|—}} €</p>
+              <p class="fr-text--xs">Tarif appliqué depuis le {{date_application_visite:date}}</p>
+            </template>
+          </dsfr-data-map-popup>
+        </dsfr-data-map>
+        </div>
+      </div>
+    </div>
+
+    <div class="odv-viz" data-code="Les tarifs de la recherche, paginés par le serveur">
+    <h2 class="fr-h4">Les tarifs</h2>
+    <dsfr-data-display source="ct-q" cols="3" uid-field="cct_siret"
+      empty="Aucun tarif ne correspond à cette recherche." count-label="tarif"
+      idle-message="Cherchez une commune, un code postal ou un département — ou choisissez un type de véhicule.">
+      <template>
+        <div class="fr-card fr-card--sm">
+          <div class="fr-card__body">
+            <div class="fr-card__content">
+              <h3 class="fr-card__title">{{cct_denomination}}</h3>
+              <p class="fr-card__desc fr-text--sm">{{cct_code_postal}} {{cct_commune}} — {{nom_departement}}</p>
+              <div class="fr-card__end">
+                <p class="fr-text--sm fr-mb-1v">{{cat_vehicule_libelle}}, {{cat_energie_libelle}}</p>
+                <p class="fr-text--lg fr-text--bold fr-mb-1v">{{prix_visite:number}} €</p>
+                <p class="fr-text--xs fr-mb-0">Contre-visite {{prix_contre_visite_mini:number|—}} à {{prix_contre_visite_maxi:number|—}} €</p>
               </div>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h6">Les centres de la page, du moins cher au plus cher</h2>
-            <div class="odv-viz" data-code="Centres de contrôle technique de la page courante">
-            <dsfr-data-map name="Centres de contrôle technique de la page courante"
-              center="46.55,2.5" zoom="5" height="420px" tiles="ign-plan" fit-bounds>
-              <dsfr-data-map-layer source="ct-q" type="circle" radius="7"
-                lat-field="latitude" lon-field="longitude" color="#000091"
-                tooltip-field="cct_denomination">
-              </dsfr-data-map-layer>
-              <dsfr-data-map-popup mode="panel-right" title-field="cct_denomination" width="340px">
-                <template>
-                  <p class="fr-text--sm fr-mb-1v">{{cct_adresse|}}</p>
-                  <p class="fr-text--sm fr-mb-2v"><strong>{{cct_code_postal}} {{cct_commune}}</strong> — {{nom_departement}}</p>
-                  <p class="fr-text--sm fr-mb-1v">{{cat_vehicule_libelle}}, {{cat_energie_libelle}}</p>
-                  <p class="fr-text--sm fr-mb-1v">Visite&nbsp;: <strong>{{prix_visite}} €</strong></p>
-                  <p class="fr-text--sm fr-mb-1v">Contre-visite&nbsp;: {{prix_contre_visite_mini|—}} à {{prix_contre_visite_maxi|—}} €</p>
-                  <p class="fr-text--xs">Tarif appliqué depuis le {{date_application_visite}}</p>
-                </template>
-              </dsfr-data-map-popup>
-            </dsfr-data-map>
             </div>
           </div>
         </div>
+      </template>
+    </dsfr-data-display>
+    </div>
 
-        <h2 class="fr-h4">Les tarifs</h2>
-        <dsfr-data-display source="ct-q" cols="3" uid-field="cct_siret"
-          empty="Aucun tarif ne correspond à cette recherche." count-label="tarif">
-          <template>
-            <div class="fr-card fr-card--sm">
-              <div class="fr-card__body">
-                <div class="fr-card__content">
-                  <h3 class="fr-card__title">{{cct_denomination}}</h3>
-                  <p class="fr-card__desc fr-text--sm">{{cct_code_postal}} {{cct_commune}} — {{nom_departement}}</p>
-                  <div class="fr-card__end">
-                    <p class="fr-text--sm fr-mb-1v">{{cat_vehicule_libelle}}, {{cat_energie_libelle}}</p>
-                    <p class="fr-text--lg fr-text--bold fr-mb-1v">{{prix_visite}} €</p>
-                    <p class="fr-text--xs fr-mb-0">Contre-visite {{prix_contre_visite_mini|—}} à {{prix_contre_visite_maxi|—}} €</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
-        </dsfr-data-display>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-lg-7">
+        <div class="odv-viz" data-code="Prix moyen de la visite par département, résumé pondéré par le nombre de tarifs">
+        <h2 class="fr-h4">Où la visite est-elle la moins chère&nbsp;?</h2>
+        <p class="odv-lecture">Tous types confondus, l'écart entre départements va du simple à près de
+          <strong>1,5 fois</strong>&nbsp;: 74&nbsp;€ dans le Loiret, 110&nbsp;€ en Haute-Savoie, et plus
+          de 100&nbsp;€ à Paris et en Corse-du-Sud (relevé du 20 septembre 2026). Chaque département est
+          la moyenne de ses tarifs&nbsp;; le chiffre «&nbsp;en France&nbsp;» est pondéré par leur nombre,
+          pas une moyenne de moyennes — c'est celui du premier compteur.</p>
+        <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-dept" source="ct-dept-aff" type="map"
+            code-field="code_departement" value-field="prix_affiche" name="Prix moyen de la visite (€)" unit-tooltip=" €"
+            map-summary="weighted" map-summary-weight="tarifs" map-summary-field="prix_moyen"
+            databox databox-title="Prix moyen de la visite, par département"
+            databox-source="DGCCRF — prix-controle-technique, via data.economie.gouv.fr" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-dept" source="ct-dept-aff" table download
+            label-field="nom_departement" value-field="prix_affiche, tarifs"
+            description="Prix moyen de la visite de contrôle technique par département, en euros, avec le nombre de tarifs qui fondent chaque moyenne. Le classement va du Loiret, le moins cher, à la Haute-Savoie."></dsfr-data-a11y>
+        </div>
+        </div>
       </div>
-
+      <div class="fr-col-12 fr-col-lg-5">
+        <div class="odv-viz" data-code="Prix moyen par énergie — exempté du filtre énergie">
+        <h2 class="fr-h4">L'énergie fait le prix</h2>
+        <p class="odv-lecture">Pour une voiture particulière, <strong>essence et diesel</strong> se
+          contrôlent au même prix (80&nbsp;€ en moyenne)&nbsp;; <strong>électrique et hybride</strong>
+          coûtent 6 à 7&nbsp;€ de plus, le <strong>gaz</strong> 15&nbsp;€ de plus. Le filtre
+          «&nbsp;Énergie&nbsp;» ne s'applique pas ici, le type de véhicule si.</p>
+        <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-energie" source="ct-energie-aff" type="bar" horizontal
+            label-field="cat_energie_libelle" value-field="prix_moyen:Prix moyen de la visite (€)" unit-tooltip=" €"
+            y-min="0"
+            databox databox-title="Prix moyen de la visite, par énergie"
+            databox-source="DGCCRF — prix-controle-technique, via data.economie.gouv.fr">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-energie" source="ct-energie-aff" table
+            label-field="cat_energie_libelle" value-field="prix_moyen, tarifs"
+            description="Prix moyen de la visite par énergie du véhicule, en euros, avec le nombre de tarifs par énergie."></dsfr-data-a11y>
+        </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -206,6 +298,20 @@
         <summary>Analyse de reproduction — Prix des contrôles techniques — ce que la reproduction a coûté</summary>
 
     <div class="fr-container">
+      <p class="fr-text--sm">
+        <strong>Refonte «&nbsp;gabarit famille A&nbsp;» (2026-09-20).</strong> La recherche est montée en
+        bandeau, les compteurs en pleine largeur, les filtres alignés sur la carte. Sur le fond&nbsp;:
+        la page s'ouvrait sur les trente tarifs les moins chers de France — <strong>trente tarifs à
+        0&nbsp;€</strong>, vérifié au navigateur (« 0 € Contre-visite 0 à 0 € ») et à l'API
+        (1&nbsp;463 lignes à 0&nbsp;€, 285 centres). Ils sont écartés (<code>where="prix_visite > 0"</code>),
+        la liste et la carte attendent un geste (<code>require-where</code>), le prix médian et la base
+        rejoignent la moyenne, le résumé de la carte est pondéré, et un graphique par énergie dit
+        pourquoi le filtre compte. En pondérant ce résumé, un second défaut est apparu&nbsp;: la carte
+        n'avait que <strong>100 départements sur 101</strong> — la Haute-Savoie, le plus cher, manquait
+        (voir «&nbsp;Ce qui a coincé&nbsp;»). Les notes éditoriales, en fin d'analyse, disent ce qui a été
+        choisi.
+      </p>
+
       <p>
         Cible d'origine&nbsp;: prix.conso.gouv.fr, une application dédiée de la DGCCRF (lue au navigateur,
         elle refuse les lectures automatisées)&nbsp;: un onglet «&nbsp;rechercher sur la carte&nbsp;» avec
@@ -218,23 +324,30 @@
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Un jeu tarif × centre × catégorie se traite en mode serveur.</strong> 145&nbsp;146
+            <li><strong>Un jeu tarif × centre × catégorie se traite en mode serveur.</strong> 145&nbsp;593
               lignes ne se chargent pas&nbsp;; <code>server-side</code>, <code>server-search</code> et une
               agrégation par département suffisent. La recherche plein texte couvre commune, code postal,
               département et nom du centre en un seul champ, là où l'original en a trois.</li>
             <li><strong>La choroplèthe des prix moyens</strong> par département est un
               <code>dsfr-data-chart type="map"</code> sur une source agrégée — un ajout que l'original n'a pas,
-              et qui suit les deux filtres.</li>
-            <li><strong>Un contexte pour trois sources.</strong> Choisir «&nbsp;Voiture particulière,
-              Diesel&nbsp;» relance la liste, la moyenne nationale et la carte des départements en trois
-              requêtes légères.</li>
+              et qui suit les deux filtres. Son résumé «&nbsp;en France&nbsp;» est pondéré par le nombre de
+              tarifs (<code>map-summary="weighted"</code>) et calculé sur la colonne non arrondie
+              (<code>map-summary-field</code>)&nbsp;: c'est le même chiffre que le compteur.</li>
+            <li><strong>Un contexte pour quatre sources.</strong> Choisir «&nbsp;Voiture particulière,
+              Diesel&nbsp;» relance la liste, les compteurs et la carte des départements en trois
+              requêtes légères&nbsp;; <code>apply-to</code> exempte le graphique par énergie du filtre
+              énergie, sans script.</li>
+            <li><strong>Attendre un geste, en une balise.</strong> <code>require-where</code> sur la source
+              paginée&nbsp;: aucune requête «&nbsp;tout&nbsp;» au chargement, et le compteur du bandeau, la
+              liste et la carte disent quoi faire (<code>idle-message</code>). Le <code>where</code> statique
+              qui écarte les 0&nbsp;€ ne compte pas comme un filtre — c'est documenté, et vérifié.</li>
             <li><strong>Le total de la recherche en un attribut</strong> (ajouté au lot 11)&nbsp;:
               <code>dsfr-data-search count</code> affichait «&nbsp;145146 resultats&nbsp;», puis
               «&nbsp;28808 resultats&nbsp;» après le choix «&nbsp;Voiture particulière&nbsp;» — il suit
               le contexte, pas seulement la saisie. Le rendu brut est corrigé&nbsp;: séparateur de milliers
               (0.26.0) et nom compté en 0.29.0, <code>count-label="tarif"</code>
               (<a href="https://github.com/bmatge/dsfr-data/pull/802" target="_blank" rel="noopener external">#802</a>,
-              AM-044). Il annonce «&nbsp;145&nbsp;300 tarifs&nbsp;» — une ligne du jeu est un tarif, pour un
+              AM-044). Il annonce des tarifs — une ligne du jeu est un tarif, pour un
               centre et une catégorie de véhicule, pas un centre.</li>
           </ul>
         </div>
@@ -244,17 +357,36 @@
           <ul>
             <li><strong>Aucune facette déclarée sur ce jeu.</strong> L'endpoint <code>/facets</code> renvoie
               une liste vide&nbsp;: <code>server-facets</code> n'a rien à afficher. Les deux filtres sont donc
-              des <code>&lt;select&gt;</code> écrits à la main, et le département — 96 valeurs — passe par la
+              des <code>&lt;select&gt;</code> écrits à la main, et le département — 101 valeurs — passe par la
               recherche. C'est une configuration du portail, pas une limite de l'outil, mais elle montre à quel
               point <code>server-facets</code> dépend du back-office (AM-003).</li>
             <li><strong>La carte des centres ne montre que la page.</strong> Trente tarifs par page, donc au
-              plus trente centres&nbsp;; sans recherche, ce sont les trente visites les moins chères de France,
-              ce qui n'est pas la vue de l'original (tous les centres d'un département). Une vue par
-              département demanderait <code>bbox</code> ou une facette département — absente.</li>
+              plus trente centres&nbsp;; sans recherche, ce seraient les trente visites les moins chères de
+              France — d'où l'attente imposée par <code>require-where</code>. La vue de l'original (tous les
+              centres d'un département) demanderait <code>bbox</code> ou une facette département — absente.</li>
             <li><strong>Un centre a autant de lignes que de catégories</strong>&nbsp;: le même point
               apparaît jusqu'à dix fois sur la carte, et <code>uid-field="cct_siret"</code> ne suffit pas à
               dédoublonner les cartes. C'est la structure du jeu&nbsp;; l'original la masque en imposant le
               choix d'une catégorie avant d'afficher (LIM-003).</li>
+            <li><strong>Un département manquait sur la carte, et rien ne le disait.</strong> La source
+              agrégée portait <code>limit="100"</code> pour 101 départements (96 en métropole et Corse,
+              5 DROM). Triée par prix croissant, elle perdait le 101e&nbsp;: la <strong>Haute-Savoie</strong>,
+              le département le plus cher (109,86&nbsp;€, 1&nbsp;673 tarifs). Ni la carte ni le tableau ne
+              peuvent le voir — <code>total_count</code> d'un <code>group_by</code> vaut la taille de page
+              (LIM-002) — et le constat n'est sorti que d'un recoupement&nbsp;: le résumé pondéré de la
+              carte (86,26&nbsp;€) ne retombait pas sur le compteur national (86,53&nbsp;€). Deux blocs
+              voisins qui devraient dire le même chiffre et ne le disent pas, c'est le seul signal qu'une
+              troncature de <code>group_by</code> laisse. <code>limit="200"</code>, et les deux chiffres
+              coïncident.</li>
+            <li><strong>Les compteurs ne suivent pas la recherche.</strong> Une recherche serveur ne parle
+              qu'à sa source (<code>source</code> au singulier)&nbsp;: la moyenne et la carte des départements
+              suivent le type et l'énergie, pas la commune cherchée. Un prix moyen «&nbsp;à Lyon&nbsp;»
+              demanderait que le terme de recherche soit diffusé au contexte. La phrase de lecture le dit.</li>
+            <li><strong>Le tableau accessible nomme ses colonnes par les clés des lignes.</strong>
+              <code>dsfr-data-a11y</code> n'a pas de libellés de colonnes&nbsp;: les alias du
+              <code>select</code> (<code>prix_moyen</code>, <code>tarifs</code>) tiennent lieu d'en-têtes.
+              Opendatasoft renvoie en plus la colonne groupée sous son nom d'origine, d'où
+              <code>value-field</code> pour ne montrer que les colonnes utiles.</li>
           </ul>
 
           <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
@@ -284,8 +416,10 @@
           <tbody>
             <tr><td>département + commune + SIRET</td><td><code>dsfr-data-search server-search</code></td><td>Un champ pour trois</td></tr>
             <tr><td>types de véhicule, énergies</td><td><code>&lt;select&gt;</code> + <code>context-filter</code></td><td>Équivalent, valeurs en dur (pas de facette déclarée)</td></tr>
+            <tr><td>choix obligatoire avant affichage</td><td><code>require-where</code> + <code>idle-message</code></td><td>Équivalent, en deux attributs</td></tr>
             <tr><td>carte des centres et tarifs</td><td><code>dsfr-data-map</code> + panneau</td><td>Équivalent sur la page courante seulement</td></tr>
             <tr><td>—</td><td>choroplèthe des prix moyens par département</td><td>Ajout</td></tr>
+            <tr><td>—</td><td>prix moyen par énergie, exempté du filtre énergie</td><td>Ajout</td></tr>
           </tbody>
         </table>
       </div>
@@ -299,8 +433,42 @@
           en soi&nbsp;: le mode serveur hérite de la configuration du back-office.</p>
         <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AM-003 et LIM-003 confirmés, AM-034 requalifié (<code>search count</code>), AM-044, LIM-006 (jeu <code>controle_techn</code> périmé au catalogue).</p>
       </div>
+
+      <h3 class="fr-h5 fr-mt-6w">Notes — les hypothèses éditoriales</h3>
+      <p class="fr-text--sm fr-hint-text">
+        Ces données se présentent de plusieurs façons. Voici les choix faits ici, et pourquoi.
+        Ils sont discutables&nbsp;: ils sont écrits pour pouvoir l'être.
+      </p>
+      <ol class="fr-text--sm">
+        <li class="fr-mb-2w"><strong>Les tarifs à 0&nbsp;€ sont écartés partout.</strong> 1&nbsp;463 lignes
+          sur 145&nbsp;593, portées par 285 centres (86 en Martinique, 59 dans l'Hérault). Une visite gratuite
+          n'existe pas&nbsp;: c'est un prix non renseigné, que le jeu code en zéro. Les garder faisait de la page
+          d'accueil une liste de «&nbsp;0&nbsp;€&nbsp;» et déplaçait la moyenne nationale de 85,66 à 86,53&nbsp;€.
+          <strong>Ce qui n'est pas écarté&nbsp;:</strong> 18 tarifs au-dessus de 300&nbsp;€ (jusqu'à
+          999&nbsp;€, dix centres) — plausiblement des erreurs de saisie, mais rien dans le jeu ne le prouve,
+          et la médiane les absorbe.</li>
+        <li class="fr-mb-2w"><strong>Moyenne et médiane, côte à côte.</strong> La moyenne est ce que le lecteur
+          attend&nbsp;; la médiane est ce qui résiste aux 999&nbsp;€. Quand elles coïncident (85 et 85&nbsp;€,
+          80 et 80&nbsp;€ pour une voiture particulière diesel), la moyenne est fiable&nbsp;; quand elles
+          divergent, la médiane a raison. Le troisième compteur donne la base&nbsp;: un chiffre sans son
+          effectif est une opinion.</li>
+        <li class="fr-mb-2w"><strong>Pas de type de véhicule présélectionné.</strong> Un <code>default</code> sur
+          le filtre aurait ouvert la page sur «&nbsp;Voiture particulière&nbsp;» — mais il aurait satisfait
+          <code>require-where</code>, et la liste serait repartie sur les trente tarifs les moins chers de France
+          (1&nbsp;€, 10&nbsp;€…). La page s'ouvre donc sur la moyenne toutes catégories (86,53&nbsp;€), et le
+          dit&nbsp;; une voiture particulière est à 85,26&nbsp;€, les cinq grandes catégories se tiennent
+          entre 84 et 88&nbsp;€, seules les deux-roues et voiturettes sont nettement en dessous (66 à 75&nbsp;€).</li>
+        <li class="fr-mb-2w"><strong>Le graphique par énergie ignore le filtre énergie.</strong> Il montre l'écart
+          entre énergies pour le type choisi&nbsp;; filtré sur «&nbsp;Diesel&nbsp;», il n'aurait qu'une barre.
+          <code>apply-to</code> sur le filtre le tient à l'écart. Le graphique par département, lui, suit les
+          deux filtres&nbsp;: sa question est «&nbsp;où&nbsp;», pas «&nbsp;quelle énergie&nbsp;».</li>
+        <li class="fr-mb-2w"><strong>Une choroplèthe de moyennes départementales, pas de médianes.</strong>
+          L'API sait calculer la médiane par département, et le classement change à la marge (Loiret, Loire et
+          Cantal à 75&nbsp;€ de médiane). La moyenne a été gardée pour que la carte, son résumé pondéré et le
+          premier compteur disent le même chiffre.</li>
+      </ol>
     </div>
-  
+
       </details></section>
 
 </main>
