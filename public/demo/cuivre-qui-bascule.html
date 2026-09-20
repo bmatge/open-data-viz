@@ -86,6 +86,40 @@
     fetch-mode="export" max-records="40000">
   </dsfr-data-source>
 
+  <!-- ====================== Les contours communaux ======================
+       Le jeu de Bercy porte la geometrie de chaque commune dans `forme_geo` --
+       un Feature GeoJSON de 12 Ko en JSON brut. Mesure a l'API, compression
+       comprise : 100 communes pesent 124 Ko, soit environ 1,24 Ko chacune.
+       Les 31 785 feraient donc pres de 40 Mo transferes -- infiniment trop
+       pour une carte "par defaut", et c'est `require-where` qui le garantit
+       plutot que de l'esperer. Un departement entier, lui, tient en ~1 Mo.
+
+       La source n'emet RIEN tant qu'aucun filtre n'est pose. Le contexte
+       ci-dessous lui transmet la recherche et les facettes de l'explorateur :
+       des qu'une commune est cherchee ou un departement choisi, et seulement
+       alors, les contours se chargent. Le plafond de 600 lignes borne le cas
+       ou quelqu'un selectionne plusieurs departements. Il est cale sur 1000 et
+       non sur 600 : le plus gros departement en compte 888 (Pas-de-Calais,
+       releve a l'API), et `max-records` tronque EN SILENCE -- un plafond trop
+       bas aurait affiche une carte incomplete sans le dire. -->
+  <dsfr-data-source id="contours" api-type="opendatasoft" require-where
+    base-url="https://data.economie.gouv.fr" dataset-id="fermeture-reseau-cuivre"
+    select="code_insee, nom_commune, departement, fermeture_commerciale, forme_geo"
+    max-records="1000"></dsfr-data-source>
+
+  <dsfr-data-normalize id="contours-n" source="contours"
+    compute="annee = year(fermeture_commerciale)"></dsfr-data-normalize>
+
+  <!-- Le contexte qui ouvre la porte. Il ne vise QUE la source des contours :
+       l'explorateur en dessous continue de filtrer ses 31 785 lignes cote
+       client, sans rien recharger. Une facette en mode `context` delegue sa
+       selection au contexte, qui la diffuse a ses sources cibles -- le champ
+       doit donc exister sur `contours`, ce qui est le cas de `departement`. -->
+  <dsfr-data-context id="ctx-contours" sources="contours">
+    <dsfr-data-context-filter ui="ct-commune" field="nom_commune"
+      operator="contains" label="Commune"></dsfr-data-context-filter>
+  </dsfr-data-context>
+
   <!-- La jointure. Clé : le code INSEE à cinq caractères, zéros de tête compris,
        identique sur les deux portails (vérifié à l'API sur l'Ain : « 01002 » des
        deux côtés). `type="inner"` est un choix éditorial, écrit dans les notes :
@@ -334,10 +368,49 @@
       </details>
 
       <div class="fr-col-12 fr-col-lg-9">
+        <!-- La carte des contours, qui n'existe qu'une fois la question posee.
+             `require-where` sur sa source lui fait afficher son message
+             d'attente tant que rien n'est cherche ni filtre -- ce qui est
+             l'inverse d'une carte vide : elle DIT pourquoi elle est vide. -->
+        <div class="odv-viz fr-mb-4w" data-code="Contours des communes filtrées">
+          <h3 class="fr-h6">Les contours de votre sélection</h3>
+          <div class="fr-grid-row fr-grid-row--gutters fr-mb-2w">
+            <div class="fr-col-12 fr-col-md-6">
+              <div class="fr-input-group">
+                <label class="fr-label" for="ct-commune">Nom de commune
+                  <span class="fr-hint-text">Saisissez au moins quelques lettres</span>
+                </label>
+                <input class="fr-input" type="text" id="ct-commune" placeholder="Ex. : Siévoz">
+              </div>
+            </div>
+            <div class="fr-col-12 fr-col-md-6">
+              <dsfr-data-facets id="ct-dep" source="donnees" context="ctx-contours"
+                fields="departement" labels="departement:Département"
+                display="departement:multiselect" searchable="departement"
+                max-values="120" no-reset></dsfr-data-facets>
+            </div>
+          </div>
+          <p class="fr-hint-text fr-mb-2v">
+            Cette carte ne se charge <strong>qu'après une recherche ou un filtre</strong>&nbsp;:
+            les 31&nbsp;785 contours communaux représentent près de 40&nbsp;Mo transférés
+            (mesuré à l'API, compression comprise). Un département entier tient en 1&nbsp;Mo.
+            C'est le genre de carte qu'on ne peut pas afficher « par défaut »&nbsp;— et
+            <code>require-where</code> le garantit plutôt que de l'espérer.
+          </p>
+          <dsfr-data-map tiles-style="muted" height="420px" fit-bounds
+            name="Contours des communes de la sélection"
+            idle-message="Cherchez une commune ou choisissez un département : les contours s'afficheront ici.">
+            <dsfr-data-map-layer source="contours-n" type="geoshape"
+              geo-field="forme_geo" color-field="annee"
+              color-map="2026:#000091, 2027:#e1000f, 2028:#00a95f, 2025:#6a6af4, 2024:#b34000"
+              tooltip-field="nom_commune"></dsfr-data-map-layer>
+          </dsfr-data-map>
+        </div>
+
         <!-- `count-label` (0.33.0, AM-077) : « 1 234 communes » et non
              « 1234 resultats », qui ne dit rien d'un annuaire de communes. -->
         <dsfr-data-list source="f" count-label="commune"
-          columns="nom_commune:Commune | departement:Département | bascule:Bascule | population:Habitants | ettot20:Établissements | milieu:Milieu"
+          columns="nom_commune:Commune, departement:Département, bascule:Bascule, population:Habitants, ettot20:Établissements, milieu:Milieu"
           sort search pagination="15" export>
         </dsfr-data-list>
       </div>
