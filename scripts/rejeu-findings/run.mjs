@@ -316,16 +316,80 @@ const tests = {
 
   // AM-081 : libelle de valeur sur une facette. Trois formes, dont un attribut
   // invente — pour verifier qu'il est ignore EN SILENCE.
+  // AM-081 : un libelle de valeur sur la facette (#928). Ce qui compte n'est pas
+  // seulement le texte affiche : c'est que la valeur DIFFUSEE reste le code.
   async am081() {
     const t = await ouvrir('/_test/am081.html', { bundle });
     await attendre(6000);
     const r = await t.page.evaluate(() => {
-      const vals = (id) => [...document.getElementById(id).querySelectorAll('label, .fr-label, legend')].map((e) => e.textContent.trim()).filter(Boolean).slice(0, 12);
-      return { f1: vals('f1'), f2: vals('f2'), f3: vals('f3') };
+      const couples = (id) => [...document.getElementById(id).querySelectorAll('input[type=checkbox]')]
+        .map((i) => ({ valeur: i.value, affiche: (i.closest('label')?.textContent ?? i.parentElement?.textContent ?? '').replace(/\s+/g, ' ').trim() }))
+        .slice(0, 6);
+      return { f1: couples('f1'), f2: couples('f2'), f3: couples('f3') };
+    });
+    console.log('version', await t.version());
+    console.log(JSON.stringify(r, null, 1));
+    // La clause forte : on coche la premiere valeur de f2 et on releve ce qui part filtrer.
+    const requetes = [];
+    t.page.on('request', (r) => { if (/equipements[.]sports[.]gouv[.]fr/.test(r.url())) requetes.push(decodeURIComponent(r.url())); });
+    await t.page.evaluate(() => document.querySelector('#f2 input[type=checkbox]').click());
+    await attendre(3000);
+    const apres = await t.page.evaluate(() => ({
+      affiche: document.querySelector('#f2 input:checked')?.closest('label')?.textContent.replace(/\s+/g, ' ').trim(),
+      tags: [...document.querySelectorAll('#f2 .fr-tag')].map((e) => e.textContent.trim()),
+    }));
+    console.log('affiche :', JSON.stringify(apres));
+    console.log('part filtrer :', requetes.map((u) => (u.match(/refine=[^&]*|where=[^&]*/g) || []).join(' ')).filter(Boolean).slice(0, 3));
+    console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 200)).slice(0, 8));
+    await t.fermer();
+  },
+
+  // AM-084 : une valeur par defaut sur la facette (#932). Temoin sans defaut,
+  // defaut present dans le jeu, defaut absent du jeu (doit sortir « indisponible »).
+  async am084() {
+    const t = await ouvrir('/_test/am084.html', { bundle });
+    await attendre(6000);
+    const r = await t.page.evaluate(() => {
+      const etat = (id) => {
+        const el = document.getElementById(id);
+        const cases = [...el.querySelectorAll('input[type=checkbox]')];
+        const sel = el.querySelector('select');
+        return {
+          cochees: cases.filter((i) => i.checked).map((i) => (i.closest('label')?.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)),
+          nbCases: cases.length,
+          indisponible: el.innerText.includes('indisponible'),
+          select: sel ? { valeur: sel.value, options: [...sel.options].map((o) => o.textContent.trim()).slice(0, 4) } : null,
+        };
+      };
+      return { f1: etat('f1'), f2: etat('f2'), f3: etat('f3'), f4: etat('f4'), f5: etat('f5') };
     });
     console.log('version', await t.version());
     console.log(JSON.stringify(r, null, 1));
     console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 200)).slice(0, 8));
+    await t.fermer();
+  },
+
+  // AM-082 : series-field sur dsfr-data-a11y. Le tableau equivalent doit passer
+  // d'une ligne par (label x serie) a une colonne par serie.
+  async am082() {
+    const t = await ouvrir('/_test/am082.html', { bundle });
+    await attendre(6000);
+    const r = await t.page.evaluate(() => {
+      const tab = (id) => {
+        const el = document.getElementById(id);
+        const table = el.querySelector('table');
+        if (!table) return '(pas de table)';
+        return {
+          entetes: [...table.querySelectorAll('thead th')].map((e) => e.textContent.trim()),
+          nbLignes: table.querySelectorAll('tbody tr').length,
+          premiere: [...(table.querySelector('tbody tr')?.children ?? [])].map((e) => e.textContent.trim()),
+        };
+      };
+      return { a1: tab('a1'), a2: tab('a2'), a3: tab('a3') };
+    });
+    console.log('version', await t.version());
+    console.log(JSON.stringify(r, null, 1));
+    console.log('console :', t.logs.filter((l) => l.type !== 'log').map((l) => l.type + ': ' + l.texte.slice(0, 250)).slice(0, 8));
     await t.fermer();
   },
 
