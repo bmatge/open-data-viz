@@ -55,7 +55,9 @@
   /* Decoupe la region marquee dans le SOURCE, par equilibrage de balises.
      On repere l'ouverture par son attribut `data-code`, qui est unique. */
   const extraire = (source, titre) => {
-    const ouv = new RegExp('<div class="odv-viz"[^>]*data-code="' + titre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"[^>]*>');
+    /* La classe peut etre accompagnee (`class="odv-chart-slot odv-viz"`) : on
+       cherche le marqueur DANS l'attribut, pas en tete de celui-ci. */
+    const ouv = new RegExp('<div class="[^"]*\\bodv-viz\\b[^"]*"[^>]*data-code="' + titre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"[^>]*>');
     const m = ouv.exec(source);
     if (!m) return null;
     let i = m.index + m[0].length, prof = 1, re = /<(\/?)div\b[^>]*?(\/?)>/g;
