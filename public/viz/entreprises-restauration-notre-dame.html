@@ -100,13 +100,26 @@
   <dsfr-data-source id="regions" url="/data/geo/regions-simplifiees.geojson" transform="features">
   </dsfr-data-source>
 
+  <!-- `share_percent` (#926) : la part de chaque groupe, calculée sur toutes les
+       lignes avant `limit` ; une query `limit="1"` en aval isole le groupe de tête
+       pour la phrase de lecture (dsfr-data-repeat). -->
   <dsfr-data-query id="nd-metiers" source="nd-f" group-by="categories_de_metiers"
-    aggregate="entreprise:count:nb" order-by="nb:desc">
+    aggregate="entreprise:count:nb, nb:share_percent:part" order-by="nb:desc">
   </dsfr-data-query>
+  <dsfr-data-query id="nd-metier-1" source="nd-metiers" limit="1"></dsfr-data-query>
 
   <dsfr-data-query id="nd-regions" source="nd-f" group-by="nom_officiel_region"
-    aggregate="entreprise:count:nb" order-by="nb:desc">
+    aggregate="entreprise:count:nb, nb:share_percent:part" order-by="nb:desc">
   </dsfr-data-query>
+  <dsfr-data-query id="nd-region-1" source="nd-regions" limit="1"></dsfr-data-query>
+  <!-- « N régions réunissent la moitié des entreprises » : un rang par cumul d'une
+       constante (`un = 1` puis `running_sum`), la part cumulée, et la première ligne
+       qui franchit 50 %. Le tri par `nb` décroissant est refait ici : un cumul
+       n'a de sens qu'après le tri (#738). -->
+  <dsfr-data-normalize id="nd-regions-un" source="nd-regions" compute="un = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="nd-regions-cumul" source="nd-regions-un" order-by="nb:desc"
+    aggregate="un:running_sum:rang, part:running_sum:cumul"></dsfr-data-query>
+  <dsfr-data-query id="nd-moitie" source="nd-regions-cumul" where="cumul:gte:50" limit="1"></dsfr-data-query>
 
   <!-- Les deux KPI filtrés de l'original (`where … LIKE 'oui'`, `where epv LIKE 'EPV'`) :
        un dsfr-data-query `where` sans agrégat laisse passer les lignes, le KPI les compte. -->
@@ -161,7 +174,14 @@
         <p class="fr-text--xs fr-hint-text fr-mb-4w">* Seules les entreprises ayant répondu à ce jour au
           questionnaire figurent sur cette cartographie, qui pourra évoluer.</p>
 
+        <div class="odv-viz" data-code="La carte des entreprises, colorée par catégorie de métier">
         <h2 class="fr-h4">Où sont ces entreprises</h2>
+        <dsfr-data-repeat source="nd-region-1">
+          <template>
+            <p class="odv-lecture"><strong>{{nom_officiel_region}}</strong> rassemble
+              <strong>{{part:number:0}}&nbsp;%</strong> des entreprises de la sélection ({{nb:number}}).</p>
+          </template>
+        </dsfr-data-repeat>
         <dsfr-data-map tiles-style="muted" name="Carte des entreprises ayant contribué à la restauration de Notre-Dame de Paris"
           center="46.8,2.5" zoom="5" height="580px" tiles="ign-plan"
           max-bounds="40,-6,56,22" insets="drom">
@@ -172,7 +192,7 @@
           <dsfr-data-map-layer source="regions" type="geoshape" geo-field="geometry"
             color="#000091" fill-opacity="0.06" no-interactive>
           </dsfr-data-map-layer>
-          <dsfr-data-map-layer source="nd-f" type="circle" radius="6"
+          <dsfr-data-map-layer id="nd-couche" source="nd-f" type="circle" radius="6"
             geo-field="geo_point"
             color-field="categories_de_metiers"
             color-map="Métiers d'art et du patrimoine:#000091, Métiers de l'accompagnement et du soutien de la restauration:#E4794A, Métiers de l'aide au pilotage:#009081, Métiers du bâtiment et des grands chantiers:#6A6AF4"
@@ -217,33 +237,57 @@
               </div>
             </template>
           </dsfr-data-map-popup>
+          <!-- La carte n'avait PAS de légende : la couche est colorée par catégorie de
+               métier, et le lecteur devait deviner. `dsfr-data-map-legend` la dérive
+               du rendu (une entrée par paire de color-map), et la rafraîchit à chaque filtre. -->
+          <dsfr-data-map-legend for="nd-couche" label="Catégorie de métier"></dsfr-data-map-legend>
         </dsfr-data-map>
+        </div>
 
         <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w fr-mb-4w">
           <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <dsfr-data-chart id="g-metiers" source="nd-metiers" type="pie"
-                label-field="categories_de_metiers" value-field="nb"
-                databox databox-title="Répartition par catégorie de métier"
-                databox-source="DGE — restauration-notre-dame, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-metiers" source="nd-metiers" table download></dsfr-data-a11y>
+            <div class="odv-viz" data-code="Répartition par catégorie de métier">
+              <h3 class="fr-h6">Quels métiers</h3>
+              <dsfr-data-repeat source="nd-metier-1">
+                <template>
+                  <p class="odv-lecture">Les <strong>{{categories_de_metiers}}</strong> font
+                    <strong>{{part:number:0}}&nbsp;%</strong> des entreprises de la sélection ({{nb:number}}).</p>
+                </template>
+              </dsfr-data-repeat>
+              <div class="odv-chart-slot">
+                <dsfr-data-chart id="g-metiers" source="nd-metiers" type="pie"
+                  label-field="categories_de_metiers" value-field="nb"
+                  empty-label="Catégorie non précisée"
+                  databox databox-title="Répartition par catégorie de métier"
+                  databox-source="DGE — restauration-notre-dame, via data.economie.gouv.fr"
+                  databox-download>
+                </dsfr-data-chart>
+                <dsfr-data-a11y for="g-metiers" source="nd-metiers" table download
+                  label-field="categories_de_metiers" value-field="nb, part"
+                  empty-label="Catégorie non précisée"></dsfr-data-a11y>
+              </div>
             </div>
           </div>
           <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <dsfr-data-chart id="g-regions" source="nd-regions" type="bar" horizontal
-                label-field="nom_officiel_region" value-field="nb" name='["Entreprises"]'
-                databox databox-title="Répartition par région"
-                databox-source="DGE — restauration-notre-dame, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-regions" source="nd-regions" table download></dsfr-data-a11y>
+            <div class="odv-viz" data-code="Le classement des régions">
+              <h3 class="fr-h6">Quelles régions</h3>
+              <dsfr-data-repeat source="nd-moitie">
+                <template>
+                  <p class="odv-lecture"><strong>{{rang}} régions</strong> suffisent à réunir
+                    <strong>{{cumul:number:0}}&nbsp;%</strong> des entreprises de la sélection.</p>
+                </template>
+              </dsfr-data-repeat>
+              <!-- Un classement : le podium remplace le bar horizontal. Le groupe sans
+                   région (entreprises étrangères) reste dans la requête — il compte au
+                   dénominateur des parts — mais n'atteint pas le top 10. -->
+              <dsfr-data-podium source="nd-regions" label-field="nom_officiel_region" value-field="nb"
+                value-unit="entreprises" max-items="10" selected-palette="sequentialDescending">
+              </dsfr-data-podium>
             </div>
           </div>
         </div>
 
+        <div class="odv-viz" data-code="Les fiches des entreprises, par ordre alphabétique">
         <h2 class="fr-h4">Les entreprises, par ordre alphabétique</h2>
         <dsfr-data-display source="nd-alpha" cols="2" pagination="10" uid-field="entreprise"
           empty="Aucune entreprise ne correspond à ces critères." url-sync count-label="entreprise">
@@ -269,13 +313,16 @@
             </div>
           </template>
         </dsfr-data-display>
+        </div>
       </div>
 
     </div>
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="odv-analyse fr-py-8w" id="analyse">
+  <details class="odv-technique fr-container" id="analyse">
+    <summary>Analyse technique — ce que la reproduction a coûté</summary>
+  <section class="odv-analyse fr-py-8w">
     <div class="fr-container">
       <h2>Analyse de reproduction — Rebâtir Notre-Dame</h2>
 
@@ -448,7 +495,7 @@
             <tr><td>KPI codé en dur «&nbsp;+ 3 000&nbsp;»</td><td><code>dsfr-data-kpi value="=+ 3 000"</code></td><td>Littéral prévu</td></tr>
             <tr><td><code>ng-if</code> lien / texte, <code>ng-repeat</code> galerie</td><td>index de tableau <code>{{images.N|_}}</code> + sélecteurs CSS d'attribut</td><td>Sans conditionnelle ni boucle&nbsp;: le CSS fait le tri</td></tr>
             <tr><td>visionneuse modale (<code>params.image_selected</code>)</td><td>photo dans un nouvel onglet</td><td><strong>Sans équivalent</strong></td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>insets</code></td><td>Sans équivalent</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>insets</code>, <code>dsfr-data-map-legend</code> (la carte n'en avait pas), podium des régions, trois phrases de lecture calculées (<code>share_percent</code>, <code>running_sum</code>)</td><td>Sans équivalent</td></tr>
           </tbody>
         </table>
       </div>
@@ -470,12 +517,14 @@
       </div>
     </div>
   </section>
+  </details>
 
 </main>
 
 <div id="site-footer"></div>
 
 <script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>

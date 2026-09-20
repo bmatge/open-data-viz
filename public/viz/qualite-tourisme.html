@@ -63,16 +63,22 @@
     select="nom_du_professionnel, activite_du_professionnel, ville, code_postal_du_professionnel, adresse, site_web, telephone, email_de_l_etablissement, questionnaire_de_satisfaction, region, departement, coordonnees_geographiques">
   </dsfr-data-source>
 
-  <dsfr-data-query id="qt-activites" source="qt-f" group-by="activite_du_professionnel"
-    aggregate="nom_du_professionnel:count:nb" order-by="nb:desc" limit="12">
-  </dsfr-data-query>
-
-  <!-- Même regroupement sans `limit` : le KPI « activités représentées » comptait
+  <!-- Un regroupement sans `limit` : le KPI « activités représentées » comptait
        les lignes de la requête limitée à 12 — il affichait 12 quel que soit le
        filtre (relecture face au relevé du portail : 28 activités). -->
   <dsfr-data-query id="qt-activites-toutes" source="qt-f" group-by="activite_du_professionnel"
     aggregate="nom_du_professionnel:count:nb">
   </dsfr-data-query>
+
+  <!-- Le classement en aval, avec la part de chaque activité dans la SÉLECTION
+       (`share_percent`, 0.33.0) : le dénominateur est la somme des lignes de
+       sortie avant `limit`, donc les douze parts ne somment pas à 100 %, et un
+       filtre de région les recalcule. -->
+  <dsfr-data-query id="qt-activites-part" source="qt-activites-toutes" group-by="activite_du_professionnel"
+    aggregate="nb:sum, nb__sum:share_percent:part" order-by="nb__sum:desc" limit="12">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="qt-activites" source="qt-activites-part"
+    compute="part_txt = concat(replace(concat(round(part, 1), ''), '.', ','), ' % de la sélection')"></dsfr-data-normalize>
 
   <!-- `where` : 146 lignes sans département formaient un groupe « null » compté
        comme un 100e département. -->
@@ -89,6 +95,7 @@
         </summary>
         <h2 class="fr-h6">Rechercher et filtrer</h2>
 
+        <div class="odv-viz" data-code="Recherche et facettes : deux balises">
         <dsfr-data-search id="qt-q" source="qt"
           fields="nom_du_professionnel, ville, code_postal_du_professionnel, adresse, activite_du_professionnel"
           label="Rechercher un établissement" placeholder="Nom, commune, code postal, activité…"
@@ -100,9 +107,13 @@
           labels="activite_du_professionnel:Activité | region:Région | departement:Département"
           searchable="departement, region" max-values="6">
         </dsfr-data-facets>
+        </div>
       </details>
 
       <div>
+        <div class="odv-viz" data-code="Trois compteurs qui suivent les filtres">
+        <p class="odv-lecture">Trois compteurs qui se recalculent à chaque filtre&nbsp;: combien
+          d'établissements, dans <strong>combien d'activités</strong>, sur combien de départements.</p>
         <dsfr-data-kpi-group class="fr-mb-4w">
           <dsfr-data-kpi source="qt-f" value="count" format="nombre"
             heading="Sélection courante" label="établissements labellisés" col="4"></dsfr-data-kpi>
@@ -111,8 +122,13 @@
           <dsfr-data-kpi source="qt-departements" value="count" format="nombre"
             heading="Couverture" label="départements couverts" col="4"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
+        </div>
 
+        <div class="odv-viz" data-code="Carte des établissements et fiche en panneau latéral">
         <h2 class="fr-h4">Où sont les établissements labellisés</h2>
+        <p class="odv-lecture">Le label couvre tout le territoire, avec une densité plus forte en
+          <strong>Occitanie</strong> et sur les littoraux. Les cinq encarts d'outre-mer suivent la
+          même sélection — Guadeloupe et Mayotte y sont vides, comme dans le jeu.</p>
         <dsfr-data-map tiles-style="muted" name="Carte des établissements labellisés Qualité Tourisme"
           center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
           fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
@@ -135,21 +151,22 @@
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
-
-        <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w fr-mb-4w">
-          <div class="fr-col-12">
-            <div class="odv-chart-slot">
-              <dsfr-data-chart id="g-activites" source="qt-activites" type="bar" horizontal
-                label-field="activite_du_professionnel" value-field="nb" name='["Établissements"]'
-                databox databox-title="Les douze activités les plus représentées"
-                databox-source="DGE — etablissements-labellises-qualite-tourisme, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-activites" source="qt-activites" table download></dsfr-data-a11y>
-            </div>
-          </div>
         </div>
 
+        <div class="odv-viz" data-code="Les douze activités les plus représentées">
+        <h2 class="fr-h4">Les douze activités les plus représentées</h2>
+        <p class="odv-lecture"><strong>Offices de tourisme, campings et lieux de visite</strong>
+          forment le gros des labellisés&nbsp;; l'hôtellerie vient ensuite, éclatée en plusieurs
+          activités. Les parts sont celles de la sélection courante&nbsp;: filtrer une région les
+          recalcule.</p>
+        <!-- Un classement se lit en podium : rang, libellé, part. `bar-position` (0.34) n'existe
+             pas dans la 0.33.0 chargée : la console l'a nommé, il a été retiré. -->
+        <dsfr-data-podium source="qt-activites" label-field="activite_du_professionnel" value-field="nb__sum"
+          subtitle-field="part_txt" value-unit="établissements" max-items="12"
+          selected-palette="sequentialDescending"></dsfr-data-podium>
+        </div>
+
+        <div class="odv-viz" data-code="La grille des établissements, paginée et synchronisée à l'URL">
         <h2 class="fr-h4">Les établissements</h2>
         <dsfr-data-display source="qt-f" cols="3" pagination="12" uid-field="nom_du_professionnel"
           empty="Aucun établissement ne correspond à ces critères." url-sync count-label="établissement">
@@ -172,15 +189,27 @@
             </div>
           </template>
         </dsfr-data-display>
+        </div>
       </div>
 
     </div>
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="odv-analyse fr-py-8w" id="analyse">
-    <div class="fr-container">
+  <div class="fr-container fr-mb-8w">
+  <details class="odv-technique" id="analyse">
+    <summary>Analyse technique — ce que la reproduction a coûté</summary>
+  <section class="odv-analyse fr-py-4w">
+    <div>
       <h2>Analyse de reproduction — Qualité Tourisme</h2>
+
+      <p class="fr-text--sm">
+        <strong>Refonte «&nbsp;convaincre&nbsp;» (2026-09-20).</strong> Le classement des activités
+        est passé du graphique en barres au <code>dsfr-data-podium</code>, avec la part de chaque
+        activité dans la sélection par <code>share_percent</code> (0.33.0) — vérifié au
+        navigateur&nbsp;: les parts se recalculent quand on filtre une région. Chaque bloc porte
+        un bouton «&nbsp;Voir le code&nbsp;» qui lit le source de la page.
+      </p>
 
       <p class="fr-text--lead">
         Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/qualite-tourisme/"
@@ -319,12 +348,15 @@
       </div>
     </div>
   </section>
+  </details>
+  </div>
 
 </main>
 
 <div id="site-footer"></div>
 
 <script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
