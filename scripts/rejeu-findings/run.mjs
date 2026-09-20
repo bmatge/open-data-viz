@@ -172,6 +172,29 @@ const tests = {
     await t.fermer();
   },
 
+  // PG-030 : « 01 » compare a un champ ENTIER. Deux montages du meme filtre --
+  // source agregee cote serveur (aucune ligne brute) et source qui charge les
+  // lignes -- et un etat initial SANS filtre, pour que la source ait vu ses
+  // lignes non filtrees avant qu'on filtre. Le message de #948 existe dans le
+  // bundle publie (grep : « publie "X" en NOMBRE ») ; ce controle mesure s'il
+  // se declenche.
+  async pg030() {
+    const t = await ouvrir('/_test/pg030.html', { bundle });
+    await attendre(6000);
+    console.log('version', await t.version());
+    for (const v of ['01', '75']) {
+      await t.page.selectOption('#sel', v);
+      await attendre(4000);
+      const kpi = await t.page.evaluate(() => ['k-a', 'k-b'].map((i) =>
+        document.getElementById(i).textContent.replace(/\s+/g, ' ').replace(/\.dsfr-data.*/, '').trim().slice(0, 40)));
+      console.log(`  reg=${v} →`, JSON.stringify(kpi));
+    }
+    const p = t.logs.filter((l) => /entier|NOMBRE|zéro de tête|type/i.test(l.texte));
+    console.log('avertissements de type :', p.length);
+    [...new Set(p.map((l) => l.type + ': ' + l.texte.slice(0, 200)))].forEach((l) => console.log('  ', l));
+    await t.fermer();
+  },
+
   async overlays() {
     const t = await ouvrir('/_test/overlays.html', { bundle });
     await attendre(6000);
