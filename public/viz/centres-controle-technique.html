@@ -85,9 +85,20 @@
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
-  <dsfr-data-query id="qt-activites" source="qt-f" group-by="nom_region"
-    aggregate="cct_siret:count:nb" order-by="nb:desc" limit="14">
+  <!-- La part du total (`share_percent`, #926) se calcule sur toutes les régions,
+       avant `limit` : la première ligne nourrit la phrase de lecture de la carte. -->
+  <dsfr-data-query id="qt-regions" source="qt-f" group-by="nom_region"
+    aggregate="cct_siret:count:nb, nb:share_percent:part" order-by="nb:desc">
   </dsfr-data-query>
+  <dsfr-data-query id="qt-region-1" source="qt-regions" limit="1"></dsfr-data-query>
+
+  <!-- Choroplèthe départementale : `code_departement` est une chaîne à zéro de
+       tête (« 01 », « 2A », « 971 »), ce que `type="map"` attend (vérifié à l'API). -->
+  <dsfr-data-query id="qt-deps-carte" source="qt-f" group-by="code_departement, nom_departement"
+    where="code_departement:isnotnull"
+    aggregate="cct_siret:count:nb, nb:share_percent:part" order-by="nb:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="qt-dep-1" source="qt-deps-carte" limit="1"></dsfr-data-query>
 
   <dsfr-data-query id="qt-departements" source="qt-f" group-by="nom_departement"
     aggregate="cct_siret:count:nb">
@@ -134,7 +145,14 @@
             heading="Couverture" label="départements couverts" col="4"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
 
+        <div class="odv-viz" data-code="La carte des centres agréés">
         <h2 class="fr-h4">Où sont les centres</h2>
+        <dsfr-data-repeat source="qt-region-1">
+          <template>
+            <p class="odv-lecture"><strong>{{nom_region}}</strong> est la région la mieux dotée&nbsp;:
+              <strong>{{part:number:0}}&nbsp;%</strong> des centres de la sélection ({{nb:number}}).</p>
+          </template>
+        </dsfr-data-repeat>
         <dsfr-data-map tiles-style="muted" name="Carte des centres agréés de contrôle technique"
           center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
           tiles-switcher="ign-plan,ign-ortho"
@@ -154,21 +172,36 @@
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
+        </div>
 
         <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w fr-mb-4w">
           <div class="fr-col-12">
-            <div class="odv-chart-slot">
-              <dsfr-data-chart id="g-activites" source="qt-activites" type="bar" horizontal
-                label-field="nom_region" value-field="nb" name='["Centres agréés"]'
-                databox databox-title="Centres agréés par région"
+            <div class="odv-viz" data-code="Centres agréés par département">
+              <h3 class="fr-h6">Combien par département</h3>
+              <dsfr-data-repeat source="qt-dep-1">
+                <template>
+                  <p class="odv-lecture">Le département le mieux doté, <strong>{{nom_departement}}</strong>,
+                    compte <strong>{{nb:number}} centres</strong> — {{part:number:1}}&nbsp;% de la sélection.</p>
+                </template>
+              </dsfr-data-repeat>
+              <!-- Le résumé « en France » d'une carte de VOLUMES est la SOMME
+                   (`map-summary="sum"`, #927) : la moyenne d'un nombre de centres
+                   par département ne mesurerait rien. Il suit les filtres. -->
+              <dsfr-data-chart id="g-deps" source="qt-deps-carte" type="map"
+                code-field="code_departement" value-field="nb" name="Centres agréés"
+                map-summary="sum"
+                databox databox-title="Centres agréés par département"
                 databox-source="DGCCRF — annuaire-centres-controle-technique, via data.economie.gouv.fr"
                 databox-download>
               </dsfr-data-chart>
-              <dsfr-data-a11y for="g-activites" source="qt-activites" table download></dsfr-data-a11y>
+              <dsfr-data-a11y for="g-deps" source="qt-deps-carte" table download
+                label-field="nom_departement" value-field="nb, part"
+                description="Nombre de centres agréés de contrôle technique par département, et part de la sélection."></dsfr-data-a11y>
             </div>
           </div>
         </div>
 
+        <div class="odv-viz" data-code="Les fiches des centres">
         <h2 class="fr-h4">Les centres</h2>
         <dsfr-data-display source="qt-f" cols="3" pagination="12" uid-field="cct_siret"
           empty="Aucun centre ne correspond à ces critères." url-sync count-label="centre">
@@ -191,12 +224,15 @@
             </div>
           </template>
         </dsfr-data-display>
+        </div>
       </div>
 
     </div>
   </div>
 
-  <section class="odv-analyse fr-py-8w" id="analyse">
+  <details class="odv-technique fr-container" id="analyse">
+    <summary>Analyse technique — ce que la reproduction a coûté</summary>
+  <section class="odv-analyse fr-py-8w">
     <div class="fr-container">
       <h2>Analyse — Centres de contrôle technique, un jeu renommé sans suivi</h2>
 
@@ -277,12 +313,14 @@
       </div>
     </div>
   </section>
+  </details>
 
 </main>
 
 <div id="site-footer"></div>
 
 <script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
