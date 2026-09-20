@@ -93,6 +93,16 @@
     select="count(*) as nb" group-by="year(debut_de_validite) as annee"
     order-by="annee" limit="30">
   </dsfr-data-source>
+  <!-- Agrégats de fenêtre (#738, #926), calculés au client sur les quinze lignes
+       déjà agrégées par le portail : le cumul en documents pour la ligne du
+       graphique, la part de chaque année et son cumul pour la phrase de lecture.
+       Tous s'appliquent après le tri et avant `limit`. -->
+  <dsfr-data-query id="bofip-cumul" source="bofip-annees"
+    aggregate="nb:running_sum:cumul_nb, nb:share_percent:part, part:running_sum:cumul_part"
+    order-by="annee:asc">
+  </dsfr-data-query>
+  <!-- L'année où le cumul franchit la moitié du corpus : première ligne au-delà de 50 %. -->
+  <dsfr-data-query id="bofip-mediane" source="bofip-cumul" where="cumul_part:gte:50" limit="1"></dsfr-data-query>
 
   <div class="fr-container fr-mb-8w">
     <div class="odv-dashboard">
@@ -114,15 +124,35 @@
       </details>
 
       <div>
-        <div class="odv-chart-slot fr-mb-4w">
-          <dsfr-data-chart id="g-annees" source="bofip-annees" type="bar"
-            label-field="annee" value-field="nb" name='["Documents entrés en vigueur"]'
-            databox databox-title="Année d'entrée en vigueur des documents actuellement applicables"
-            databox-source="DGFiP — bofip-vigueur, via data.economie.gouv.fr" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-annees" source="bofip-annees" table download></dsfr-data-a11y>
+        <div class="odv-viz" data-code="Année d'entrée en vigueur et cumul du corpus">
+          <h2 class="fr-h4">De quand date le droit applicable</h2>
+          <dsfr-data-repeat source="bofip-mediane">
+            <template>
+              <p class="odv-lecture">La moitié du corpus applicable aujourd'hui est entrée en vigueur
+                <strong>en {{annee}} ou avant</strong>&nbsp;: c'est l'année où le cumul franchit
+                <strong>{{cumul_part:number:0}}&nbsp;%</strong> des documents (colonne du tableau).</p>
+            </template>
+          </dsfr-data-repeat>
+          <div class="odv-chart-slot fr-mb-4w">
+            <!-- Essayé en `bar-line` (barres = documents de l'année, ligne = cumul,
+                 même unité) : DSFR Chart trace TOUJOURS deux axes Y indépendants
+                 (`yBar` à gauche, `yLine` à droite, bornes séparées), et dsfr-data
+                 0.33 ne pose `y-bar-max` / `y-line-max` que depuis `targets`. Un
+                 cumul à 9 000 face à des barres à 1 500 donnait un double axe
+                 trompeur — vérifié à l'écran. Le cumul reste dans le tableau. -->
+            <dsfr-data-chart id="g-annees" source="bofip-cumul" type="bar"
+              label-field="annee" value-field="nb" name="Documents entrés en vigueur"
+              unit-tooltip="documents"
+              databox databox-title="Année d'entrée en vigueur des documents actuellement applicables"
+              databox-source="DGFiP — bofip-vigueur, via data.economie.gouv.fr" databox-download>
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-annees" source="bofip-cumul" table download
+              label-field="annee" value-field="nb, cumul_nb, cumul_part"
+              description="Pour chaque année depuis 2012, le nombre de documents du BOFiP encore en vigueur entrés en vigueur cette année-là, le cumul et la part cumulée du corpus."></dsfr-data-a11y>
+          </div>
         </div>
 
+        <div class="odv-viz" data-code="Les documents, recherche et facettes serveur">
         <h2 class="fr-h4">Les documents</h2>
         <dsfr-data-display source="bofip-f" cols="1" uid-field="identifiant_juridique"
           empty="Aucun document ne correspond à cette recherche." count-label="document">
@@ -144,13 +174,16 @@
             </div>
           </template>
         </dsfr-data-display>
+        </div>
       </div>
 
     </div>
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="odv-analyse fr-py-8w" id="analyse">
+  <details class="odv-technique fr-container" id="analyse">
+    <summary>Analyse technique — ce que la reproduction a coûté</summary>
+  <section class="odv-analyse fr-py-8w">
     <div class="fr-container">
       <h2>Analyse de reproduction — Bulletins officiels des finances publiques</h2>
       <p>
@@ -227,7 +260,7 @@
             <tr><td>moteur de recherche plein texte</td><td><code>dsfr-data-search server-search</code></td><td>Équivalent, sur l'index Opendatasoft</td></tr>
             <tr><td>navigation par série / division</td><td><code>dsfr-data-facets server-facets</code></td><td>Équivalent</td></tr>
             <tr><td>liste de résultats</td><td><code>dsfr-data-display</code> paginé serveur, permaliens</td><td>Équivalent</td></tr>
-            <tr><td>—</td><td>chronologie des entrées en vigueur</td><td>Ajout</td></tr>
+            <tr><td>—</td><td>chronologie des entrées en vigueur, son année médiane par <code>running_sum</code> + <code>share_percent</code> (le cumul en colonne du tableau accessible)</td><td>Ajout&nbsp;; le <code>bar-line</code> essayé pour le cumul rendait deux axes Y — écarté</td></tr>
           </tbody>
         </table>
       </div>
@@ -242,12 +275,14 @@
       </div>
     </div>
   </section>
+  </details>
 
 </main>
 
 <div id="site-footer"></div>
 
 <script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.core.umd.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
