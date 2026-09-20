@@ -30,7 +30,11 @@ let ko = 0;
 const dit = (ok, quoi, detail) => { if (!ok) ko++; console.log((ok ? '  ok  ' : '  KO  ') + quoi.padEnd(38) + (detail ?? '')); };
 
 // ---- 1 & 2 : le source, avant d'ouvrir quoi que ce soit --------------------
-const src = readFileSync(fichier, 'utf8');
+const brut = readFileSync(fichier, 'utf8');
+// Les commentaires HTML citent souvent des balises (« ce commentaire vivait DANS le
+// <template> ») : les compter fait crier au loup sur une page saine. On les retire
+// avant de compter, mais on garde le source brut pour tout le reste.
+const src = brut.replace(/<!--[\s\S]*?-->/g, '');
 console.log('\n' + fichier);
 for (const t of ['div', 'details', 'section', 'template', 'li']) {
   const o = (src.match(new RegExp('<' + t + '(?=[\\s/>])', 'gi')) || []).length;
