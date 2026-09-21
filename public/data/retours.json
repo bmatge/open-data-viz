@@ -4624,5 +4624,118 @@
         "Un test couvre le cas « grammaire du chart recopiée » et vérifie que le corps du tableau n'est pas vide."
       ]
     }
+  },
+  {
+    "id": "PG-033",
+    "titre": "API Tabular : un tri serveur combiné à la pagination **perd des lignes en silence** — 177 distinctes sur 180 rendues, et une courbe qui plonge à zéro",
+    "type": "piege",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-source",
+      "dsfr-data-query"
+    ],
+    "dataviz": [
+      "demo/delinquance-sans-total"
+    ],
+    "constat": "L'adaptateur Tabular délègue `order-by` au serveur (`champ__sort=asc`) et pagine par 50, plafond de l'API. Les deux ensemble donnent un ordre **instable d'une page à l'autre** dès que le champ de tri n'est pas unique : des lignes reviennent deux fois, d'autres ne reviennent jamais. Le compte total, lui, est juste — c'est ce qui rend le défaut invisible.\n\nSur la base départementale de la délinquance (SSMSI), une source `group-by=\"annee, indicateur\"` + `order-by=\"annee:asc\"` rend **180 lignes dont 177 distinctes** : trois doublons de 2018, trois couples (année × indicateur) disparus, HTTP 200 sur les quatre pages. « Usage de stupéfiants » 2018 faisait partie des disparus, et la courbe du chapitre 1 de la page **plongeait à zéro au milieu du graphique**. Le même défaut sans `group-by` : 101 départements triés par `nombre__sort=desc` en rendent 99 distincts.\n\nLa faute est celle de l'API Tabular (pagination par offset sur un tri non total), pas de la bibliothèque. Mais c'est la bibliothèque qui compose `champ__sort` **et** la boucle de pagination : elle est le seul endroit où le garde-fou peut vivre. Sans tri, les 180 lignes — et les 101 — sont toujours complètes, vérifié en rejouant les pages à l'API hors de toute page.\n\n⚠️ Seul un recalcul indépendant, ou un zéro assez voyant pour sauter aux yeux, révèle ce genre de perte : aucune recette comptant des lignes ne la voit, puisque le compte est bon.",
+    "verifie": "Relevé au navigateur le 2026-09-21 contre `dsfr-data@0.33.0` (courbe « Total enregistré » à 0 en 2018 sur `/demo/delinquance-sans-total`, `q-stups` rendant 28 lignes au lieu de 30), puis **reproduit à l'API hors de toute page** : les quatre pages de `?annee__sort=asc&page_size=50&page=N&annee__groupby&indicateur__groupby&nombre__sum` rendent 180 lignes / 177 couples distincts, avec (2018, 'Usage de stupéfiants'), (2018, 'Usage de stupéfiants (AFD)') et (2018, \"Vols d'accessoires sur véhicules\") manquants et trois autres couples de 2018 en double ; les mêmes quatre pages **sans** `annee__sort` rendent 180 lignes / 180 distinctes. Contre-épreuve sans `group-by` : `?indicateur__exact=Homicides&annee__exact=2025&nombre__sort=desc` sur trois pages rend 101 lignes / 99 départements distincts (56 et 49 en double) ; sans tri, 101 / 101.",
+    "contournement": "Ne rien trier au serveur sur ce fournisseur : retirer `order-by` de la `dsfr-data-source` et le poser en aval, sur une `dsfr-data-query` qui travaille sur des lignes déjà toutes chargées. C'est ce que fait la page. Le coût est nul tant que le jeu tient en mémoire ; il devient réel en `server-side`, où le tri n'a pas d'aval — et là il n'y a pas de contournement.",
+    "demande": "Sur l'adaptateur Tabular, ne pas déléguer `order-by` quand le chargement est paginé (plus d'une page attendue), ou à défaut avertir en console que le tri serveur combiné à la pagination peut perdre des lignes sur ce fournisseur. Idéalement : compléter le tri délégué par une clé de départage stable (les champs du `group-by`, ou `__id`) pour rendre l'ordre total.",
+    "statut": "a-deposer",
+    "date": "2026-09-21",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "S",
+      "decision": "Déposer chez dsfr-data",
+      "impact": "Des données **manquantes sans aucun signal** : compte total juste, HTTP 200, rien en console. La page l'a payé par une courbe fausse, visible seulement parce que le trou tombait au milieu d'un graphique. Sur un tableau ou un KPI, il serait passé. Tout jeu Tabular de plus de 50 lignes trié au serveur est concerné, c'est-à-dire le cas nominal.",
+      "objectif": "Qu'un chargement paginé sur Tabular rende toujours l'ensemble des lignes, ou dise qu'il ne le garantit pas.",
+      "perennite": "Structurel tant que l'API Tabular pagine par offset sans clé de départage. Le défaut est dans l'API ; la bibliothèque est le seul endroit où il peut être neutralisé, puisqu'elle compose le tri et la boucle de pagination.",
+      "acceptation": [
+        "Un chargement Tabular paginé avec `order-by` rend le même ensemble de lignes qu'un chargement sans `order-by` (test sur un jeu de plus de 100 lignes, tri sur un champ non unique).",
+        "À défaut de correctif : un avertissement console nommant le champ de tri et le nombre de pages, émis une fois.",
+        "Aucune régression sur un chargement d'une seule page, où le tri serveur reste utile et sûr."
+      ]
+    }
+  },
+  {
+    "id": "PG-034",
+    "titre": "API Tabular : `__in` **ignore toute valeur contenant une parenthèse**, avec un HTTP 200 et zéro ligne — là où `__exact` accepte la même valeur",
+    "type": "piege",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-source",
+      "dsfr-data-query"
+    ],
+    "dataviz": [
+      "demo/delinquance-sans-total"
+    ],
+    "constat": "`where=\"champ:in:a|b|c\"` part chez Tabular en `champ__in=a,b,c`. Dès qu'une des valeurs contient une parenthèse, elle est **écartée sans un mot** : la réponse est un 200 avec les lignes des autres valeurs, ou zéro ligne s'il n'y en a pas d'autre. Le même `champ__exact=<valeur à parenthèses>` rend, lui, toutes les lignes attendues — ce n'est donc pas un problème d'encodage mais du parseur de liste.\n\nSur la base SSMSI, trois des dix-huit indicateurs portent une parenthèse (« Usage de stupéfiants (AFD) », « Usage de stupéfiants (hors AFD) ») : un `where=\"indicateur:in:…\"` pour tracer les trois courbes du chapitre 1 aurait rendu un graphique **incomplet sans prévenir**. Les libellés parenthésés sont courants en open data français (millésimes, variantes, unités), ce qui rend le piège banal.",
+    "verifie": "Relevé à l'API le 2026-09-21, six requêtes sur la ressource `2b27a675-e3bf-41ef-a852-5fb9ab483967` avec `annee__exact=2025` : `indicateur__exact=Usage de stupéfiants (AFD)` → **101** lignes ; `indicateur__in=Usage de stupéfiants (AFD)` → **0** ; `indicateur__in=Homicides,Usage de stupéfiants (AFD)` → **101** (seul « Homicides » retenu, au lieu de 202) ; contre-épreuves sans parenthèse : `indicateur__in=Homicides,Tentatives d'homicide` → 202, `indicateur__in=Usage de stupéfiants,Trafic de stupéfiants` → 202. Aucune erreur, aucun avertissement dans aucun des cas.",
+    "contournement": "Dériver une colonne par `dsfr-data-normalize compute=\"…\"` et filtrer dessus : le `compute` change le schéma, donc la `dsfr-data-query` en aval cesse de déléguer et filtre côté client, où la parenthèse ne gêne pas. C'est ce que fait la page (colonne `serie`, puis `where=\"serie:isnotnull\"`). Le contournement cesse de marcher dès que le jeu est trop gros pour être chargé entièrement — c'est-à-dire exactement quand la délégation serveur était nécessaire.",
+    "demande": "Avertir en console quand une valeur de `in` / `notin` déléguée à Tabular contient une parenthèse, la clause étant alors silencieusement incomplète. Le correctif de fond appartient à `data.gouv.fr` ; la bibliothèque peut au moins refuser de déléguer la clause et la calculer côté client.",
+    "statut": "a-deposer",
+    "date": "2026-09-21",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "S",
+      "decision": "Déposer chez dsfr-data et signaler à data.gouv.fr",
+      "impact": "Un graphique ou un tableau amputé d'une partie de ses séries, sans erreur ni avertissement. Le cas est d'autant plus facile à payer que `__exact` sur la même valeur fonctionne : rien n'invite à se méfier de la forme liste.",
+      "objectif": "Qu'une clause `in` déléguée à Tabular rende les mêmes lignes qu'un filtrage client, ou dise qu'elle ne le fait pas.",
+      "perennite": "Durable tant que le parseur de liste de l'API Tabular n'est pas corrigé. Les libellés parenthésés sont fréquents dans les nomenclatures publiques.",
+      "acceptation": [
+        "Un `where=\"champ:in:…\"` dont une valeur contient une parenthèse rend les mêmes lignes que le même filtre appliqué côté client, ou émet un avertissement console nommant la valeur en cause.",
+        "Aucun changement pour une liste dont aucune valeur ne contient de parenthèse."
+      ]
+    }
+  },
+  {
+    "id": "AM-087",
+    "titre": "La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-source"
+    ],
+    "dataviz": [
+      "demo/delinquance-sans-total"
+    ],
+    "constat": "La section « Proxy CORS » de la fiche `apiProviders` range Tabular parmi les APIs qui « ne supportent pas le CORS navigateur : il faut un proxy CORS », et la liste « APIs avec CORS natif » juste en dessous ne mentionne qu'Opendatasoft et INSEE Melodi. C'est inexact : `tabular-api.data.gouv.fr` sert `access-control-allow-origin: *` sur la requête comme sur la préflight `OPTIONS`.\n\nL'écart coûte cher en pratique : une IA ou un intégrateur qui lit la fiche conclut qu'il faut déployer un proxy pour toucher les données de `data.gouv.fr` depuis une page statique — c'est-à-dire qu'il renonce à l'argument central de la bibliothèque (« une balise, un CDN, et ça marche ») sur le portail de données de l'État le plus fréquenté. La page de démonstration ne porte ni `proxy-url`, ni `use-proxy`, ni clé.",
+    "verifie": "Vérifié le 2026-09-21 : `curl -D- -H 'Origin: https://open-data-viz.lab.miweb.run' 'https://tabular-api.data.gouv.fr/api/resources/2b27a675-e3bf-41ef-a852-5fb9ab483967/data/?page_size=1'` rend HTTP 200 avec `access-control-allow-origin: *`, `access-control-allow-methods: GET, OPTIONS`, `access-control-expose-headers: *` ; la préflight `OPTIONS` avec `Access-Control-Request-Method: GET` rend 204 avec les mêmes en-têtes. Confirmé au navigateur : les 13 requêtes Tabular de `/demo/delinquance-sans-total` aboutissent depuis `localhost:3000` sans proxy et sans erreur CORS en console.",
+    "contournement": "Aucun nécessaire : ne pas poser `proxy-url` sur une source Tabular. Le piège est purement documentaire.",
+    "demande": "Corriger la fiche `apiProviders` : retirer Tabular de la phrase sur les APIs sans CORS, et l'ajouter à la liste « APIs avec CORS natif (pas de proxy nécessaire) » aux côtés d'Opendatasoft et d'INSEE Melodi. L'endpoint `/tabular-proxy` reste utile pour d'autres raisons (cache, quota) et peut être mentionné comme tel, pas comme une nécessité.",
+    "statut": "a-deposer",
+    "date": "2026-09-21",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "XS",
+      "decision": "Déposer chez dsfr-data",
+      "impact": "La fiche est ce que lit une IA avant d'écrire la première balise. Annoncer un proxy obligatoire sur `data.gouv.fr` décourage l'usage direct de la bibliothèque sur le principal portail de données publiques françaises, pour une contrainte qui n'existe pas.",
+      "objectif": "Que la documentation dise ce que l'API fait.",
+      "perennite": "Ponctuel — une correction de fiche.",
+      "acceptation": [
+        "La fiche `apiProviders` liste `tabular-api.data.gouv.fr` parmi les APIs à CORS natif.",
+        "Un exemple Tabular de la fiche ne porte pas `proxy-url`."
+      ]
+    }
+  },
+  {
+    "id": "AV-032",
+    "titre": "Un deuxième fournisseur d'API dans le banc, sans une ligne de code : `api-type=\"tabular\"` délègue le regroupement et les agrégats à data.gouv.fr",
+    "type": "avantage",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-source",
+      "dsfr-data-query",
+      "dsfr-data-join"
+    ],
+    "dataviz": [
+      "demo/delinquance-sans-total"
+    ],
+    "constat": "Les 299 balises de source du banc visaient jusqu'ici un seul fournisseur, Opendatasoft. La page de démonstration sur la délinquance enregistrée est la première à lire l'**API Tabular de `data.gouv.fr`** : trois attributs (`api-type=\"tabular\"`, `base-url`, `resource`) et le reste du pipeline est identique — `group-by` et `aggregate` sont délégués au serveur, `where` traduit dans la syntaxe à suffixe de l'API, la pagination bouclée toute seule.\n\nDeux choses méritent d'être notées. D'abord l'API exige des **flags nus** (`annee__groupby`, `nombre__sum`) et rejette la forme valuée `annee__groupby=` par un 400 « Malformed query » ; `URLSearchParams` émettant toujours le `=`, l'adaptateur assemble ces flags à la main (#596). Le contournement a été écrit une fois dans la bibliothèque, jamais dans la page. Ensuite, une même `dsfr-data-join` rapproche une source **Tabular** et une source **Opendatasoft** sans que rien ne les distingue en aval : le référentiel départemental vient d'un portail ODS, la donnée de `data.gouv.fr`, et le code département les apparie dans le navigateur.\n\nLe contraste avec Opendatasoft est instructif : là où `fetch-mode=\"export\"` charge un jeu entier en une requête, Tabular plafonne à 50 lignes par page et n'a pas d'endpoint d'export — les 18 180 lignes coûteraient 364 allers-retours. C'est l'agrégation serveur qui sauve la page, et elle le fait bien.",
+    "verifie": "Mesuré au navigateur le 2026-09-21 contre `dsfr-data@0.33.0` : `/demo/delinquance-sans-total` émet **13 requêtes Tabular** au total — 4 pour la vue nationale (`annee__groupby&indicateur__groupby&nombre__sum&insee_pop__sum&insee_log__sum`, 180 lignes), 3 pour la carte (101 lignes filtrées), 3 pour les homicides 2025, 3 pour le cumul décennal groupé par département — plus une requête Opendatasoft pour les 107 noms de départements (`fetch-mode=\"export\"` + `group-by`). Tous les chiffres de la page ont été recalculés indépendamment en Python depuis le CSV source avant d'écrire la première balise, et concordent : +69,6 % / −49,5 %, 3 616 155, 9 002, taux nationaux des 18 indicateurs au centième près.",
+    "contournement": "",
+    "demande": "",
+    "statut": "acte",
+    "date": "2026-09-21"
   }
 ]
