@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>La délinquance n'a pas de total — open-data-viz</title>
+  <meta name="description" content="Démonstration dsfr-data : dix ans de délinquance enregistrée (SSMSI, base départementale) lus par l'API Tabular de data.gouv.fr. Trois façons de se tromper de chiffre, et les attributs qui les évitent.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <!-- DSFR Chart livre SA PROPRE feuille : sans elle l'infobulle rend son HTML
+       sans aucun style, et seul le survol le montre. Voir la note de la page
+       « cuivre » : ce n'est pas optionnel dès qu'une page porte un graphique. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <link rel="stylesheet" href="/assets/demo.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       BANDEAU D'OUVERTURE
+       ========================================================================== -->
+  <section class="odv-hero">
+    <div class="fr-container odv-hero__corps">
+      <p class="fr-badge fr-badge--new fr-mb-3v">Démonstration — un jeu qui refuse d'être résumé</p>
+      <h1 class="odv-hero__titre">La délinquance<br>n'a pas de total</h1>
+      <p class="odv-hero__chapo">
+        Dix-huit indicateurs, dix ans, cent un départements — et pas une seule addition permise.
+        Une courbe qui grimpe de <strong>70&nbsp;%</strong> est la même que celle qui s'effondre de
+        <strong>50&nbsp;%</strong>. La moyenne nationale qu'une carte affiche par défaut peut se
+        tromper d'un <strong>tiers</strong>. Cette page montre les trois pièges, et l'attribut qui
+        règle chacun.
+      </p>
+      <p class="odv-hero__source fr-text--sm">
+        <code>2b27a675</code> — base départementale de la délinquance enregistrée (SSMSI, ministère
+        de l'Intérieur), lue par l'<strong>API Tabular</strong> de <code>data.gouv.fr</code>.
+        Premier emploi de ce fournisseur dans le banc.
+      </p>
+      <a class="fr-btn fr-btn--lg fr-icon-arrow-down-line fr-btn--icon-right" href="#afd">Voir la première courbe</a>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       LE PIPELINE
+       Un seul jeu, trois lectures. Toute la page tient sur quatre sources, dont
+       trois agrègent CÔTÉ SERVEUR : `api-type="tabular"` délègue `group-by` et
+       `aggregate` à l'API sous la forme de flags nus (`annee__groupby`,
+       `nombre__sum`), que la bibliothèque assemble à la main parce que
+       `URLSearchParams` y ajouterait un `=` que l'API rejette (#596).
+
+       ⚠️ POURQUOI L'AGRÉGATION SERVEUR N'EST PAS UN LUXE ICI. Tabular pagine
+       par 50 lignes, plafond de l'API — pas un défaut de la bibliothèque. Les
+       18 180 lignes du jeu coûteraient donc 364 allers-retours. Groupées par
+       (année × indicateur) elles font 180 lignes, soit 4 requêtes ; filtrées à
+       un indicateur et une année, 101 lignes, soit 3. Sur ce fournisseur, ce
+       n'est pas le poids transféré qui coûte, c'est le NOMBRE de requêtes :
+       toute la conception de cette page en découle.
+       ========================================================================== -->
+
+  <!-- Le référentiel des noms de départements. Le jeu du SSMSI ne publie que
+       des CODES ("01", "2A", "971") : sans cette source, un classement affiche
+       « 13 » en tête et ne se lit pas. Elle vient d'un deuxième fournisseur —
+       un portail Opendatasoft — et les deux se joignent dans le navigateur.
+
+       ⚠️ Le `group-by` EST le dédoublonnage (PG-001) : le jeu porte une ligne
+       par commune, pas par département. Unicité du côté DROIT contrôlée à
+       l'API avant d'écrire la jointure — 107 groupes, zéro code en double,
+       zéro nom vide, et les 101 codes du SSMSI tous couverts. Les 6 codes en
+       trop (975, 977, 978, 986, 987, 988) sont des collectivités absentes de
+       la base départementale ; la jointure `left` les laisse de côté.
+
+       ⚠️ Déclarée AVANT `carte-src`, qui porte `require-where` : une jointure
+       dont une entrée attend un filtre peut rester sur « Chargement… »
+       indéfiniment selon l'ordre du DOM (BUG-015, toujours ouvert en 0.33). -->
+  <dsfr-data-source id="ref-dep" api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="insee-2020-geoapi-2023"
+    select="codedepartement, nom_departement"
+    group-by="codedepartement, nom_departement"
+    fetch-mode="export" max-records="200">
+  </dsfr-data-source>
+
+  <!-- Vue nationale : une ligne par (année × indicateur), 180 lignes.
+       Les sommes de population et de logements suivent le groupe : la somme
+       des 101 populations départementales EST la population française, et
+       c'est ce qui permet de calculer un taux national sans jamais moyenner
+       des taux.
+
+       ⚠️ AUCUN `order-by` ICI, ET C'EST DÉLIBÉRÉ. Un tri serveur combiné à la
+       pagination fait PERDRE des lignes à l'API Tabular, sans aucune erreur :
+       avec `annee__sort=asc`, les quatre pages rendent bien 180 lignes, mais
+       177 distinctes — trois doublons et trois manquantes. La page l'a payé :
+       « Usage de stupéfiants » 2018 avait disparu, et la courbe du chapitre 1
+       plongeait à zéro au milieu du graphique. Sans tri, les 180 lignes sont
+       complètes, vérifié en rejouant les quatre pages à l'API. Le tri se fait
+       donc en aval, côté client, où il porte sur des lignes déjà toutes là.
+       Même chose pour les 101 lignes d'un département : `nombre__sort=desc`
+       en perd deux. Règle de ce fournisseur : ne jamais trier au serveur ce
+       qu'on pagine. -->
+  <dsfr-data-source id="national" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="2b27a675-e3bf-41ef-a852-5fb9ab483967"
+    group-by="annee, indicateur"
+    aggregate="nombre:sum, insee_pop:sum, insee_log:sum">
+  </dsfr-data-source>
+
+  <!-- Colonnes dérivées. L'ordre compte : `denom` est relu par `taux_nat`.
+       `unite` recopie l'unité de compte, que le group-by ne rapporte pas —
+       elle est reconstruite ici parce qu'elle est FIXE par indicateur
+       (vérifié à l'API : les 18 indicateurs portent exactement une unité).
+
+       ⚠️ Ce `compute` a un effet de bord voulu : il change le schéma, donc
+       toute `dsfr-data-query` en aval cesse de déléguer son `where` au
+       serveur et filtre côté client. C'est ce qu'on veut ici — voir la note
+       sur `__in` dans l'analyse : la liste `__in` de Tabular avale en silence
+       toute valeur qui contient une parenthèse, et trois de nos indicateurs
+       en portent une. -->
+  <dsfr-data-normalize id="nat" source="national"
+    compute="denom = when indicateur = 'Cambriolages de logement' then insee_log__sum else insee_pop__sum;
+             taux_nat = round(nombre__sum / denom * 1000, 2);
+             unite = when contains(indicateur, 'véhicule') then 'Véhicule'
+                     when contains(indicateur, 'stupéfiants') then 'Mis en cause'
+                     when indicateur = 'Vols sans violence contre des personnes' then 'Victime entendue'
+                     when indicateur = 'Cambriolages de logement' then 'Infraction'
+                     when indicateur = 'Destructions et dégradations volontaires' then 'Infraction'
+                     when indicateur = 'Vols avec armes' then 'Infraction'
+                     when indicateur = 'Vols violents sans arme' then 'Infraction'
+                     else 'Victime';
+             pour_mille = when indicateur = 'Cambriolages de logement' then 'pour 1 000 logements' else 'pour 1 000 habitants';
+             serie = when indicateur = 'Usage de stupéfiants' then 'Total enregistré'
+                     when indicateur = 'Usage de stupéfiants (AFD)' then 'Dont amende forfaitaire (AFD)'
+                     when indicateur = 'Usage de stupéfiants (hors AFD)' then 'Dont voie judiciaire'
+                     else null">
+  </dsfr-data-normalize>
+
+  <!-- ==========================================================================
+       CHAPITRE 1 — L'amende qui a fait monter la courbe
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w" id="afd">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 1</p>
+    <h2 class="fr-h3">Le chiffre qui monte est celui qui baisse</h2>
+    <p class="fr-text--lead fr-mb-4w">
+      «&nbsp;Usage de stupéfiants&nbsp;» est publié en trois lignes&nbsp;: un total, et ses deux
+      moitiés — les affaires traitées par <strong>amende forfaitaire délictuelle</strong> (AFD),
+      généralisée le 1<sup>er</sup>&nbsp;septembre 2020, et celles qui suivent la voie judiciaire
+      classique. Le total et la part judiciaire vont en sens opposés. C'est le même fait.
+    </p>
+
+    <!-- Trois queries plutôt qu'un `where ... in ...` : le filtre porte sur une
+         colonne calculée en amont, donc jamais délégué. `order-by` chronologique
+         est OBLIGATOIRE pour `:evolution`, qui lit la première et la dernière
+         ligne DANS L'ORDRE COURANT. -->
+    <dsfr-data-query id="q-stup-total" source="nat"
+      where="indicateur:eq:Usage de stupéfiants" order-by="annee:asc"></dsfr-data-query>
+    <dsfr-data-query id="q-stup-hors" source="nat"
+      where="indicateur:eq:Usage de stupéfiants (hors AFD)" order-by="annee:asc"></dsfr-data-query>
+    <!-- Les trois séries du graphique : `serie` vaut null pour les quinze
+         autres indicateurs, donc `isnotnull` les écarte sans avoir à les
+         nommer une deuxième fois. -->
+    <dsfr-data-query id="q-stups" source="nat"
+      where="serie:isnotnull" order-by="annee:asc"></dsfr-data-query>
+
+    <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-4w">
+      <dsfr-data-kpi source="q-stup-total" value="nombre__sum:evolution"
+        format="pourcentage" decimals="1" color-token="bleu"
+        heading="Total enregistré, 2016 → 2025"
+        label="mis en cause pour usage de stupéfiants"></dsfr-data-kpi>
+      <dsfr-data-kpi source="q-stup-hors" value="nombre__sum:evolution"
+        format="pourcentage" decimals="1" color-token="bleu"
+        heading="Hors amende forfaitaire, 2016 → 2025"
+        label="la voie judiciaire classique, sur la même période"></dsfr-data-kpi>
+      <!-- Une part est un RATIO DE SOMMES. Le filtre entre accolades ne vaut
+           que pour son côté du ratio ; le `where` du KPI, lui, filtre les deux. -->
+      <dsfr-data-kpi source="nat" where="annee:eq:2025"
+        value="nombre__sum:sum{indicateur:eq:Usage de stupéfiants (AFD)} / nombre__sum:sum{indicateur:eq:Usage de stupéfiants}"
+        format="pourcentage" decimals="1" color-token="orange"
+        heading="Part de l'amende forfaitaire en 2025"
+        label="du total « usage de stupéfiants »"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="odv-viz" data-code="Usage de stupéfiants : le total et ses deux moitiés">
+      <h3 class="fr-h6">Trois courbes, une seule mesure</h3>
+      <p class="odv-lecture">
+        À partir de 2021, <strong>la hausse du total est entièrement portée par l'amende
+        forfaitaire</strong>&nbsp;: la voie judiciaire, elle, décroît sans interruption depuis 2016.
+        Ce graphique ne mesure pas l'usage de stupéfiants — il mesure <em>comment les services le
+        traitent</em>.
+      </p>
+      <!-- Les trois séries partagent l'unité (mis en cause) ET l'ordre de
+           grandeur : un axe commun est ici légitime, et c'est justement ce qui
+           rend l'écart lisible. `y-min="0"` parce que le lecteur suppose que
+           l'axe d'un volume part de zéro.
+           `reference-lines` sur une catégorie de l'axe X : la valeur est le
+           LIBELLÉ de la catégorie, pas un index. -->
+      <dsfr-data-chart id="g-afd" source="q-stups" type="line"
+        label-field="annee" value-field="nombre__sum" series-field="serie"
+        color-map="Total enregistré:#000091, Dont amende forfaitaire (AFD):#e1000f, Dont voie judiciaire:#00a95f"
+        unit-tooltip="mis en cause" y-min="0"
+        reference-lines='[{"axis":"x","value":"2020","label":"Généralisation de l’AFD","color":"#6a6af4","dash":true}]'
+        databox heading-level="4"
+        databox-title="Usage de stupéfiants : total, amende forfaitaire et voie judiciaire"
+        databox-source="SSMSI — base départementale, édition juillet 2026"
+        databox-download></dsfr-data-chart>
+      <dsfr-data-a11y for="g-afd" source="q-stups" table download
+        label-field="annee" value-field="nombre__sum" series-field="serie"
+        filename="usage-stupefiants-afd.csv"
+        description="Nombre de personnes mises en cause pour usage de stupéfiants, de 2016 à 2025 : le total enregistré, la part traitée par amende forfaitaire délictuelle (nulle avant 2020) et la part suivant la voie judiciaire. Le total progresse pendant que la voie judiciaire décroît."></dsfr-data-a11y>
+    </div>
+
+    <div class="fr-callout fr-icon-information-line fr-my-4w">
+      <h3 class="fr-callout__title fr-text--md">Ce que ces trois lignes interdisent</h3>
+      <p class="fr-callout__text fr-text--sm">
+        «&nbsp;Usage de stupéfiants&nbsp;» <strong>est</strong> la somme des deux autres —&nbsp;contrôlé
+        par recalcul indépendant sur les dix années et les 101 départements, à l'unité près. Les
+        trois ne peuvent donc jamais figurer au même niveau dans un total, un camembert ou un
+        classement&nbsp;: ce serait compter deux fois. C'est aussi pourquoi la somme des dix-huit
+        indicateurs du chapitre suivant n'a pas de sens, et ce n'est pas la seule raison.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       CHAPITRE 2 — Il n'y a pas de « chiffre de la délinquance »
+       ========================================================================== -->
+  <div class="odv-bande">
+    <div class="fr-container">
+      <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 2</p>
+      <h2 class="fr-h3">Dix-huit indicateurs, cinq unités de compte</h2>
+      <p class="fr-text--lead">
+        Le jeu ne publie aucun total, et ce n'est pas un oubli. Un vol de véhicule compte des
+        <em>véhicules</em>, une violence sexuelle compte des <em>victimes</em>, un usage de
+        stupéfiants compte des <em>mis en cause</em>, un cambriolage compte des
+        <em>infractions</em>. Les additionner reviendrait à ajouter des voitures à des personnes.
+      </p>
+
+      <dsfr-data-query id="q-2025" source="nat" where="annee:eq:2025"
+        order-by="nombre__sum:desc"></dsfr-data-query>
+
+      <div class="fr-callout fr-icon-warning-line fr-my-4w">
+        <h3 class="fr-callout__title fr-text--md">Le chiffre qu'il ne faut pas écrire</h3>
+        <p class="fr-callout__text fr-text--sm fr-mb-2w">
+          Voici ce que donnerait l'addition, et ce qu'elle contient déjà en double. Ces deux
+          nombres sont calculés par la page&nbsp;: ils sont exacts, et ils ne mesurent rien.
+        </p>
+        <dsfr-data-kpi-group cols="2" gap="md">
+          <dsfr-data-kpi source="q-2025" value="nombre__sum:sum" format="nombre" color-token="rouge"
+            heading="Somme brute des 18 indicateurs, 2025"
+            label="des véhicules ajoutés à des personnes — chiffre sans signification"></dsfr-data-kpi>
+          <dsfr-data-kpi source="q-2025"
+            value="nombre__sum:sum{indicateur:eq:Usage de stupéfiants}"
+            format="nombre" color-token="orange"
+            heading="Dont compté deux fois"
+            label="le total « usage de stupéfiants », déjà présent dans ses deux moitiés"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+      </div>
+
+      <div class="odv-viz" data-code="Évolution de chaque indicateur entre 2016 et 2025">
+        <h3 class="fr-h6">Ce qui monte, ce qui baisse — un indicateur à la fois</h3>
+        <p class="odv-lecture">
+          Sur dix ans, <strong>les atteintes aux biens reculent et les violences aux personnes
+          progressent</strong>. Les deux plus fortes hausses — violences sexuelles et violences
+          intrafamiliales — sont aussi celles dont la lecture demande le plus de prudence&nbsp;:
+          voir l'encadré sous le graphique.
+        </p>
+        <!-- Pourquoi une ÉVOLUTION et pas les niveaux : les niveaux vont de 975
+             (homicides) à 622 059 (vols sans violence). Un axe partagé les
+             rendrait illisibles, et un axe par indicateur demanderait 18
+             graphiques pour une question qui tient en une. L'évolution
+             relative met les 18 sur la même échelle sans rien fausser —
+             au niveau NATIONAL, où le plus petit effectif est de 975, un
+             pourcentage est légitime. Au niveau départemental il ne l'est
+             plus : c'est le chapitre 4.
+
+             `series-field` + `stacked` : chaque indicateur n'appartient qu'à
+             une des deux séries, l'autre est absente. Empilées, les deux
+             séries se réduisent donc à une seule barre par ligne, colorée
+             selon le sens — la couleur n'est pas seule, le signe et le côté
+             de l'axe la redisent. -->
+        <!-- Deux années côte à côte : c'est un pivot, pas une jointure. Le jeu
+             est en format long (une ligne par année), et `dsfr-data-pivot` le
+             replie en une ligne par indicateur avec une colonne par année —
+             `column-format` donne des noms d'identifiants utilisables dans le
+             `compute` qui suit.
+             `an_2016` vaut 0 pour l'amende forfaitaire, qui n'existait pas :
+             la division rend `null` (jamais Infinity, jamais un 0 plausible),
+             et `isnotnull` écarte la ligne. Dix-sept barres, pas dix-huit. -->
+        <dsfr-data-query id="q-1625" source="nat" where="annee:in:2016|2025"></dsfr-data-query>
+        <dsfr-data-pivot id="p-evol" source="q-1625"
+          row="indicateur, unite" column="annee" value="nombre__sum"
+          aggregate="sum" column-format="an_{value}"></dsfr-data-pivot>
+        <dsfr-data-normalize id="evol" source="p-evol"
+          compute="evolution = round((an_2025 - an_2016) / an_2016 * 100, 1);
+                   sens = when an_2025 &gt;= an_2016 then 'En hausse depuis 2016' else 'En baisse depuis 2016'">
+        </dsfr-data-normalize>
+        <dsfr-data-query id="evol-tri" source="evol"
+          where="evolution:isnotnull" order-by="evolution:desc"></dsfr-data-query>
+
+        <dsfr-data-chart id="g-evol" source="evol-tri" type="bar" horizontal stacked
+          label-field="indicateur" value-field="evolution" series-field="sens"
+          color-map="En hausse depuis 2016:#b34000, En baisse depuis 2016:#0063cb"
+          unit-tooltip="%" databox heading-level="4"
+          databox-title="Évolution du nombre de faits enregistrés entre 2016 et 2025"
+          databox-source="SSMSI — base départementale, édition juillet 2026"
+          databox-download></dsfr-data-chart>
+        <dsfr-data-a11y for="g-evol" source="evol-tri" table download
+          label-field="indicateur" value-field="evolution, an_2016, an_2025, unite"
+          filename="delinquance-evolution-2016-2025.csv"
+          description="Pour chacun des dix-sept indicateurs présents en 2016 et en 2025, l'évolution du nombre de faits enregistrés en pourcentage, les deux volumes qui la produisent et l'unité de compte. L'amende forfaitaire délictuelle, absente en 2016, ne figure pas dans ce classement."></dsfr-data-a11y>
+      </div>
+
+      <div class="fr-callout fr-icon-quote-line fr-my-4w">
+        <h3 class="fr-callout__title fr-text--md">Ce que ce graphique ne dit pas</h3>
+        <p class="fr-callout__text fr-text--sm">
+          Ce sont des faits <strong>enregistrés</strong> par la police et la gendarmerie —&nbsp;des
+          plaintes et des constatations, pas la délinquance réelle. Une hausse peut venir des faits
+          comme du dépôt de plainte&nbsp;: pour les violences sexuelles (+&nbsp;154&nbsp;%) et
+          intrafamiliales (+&nbsp;125&nbsp;%), la libération de la parole en explique une part que
+          ce jeu ne permet pas d'isoler. À l'autre bout, les stupéfiants mesurent d'abord
+          l'activité des services, comme le chapitre&nbsp;1 vient de le montrer. Aucun de ces
+          dix-sept nombres ne se lit sans sa phrase.
+        </p>
+      </div>
+
+      <h3 class="fr-h6 fr-mt-4w">Les dix-huit, avec leur unité</h3>
+      <p class="fr-hint-text fr-mb-2v">
+        Année&nbsp;2025. Le taux est calculé <strong>somme sur somme</strong>
+        (Σ&nbsp;faits ÷ Σ&nbsp;dénominateur), jamais comme une moyenne des 101 taux
+        départementaux — la différence fait l'objet du chapitre suivant.
+      </p>
+      <dsfr-data-list source="q-2025" count-label="indicateur"
+        columns="indicateur:Indicateur, unite:Unité de compte, nombre__sum:Faits enregistrés en 2025, taux_nat:Taux national, pour_mille:Rapporté à"
+        sort search pagination="20" export>
+      </dsfr-data-list>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       CHAPITRE 3 — La carte, et la moyenne qui ment
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 3</p>
+    <h2 class="fr-h3">La carte, et la moyenne qui ment</h2>
+    <p class="fr-text--lead">
+      Une carte de taux affiche un résumé «&nbsp;en France&nbsp;» sous son titre. Par défaut, c'est
+      la <strong>moyenne des 101 valeurs départementales</strong> — où la Lozère pèse autant que le
+      Nord. Les deux cartes ci-dessous portent <strong>exactement la même donnée et le même
+      dessin</strong>&nbsp;; seule la ligne sous leur titre diffère. Changez d'indicateur&nbsp;: sur
+      les vols violents sans arme, l'écart entre les deux dépasse le tiers.
+    </p>
+
+    <!-- La source de la carte n'est PAS groupée : une année et un indicateur
+         donnent déjà exactement une ligne par département (101). `require-where`
+         garantit qu'elle ne parte jamais chercher les 18 180 lignes du jeu ;
+         les valeurs par défaut des facettes posent le premier filtre au
+         montage, donc la carte se charge d'emblée. -->
+    <dsfr-data-source id="carte-src" api-type="tabular" require-where
+      base-url="https://tabular-api.data.gouv.fr"
+      resource="2b27a675-e3bf-41ef-a852-5fb9ab483967">
+    </dsfr-data-source>
+
+    <!-- PG-031 appliqué : la colonne AFFICHÉE est arrondie, la colonne
+         CALCULÉE ne l'est pas. Arrondir en amont d'un résumé pondéré fausse
+         le résumé sans que rien ne le dise — `map-summary-field` désigne la
+         colonne brute. Trois décimales et non deux : au centième, les
+         homicides (0,014 ‰) s'écraseraient tous sur la même valeur. -->
+    <dsfr-data-join id="carte-nom" left="carte-src" right="ref-dep"
+      on="Code_departement=codedepartement" type="left"></dsfr-data-join>
+    <dsfr-data-normalize id="carte" source="carte-nom"
+      compute="poids = when indicateur = 'Cambriolages de logement' then insee_log else insee_pop;
+               taux_aff = round(taux_pour_mille, 3)">
+    </dsfr-data-normalize>
+
+    <!-- Un seul contexte sur la page, qui ne vise que la source de la carte
+         (PG-028). Les facettes sont peuplées par `nat` — la vue nationale,
+         déjà chargée — et délèguent leur sélection au contexte : une facette
+         alimentée par la source filtrée n'offrirait plus qu'une valeur.
+         `annee` est un ENTIER dans ce jeu, donc `annee:eq:2025` part en
+         `annee__exact=2025` sans zéro de tête à perdre (PG-030). -->
+    <dsfr-data-context id="ctx-carte" sources="carte-src"></dsfr-data-context>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-3w">
+      <div class="fr-col-12">
+        <!-- `hide-counts` : la source des facettes porte UNE ligne par couple
+             (année × indicateur), donc chaque valeur y est vue une seule fois.
+             Un « (1) » derrière chaque année ne dirait rien de la donnée et
+             laisserait croire à un effectif. -->
+        <dsfr-data-facets id="f-carte" source="nat" context="ctx-carte" hide-counts
+          fields="indicateur, annee"
+          labels="indicateur:Indicateur | annee:Année"
+          display="indicateur:select | annee:select"
+          default="indicateur:Vols sans violence contre des personnes | annee:2025"
+          span="indicateur:7 | annee:3"
+          sort="annee:alpha:desc | indicateur:alpha:asc" no-reset></dsfr-data-facets>
+      </div>
+    </div>
+
+    <div class="odv-viz" data-code="Carte départementale du taux, à indicateur et année choisis">
+      <h3 class="fr-h6">
+        <dsfr-data-context-value for="ctx-carte" template="{{indicateur}}"
+          fallback="Vols sans violence contre des personnes" live></dsfr-data-context-value>
+        en
+        <dsfr-data-context-value for="ctx-carte" template="{{annee}}" fallback="2025" live></dsfr-data-context-value>
+      </h3>
+      <p class="odv-lecture">
+        Le chiffre affiché sous le titre de la carte est la <strong>moyenne pondérée</strong> par la
+        population du département (ou par son nombre de logements pour les cambriolages)&nbsp;: c'est
+        le taux national, celui qu'on lirait en divisant la somme des faits par la somme des
+        habitants. Il est presque toujours plus élevé que la moyenne des départements, parce que les
+        départements les plus peuplés sont aussi les plus touchés.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-6">
+          <p class="fr-badge fr-badge--success fr-badge--sm fr-mb-2v">Résumé juste</p>
+          <dsfr-data-chart id="c-juste" source="carte" type="map"
+            code-field="Code_departement" value-field="taux_aff" name="Taux pour 1 000"
+            unit-tooltip="pour 1 000" selected-palette="sequentialAscending"
+            map-summary="weighted" map-summary-weight="poids" map-summary-field="taux_pour_mille"
+            idle-message="Choisissez un indicateur et une année pour afficher la carte."
+            databox heading-level="4"
+            databox-title="Taux pour 1 000, par département — résumé pondéré"
+            databox-source="SSMSI — base départementale, édition juillet 2026"
+            databox-download></dsfr-data-chart>
+          <p class="fr-hint-text">
+            <code>map-summary="weighted"</code> +
+            <code>map-summary-weight="poids"</code> — Σ(taux × effectif) ÷ Σ(effectif).
+          </p>
+        </div>
+        <div class="fr-col-12 fr-col-lg-6">
+          <p class="fr-badge fr-badge--error fr-badge--sm fr-mb-2v">Résumé par défaut</p>
+          <!-- MÊME donnée, MÊME dessin : seul le mode de résumé change. Cette
+               carte est là pour être comparée, pas pour être lue. -->
+          <dsfr-data-chart id="c-faux" source="carte" type="map"
+            code-field="Code_departement" value-field="taux_aff" name="Taux pour 1 000"
+            unit-tooltip="pour 1 000" selected-palette="sequentialAscending"
+            map-summary="avg"
+            idle-message="Choisissez un indicateur et une année pour afficher la carte."
+            databox heading-level="4"
+            databox-title="Taux pour 1 000, par département — moyenne des départements"
+            databox-source="SSMSI — base départementale, édition juillet 2026"></dsfr-data-chart>
+          <p class="fr-hint-text">
+            <code>map-summary="avg"</code> — la moyenne des 101 départements. Les deux cartes sont
+            <strong>identiques au pixel</strong>&nbsp;; c'est la ligne sous le titre qui diffère.
+          </p>
+        </div>
+      </div>
+
+      <dsfr-data-a11y for="c-juste" source="carte" table download
+        label-field="nom_departement" value-field="taux_pour_mille, nombre, poids"
+        filename="delinquance-par-departement.csv"
+        description="Pour chaque département, le taux pour 1 000 de l'indicateur et de l'année choisis, le nombre de faits enregistrés et l'effectif de référence (population, ou nombre de logements pour les cambriolages de logement)."></dsfr-data-a11y>
+    </div>
+
+    <div class="fr-callout fr-icon-scales-3-line fr-my-4w">
+      <h3 class="fr-callout__title fr-text--md">Deux dénominateurs dans le même sélecteur</h3>
+      <p class="fr-callout__text fr-text--sm">
+        Dix-sept indicateurs sont rapportés à <strong>1 000 habitants</strong>&nbsp;; «&nbsp;cambriolages
+        de logement&nbsp;» est rapporté à <strong>1 000 logements</strong>. Ce n'est pas un détail
+        de légende&nbsp;: la France compte 68,4 millions d'habitants et 37,6 millions de logements,
+        donc un taux «&nbsp;logements&nbsp;» n'est jamais comparable à un taux
+        «&nbsp;habitants&nbsp;». La colonne <code>poids</code> change de dénominateur avec
+        l'indicateur, et le libellé sous la carte suit. <strong>Ce que la bibliothèque ne permet
+        pas</strong>&nbsp;: rendre l'unité de l'infobulle (<code>unit-tooltip</code>) tributaire du
+        filtre — elle reste «&nbsp;pour 1 000&nbsp;», et c'est la phrase qui porte la précision.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       CHAPITRE 4 — Ce qu'on ne cartographie pas
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w fr-mb-8w">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 4</p>
+    <h2 class="fr-h3">Pourquoi il n'y a pas de carte des homicides, année par année</h2>
+    <p class="fr-text--lead">
+      Le sélecteur ci-dessus accepte «&nbsp;Homicides&nbsp;». Il ne faut pas le lire. En 2025,
+      <strong>quatre départements sur dix</strong> en enregistrent cinq ou moins, et trois n'en
+      enregistrent aucun&nbsp;: une carte annuelle y dessine du bruit, pas un territoire. Un fait de
+      plus ou de moins y double un taux.
+    </p>
+
+    <dsfr-data-source id="hom-2025" api-type="tabular"
+      base-url="https://tabular-api.data.gouv.fr"
+      resource="2b27a675-e3bf-41ef-a852-5fb9ab483967"
+      where="indicateur:eq:Homicides, annee:eq:2025">
+    </dsfr-data-source>
+
+    <!-- Le cumul décennal : `group-by` délégué au serveur, 101 lignes.
+         La population est celle de la DERNIÈRE année disponible, pas une somme
+         de dix millésimes : on la prend par `max`, qui sur un champ figé depuis
+         2024 (millésime 2023) rend simplement la population de référence. -->
+    <dsfr-data-source id="hom-cumul" api-type="tabular"
+      base-url="https://tabular-api.data.gouv.fr"
+      resource="2b27a675-e3bf-41ef-a852-5fb9ab483967"
+      where="indicateur:eq:Homicides"
+      group-by="Code_departement"
+      aggregate="nombre:sum, insee_pop:max">
+    </dsfr-data-source>
+    <dsfr-data-join id="hom-cumul-nom" left="hom-cumul" right="ref-dep"
+      on="Code_departement=codedepartement" type="left"></dsfr-data-join>
+    <dsfr-data-normalize id="hom-cumul-n" source="hom-cumul-nom"
+      compute="taux_10ans = round(nombre__sum / insee_pop__max * 1000, 3)">
+    </dsfr-data-normalize>
+
+    <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-4w">
+      <dsfr-data-kpi source="hom-2025" value="nombre:sum" format="nombre"
+        heading="Homicides en 2025" label="victimes, France entière"></dsfr-data-kpi>
+      <dsfr-data-kpi source="hom-2025" value="count{nombre:lte:5} / count"
+        format="pourcentage" decimals="0" color-token="orange"
+        heading="Départements à 5 homicides ou moins"
+        label="sur les 101 de la base, en 2025"></dsfr-data-kpi>
+      <dsfr-data-kpi source="hom-cumul-n" value="nombre__sum:sum" format="nombre"
+        heading="Homicides cumulés, 2016-2025" label="la base sur laquelle une carte tient"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Homicides par département en 2025 — nombres bruts">
+          <h3 class="fr-h6">Une année seule&nbsp;: des nombres bruts</h3>
+          <p class="odv-lecture">
+            Pas de taux, pas de choroplèthe&nbsp;: <strong>les dix départements les plus
+            touchés en nombre</strong>, et rien d'autre. Sur des effectifs de cet ordre, un
+            classement en taux ferait remonter les départements les moins peuplés par le seul
+            effet du hasard.
+          </p>
+          <dsfr-data-join id="hom-2025-nom" left="hom-2025" right="ref-dep"
+            on="Code_departement=codedepartement" type="left"></dsfr-data-join>
+          <dsfr-data-query id="hom-top" source="hom-2025-nom"
+            order-by="nombre:desc" limit="10"></dsfr-data-query>
+          <dsfr-data-podium source="hom-top" label-field="nom_departement"
+            value-field="nombre" value-unit="victimes" max-items="10"
+            selected-palette="sequentialDescending"></dsfr-data-podium>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Homicides cumulés 2016-2025, taux pour 1 000">
+          <h3 class="fr-h6">Dix ans cumulés&nbsp;: une carte redevient lisible</h3>
+          <p class="odv-lecture">
+            Sur dix ans, le plus petit département compte <strong>deux homicides</strong> et le plus
+            grand 622&nbsp;: l'écart cesse d'être du bruit. La carte qui suit est la seule forme
+            cartographique que cet indicateur supporte — et elle parle de <em>dix ans</em>, ce que
+            son titre doit dire.
+          </p>
+          <dsfr-data-chart id="c-hom" source="hom-cumul-n" type="map"
+            code-field="Code_departement" value-field="taux_10ans"
+            name="Homicides pour 1 000 habitants, cumul 2016-2025"
+            unit-tooltip="pour 1 000 sur dix ans" selected-palette="sequentialAscending"
+            map-summary="weighted" map-summary-weight="insee_pop__max"
+            databox heading-level="4"
+            databox-title="Homicides cumulés 2016-2025, pour 1 000 habitants"
+            databox-source="SSMSI — base départementale, édition juillet 2026"
+            databox-download></dsfr-data-chart>
+        </div>
+      </div>
+    </div>
+
+    <dsfr-data-a11y for="c-hom" source="hom-cumul-n" table download
+      label-field="nom_departement" value-field="nombre__sum, taux_10ans, insee_pop__max"
+      filename="homicides-cumul-2016-2025.csv"
+      description="Pour chaque département, le nombre d'homicides cumulés de 2016 à 2025, le taux correspondant pour 1 000 habitants et la population de référence."></dsfr-data-a11y>
+  </section>
+
+  <!-- ==========================================================================
+       NOTES — les hypothèses éditoriales
+       ========================================================================== -->
+  <section class="fr-container fr-mb-8w odv-analyse fr-pt-6w" id="notes">
+    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
+    <p>Tout ce qui suit est un choix. Il est écrit pour pouvoir être discuté.</p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on a choisi</h3>
+        <ul>
+          <li><strong>Ne jamais afficher un total, sauf pour dire qu'il est faux.</strong> Le seul
+            endroit de cette page où les dix-huit indicateurs sont additionnés est un encadré qui
+            explique pourquoi ce nombre ne mesure rien. C'était la tentation évidente d'une page
+            d'accueil, et c'est le contresens que le jeu interdit.</li>
+          <li><strong>Deux cartes identiques pour une seule différence.</strong> Le chapitre 3
+            affiche deux fois le même dessin. C'est volontairement redondant&nbsp;: la seule façon
+            de montrer qu'un résumé faux <em>ressemble</em> à un résumé juste est de les mettre
+            côte à côte. La carte de droite ne doit pas être lue.</li>
+          <li><strong>Une évolution plutôt que des niveaux.</strong> Les volumes vont de 975 à
+            622&nbsp;059&nbsp;: un axe partagé serait illisible, dix-huit axes séparés répondraient
+            dix-huit fois à la même question. L'évolution relative met tout le monde sur la même
+            échelle — et au niveau national, où le plus petit effectif dépasse 900, un pourcentage
+            reste honnête. Au niveau départemental il cesse de l'être, et le chapitre 4 refuse de
+            le calculer.</li>
+          <li><strong>Un classement en nombres bruts pour les homicides.</strong> Le podium du
+            chapitre 4 classe des victimes, pas des taux. Un taux sur des effectifs de 0 à 56
+            hisserait en tête les départements les moins peuplés, par construction.</li>
+          <li><strong>L'arrondi après le calcul, jamais avant.</strong> La carte affiche un taux à
+            trois décimales et calcule son résumé sur la colonne brute
+            (<code>map-summary-field</code>). Arrondir en amont d'une pondération fausse le résumé
+            sans que rien ne le signale.</li>
+        </ul>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on ne montre pas</h3>
+        <ul>
+          <li><strong>La délinquance réelle.</strong> Ce jeu compte ce que la police et la
+            gendarmerie <em>enregistrent</em>. Le chapitre 1 en donne la démonstration la plus nette
+            — une réforme de procédure fait monter une courbe de 70&nbsp;% — et la réserve vaut
+            pour les dix-huit indicateurs, pas seulement pour les stupéfiants.</li>
+          <li><strong>Cinq collectivités.</strong> La base départementale en compte 101&nbsp;:
+            les 96 départements métropolitains, la Guadeloupe, la Martinique, la Guyane, La Réunion
+            et Mayotte. Saint-Pierre-et-Miquelon, Saint-Barthélemy, Saint-Martin, Wallis-et-Futuna
+            et la Polynésie n'y sont pas. «&nbsp;En France&nbsp;» veut donc dire «&nbsp;dans ces
+            101 territoires&nbsp;».</li>
+          <li><strong>Une population figée.</strong> Les taux de 2024 et 2025 sont rapportés à la
+            population du millésime 2023, et ceux de 2023 à 2025 pour les cambriolages au parc de
+            logements de 2022&nbsp;: sur ces dernières années, une variation du taux ne reflète
+            <em>que</em> la variation du nombre. Mayotte fait exception dans l'autre sens — sa
+            population de référence est figée au millésime 2017 sur toute la période.</li>
+          <li><strong>Aucune valeur manquante, et ce n'est pas rien.</strong> Les 18 180 lignes
+            portent un nombre et un taux&nbsp;; 469 d'entre elles valent zéro. Vérifié par
+            recalcul&nbsp;: ce sont de vrais zéros, pas des cases vides — aucune donnée n'est
+            secrétisée dans cette base départementale. La question se poserait autrement sur la
+            base communale, qui l'est.</li>
+          <li><strong>Le classement des départements en page d'accueil.</strong> Il aurait été
+            facile, et il aurait été lu comme un palmarès de l'insécurité. La carte en taux et le
+            détail par indicateur disent la même chose sans la transformer en concours.</li>
+          <li><strong>L'infobulle ne dit pas le dénominateur.</strong>
+            <code>unit-tooltip</code> est une chaîne fixe&nbsp;: elle affiche «&nbsp;pour
+            1 000&nbsp;» que l'indicateur soit rapporté aux habitants ou aux logements. La phrase
+            de lecture et le tableau équivalent portent la précision&nbsp;; l'infobulle, non.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="odv-verdict fr-mt-4w">
+      <h3 class="fr-h6">Ce que cette page démontre de <code>dsfr-data</code></h3>
+      <p>
+        <strong>Un deuxième fournisseur d'API dans ce banc, sans une ligne de
+        JavaScript&nbsp;: l'API Tabular de <code>data.gouv.fr</code>.</strong> <code>api-type="tabular"</code> délègue
+        au serveur le regroupement et les agrégats — 18 180 lignes réduites à 180 en quatre
+        requêtes — et les trois pièges de ce jeu se règlent par trois attributs&nbsp;:
+        <code>map-summary="weighted"</code> pour la moyenne nationale,
+        <code>map-summary-field</code> pour l'arrondi, et une colonne calculée pour le dénominateur
+        variable. Le reste est éditorial, et aucun attribut ne le fera à notre place.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       ANALYSE TECHNIQUE — repliée
+       ========================================================================== -->
+  <section class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que ce jeu et cette API ont coûté</summary>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mt-3w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h6">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le fournisseur Tabular est natif.</strong> <code>api-type="tabular"</code>
+              + <code>base-url</code> + <code>resource</code>, et le <code>group-by</code> part au
+              serveur. La bibliothèque assemble elle-même les flags nus
+              (<code>annee__groupby</code>, <code>nombre__sum</code>) que l'API exige — la forme
+              valuée <code>annee__groupby=</code> reçoit un 400 «&nbsp;Malformed query&nbsp;», et
+              <code>URLSearchParams</code> ajouterait toujours ce <code>=</code>. Le contournement
+              a été écrit une fois dans l'adaptateur (#596), pas dans la page.</li>
+            <li><strong>Le découpage départemental tombe juste.</strong> Les codes du jeu
+              (<code>01</code> à <code>95</code>, <code>2A</code>, <code>2B</code>,
+              <code>971</code>-<code>976</code>) sont exactement ceux qu'attend
+              <code>type="map"</code>&nbsp;: aucune ligne ignorée, aucun GeoJSON à fournir, les
+              encarts d'outre-mer compris.</li>
+            <li><strong>Le dénominateur variable se calcule.</strong> Un
+              <code>compute</code> conditionnel donne une colonne <code>poids</code> qui vaut la
+              population ou le parc de logements selon l'indicateur, et
+              <code>map-summary-weight</code> la lit. Le problème paraissait demander un attribut
+              nouveau&nbsp;; il demandait une colonne.</li>
+            <li><strong>Le CORS est ouvert.</strong> Aucun proxy, aucune clé&nbsp;:
+              <code>access-control-allow-origin: *</code> sur les requêtes comme sur la préflight,
+              vérifié le 2026-09-21 depuis l'origine de déploiement.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h6">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Cinquante lignes par page, et c'est l'API.</strong> Tabular plafonne
+              <code>page_size</code> à 50 et n'a pas d'endpoint d'export&nbsp;: les 18 180 lignes
+              coûteraient 364 allers-retours. Il n'y a pas d'équivalent de
+              <code>fetch-mode="export"</code> côté ODS, et ce n'est pas un manque de
+              <code>dsfr-data</code> — c'est la surface de l'API. La réponse est de <em>ne jamais
+              tout charger</em>&nbsp;: agréger au serveur, ou filtrer à 101 lignes.</li>
+            <li><strong><code>__in</code> avale les parenthèses, en silence.</strong> Relevé à
+              l'API&nbsp;: <code>indicateur__exact=Usage de stupéfiants (AFD)</code> rend
+              101 lignes, <code>indicateur__in=Usage de stupéfiants (AFD)</code> en rend
+              <strong>zéro</strong>, avec un HTTP 200 et sans message. Une liste mixte ne retient
+              que les valeurs sans parenthèse. Trois des dix-huit indicateurs en portent&nbsp;: un
+              <code>where="indicateur:in:…"</code> aurait rendu un graphique incomplet sans
+              prévenir. Contournement de cette page&nbsp;: filtrer sur une colonne calculée, ce qui
+              force la voie client. C'est un défaut de l'API Tabular, à signaler à
+              <code>data.gouv.fr</code>, pas à la bibliothèque.</li>
+            <li><strong>Un tri serveur fait perdre des lignes, sans rien dire.</strong> C'est le
+              défaut le plus coûteux rencontré ici, et il a produit une <em>courbe fausse</em>&nbsp;:
+              avec <code>annee__sort=asc</code>, les quatre pages du regroupement rendent bien
+              180 lignes, mais <strong>177 distinctes</strong> — trois doublons, trois disparues,
+              HTTP 200 partout. «&nbsp;Usage de stupéfiants&nbsp;» 2018 faisait partie des
+              disparues, et la courbe bleue du chapitre 1 plongeait à zéro au milieu du graphique.
+              Reproduit à l'API hors de toute page, et cerné&nbsp;: le tri sur un champ non unique
+              (<code>annee</code>, <code>nombre</code>) combiné à la pagination donne un ordre
+              instable d'une page à l'autre&nbsp;; sans tri, les 180 lignes — et les 101 d'un
+              département — sont toujours complètes. <strong>Seul un recalcul indépendant, ou un
+              zéro assez voyant pour sauter aux yeux, révèle ce genre de perte.</strong> La page ne
+              trie donc plus rien au serveur&nbsp;: <code>order-by</code> est posé en aval, sur des
+              lignes déjà toutes chargées. Défaut de l'API Tabular.</li>
+            <li><strong>Pas de total serveur derrière un <code>group-by</code>.</strong> La réponse
+              agrégée de Tabular ne porte plus <code>meta.total</code>&nbsp;: un KPI en
+              <code>meta:total</code> retomberait sur le nombre de lignes reçues. Sans conséquence
+              ici, où l'on connaît les 180 lignes attendues — à savoir ailleurs.</li>
+            <li><strong>L'unité de compte disparaît au regroupement.</strong> Grouper par
+              (année × indicateur) sans embarquer <code>unite_de_compte</code> perd la colonne, et
+              l'ajouter au <code>group-by</code> n'aurait servi à rien de plus. Elle est
+              reconstruite par <code>compute</code>, ce qui n'est acceptable que parce qu'elle est
+              <em>fixe</em> par indicateur — contrôlé à l'API&nbsp;: 18 indicateurs, 18 couples.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="fr-h6 fr-mt-4w">Correspondance — le problème, l'attribut</h3>
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Ce que chaque piège du jeu a demandé, et où la réponse se trouve</caption>
+          <thead>
+            <tr><th scope="col">Piège du jeu</th><th scope="col">Réponse <code>dsfr-data</code></th><th scope="col">Statut</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Moyenne nationale d'un taux</td><td><code>map-summary="weighted"</code> + <code>map-summary-weight</code></td><td>Natif (0.33.0)</td></tr>
+            <tr><td>Arrondi d'affichage faussant le résumé</td><td><code>map-summary-field</code> sur la colonne brute</td><td>Natif (0.33.0, PG-031)</td></tr>
+            <tr><td>Dénominateur variable selon l'indicateur</td><td><code>compute</code> conditionnel → colonne <code>poids</code></td><td>Natif</td></tr>
+            <tr><td>18 180 lignes à 50 par page</td><td><code>group-by</code> + <code>aggregate</code> délégués au serveur</td><td>Natif (adaptateur Tabular)</td></tr>
+            <tr><td>Double compte des stupéfiants</td><td>Aucun attribut — trois <code>dsfr-data-query</code> et une phrase</td><td>Éditorial</td></tr>
+            <tr><td>Repère temporel sur l'axe X</td><td><code>reference-lines</code> sur la catégorie</td><td>Natif</td></tr>
+            <tr><td>Unité d'infobulle tributaire d'un filtre</td><td>Aucune&nbsp;: <code>unit-tooltip</code> est une chaîne fixe</td><td>Porté par la phrase</td></tr>
+            <tr><td><code>__in</code> muet sur les parenthèses</td><td>Filtre sur colonne calculée (voie client forcée)</td><td>Défaut de l'API Tabular</td></tr>
+            <tr><td>Tri serveur + pagination : lignes perdues</td><td>Aucun <code>order-by</code> sur la source ; tri en aval</td><td>Défaut de l'API Tabular</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <h3 class="fr-h6">Verdict</h3>
+        <p>
+          <strong>Le deuxième fournisseur du banc se branche sans effort ; c'est sa pagination qui
+          dicte l'architecture — et son tri qui mord.</strong> Là où un portail Opendatasoft se charge d'un bloc
+          (<code>fetch-mode="export"</code>), Tabular impose de penser chaque bloc en nombre de
+          requêtes — et récompense l'agrégation serveur, qu'il exécute bien. Les trois pièges
+          <em>statistiques</em> du jeu, eux, ont tous trouvé un attribut&nbsp;: aucune limite dure
+          n'est sortie de cette page. Ce qui reste hors de portée de la bibliothèque est ce qui
+          devait l'être&nbsp;: décider qu'on n'additionne pas, et écrire pourquoi.
+        </p>
+      </div>
+    </details>
+
+    <details class="odv-contexte fr-mt-3w">
+      <summary>Le jeu de données utilisé</summary>
+      <ul class="fr-mt-2w">
+        <li><strong>Jeu</strong> — «&nbsp;Bases statistiques communale, départementale et régionale
+          de la délinquance enregistrée par la police et la gendarmerie nationales&nbsp;», SSMSI
+          (service statistique ministériel de la sécurité intérieure), ministère de l'Intérieur.
+          Édition de juillet 2026, géographie 2026.
+          <a href="https://www.data.gouv.fr/fr/datasets/621df2954fa5a3b5a023e23c/">Fiche
+          <code>data.gouv.fr</code></a>.</li>
+        <li><strong>Ressource</strong> — base <em>départementale</em>
+          (<code>2b27a675-e3bf-41ef-a852-5fb9ab483967</code>), 18 180 lignes&nbsp;:
+          18 indicateurs × 10 années (2016-2025) × 101 départements. Lue par
+          <a href="https://tabular-api.data.gouv.fr/api/resources/2b27a675-e3bf-41ef-a852-5fb9ab483967/data/">l'API
+          Tabular</a>.</li>
+        <li><strong>Documentation</strong> —
+          <a href="https://www.data.gouv.fr/fr/datasets/r/5e6dd067-3bba-45e3-b7ad-ed8c673bea5b">notice
+          méthodologique (PDF)</a>&nbsp;: définitions des indicateurs, unités de compte, règles de
+          secrétisation.</li>
+        <li><strong>Licence</strong> — Licence Ouverte v2.0 (Etalab).</li>
+      </ul>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
