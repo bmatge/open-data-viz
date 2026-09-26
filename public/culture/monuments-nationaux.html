@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fréquentation des monuments nationaux — open-data-viz</title>
+  <meta name="description" content="Monuments nationaux 2019-2022 : en 2020 et 2021, Chambord a dépassé l'Arc de Triomphe ; Paris a perdu les trois quarts de ses entrées, puis a été le seul à dépasser 2019. Création avec dsfr-data sur l'API Tabular de data.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 10 de docs/portail-culture/proposition.md.
+
+       UN JEU, UNE REQUÊTE : « Fréquentation des monuments nationaux » (ministère de la
+       Culture, CMN / DEPS), ressource Tabular 4b6182c9. 396 lignes = 99 monuments × 4 années
+       (2019-2022), chargées en entier par fetch-mode="export" (Parquet). Tout se calcule
+       dans la page.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué sur les 396 lignes le 2026-09-26) :
+       - Totaux annuels : 11,20 M (2019), 4,08 M (2020), 5,45 M (2021), 11,12 M (2022).
+       - Chambord a été premier DEUX années (2020 et 2021), pas une.
+       - Le cadrage parlait des « 99 monuments du CMN » : la description du jeu précise que
+         Chambord n'est PAS administré par le CMN. Le premier de 2020-2021 est donc
+         l'exception du fichier. Dit en page.
+       - L'histoire se précise : Paris (12 monuments) a perdu 76 % en 2020, le reste 55 % ;
+         en 2022 Paris dépasse 2019 (indice 106), le reste non (95). À périmètre constant
+         Paris est à 101, le reste à 93 : l'Hôtel de la Marine (ouvert en 2021 dans le
+         fichier) compense les tours de Notre-Dame (fermées depuis 2020 dans le fichier).
+       - Pas de coordonnées dans le jeu : pas de carte à cercles (dit en page).
+       ========================================================================== -->
+
+  <!-- ---------- Le jeu entier, par son export Parquet ---------- -->
+  <dsfr-data-source id="mn-src" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="4b6182c9-1989-456f-925c-d98bd363cee7"
+    fetch-mode="export">
+  </dsfr-data-source>
+
+  <!-- Noms courts ; Paris = département 75 (la ville, pas l'Île-de-France). -->
+  <dsfr-data-normalize id="mn" source="mn-src"
+    rename="Nom de l'établissement:nom | Année:annee_brute | Total:total | Gratuit:gratuit | Payant:payant | Région:region | Libellé géographique commune:commune | Code Insee département:dep"
+    compute="k = 'fr';
+             Annee = concat(annee_brute, '');
+             paris = when dep = '75' then 1 else 0;
+             t_paris = when dep = '75' then total else 0;
+             t_hors = when dep = '75' then 0 else total;
+             ouvert = when total > 0 then 1 else 0;
+             t_k = round(total / 1000, 1);
+             un = 1">
+  </dsfr-data-normalize>
+
+  <!-- Série annuelle, et sa base 2019 (l'année d'avant la crise, référence fixe) -->
+  <dsfr-data-query id="an" source="mn" group-by="Annee, k"
+    aggregate="total:sum:tot, t_paris:sum:tp, t_hors:sum:th, gratuit:sum:gr, ouvert:sum:nouv, un:sum:nlig, paris:sum:np, total:max:tmax"
+    order-by="Annee:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="an-19" source="an" where="Annee:eq:2019"></dsfr-data-query>
+  <dsfr-data-join id="an-j" left="an" right="an-19" on="k" type="inner" prefix-right="r_"></dsfr-data-join>
+  <dsfr-data-normalize id="an-t" source="an-j"
+    compute="i_tot = round(tot / r_tot * 100, 1);
+             i_p = round(tp / r_tp * 100, 1);
+             i_h = round(th / r_th * 100, 1);
+             perte = (1 - tot / r_tot) * 100;
+             pp = 100 - tp / r_tp * 100;
+             ph = 100 - th / r_th * 100;
+             tot_m = tot / 1000000;
+             r_tot_m = r_tot / 1000000;
+             p_paris = tp / tot * 100;
+             r_p_paris = r_tp / r_tot * 100;
+             p_gr = gr / tot * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="an-der" source="an-t" order-by="Annee:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-bas" source="an-t" order-by="tot:asc" limit="1"></dsfr-data-query>
+
+  <!-- Le premier monument de chaque année : jointure du maximum annuel sur (année, entrées) -->
+  <dsfr-data-join id="lead-j" left="an-t" right="mn" on="Annee, tmax=total" type="inner" prefix-right="m_"></dsfr-data-join>
+  <dsfr-data-query id="lead" source="lead-j" order-by="Annee:asc"></dsfr-data-query>
+  <dsfr-data-query id="lead-19" source="lead" where="Annee:eq:2019"></dsfr-data-query>
+  <dsfr-data-query id="lead-der" source="lead" order-by="Annee:desc" limit="1"></dsfr-data-query>
+
+  <!-- Lignes par monument : dernière année, 2019, année la plus basse -->
+  <dsfr-data-query id="m19" source="mn" where="Annee:eq:2019"></dsfr-data-query>
+  <dsfr-data-join id="der" left="mn" right="an-der" on="Annee" type="inner" prefix-right="n_"></dsfr-data-join>
+  <dsfr-data-join id="bas-m" left="mn" right="an-bas" on="Annee" type="inner" prefix-right="n_"></dsfr-data-join>
+  <dsfr-data-join id="mi-1" left="der" right="m19" on="nom" type="left" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-join id="mi-2" left="mi-1" right="bas-m" on="nom" type="left" prefix-right="b_"></dsfr-data-join>
+  <dsfr-data-normalize id="mi" source="mi-2"
+    compute="v19 = when p_total > 0 then round((total / p_total - 1) * 100, 1) else null;
+             i_der = when p_total > 0 then round(total / p_total * 100, 0) else null;
+             i_bas = when p_total > 0 then round(b_total / p_total * 100, 0) else null;
+             an_bas = b_Annee;
+             titre = when p_total > 0 then concat(nom, ' (', commune, ') : ', i_bas, ' % de 2019 en ', an_bas, ', ', i_der, ' % en ', Annee)
+                     else concat(nom, ' (', commune, ') : aucune entrée en 2019, pas d’indice');
+             lecture = when p_total > 0 then concat('L’année la plus basse (', an_bas, '), le monument garde ', i_bas, ' % de ses entrées de 2019, et la dernière année (', Annee, '), ', i_der, ' %.')
+                       else 'Le monument ne déclare aucune entrée en 2019 : il n’a pas d’indice.'">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Fréquentation des monuments nationaux</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Monuments nationaux&nbsp;: en 2020 et 2021, Chambord a dépassé l'Arc de Triomphe&nbsp;; en 2022, seul Paris a fait mieux qu'en 2019</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="an-bas">
+        <template>
+          Les {{nlig:number:0}}&nbsp;monuments nationaux du fichier ont déclaré {{r_tot_m:number:1}}&nbsp;millions d'entrées
+          en 2019, et {{tot_m:number:1}}&nbsp;millions en {{Annee}}&nbsp;: <strong>{{perte:number:0}}&nbsp;% de moins</strong>.
+          Paris, qui faisait {{r_p_paris:number:0}}&nbsp;% des entrées, en a perdu {{pp:number:0}}&nbsp;%, le reste de la
+          France {{ph:number:0}}&nbsp;% — assez pour que le premier monument ne soit plus parisien.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-der">
+        <template>
+          En {{Annee}}, l'ensemble retrouve {{i_tot:number:0}}&nbsp;% de son niveau de 2019, mais pas partout&nbsp;:
+          <strong>Paris est à l'indice {{i_p:number:0}}, le reste de la France à {{i_h:number:0}}</strong>.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, «&nbsp;Fréquentation des monuments nationaux&nbsp;» (Centre des monuments nationaux,
+      DEPS), servi par l'API Tabular de data.gouv.fr. Entrées payantes et gratuites, 2019 à 2022, arrondies à la dizaine
+      par le producteur. Le fichier compte le domaine de Chambord, qui n'est pas administré par le Centre des monuments
+      nationaux. «&nbsp;Paris&nbsp;» désigne les monuments situés dans la ville (département&nbsp;75).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="an-der" value="tot:max" format="compact" decimals="1" span="3"
+        heading="Entrées" label="dernière année du fichier, tous monuments"></dsfr-data-kpi>
+      <dsfr-data-kpi source="an-bas" value="perte:max" decimals="0" unit="%" span="3"
+        heading="Perte au plus bas" label="entrées perdues par rapport à 2019, année la plus basse"></dsfr-data-kpi>
+      <dsfr-data-kpi source="an-der" value="i_p:max" decimals="0" span="3"
+        heading="Paris" label="indice des entrées la dernière année, base 100 en 2019"></dsfr-data-kpi>
+      <dsfr-data-kpi source="an-der" value="i_h:max" decimals="0" span="3"
+        heading="Hors Paris" label="indice des entrées la dernière année, base 100 en 2019"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= ACCROCHE — le premier monument change de ville ======================= -->
+  <dsfr-data-query id="top19" source="m19" order-by="total:desc" limit="4"></dsfr-data-query>
+  <dsfr-data-join id="top4-j" left="mn" right="top19" on="nom" type="inner" prefix-right="q_"></dsfr-data-join>
+  <dsfr-data-query id="top4" source="top4-j" order-by="Annee:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-premier">
+    <h2 id="t-premier" class="fr-h3">Pendant deux ans, le premier monument national n'était plus à Paris</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="lead-19">
+        <template>
+          En {{Annee}}, le premier monument était l'{{nom}} ({{tmax:number:0}}&nbsp;entrées).
+        </template>
+      </dsfr-data-repeat>
+      Quand les monuments parisiens ont perdu les trois quarts de leurs entrées, <strong>le domaine de Chambord est passé
+      devant en 2020 et en 2021</strong>, sans avoir retrouvé son propre niveau&nbsp;: il a simplement moins reculé.
+      <dsfr-data-repeat source="lead-der">
+        <template>
+          En {{Annee}}, l'{{nom}} reprend la tête, avec {{tmax:number:0}}&nbsp;entrées.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12">
+        <div class="odv-chart-slot odv-viz" data-code="Entrées des quatre premiers monuments de 2019, par année">
+          <dsfr-data-chart id="g-premier" source="top4" type="bar"
+            label-field="Annee" value-field="t_k" series-field="nom" unit-tooltip="milliers" y-min="0"
+            databox databox-title="Entrées des quatre monuments les plus visités en 2019, de 2019 à 2022 (milliers)"
+            databox-source="Ministère de la Culture — Fréquentation des monuments nationaux (data.gouv.fr, Tabular)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-premier" source="top4" label-field="Annee" value-field="t_k" series-field="nom"
+            description="Barres groupées par année, de 2019 à 2022 : pour chaque année, les entrées en milliers de l'Arc de Triomphe, de l'abbaye du Mont-Saint-Michel, de la Sainte-Chapelle et du domaine de Chambord, les quatre monuments les plus visités en 2019. En 2019 et en 2022, l'Arc de Triomphe a la barre la plus haute, Chambord la plus basse des quatre. En 2020 et en 2021, l'ordre s'inverse : Chambord est le plus haut, la Sainte-Chapelle le plus bas.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12">
+        <h3 class="fr-h6">Le premier monument de chaque année</h3>
+        <dsfr-data-list source="lead"
+          columns="Annee:Année, nom:Monument, commune:Commune, tmax:Entrées" decimals="0"
+          caption="Monument national le plus visité, par année">
+        </dsfr-data-list>
+      </div>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Les quatre monuments sont ceux qui comptaient le plus d'entrées en 2019. Chambord figure dans ce fichier des monuments
+      nationaux, mais il est géré par son propre établissement public, pas par le Centre des monuments nationaux&nbsp;: le
+      premier des années de crise est l'exception du fichier.
+    </p>
+  </section>
+
+  <!-- ======================= PREUVE — Paris a plus perdu ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-paris">
+    <h2 id="t-paris" class="fr-h3">Paris a perdu les trois quarts de ses entrées en 2020, le reste de la France un peu plus de la moitié</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="an-bas">
+        <template>
+          En {{Annee}}, les monuments parisiens ne gardent que <strong>{{i_p:number:0}}&nbsp;% de leurs entrées de 2019</strong>,
+          ceux du reste de la France {{i_h:number:0}}&nbsp;%.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-der">
+        <template>
+          En {{Annee}}, l'ordre s'inverse&nbsp;: Paris remonte à l'indice {{i_p:number:0}}, au-dessus de son niveau
+          d'avant-crise, et fait {{p_paris:number:0}}&nbsp;% des entrées&nbsp;; le reste de la France s'arrête à
+          {{i_h:number:0}}.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Entrées des monuments nationaux, Paris et reste de la France, indice base 100 en 2019">
+      <dsfr-data-chart id="g-paris" source="an-t" type="bar"
+        label-field="Annee" value-field="i_p:Paris" value-fields="i_h:Reste de la France"
+        y-min="0" unit-tooltip="(base 100 en 2019)"
+        reference-lines='[{"axis":"y","value":100,"label":"Niveau de 2019","dash":true}]'
+        databox databox-title="Entrées des monuments nationaux, Paris et reste de la France, indice base 100 en 2019"
+        databox-source="Ministère de la Culture — Fréquentation des monuments nationaux (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-paris" source="an-t" label-field="Annee" value-field="i_p,i_h,tp,th"
+        description="Barres groupées par année, de 2019 à 2022, en indice base 100 en 2019 : les monuments nationaux situés à Paris et ceux du reste de la France, avec une ligne pointillée au niveau 100. En 2020, Paris tombe sous 25, le reste de la France vers 45. En 2021, les deux remontent un peu. En 2022, Paris repasse au-dessus de 100, le reste de la France reste en dessous, vers 95. Le tableau ajoute les entrées de chaque ensemble.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — périmètre constant et monument par monument ======================= -->
+  <dsfr-data-query id="pc" source="mi" where="total:gt:0, p_total:gt:0" group-by="paris"
+    aggregate="total:sum:t, p_total:sum:t19, un:sum:n"></dsfr-data-query>
+  <dsfr-data-normalize id="pc-t" source="pc" compute="idx = t / t19 * 100"></dsfr-data-normalize>
+  <dsfr-data-query id="pc-p" source="pc-t" where="paris:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="pc-h" source="pc-t" where="paris:eq:0"></dsfr-data-query>
+  <dsfr-data-query id="entrants" source="mi" where="paris:eq:1, p_total:eq:0, total:gt:0" order-by="total:desc"></dsfr-data-query>
+  <dsfr-data-query id="sortants" source="mi" where="paris:eq:1, p_total:gt:0, total:eq:0" order-by="p_total:desc"></dsfr-data-query>
+  <!-- Les quinze premiers de 2019, triés sur l'écart à 2019 -->
+  <dsfr-data-query id="ec15" source="mi" where="p_total:gt:0" order-by="p_total:desc" limit="15"></dsfr-data-query>
+  <dsfr-data-query id="ec" source="ec15" order-by="v19:desc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ecart">
+    <h2 id="t-ecart" class="fr-h3">L'Arc de Triomphe et le Panthéon dépassent 2019&nbsp;; le Mont-Saint-Michel et la Sainte-Chapelle en restent loin</h2>
+    <div class="odv-lecture">
+      Une partie de l'avance parisienne tient au périmètre&nbsp;: des monuments de Paris ouvrent, d'autres ferment.
+        <dsfr-data-repeat source="entrants">
+          <template>{{nom}}&nbsp;: aucune entrée en 2019, {{total:number:0}} la dernière année&nbsp;;</template>
+        </dsfr-data-repeat>
+        <dsfr-data-repeat source="sortants">
+          <template>{{nom}}&nbsp;: {{p_total:number:0}} entrées en 2019, aucune la dernière année&nbsp;;</template>
+        </dsfr-data-repeat>
+      <dsfr-data-repeat source="pc-p">
+        <template>
+          à monuments constants — les {{n:number:0}}&nbsp;monuments parisiens qui déclarent des entrées en 2019 et la
+          dernière année —, Paris est à l'indice <strong>{{idx:number:0}}</strong>&nbsp;;
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="pc-h">
+        <template>
+          hors de Paris, à monuments constants ({{n:number:0}}), l'indice est de <strong>{{idx:number:0}}</strong>. La
+          conclusion tient donc&nbsp;: Paris est revenu à son niveau d'avant-crise, le reste de la France non.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Écart des entrées entre 2019 et la dernière année, quinze premiers monuments de 2019">
+      <dsfr-data-chart id="g-ecart" source="ec" type="bar" horizontal
+        label-field="nom" value-field="v19" name="Écart à 2019 (%)" unit-tooltip="%"
+        selected-palette="neutral"
+        reference-lines='[{"axis":"x","value":0,"label":"Niveau de 2019","dash":true}]'
+        databox databox-title="Écart des entrées de la dernière année du fichier à celles de 2019, quinze monuments les plus visités en 2019 (%)"
+        databox-source="Ministère de la Culture — Fréquentation des monuments nationaux (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ecart" source="ec" label-field="nom" value-field="v19,p_total,total,commune"
+        description="Barres horizontales triées, une par monument, pour les quinze monuments les plus visités en 2019 : écart en pourcentage entre les entrées de la dernière année du fichier et celles de 2019. Quatre dépassent 2019 d'environ 9 % : le domaine de Saint-Cloud, les tours d'Aigues-Mortes, l'Arc de Triomphe et le Panthéon. Les autres restent en dessous, jusqu'à −13 % pour le Mont-Saint-Michel, la Sainte-Chapelle, Azay-le-Rideau et Carcassonne, et −21 % pour la basilique de Saint-Denis. Le tableau ajoute les entrées des deux années et la commune.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Les barres vers la gauche ne sont pas une mauvaise nouvelle en soi&nbsp;: elles mesurent l'écart à une année 2019
+      qui n'est pas un objectif. Le Mont-Saint-Michel et la Sainte-Chapelle restaient, la dernière année, parmi les trois
+      monuments les plus visités.
+    </p>
+  </section>
+
+  <!-- ======================= PETITS MULTIPLES — douze creux ======================= -->
+  <dsfr-data-query id="mn-tri" source="mn" order-by="Annee:asc"></dsfr-data-query>
+  <dsfr-data-query id="gmax" source="mn" group-by="k" aggregate="t_k:max:gm"></dsfr-data-query>
+  <dsfr-data-normalize id="gmax-t" source="gmax" compute="ymax = ceil(gm / 200) * 200"></dsfr-data-normalize>
+  <dsfr-data-query id="top12" source="mi" order-by="total:desc" limit="12"></dsfr-data-query>
+  <dsfr-data-join id="top12-j" left="top12" right="gmax-t" on="k" type="inner" prefix-right="g_"></dsfr-data-join>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-multiples">
+    <h2 id="t-multiples" class="fr-h3">Les douze premiers de la dernière année&nbsp;: tous ont plongé en 2020, pas tous aussi profond</h2>
+    <p class="odv-lecture">
+      Un graphique par monument, sur la même échelle&nbsp;: la hauteur des barres se compare d'un graphique à l'autre.
+      Le titre de chacun donne son niveau de l'année la plus basse et de la dernière année, en pourcentage de 2019.
+    </p>
+    <dsfr-data-repeat source="top12-j" key-field="nom" scopes="mn-tri:nom:s" per-row="1 md:2 lg:3">
+      <template>
+        <div class="odv-chart-slot odv-viz fr-mb-2w" data-code="Entrées : {{nom}}">
+          <dsfr-data-chart id="g-{{$uid}}" source="{{$scope.s}}" type="bar"
+            label-field="Annee" value-field="t_k" name="{{nom}}" unit-tooltip="milliers"
+            y-min="0" y-max="{{ymax}}"
+            databox databox-title="{{titre}}"
+            databox-source="Ministère de la Culture — Fréquentation des monuments nationaux">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-{{$uid}}" source="{{$scope.s}}" label-field="Annee" value-field="t_k"
+            description="Barres annuelles de 2019 à la dernière année, entrées en milliers de {{nom}} ({{commune}}), sur un axe de 0 à {{ymax}} milliers commun aux douze graphiques. {{lecture}}">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Un monument sans entrée en 2019 n'a pas d'indice, et son titre le dit&nbsp;: c'est le cas de l'Hôtel de la Marine, qui
+      ne déclare ses premières entrées qu'en 2021 dans le fichier.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — mon monument ======================= -->
+  <dsfr-data-pivot id="piv" source="mn-tri" row="nom, commune, region" column="Annee" value="total"
+    aggregate="sum" column-order="asc"></dsfr-data-pivot>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: les 99 monuments, année par année</h2>
+    <p class="fr-text--sm">
+      Une ligne par monument, une colonne par année. Cherchez un monument, une commune, ou filtrez par région.
+    </p>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="piv-f" source="piv"
+          fields="region" labels="region:Région" display="region:multiselect" hide-counts>
+        </dsfr-data-facets>
+      </details>
+      <div>
+        <dsfr-data-list source="piv-f"
+          columns="nom:Monument, commune:Commune, region:Région" columns-auto
+          search pagination="20" count-label="monument" export="csv" decimals="0"
+          caption="Entrées des monuments nationaux par année">
+        </dsfr-data-list>
+      </div>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Les régions sont écrites comme dans le fichier, y compris «&nbsp;Provence-Alpes- Côte d’Azur&nbsp;» et
+      «&nbsp;Centre-Val de loire&nbsp;».
+    </p>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <dsfr-data-query id="zeros" source="mn" where="total:eq:0" group-by="Annee"
+    aggregate="un:sum:n" order-by="Annee:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm fr-mb-0">
+      <li><strong>Les monuments sans entrée.</strong> Chaque année, une partie des monuments du fichier déclare zéro
+        entrée&nbsp;:
+        <dsfr-data-repeat source="zeros">
+          <template>en {{Annee}}, {{n:number:0}}&nbsp;monuments&nbsp;;</template>
+        </dsfr-data-repeat>
+        le fichier ne dit pas pourquoi (fermeture, travaux, lieu non ouvert à la visite). Relevé le 26&nbsp;septembre
+        2026&nbsp;: six n'en déclarent aucune les quatre années, dont l'Hôtel de Brienne et le fort de Brégançon. Ils
+        restent dans les totaux, où ils ne pèsent rien, et hors des indices, qui n'existent pas sans base 2019.</li>
+      <li><strong>Une carte.</strong> Le fichier ne publie ni coordonnées ni adresse, seulement le code de la commune.
+        Une carte des monuments demanderait de joindre un référentiel géographique&nbsp;; avec douze monuments dans la seule
+        ville de Paris, elle montrerait surtout un empilement de cercles.</li>
+      <li><strong>Les entrées gratuites et payantes.</strong> Le fichier les publie, mais chacune est arrondie à la
+        dizaine indépendamment du total&nbsp;: la somme des deux diffère du total sur 93 lignes sur 396, de 10 entrées le
+        plus souvent, de 1&nbsp;100 pour Chambord en 2021 (relevé le 26&nbsp;septembre 2026). La page raisonne sur le
+        total seul.</li>
+      <li><strong>Les visiteurs et la cause.</strong> Une entrée n'est pas une personne, et rien ne dit d'où viennent les
+        visiteurs&nbsp;: la page constate que Paris a plus perdu que le reste de la France, elle n'en mesure pas la cause.
+        L'absence des touristes étrangers est une hypothèse cohérente avec cet écart, pas une donnée de ce fichier.</li>
+      <li><strong>Après 2022.</strong> Le fichier s'arrête en 2022&nbsp;; il ne dit rien des années suivantes.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création sur un fichier de 396 lignes du ministère de la Culture, servi par l'API
+        Tabular de data.gouv.fr. Le cadrage annonçait «&nbsp;l'année où Chambord a dépassé l'Arc de Triomphe&nbsp;»&nbsp;;
+        rejoué, ce sont deux années, et la donnée ajoute l'essentiel&nbsp;: Paris a plus perdu, puis a été le seul à
+        dépasser 2019.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Une requête.</strong> <code>fetch-mode="export"</code> lit l'export Parquet&nbsp;; tout le reste
+              est calculé dans la page, sans rien déléguer.</li>
+            <li><strong>Le premier de chaque année</strong>, sans fonction «&nbsp;premier par groupe&nbsp;»&nbsp;: le
+              maximum annuel (<code>total:max</code>) joint aux lignes sur deux clés, <code>on="Annee, tmax=total"</code>.</li>
+            <li><strong>Douze graphiques en une balise.</strong> <code>dsfr-data-repeat scopes</code> donne à chaque
+              monument ses quatre années, et l'axe commun est lu dans la donnée.</li>
+            <li><strong>Le tableau croisé d'exploration</strong> en un <code>dsfr-data-pivot</code> dont les colonnes
+              d'années suivent le fichier (<code>columns-auto</code>).</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Le périmètre du fichier n'est pas celui de son titre.</strong> «&nbsp;Monuments nationaux&nbsp;»
+              compte Chambord, qui n'est pas géré par le Centre des monuments nationaux&nbsp;: seule la description du jeu
+              le dit. Le cadrage avait écrit «&nbsp;99 monuments du CMN&nbsp;».</li>
+            <li><strong>Un indice sans base.</strong> Les monuments sans entrée en 2019 (Hôtel de la Marine) n'ont pas
+              d'indice&nbsp;; le <code>when … else null</code> de <code>compute</code> le garde vide, mais le titre
+              interpolé affichait alors «&nbsp;%&nbsp;» sans valeur (vu au navigateur). Un titre entier calculé par
+              <code>when … then concat(…)</code> dans <code>compute</code> règle le cas, au prix de la lisibilité.</li>
+            <li><strong>Une courbe qui ment sur quatre points.</strong> En <code>type="line"</code>, l'indice
+              Paris / reste passait par une spline qui plonge sous les points (sous 20 entre 2020 et 2021, pour des
+              valeurs de 24 et 37) et l'axe des années affichait «&nbsp;2019.5&nbsp;», alors que l'année est une
+              chaîne (<code>concat</code>). Vu au navigateur&nbsp;; la page passe en barres groupées.</li>
+            <li><strong>Cinq jointures pour une ligne par monument</strong> portant 2019, l'année la plus basse et la
+              dernière&nbsp;: chaque repère temporel est une jointure sur une année lue dans la donnée.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger tout le jeu Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export"</code></td><td>Natif</td></tr>
+            <tr><td>Premier monument de chaque année</td><td><code>dsfr-data-query aggregate="total:max"</code> + <code>dsfr-data-join on="Annee, tmax=total"</code></td><td>Faisable, deux balises</td></tr>
+            <tr><td>Indice base 100 en 2019, Paris / reste</td><td><code>compute</code> (split par département) + <code>dsfr-data-join</code> sur clé constante</td><td>Natif</td></tr>
+            <tr><td>Périmètre constant</td><td><code>dsfr-data-join type="left" on="nom"</code> + <code>where</code></td><td>Natif</td></tr>
+            <tr><td>Petits multiples à axe commun</td><td><code>dsfr-data-repeat scopes</code> + <code>y-max="{{ymax}}"</code></td><td>Natif</td></tr>
+            <tr><td>Une colonne par année</td><td><code>dsfr-data-pivot</code> + <code>dsfr-data-list columns-auto</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un petit fichier, une source, et une histoire plus riche que son titre.</strong> L'outil n'a posé aucune
+          limite&nbsp;; ce qui a coûté, c'est de relire la description du jeu (Chambord hors CMN) et de séparer ce qui tient
+          à la crise de ce qui tient au périmètre (un monument qui ouvre, un autre qui ferme).</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

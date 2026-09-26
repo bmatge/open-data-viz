@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrepreneurs de spectacles, le cycle de cinq ans — open-data-viz</title>
+  <meta name="description" content="Plus d'une déclaration d'entrepreneur de spectacles vivants sur deux déposées depuis avril 2020 vaut aujourd'hui licence ; la première génération, celle de 2020, arrive au bout de ses cinq ans. Création avec dsfr-data à partir de la base des licences du ministère de la Culture (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 7 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte la base « Licences et demandes de licences
+       d'entrepreneurs de spectacles vivants » du ministère de la Culture, mise à jour
+       chaque jour, servie par Tabular.
+
+       L'UNITÉ. Une ligne = une DÉCLARATION (un récépissé), pour UNE catégorie de
+       licence. Une structure qui exploite un lieu et produit des spectacles porte deux
+       lignes. On compte des déclarations et des licences ; « structures » n'est écrit
+       qu'après un regroupement par SIRET.
+
+       LE CHARGEMENT. Le cadrage prévoyait des agrégats serveur (115 832 lignes = 580
+       pages de 200). Or la ressource a un export Parquet (3,5 Mo) : `fetch-mode="export"`
+       le lit en une requête, `select` ne garde que les onze colonnes utiles, et TOUTES
+       les vues (séries mensuelles comprises, que le serveur ne sait pas faire sans
+       fonction date) se calculent côté client. `max-records` relevé à 200 000 : le
+       défaut (25 000) tronquerait en silence.
+
+       L'ENCODAGE. Le fichier source porte « č » à la place de « è » (« Premičre demande »,
+       « Isčre »). `compute` recode les deux champs affichés avec `replace()`.
+
+       LE CYCLE. Une déclaration valide vaut licence cinq ans. `date_validite + 5 ans`
+       donne l'échéance des licences valides ; `date_expire_licence` celle des expirées.
+       ========================================================================== -->
+
+  <dsfr-data-source id="lic" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="fb6c3b2e-da8c-4e69-a719-6a96329e4cb2"
+    fetch-mode="export" max-records="200000"
+    select="numero_recepisse, date_depot_dossier, date_validite, statut_recepisse, categorie, type_declaration, raison_sociale, siren_siret, departement_siret, region_siret, date_expire_licence">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="lic-n" source="lic" trim
+    rename="numero_recepisse:numero | statut_recepisse:statut | raison_sociale:nom | siren_siret:siret | region_siret:region"
+    compute="un = 1; k = 1;
+             valide = when statut = 'Valide' then 1 else 0;
+             expire = when statut = 'Expiré' then 1 else 0;
+             invalide = when statut = 'Invalide' then 1 else 0;
+             retiree = when statut = 'Invalidé' then 1 else 0;
+             instruction = when statut = 'En instruction' then 1 else 0;
+             active = valide + instruction;
+             renouv = when type_declaration = 'Renouvellement' then 1 else 0;
+             premiere = 1 - renouv;
+             demande = when renouv = 1 then 'Renouvellement' else 'Première demande';
+             departement = replace(departement_siret, 'č', 'è');
+             categorie_lib = when categorie = 1 then '1 — Exploitant de lieu'
+                             when categorie = 2 then '2 — Producteur, entrepreneur de tournées'
+                             when categorie = 3 then '3 — Diffuseur'
+                             else 'Non renseignée';
+             statut_lib = when statut = 'Valide' then 'Valide (vaut licence)'
+                          when statut = 'Invalide' then 'Invalide (refusée ou non mise en conformité)'
+                          when statut = 'Expiré' then 'Expirée (cinq ans écoulés)'
+                          when statut = 'Invalidé' then 'Retirée après validité'
+                          else 'En instruction';
+             ordre_statut = when statut = 'Valide' then 1 when statut = 'Invalide' then 2
+                            when statut = 'Expiré' then 3 when statut = 'Invalidé' then 4 else 5;
+             an_depot = year(date_depot_dossier);
+             m_depot = month(date_depot_dossier);
+             k_depot = an_depot * 100 + m_depot;
+             mois_depot = concat(an_depot, '-', when m_depot &lt; 10 then '0' else '', m_depot);
+             an_ech = when valide = 1 then year(date_validite) + 5 when expire = 1 then year(date_expire_licence) else null;
+             m_ech = when valide = 1 then month(date_validite) when expire = 1 then month(date_expire_licence) else null;
+             k_ech = an_ech * 100 + m_ech;
+             mois_ech = concat(an_ech, '-', when m_ech &lt; 10 then '0' else '', m_ech);
+             an_valid = year(date_validite);
+             v2122 = when valide = 1 and (an_valid = 2021 or an_valid = 2022) then 1 else 0;
+             p2023 = when an_depot = 2023 then premiere else 0;
+             p2024 = when an_depot = 2024 then premiere else 0;
+             p2025 = when an_depot = 2025 then premiere else 0;
+             r2021 = when an_depot = 2021 then renouv else 0;
+             r2023 = when an_depot = 2023 then renouv else 0;
+             r2025 = when an_depot = 2025 then renouv else 0;
+             v_cat2 = when valide = 1 and categorie = 2 then 1 else 0;
+             v_cat1 = when valide = 1 and categorie = 1 then 1 else 0;
+             v_cat3 = when valide = 1 and categorie = 3 then 1 else 0;
+             v_sans_region = when valide = 1 and is_empty(region) then 1 else 0;
+             v_mayotte = when valide = 1 and region = 'Mayotte' then 1 else 0;
+             cat_vide = when is_empty(categorie) then 1 else 0;
+             siret_vide = when is_empty(siret) then 1 else 0;
+             cle = concat(siret, '-', categorie)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="lic-n" group-by="k"
+    aggregate="un:sum:n, valide:sum:valide, expire:sum:expire, invalide:sum:invalide, retiree:sum:retiree,
+               instruction:sum:instruction, renouv:sum:renouv, premiere:sum:premiere, v2122:sum:v2122,
+               p2023:sum:p2023, p2024:sum:p2024, p2025:sum:p2025, r2021:sum:r2021, r2023:sum:r2023, r2025:sum:r2025,
+               v_cat1:sum:v_cat1, v_cat2:sum:v_cat2, v_cat3:sum:v_cat3, v_sans_region:sum:v_sans_region,
+               v_mayotte:sum:v_mayotte, cat_vide:sum:cat_vide, siret_vide:sum:siret_vide">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="part_valide = valide / n * 100;
+             part_invalide = invalide / n * 100;
+             part_renouv = renouv / n * 100;
+             part_cat2 = v_cat2 / valide * 100;
+             r_ratio = r2021 / r2023">
+  </dsfr-data-normalize>
+
+  <!-- Premier dépôt de la base : un tri + limit, pas un `date:min` — l'agrégat min de
+       dsfr-data-query 0.42.0 rend l'ANNÉE d'une date ISO (2020), pas la date (le KPI, lui,
+       rend la date). Joint à la synthèse sur la clé constante k. -->
+  <dsfr-data-query id="debut" source="lic-n" order-by="date_depot_dossier:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="syn-d" left="syn-t" right="debut" on="k" type="inner" prefix-right="d_"></dsfr-data-join>
+
+  <!-- Structures titulaires : un SIRET compté une fois, quelles que soient ses catégories. -->
+  <dsfr-data-query id="structures" source="lic-n" where="valide:eq:1, siret:isnotnull" group-by="siret" aggregate="un:sum:n"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Entrepreneurs de spectacles</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Spectacle vivant&nbsp;: une déclaration sur deux vaut licence, et la génération de 2020 arrive au bout de ses cinq ans</h1>
+
+    <dsfr-data-repeat source="syn-d">
+      <template>
+        <p class="fr-text--lead">
+          Depuis le {{date_depot_dossier:date}}, {{n:number}}&nbsp;déclarations d'entrepreneur de spectacles vivants ont été
+          déposées. Aujourd'hui, <strong>{{valide:number}} valent licence</strong>, soit {{part_valide:number:0}}&nbsp;%.
+          Une sur cinq n'a jamais abouti ({{invalide:number}}&nbsp;refusées ou non mises en conformité). Et la licence ne
+          dure que cinq ans&nbsp;: les premières, délivrées en 2020, ont commencé à expirer à l'été 2025
+          — {{expire:number}}&nbsp;déjà, et {{v2122:number}} licences valides datent de 2021 ou 2022.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture — <em>Licences et demandes de licences d'entrepreneurs de spectacles vivants</em>, base mise à
+      jour chaque jour. Une ligne par déclaration et par catégorie de licence&nbsp;; «&nbsp;le statut du dossier fait foi
+      de la détention ou non de licence&nbsp;». Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/licences-et-demandes-de-licences-dentrepreneurs-de-spectacles-vivants" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="valide:max" format="nombre" span="3"
+        heading="Licences valides" label="déclarations au statut « valide » aujourd'hui"></dsfr-data-kpi>
+      <dsfr-data-kpi source="structures" value="count" format="nombre" span="3"
+        heading="Structures titulaires" label="SIRET distincts détenant au moins une licence valide"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_invalide:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Déclarations refusées" label="ou jamais mises en conformité (statut « invalide »)"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="expire:max" format="nombre" span="3"
+        heading="Licences expirées" label="arrivées au bout de leurs cinq ans"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les statuts ======================= -->
+  <dsfr-data-query id="st" source="lic-n" group-by="statut_lib, ordre_statut" aggregate="un:sum:n" order-by="ordre_statut:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="st-g" source="st" rename="statut_lib:Statut | n:Déclarations"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-statut">
+    <h2 id="t-statut" class="fr-h3">Plus d'une déclaration sur deux vaut licence ; une sur cinq n'a jamais abouti</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Sur {{n:number}}&nbsp;déclarations, {{valide:number}} sont valides&nbsp;: la structure peut exercer. {{invalide:number}}
+          sont invalides ({{part_invalide:number:0}}&nbsp;%)&nbsp;: refusées sur le fond ou la forme, ou jamais mises en
+          conformité. {{expire:number}} ont expiré au bout de cinq ans, {{retiree:number}} ont été retirées après une
+          période de validité — souvent parce qu'un renouvellement anticipé les a remplacées — et {{instruction:number}}
+          sont en cours d'instruction.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations d'entrepreneur de spectacles selon leur statut">
+      <dsfr-data-chart id="g-statut" source="st-g" type="bar" horizontal
+        label-field="Statut" value-field="Déclarations" name="Déclarations"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="déclarations"
+        databox databox-title="Déclarations déposées depuis avril 2020, selon leur statut aujourd'hui"
+        databox-source="Ministère de la Culture — Licences d'entrepreneurs de spectacles vivants (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-statut" source="st-g" label-field="Statut" value-field="Déclarations"
+        description="Cinq barres horizontales, une par statut : valide (vaut licence), invalide (refusée ou non mise en conformité), expirée, retirée après validité, en instruction. La barre des déclarations valides, mise en évidence, est la plus longue, un peu plus de la moitié du total ; les invalides viennent ensuite, autour d'un cinquième ; les expirées suivent de près.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LE CYCLE — dépôts par mois ======================= -->
+  <dsfr-data-query id="mois" source="lic-n" group-by="k_depot, mois_depot"
+    aggregate="premiere:sum:premiere, renouv:sum:renouv" order-by="k_depot:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-cycle">
+    <h2 id="t-cycle" class="fr-h3">Les nouvelles demandes arrivent à rythme constant ; les renouvellements, par vagues de cinq ans</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Les premières demandes tiennent un rythme stable&nbsp;: {{p2023:number}} en 2023, {{p2024:number}} en 2024,
+          {{p2025:number}} en 2025. Les renouvellements, eux, vont et viennent&nbsp;: {{r2021:number}} en 2021, quand les
+          licences antérieures à la base ont été renouvelées, {{r2023:number}} seulement en 2023, puis {{r2025:number}} en
+          2025, quand les licences de 2020 sont arrivées au bout de leurs cinq ans. Au total, {{part_renouv:number:0}}&nbsp;%
+          des déclarations sont des renouvellements.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations déposées chaque mois, premières demandes et renouvellements">
+      <dsfr-data-chart id="g-mois" source="mois" type="line"
+        label-field="mois_depot"
+        value-field="premiere:Premières demandes" value-fields="renouv:Renouvellements"
+        unit-tooltip="déclarations" y-min="0"
+        databox databox-title="Déclarations déposées chaque mois, selon qu'il s'agit d'une première demande ou d'un renouvellement"
+        databox-source="Ministère de la Culture — Licences d'entrepreneurs de spectacles vivants (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-mois" source="mois" label-field="mois_depot" value-field="premiere, renouv"
+        description="Deux courbes mensuelles d'avril 2020 au mois en cours. Les premières demandes restent à peu près au même niveau, entre 300 et 950 par mois hors le premier mois incomplet, avec un creux chaque mois d'août. Les renouvellements montent haut en 2020, 2021 et début 2022, retombent sous les premières demandes en 2023 et 2024, puis remontent à partir de 2025.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Mois de dépôt de la déclaration. Le premier mois (avril 2020) commence le 23&nbsp;; le dernier est en cours.
+    </p>
+  </section>
+
+  <!-- ======================= L'ÉCHÉANCE — expirations passées et à venir ======================= -->
+  <!-- Une barre par mois d'échéance : les licences expirées (date_expire_licence) et les
+       licences valides à leur cinquième anniversaire (date_validite + 5 ans). Fenêtre
+       fixe, juillet 2025 – décembre 2027, écrite dans le titre du graphique. -->
+  <dsfr-data-query id="ech" source="lic-n" where="k_ech:gte:202507, k_ech:lte:202712" group-by="k_ech, mois_ech"
+    aggregate="expire:sum:expire, valide:sum:valide" order-by="k_ech:asc"></dsfr-data-query>
+
+  <!-- Renouvellement des licences expirées : même SIRET, même catégorie, une licence valide
+       ou en instruction aujourd'hui. -->
+  <dsfr-data-query id="suite" source="lic-n" where="statut:in:Valide|Expiré|En instruction, siret:isnotnull"
+    group-by="cle" aggregate="expire:sum:e, active:sum:a"></dsfr-data-query>
+  <dsfr-data-normalize id="suite-t" source="suite"
+    compute="e_suivie = when e > 0 and a > 0 then e else 0; k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="suite-s" source="suite-t" group-by="k" aggregate="e:sum:e, e_suivie:sum:e_suivie"></dsfr-data-query>
+  <dsfr-data-normalize id="suite-p" source="suite-s"
+    compute="part = e_suivie / e * 100; sans = e - e_suivie"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ech">
+    <h2 id="t-ech" class="fr-h3">Depuis juillet 2025, les licences de 2020 expirent par milliers ; celles de 2021-2022 suivent</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Une licence vaut cinq ans. Les premières, validées à l'été 2020, ont expiré à l'été 2025&nbsp;; depuis,
+          {{expire:number}}&nbsp;licences sont arrivées à échéance. La vague suivante est
+          déjà écrite&nbsp;: {{v2122:number}}&nbsp;licences valides aujourd'hui ont commencé leur validité en 2021 ou 2022,
+          et atteignent leurs cinq ans entre l'automne 2026 et la fin de 2027.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Licences arrivées ou arrivant à cinq ans, par mois, juillet 2025 – décembre 2027">
+      <dsfr-data-chart id="g-ech" source="ech" type="bar" stacked
+        label-field="mois_ech"
+        value-field="expire:Expirées" value-fields="valide:Valides arrivant à cinq ans"
+        color-map="Expirées:#929292,Valides arrivant à cinq ans:#000091"
+        unit-tooltip="licences"
+        databox databox-title="Licences arrivées ou arrivant au bout de leurs cinq ans, par mois (juillet 2025 – décembre 2027)"
+        databox-source="Ministère de la Culture — Licences d'entrepreneurs de spectacles vivants (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ech" source="ech" label-field="mois_ech" value-field="expire, valide"
+        description="Barres empilées, une par mois de juillet 2025 à décembre 2027. Jusqu'au mois en cours, les barres grises comptent les licences expirées, entre 800 et 2 100 par mois. À partir du mois en cours, les barres bleues comptent les licences aujourd'hui valides qui atteindront leurs cinq ans ce mois-là : entre 850 et 1 850 par mois de l'automne 2026 à la fin de 2027.">
+      </dsfr-data-a11y>
+    </div>
+
+    <p class="fr-text--xs fr-hint-text">
+      Mois d'expiration pour les licences expirées, mois du cinquième anniversaire de la date de validité pour les licences
+      valides. Le fin liseré bleu au-dessus de quelques barres grises&nbsp;: des licences encore marquées valides au-delà de
+      cinq ans (32 le 26&nbsp;septembre 2026), sans doute un statut pas encore mis à jour.
+    </p>
+
+    <h3 class="fr-h5 fr-mt-4w">Une licence expirée n'est pas une structure disparue</h3>
+    <dsfr-data-repeat source="suite-p">
+      <template>
+        <p class="odv-lecture">
+          Sur {{e:number}}&nbsp;licences expirées portant un SIRET, {{e_suivie:number}} ({{part:number:0}}&nbsp;%) appartiennent à une structure
+          qui détient aujourd'hui, sous le même SIRET et dans la même catégorie, une licence valide ou une déclaration en
+          instruction&nbsp;: elle a renouvelé, parfois après l'échéance. Pour les {{sans:number}} autres, la base ne dit pas si
+          la structure a cessé son activité, changé d'établissement (donc de SIRET) ou continue sans licence.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Appariement sur le SIRET complet et la catégorie. Un déménagement change le SIRET&nbsp;: la part renouvelée est un
+      minimum.
+    </p>
+  </section>
+
+  <!-- ======================= QUI — les catégories ======================= -->
+  <dsfr-data-query id="cat" source="lic-n" where="valide:eq:1" group-by="categorie_lib" aggregate="un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="cat-g" source="cat" rename="categorie_lib:Catégorie de licence | n:Licences valides"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-cat">
+    <h2 id="t-cat" class="fr-h3">Six licences valides sur dix sont des licences de producteur</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{v_cat2:number}}&nbsp;licences valides sont de catégorie 2 (producteurs de spectacles, entrepreneurs de tournées),
+          {{part_cat2:number:0}}&nbsp;% du total. Les diffuseurs (catégorie 3) en détiennent {{v_cat3:number}}, les exploitants
+          de lieux (catégorie 1) {{v_cat1:number}}. Une même structure peut cumuler les trois&nbsp;: les licences sont plus
+          nombreuses que les structures qui les détiennent.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Licences valides par catégorie">
+      <dsfr-data-chart id="g-cat" source="cat-g" type="bar" horizontal
+        label-field="Catégorie de licence" value-field="Licences valides" name="Licences valides"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="licences"
+        databox databox-title="Licences valides aujourd'hui, par catégorie"
+        databox-source="Ministère de la Culture — Licences d'entrepreneurs de spectacles vivants (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-cat" source="cat-g" label-field="Catégorie de licence" value-field="Licences valides"
+        description="Barres horizontales triées de la plus longue à la plus courte : les licences valides par catégorie. La catégorie 2, producteurs et entrepreneurs de tournées, mise en évidence, dépasse 35 000 licences ; la catégorie 3, diffuseurs, en compte moins de la moitié ; la catégorie 1, exploitants de lieux, est la plus petite.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= OÙ — rapporté aux habitants ======================= -->
+  <!-- Population 2023 par région : jeu « Dépenses culturelles des régions 2023 » du même
+       ministère (17 lignes, une par région, noms identiques à `region_siret`, tirets
+       compris — vérifié le 2026-09-26). Mayotte n'y est pas : ses licences sont
+       comptées dans « ce qu'on ne montre pas ». -->
+  <dsfr-data-source id="pop" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="4dfccc0d-962c-4800-8599-b47730823a33"
+    select="libelle_region, population_annee">
+  </dsfr-data-source>
+  <dsfr-data-query id="reg-n" source="lic-n" where="valide:eq:1, region:isnotnull, region:neq:Mayotte" group-by="region" aggregate="un:sum:n"></dsfr-data-query>
+  <dsfr-data-join id="reg-j" left="reg-n" right="pop" on="region=libelle_region" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="reg-t" source="reg-j"
+    compute="taux = round(n / population_annee * 100000, 0); k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-tri" source="reg-t" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-g" source="reg-tri" rename="region:Région | taux:Licences valides pour 100 000 habitants | n:Licences valides"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-top" source="reg-tri" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-idf" source="reg-t" where="region:eq:Île-de-France"></dsfr-data-query>
+  <dsfr-data-query id="reg-nat" source="reg-t" group-by="k" aggregate="n:sum:n, population_annee:sum:pop"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-nat-t" source="reg-nat" compute="taux = n / pop * 100000"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-bas" source="reg-t" order-by="taux:asc" where="region:notin:Guyane|Martinique|Guadeloupe|La Réunion" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="idf-part" left="reg-idf" right="syn-t" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="idf-part-t" source="idf-part" compute="part_vol = n / valide * 100"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">Rapportée aux habitants, l'Île-de-France n'est pas en tête</h2>
+    <dsfr-data-repeat source="idf-part-t">
+      <template>
+        <p class="odv-lecture">
+          L'Île-de-France concentre {{n:number}}&nbsp;licences valides, {{part_vol:number:0}}&nbsp;% du total&nbsp;: c'est la
+          région qui en compte le plus. Mais elle compte aussi un Français sur cinq&nbsp;: rapportée à sa population, elle
+          n'a que {{taux:number}}&nbsp;licences pour 100&nbsp;000&nbsp;habitants.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="reg-top"><template>Premier rang&nbsp;: {{region}}, avec {{taux:number}}&nbsp;licences pour 100&nbsp;000&nbsp;habitants.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-nat-t"><template>Ensemble des régions représentées&nbsp;: {{taux:number:0}}.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-bas"><template>Dernière région de l'Hexagone et de la Corse&nbsp;: {{region}}, {{taux:number}}.</template></dsfr-data-repeat>
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Licences valides pour 100 000 habitants, par région">
+      <dsfr-data-chart id="g-reg" source="reg-g" type="bar" horizontal
+        label-field="Région" value-field="Licences valides pour 100 000 habitants" name="Licences valides pour 100 000 habitants"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="pour 100 000 hab."
+        databox databox-title="Licences valides pour 100 000 habitants, par région du siège (population 2023)"
+        databox-source="Ministère de la Culture — Licences d'entrepreneurs de spectacles vivants ; Dépenses culturelles des régions 2023 (population) — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-g" label-field="Région" value-field="Licences valides pour 100 000 habitants, Licences valides"
+        description="Barres horizontales triées de la plus longue à la plus courte : pour chaque région, le nombre de licences valides pour 100 000 habitants. La première région, mise en évidence, dépasse 120 ; l'Île-de-France est dans la première moitié, autour de 100 ; les Hauts-de-France et le Grand Est sont en bas, autour de 50, et la Guyane dernière, sous 40.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Région du siège de la structure (établissement principal), pas des lieux où elle joue. Population 2023.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: qui détient une licence, et où&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      La base fait foi de la détention d'une licence. La sélection s'ouvre sur les licences valides&nbsp;; décochez le
+      statut pour voir toutes les déclarations. Les filtres agissent sur les chiffres et sur la liste.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="fac" value="count" format="nombre"
+        heading="Déclarations" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="valide:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Valides" label="part de la sélection qui vaut licence"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="renouv:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Renouvellements" label="part de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="fac" source="lic-n"
+          fields="statut_lib, categorie_lib, demande, region, departement"
+          labels="statut_lib:Statut | categorie_lib:Catégorie de licence | demande:Type de déclaration | region:Région du siège | departement:Département du siège"
+          display="statut_lib:checkbox | categorie_lib:checkbox | demande:checkbox | region:multiselect | departement:multiselect"
+          disjunctive="statut_lib, categorie_lib, demande, region, departement"
+          searchable="region, departement"
+          sort="region:alpha:asc | departement:alpha:asc"
+          default="statut_lib:Valide (vaut licence)"
+          max-values="6" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-list source="fac"
+          columns="nom:Structure, numero:N° de déclaration, categorie_lib:Catégorie, statut_lib:Statut, departement:Département du siège, date_depot_dossier:Dépôt, date_validite:Valide depuis"
+          search sort="date_depot_dossier:desc" pagination="20" count-label="déclaration|déclarations" export="csv"
+          caption="Déclarations d'entrepreneur de spectacles vivants (sélection courante)">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-d">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Les licences d'avant avril 2020.</strong> La base commence au {{date_depot_dossier:date}}. Les structures
+            licenciées auparavant n'y entrent qu'à leur renouvellement&nbsp;: c'est la vague de 2020-2021.</li>
+          <li><strong>Une activité réelle.</strong> Une licence valide dit qu'une structure a le droit d'exercer, pas qu'elle
+            produit ou diffuse effectivement des spectacles. La base ne dit ni combien, ni où elle joue.</li>
+          <li><strong>Des structures, sauf dans le chiffre titré comme tel.</strong> Une ligne est une déclaration pour une
+            catégorie&nbsp;; une même structure peut porter plusieurs lignes, d'une catégorie à l'autre et d'un cycle de cinq
+            ans à l'autre.</li>
+          <li><strong>Un renouvellement mesuré par entreprise.</strong> Le rapprochement des licences expirées se fait sur le SIRET
+            complet, seul identifiant de la base&nbsp;: une structure qui a changé d'établissement paraît ne pas avoir renouvelé.
+            La page ne sait pas tronquer un SIRET en SIREN (neuf premiers chiffres). Mesuré hors de la page le 26&nbsp;septembre
+            2026, au SIREN et à la catégorie, la part des licences expirées suivies d'une licence valide ou en instruction
+            monte à 58&nbsp;% (11&nbsp;942 sur 20&nbsp;654).</li>
+          <li><strong>{{v_sans_region:number}}&nbsp;licences valides sans région</strong> (siège non géolocalisé) et
+            {{v_mayotte:number}} à Mayotte, absente du fichier de population&nbsp;: hors du graphique régional, présentes
+            partout ailleurs.</li>
+          <li><strong>Une carte par département.</strong> Le département du siège est donné en toutes lettres, et le fichier
+            de population départementale du ministère n'a pas de ligne pour Paris&nbsp;: un taux départemental aurait manqué
+            le premier département du spectacle.</li>
+          <li><strong>Le type de déclarant.</strong> Deux nomenclatures coexistent dans la colonne («&nbsp;Personne
+            morale&nbsp;» d'un côté, «&nbsp;une association de loi 1901&nbsp;» de l'autre) selon la période de dépôt&nbsp;:
+            aucune part associative n'en est tirée.</li>
+          <li><strong>{{cat_vide:number}}&nbsp;déclarations sans catégorie et {{siret_vide:number}} sans SIRET</strong>&nbsp;:
+            comptées dans les totaux, hors des répartitions correspondantes.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir de la base des licences du ministère de la Culture, servie par
+        l'API Tabular. Les chiffres du cadrage tiennent (115&nbsp;832 déclarations, 63&nbsp;159 valides le 26 septembre
+        2026)&nbsp;; l'histoire s'est déplacée&nbsp;: la moitié valide est un instantané, le cycle de cinq ans est le récit.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>115&nbsp;832 lignes en une requête.</strong> Le cadrage prévoyait des agrégats serveur et une
+              requête par mois pour la série&nbsp;; la ressource a un export Parquet de 3,5&nbsp;Mo, que
+              <code>fetch-mode="export"</code> lit d'un coup. Toutes les vues en dérivent côté client.</li>
+            <li><strong>Une série mensuelle sans fonction serveur.</strong> <code>year()</code> et <code>month()</code> dans
+              <code>compute</code>, puis un <code>group-by</code> client.</li>
+            <li><strong>Une échéance calculée.</strong> «&nbsp;Date de validité + 5 ans&nbsp;» est une addition sur
+              <code>year()</code>&nbsp;: la vague de 2027 se lit avant d'arriver.</li>
+            <li><strong>Un taux par habitant.</strong> Les noms de région du fichier des licences et du fichier de
+              population du même ministère coïncident au caractère près&nbsp;: <code>dsfr-data-join</code> direct.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas de sous-chaîne dans <code>compute</code>.</strong> Le SIREN est les neuf premiers chiffres du
+              SIRET&nbsp;; sans <code>left()</code>, le rapprochement des licences expirées se fait au SIRET et sous-estime
+              les renouvellements.</li>
+            <li><strong>Un encodage cassé dans la source.</strong> «&nbsp;Premičre demande&nbsp;», «&nbsp;Isčre&nbsp;»&nbsp;:
+              <code>replace()</code> de <code>compute</code> le répare, mais il faut l'avoir vu.</li>
+            <li><strong>Un mois sur deux chiffres.</strong> Sans fonction de formatage, «&nbsp;2025-07&nbsp;» s'écrit
+              <code>concat(an, '-', when m &lt; 10 then '0' else '', m)</code>, et le tri passe par une clé numérique
+              <code>an * 100 + m</code>.</li>
+            <li><strong>La date du premier dépôt.</strong> <code>aggregate="date_depot_dossier:min"</code> rend
+              l'année (2020), pas la date&nbsp;: le chapô affichait «&nbsp;depuis le 01/01/1970&nbsp;». Le KPI, lui, sait
+              comparer des dates. Contournement&nbsp;: un tri et <code>limit="1"</code>, joints à la synthèse.</li>
+            <li><strong>Des points qui ne suivent pas leur courbe.</strong> Sur la courbe mensuelle, <code>color-map</code>
+              recolorait les lignes et la légende, pas les points&nbsp;: une courbe orange à points bleu clair. La page garde la
+              palette par défaut.</li>
+            <li><strong>Le calcul client se voit.</strong> Chronométré trois fois&nbsp;: 1,4 à 2,5&nbsp;s de réseau (35 lectures
+              par plage du Parquet), puis environ 2,7&nbsp;s de calcul avant le chapô (trente-neuf colonnes calculées sur
+              115&nbsp;832 lignes, douze regroupements)&nbsp;; un clic de filtre, 0,7&nbsp;s.</li>
+            <li><strong>Une phrase qui croise deux agrégats.</strong> La part de l'Île-de-France demande de joindre sa ligne à
+              la synthèse nationale sur une clé constante.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 115&nbsp;832 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select max-records</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Recoder statuts, catégories, encodage</td><td><code>normalize compute</code> (<code>when</code>, <code>replace</code>)</td><td>Natif</td></tr>
+            <tr><td>Série mensuelle de dépôts</td><td><code>compute</code> <code>year()</code> / <code>month()</code> + <code>query group-by</code></td><td>Natif</td></tr>
+            <tr><td>Échéance à cinq ans</td><td><code>compute</code> sur <code>year(date_validite) + 5</code></td><td>Natif</td></tr>
+            <tr><td>Structures distinctes</td><td><code>query group-by="siret"</code> + KPI <code>count</code></td><td>Natif</td></tr>
+            <tr><td>Renouvellement d'une licence expirée</td><td><code>query group-by="cle"</code> (SIRET + catégorie), puis <code>compute</code></td><td>Natif, au SIRET seulement</td></tr>
+            <tr><td>Licences pour 100&nbsp;000 habitants</td><td><code>dsfr-data-join</code> avec la population régionale</td><td>Natif</td></tr>
+            <tr><td>Recherche d'une structure</td><td><code>dsfr-data-facets</code> (statut par défaut) + <code>dsfr-data-list search</code></td><td>Natif</td></tr>
+            <tr><td>SIREN depuis le SIRET</td><td>—</td><td>Manque (<code>compute</code> sans sous-chaîne)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Le jeu le plus gros du portail se traite comme un petit.</strong> L'export Parquet rend inutile la voie
+          serveur prévue au cadrage&nbsp;: dates, échéances et rapprochements se calculent dans la page. La seule vraie
+          limite rencontrée est l'absence de sous-chaîne, qui empêche de raisonner en entreprise plutôt qu'en établissement.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte Leaflet sur la page. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

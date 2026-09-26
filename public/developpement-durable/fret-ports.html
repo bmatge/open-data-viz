@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fret : les ports et le rail — open-data-viz</title>
+  <meta name="description" content="Cinq ports traitent les quatre cinquièmes du fret maritime français ; le rail transporte deux fois moins qu'en 1980 et plafonne depuis quinze ans. Création avec dsfr-data sur trois jeux du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — deuxième vague (§ 5) de
+       docs/portail-developpement-durable/proposition.md.
+
+       TROIS JEUX DiDo en mode URL (pas d'adaptateur DiDo), quatre fichiers :
+       - jeu 13 « Maritime : marchandises », un fichier port × année × sens
+         (entrée/sortie), 1 540 lignes, 2000 → 2025, réduit par `columns=` ;
+       - jeu 8 « Rail : marchandises », fichier national (2 980 lignes) où se
+         mêlent lignes de total, types de transport, marchandises (NST), mois et
+         matières dangereuses : une colonne indicatrice isole les 46 lignes de
+         total (dimensions toutes vides) ; plus le fichier « conventionnel et
+         combiné » (57 lignes) ;
+       - jeu 22 « Fluvial : marchandises », fichier national (588 lignes), même
+         construction que le rail.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-26) :
+       - 2025 est désormais publiée (millésime 2026-08) : 333,5 Mt, cinq premiers
+         ports 81,5 % (81,5 % aussi en 2024, chiffres du cadrage justes).
+       - « 2008 → 2024 : −15 % » compare 21 ports déclarants à 39 : la liste des
+         ports s'allonge (20 en 2000, 42 en 2025). À liste constante (les 20 de
+         2000), le recul 2008 → 2025 est de −15,8 % ; sur la série publiée, −13,2 %.
+         Les deux courbes sont dessinées.
+       - « Rail 34,4 → 38,1 Md t-km (2019 → 2025) » est faux : la ligne de total
+         vaut 34,2 en 2019 et 34,4 en 2025. Le « 88,9 Md t-km de lignes à type
+         vide » du cadrage additionnait le total, les matières dangereuses et le
+         détail. La somme des quatre types égale exactement la ligne de total,
+         chaque année. Le titre tient quand même : le rail ne décolle pas.
+       - Calais : 62 % de son tonnage est de la TARE (camions, remorques,
+         voitures des ferries). Hors tare, Calais passe derrière Nantes-Saint-
+         Nazaire, et les cinq premiers font toujours 81,6 %.
+       - Secret : 316 cellules `secret` dans le fichier rail, TOUTES dans le détail
+         par marchandise que la page n'utilise pas ; 1 120 `nd` (tonnes non
+         disponibles), idem. Compté en page par une colonne indicatrice.
+
+       DiDo refuse plus de trois connexions simultanées : deux sources au montage
+       (ports, rail), les deux autres en `lazy`.
+       ========================================================================== -->
+
+  <!-- ---------- Ports (jeu 13) ---------- -->
+  <dsfr-data-source id="mar"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/89c4e831-27ae-4fe7-8ff7-d6c82fa4a841/json?columns=PORT,FACADE,REGION,STATUT,ANNEE,TONNAGE_TOT,MAR_TOT,TARE_TOT,VRACS_LIQUIDES,VRACS_SOLIDES,CONT_MAR,RORO_MAR,AUTRE_MAR_DIV,EVP_TOT">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="mar-n" source="mar" compute="k = 'fr'"></dsfr-data-normalize>
+
+  <!-- Total par année (entrées + sorties, tous ports déclarants). -->
+  <dsfr-data-query id="mar-an" source="mar-n" group-by="ANNEE"
+    aggregate="TONNAGE_TOT:sum:tot, MAR_TOT:sum:mar, PORT:distinct:nports">
+  </dsfr-data-query>
+  <dsfr-data-query id="mar-der" source="mar-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="mar-prem" source="mar-an" order-by="ANNEE:asc" limit="1"></dsfr-data-query>
+
+  <!-- Lignes de la dernière année, puis un port par ligne (entrée + sortie). -->
+  <dsfr-data-join id="mar-dj" left="mar-n" right="mar-der" on="ANNEE" type="inner" prefix-right="d_"></dsfr-data-join>
+  <dsfr-data-query id="ports-g" source="mar-dj" group-by="PORT, FACADE, REGION, STATUT, ANNEE"
+    aggregate="TONNAGE_TOT:sum:t, MAR_TOT:sum:m, TARE_TOT:sum:tare, VRACS_LIQUIDES:sum:vl, VRACS_SOLIDES:sum:vs, CONT_MAR:sum:cm, RORO_MAR:sum:rm, AUTRE_MAR_DIV:sum:div, EVP_TOT:sum:evp, t:share_percent:pt, m:share_percent:pm">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="ports" source="ports-g"
+    compute="k = 'fr';
+             Port = PORT;
+             Mt = round(t / 1000000, 1);
+             Mt_m = round(m / 1000000, 1);
+             part = round(pt, 1);
+             part_m = round(pm, 1);
+             p_tare = tare / t * 100;
+             Vracs_liquides = round(vl / 1000000, 1);
+             Vracs_solides = round(vs / 1000000, 1);
+             Conteneurs = round(cm / 1000000, 1);
+             Roulier = round(rm / 1000000, 1);
+             Divers = round(div / 1000000, 1);
+             Tare = round(tare / 1000000, 1);
+             Facade = when FACADE = 'MCH' then 'Manche – mer du Nord' when FACADE = 'ATL' then 'Atlantique' when FACADE = 'MED' then 'Méditerranée' when FACADE = 'OM' then 'Outre-mer' else FACADE;
+             Statut = when STATUT = 'GPM' then 'Grand port maritime' when STATUT = 'DEC' then 'Port décentralisé' else STATUT">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ports-top" source="ports" order-by="t:desc" limit="12"></dsfr-data-query>
+  <dsfr-data-query id="top5" source="ports" order-by="t:desc" limit="5"></dsfr-data-query>
+  <dsfr-data-query id="top5-s" source="top5" group-by="k, ANNEE" aggregate="pt:sum:p5, t:sum:t5"></dsfr-data-query>
+  <dsfr-data-query id="top5m" source="ports" order-by="m:desc" limit="5"></dsfr-data-query>
+  <dsfr-data-query id="top5m-s" source="top5m" group-by="k" aggregate="pm:sum:p5m"></dsfr-data-query>
+  <dsfr-data-query id="ports-n" source="ports" group-by="k" aggregate="PORT:count:n, t:sum:tt, tare:sum:ttare, vl:sum:tvl"></dsfr-data-query>
+  <dsfr-data-join id="conc-j1" left="top5-s" right="ports-n" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="conc-j2" left="conc-j1" right="top5m-s" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="conc" source="conc-j2"
+    compute="autres = n - 5;
+             p_autres = 100 - p5;
+             p_tare_fr = ttare / tt * 100;
+             p_vl_fr = tvl / tt * 100;
+             tot_mt = tt / 1000000;
+             t5_mt = t5 / 1000000">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="calais" source="ports" where="PORT:eq:CALAIS"></dsfr-data-query>
+
+  <!-- ---------- Rail (jeu 8) ---------- -->
+  <dsfr-data-source id="rail"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/b7894d99-9ae3-4520-837e-f4aa271793a3/json?columns=ANNEE,TYPE_CODE,NST_2_CODE,MOIS,RID_CODE,TKM,TONNES">
+  </dsfr-data-source>
+  <!-- La ligne de total d'une année est celle dont toutes les dimensions sont
+       vides. DiDo refuse un filtre sur une chaîne vide (« doit avoir une valeur ») :
+       l'indicatrice se calcule donc dans le navigateur. -->
+  <dsfr-data-normalize id="rail-n" source="rail"
+    compute="k = 'fr';
+             tot = when is_empty(TYPE_CODE) and is_empty(NST_2_CODE) and is_empty(MOIS) and is_empty(RID_CODE) then 1 else 0;
+             sec = when TKM = 'secret' then 1 else 0;
+             sec_tot = when TKM = 'secret' and tot = 1 then 1 else 0;
+             nd = when TONNES = 'nd' then 1 else 0;
+             cell = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="rail-sec" source="rail-n" group-by="k" aggregate="sec:sum:sec, sec_tot:sum:sec_tot, nd:sum:nd, cell:sum:lignes"></dsfr-data-query>
+  <dsfr-data-query id="rail-t" source="rail-n" where="tot:eq:1"></dsfr-data-query>
+  <dsfr-data-normalize id="rail-an" source="rail-t"
+    compute="Annee = ANNEE; Mdtkm = round(TKM / 1000000000, 1); Mt = TONNES / 1000000; tkm = TKM">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="rail-der" source="rail-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="rail-prem" source="rail-an" order-by="ANNEE:asc" limit="1"></dsfr-data-query>
+  <!-- 2009 est écrit en dur : l'année de la crise, après laquelle la série ne
+       remonte plus. Les bornes de la fourchette sont lues dans la donnée. -->
+  <dsfr-data-query id="rail-09max" source="rail-an" where="ANNEE:gte:2009" order-by="tkm:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="rail-09min" source="rail-an" where="ANNEE:gte:2009" order-by="tkm:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="rail-e1" left="rail-der" right="rail-prem" on="k" type="inner" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-join id="rail-e2" left="rail-e1" right="rail-09max" on="k" type="inner" prefix-right="mx_"></dsfr-data-join>
+  <dsfr-data-join id="rail-e3" left="rail-e2" right="rail-09min" on="k" type="inner" prefix-right="mn_"></dsfr-data-join>
+  <dsfr-data-normalize id="rail-evo" source="rail-e3"
+    compute="var_prem = (TKM / p_TKM - 1) * 100;
+             mx = mx_TKM / 1000000000;
+             mn = mn_TKM / 1000000000;
+             p_md = p_TKM / 1000000000;
+             md = TKM / 1000000000">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Évolution des ports : série publiée et liste constante ---------- -->
+  <!-- Les ports déclarants de la première année du fichier (lue dans la donnée),
+       puis leurs lignes seules, toutes années. Clé droite unique : un port par ligne. -->
+  <dsfr-data-join id="p0-j" left="mar-n" right="mar-prem" on="ANNEE" type="inner" prefix-right="f_"></dsfr-data-join>
+  <dsfr-data-query id="p0" source="p0-j" group-by="PORT, ANNEE" aggregate="TONNAGE_TOT:count:c"></dsfr-data-query>
+  <dsfr-data-join id="panel-j" left="mar-n" right="p0" on="PORT" type="inner" prefix-right="z_"></dsfr-data-join>
+  <dsfr-data-query id="panel" source="panel-j" group-by="ANNEE, z_ANNEE" aggregate="TONNAGE_TOT:sum:totp, PORT:distinct:npanel"></dsfr-data-query>
+  <dsfr-data-join id="evo-j" left="mar-an" right="panel" on="ANNEE" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="evo" source="evo-j"
+    compute="k = 'fr'; Annee = ANNEE;
+             Tous = round(tot / 1000000, 1);
+             Constants = round(totp / 1000000, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="evo-t" source="evo" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-query id="evo-max" source="evo" order-by="tot:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="evo-der" source="evo" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="evo-c" left="evo-der" right="evo-max" on="k" type="inner" prefix-right="mx_"></dsfr-data-join>
+  <dsfr-data-normalize id="evo-v" source="evo-c"
+    compute="var_tous = (tot / mx_tot - 1) * 100;
+             var_const = (totp / mx_totp - 1) * 100">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Rail conventionnel et combiné (jeu 8, second fichier) ---------- -->
+  <dsfr-data-source id="cc" lazy lazy-target="#t-combine"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/478d95f8-a39b-45ed-8764-abd4611ef099/json">
+  </dsfr-data-source>
+  <!-- Le conventionnel est publié en un poste de 2016 à 2018, en deux (train
+       entier, wagons isolés) ensuite : on les réunit. Les lignes par
+       conditionnement (ACHEM_CODE vide) sont une autre ventilation, écartée. -->
+  <dsfr-data-normalize id="cc-n" source="cc"
+    compute="comb = when ACHEM_CODE = 'COMBINE' then TKM else 0;
+             conv = when not is_empty(ACHEM_CODE) and ACHEM_CODE != 'COMBINE' then TKM else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cc-g" source="cc-n" group-by="ANNEE" aggregate="comb:sum:comb, conv:sum:conv"></dsfr-data-query>
+  <dsfr-data-normalize id="cc-an" source="cc-g"
+    compute="k = 'fr'; Annee = ANNEE;
+             Combine = round(comb / 1000000000, 1);
+             Conventionnel = round(conv / 1000000000, 1);
+             part_comb = comb / (comb + conv) * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cc-t" source="cc-an" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-query id="cc-der" source="cc-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="cc-prem" source="cc-an" order-by="ANNEE:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="cc-e" left="cc-der" right="cc-prem" on="k" type="inner" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-normalize id="cc-evo" source="cc-e"
+    compute="var_comb = (comb / p_comb - 1) * 100; var_conv = (conv / p_conv - 1) * 100;
+             comb_md = comb / 1000000000; conv_md = conv / 1000000000;
+             p_comb_md = p_comb / 1000000000; p_conv_md = p_conv / 1000000000">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Fluvial (jeu 22) ---------- -->
+  <dsfr-data-source id="fl" lazy lazy-target="#t-fleuve"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/ad270003-70bc-4e45-a37c-06f36dcc56a5/json?columns=ANNEE,MOIS,TYPE_CODE,COND_CODE,DIVNST_CODE,PAV_CODE,TONNES,TKM">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="fl-n" source="fl"
+    compute="tot = when is_empty(TYPE_CODE) and is_empty(COND_CODE) and is_empty(DIVNST_CODE) and is_empty(PAV_CODE) and is_empty(MOIS) then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="fl-t" source="fl-n" where="tot:eq:1"></dsfr-data-query>
+
+  <!-- Base 100 sur les années communes aux trois séries (jointures internes),
+       première année commune lue dans la donnée. prefix-right ne s'applique
+       qu'aux colonnes en COLLISION : totp (propre à evo) garde son nom, TKM du
+       rail devient r_TKM, et toute la ligne de base est préfixée b_. -->
+  <dsfr-data-join id="b-j1" left="fl-t" right="rail-an" on="ANNEE" type="inner" prefix-right="r_"></dsfr-data-join>
+  <dsfr-data-join id="b-j2" left="b-j1" right="evo" on="ANNEE" type="inner" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-query id="b-prem" source="b-j2" order-by="ANNEE:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="b-j3" left="b-j2" right="b-prem" on="p_k" type="inner" prefix-right="b_"></dsfr-data-join>
+  <dsfr-data-normalize id="base" source="b-j3"
+    compute="Annee = ANNEE;
+             Ports = round(totp / b_totp * 100, 1);
+             Rail = round(r_TKM / b_r_TKM * 100, 1);
+             Fleuve = round(TKM / b_TKM * 100, 1);
+             fl_md = TKM / 1000000000;
+             b_fl_md = b_TKM / 1000000000">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="base-t" source="base" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-query id="base-der" source="base" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Fret : les ports et le rail</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Cinq ports font les quatre cinquièmes du fret maritime&nbsp;; le rail ne décolle pas</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="conc">
+        <template>
+          En {{ANNEE}}, les {{n}}&nbsp;ports de commerce déclarants ont vu passer <strong>{{tot_mt:number:1}}&nbsp;millions
+          de tonnes de fret</strong>, à l'entrée et à la sortie. <strong>Cinq d'entre eux en traitent
+          {{p5:number:1}}&nbsp;%</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="rail-evo">
+        <template>
+          Le rail, lui, a transporté {{md:number:1}}&nbsp;milliards de tonnes-kilomètres en {{ANNEE}}&nbsp;:
+          <strong>{{var_prem:number:0}}&nbsp;% par rapport à {{p_ANNEE}}</strong>, presque la moitié en moins, et pas davantage que dans les
+          années 2010.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: transport maritime de marchandises
+      par port (déclarations des autorités portuaires), transport ferroviaire et fluvial de marchandises. Dernier
+      millésime de chaque fichier au chargement de la page. Le fret portuaire se compte en tonnes chargées et
+      déchargées, emballages et véhicules compris&nbsp;; le rail et le fleuve en tonnes-kilomètres (une tonne
+      transportée sur un kilomètre).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="conc" value="tot_mt:max" decimals="1" unit="Mt" span="3"
+        heading="Fret des ports français" label="entrées et sorties, dernière année publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="conc" value="p5:max" decimals="1" unit="%" span="3"
+        heading="Passent par cinq ports" label="part des tonnes, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="rail-evo" value="md:max" decimals="1" unit="Md" span="3"
+        heading="Fret ferroviaire" label="milliards de tonnes-kilomètres, dernière année publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="rail-evo" value="var_prem:max" decimals="0" unit="%" span="3"
+        heading="Rail depuis 1980" label="variation des tonnes-kilomètres, première à dernière année"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — la concentration ======================= -->
+  <!-- Douze barres triées, les cinq premières mises en évidence : le « cinq »
+       du titre est le limit de top5, la part est calculée (share_percent sur
+       TOUS les ports, avant limit). Mono-série : pas de color-map. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ports">
+    <h2 id="t-ports" class="fr-h3">Quatre tonnes sur cinq passent par cinq ports</h2>
+    <dsfr-data-repeat source="conc">
+      <template>
+        <p class="odv-lecture">
+          En {{ANNEE}}, les cinq premiers ports traitent {{t5_mt:number:1}}&nbsp;millions de tonnes, soit {{p5:number:1}}&nbsp;% du
+          fret portuaire. Les {{autres}}&nbsp;autres se partagent les {{p_autres:number:1}}&nbsp;% restants&nbsp;: aucun
+          ne dépasse quelques pour cent. Le premier, Haropa, réunit depuis 2021 les ports du Havre, de Rouen et
+          de Paris&nbsp;: c'est l'axe de la Seine qui est compté ici comme un seul port.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <!-- Libellés lisibles par rename : le tableau équivalent (a11y) ne lit que des
+         noms de colonnes (PG-032), et une virgule dans un alias de value-fields
+         découpe la série (voir g-compo). -->
+    <dsfr-data-normalize id="ports-top-r" source="ports-top" rename="Mt:Tonnage traité (Mt) | part:Part du total national (%)"></dsfr-data-normalize>
+    <div class="odv-chart-slot odv-viz" data-code="Les douze premiers ports par tonnage, dernière année">
+      <dsfr-data-chart id="g-ports" source="ports-top-r" type="bar" horizontal
+        label-field="Port" value-field="Tonnage traité (Mt)"
+        selected-palette="neutral" highlight-index="[0, 1, 2, 3, 4]" unit-tooltip="Mt"
+        databox databox-title="Les douze premiers ports de commerce par tonnage traité, dernière année publiée (millions de tonnes, entrées et sorties)"
+        databox-source="SDES — transport maritime de marchandises (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ports" table download source="ports-top-r" label-field="Port" value-field="Tonnage traité (Mt),Part du total national (%)"
+        description="Barres horizontales triées : tonnage traité par les douze premiers ports de commerce la dernière année publiée. Les cinq premiers, mis en évidence, se détachent nettement : Haropa et Marseille, chacun au-dessus de 70 millions de tonnes, puis Dunkerque, Calais et Nantes-Saint-Nazaire. À partir du sixième, La Rochelle, aucun port ne dépasse une dizaine de millions de tonnes. Le tableau donne aussi la part de chaque port dans le total national.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Noms de ports tels que publiés par le SDES. Un port est compté une fois, entrées et sorties additionnées.
+      Les parts se calculent sur tous les ports déclarants, pas sur les douze affichés.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — ce que pèsent les ports ======================= -->
+  <!-- Barres horizontales empilées : marchandises par mode de conditionnement,
+       puis la tare (conteneurs vides et pleins, camions, remorques, voitures).
+       MAR_TOT + TARE_TOT = TONNAGE_TOT sur les 1 540 lignes (vérifié à l'API). -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-tare">
+    <h2 id="t-tare" class="fr-h3">Pétrole au Havre et à Marseille, camions à Calais&nbsp;: la même tonne ne pèse pas pareil</h2>
+    <dsfr-data-repeat source="calais">
+      <template>
+        <p class="odv-lecture">
+          À Calais, <strong>{{p_tare:number:0}}&nbsp;% des tonnes sont la tare</strong>&nbsp;: le poids des camions,
+          des remorques et des voitures qui embarquent sur les ferries vers l'Angleterre, pas celui de ce qu'ils
+          transportent. Hors tare, Calais n'a traité que {{Mt_m:number:1}}&nbsp;millions de tonnes de marchandises
+          ({{part_m:number:1}}&nbsp;% du total national).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="conc">
+      <template>
+        <p class="odv-lecture">
+          La concentration, elle, résiste&nbsp;: compté sans la tare, les cinq premiers ports font encore
+          {{p5m:number:1}}&nbsp;% du fret, et en {{ANNEE}} Nantes-Saint-Nazaire y passe devant Calais. Les vracs liquides —
+          pétrole brut, carburants, gaz — font à eux seuls {{p_vl_fr:number:0}}&nbsp;% des tonnes de tous les ports.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <!-- Une virgule dans un alias `value-fields="champ:Libellé (a, b)"` DÉCOUPE la
+         série (le parseur coupe sur toutes les virgules) : légende à dix entrées pour
+         six séries, décalée, sans erreur console. Constaté au navigateur le
+         2026-09-26. Les libellés passent donc par rename, sans virgule. -->
+    <dsfr-data-normalize id="compo" source="top5"
+      rename="Vracs_liquides:Vracs liquides | Vracs_solides:Vracs solides | Conteneurs:Marchandises en conteneurs | Roulier:Marchandises en camions et remorques | Divers:Autres marchandises | Tare:Tare des conteneurs et véhicules">
+    </dsfr-data-normalize>
+    <div class="odv-chart-slot odv-viz" data-code="Composition du tonnage des cinq premiers ports">
+      <dsfr-data-chart id="g-compo" source="compo" type="bar" horizontal stacked
+        label-field="Port"
+        value-field="Vracs liquides"
+        value-fields="Vracs solides, Marchandises en conteneurs, Marchandises en camions et remorques, Autres marchandises, Tare des conteneurs et véhicules"
+        unit-tooltip="Mt"
+        databox databox-title="Ce que pèsent les cinq premiers ports : marchandises par conditionnement et tare, dernière année publiée (millions de tonnes)"
+        databox-source="SDES — transport maritime de marchandises (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-compo" table download source="compo" label-field="Port"
+        value-field="Vracs liquides,Vracs solides,Marchandises en conteneurs,Marchandises en camions et remorques,Autres marchandises,Tare des conteneurs et véhicules"
+        description="Barres horizontales empilées, une par port parmi les cinq premiers, découpées en marchandises (vracs liquides, vracs solides, conteneurs, roulier, divers) et en tare. Haropa et Marseille sont dominés par les vracs liquides, puis les conteneurs ; Nantes-Saint-Nazaire surtout par les vracs liquides ; Dunkerque mêle à parts égales vracs solides et vracs liquides, plus du roulier et une tare notable. La barre de Calais est presque entièrement faite de roulier et de tare : la tare y dépasse les marchandises.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      La tare est le poids des contenants&nbsp;: conteneurs (vides ou pleins), camions et remorques, et, sur
+      les ferries, voitures et autocars des voyageurs. Le SDES l'inclut dans le tonnage total&nbsp;; elle en
+      fait une part faible partout sauf dans les ports de ferries.
+    </p>
+  </section>
+
+  <!-- ======================= LE TEMPS — ports ======================= -->
+  <!-- Deux séries complètes (aucune valeur nulle) : la série publiée, tous ports
+       déclarants, et la liste constante des ports de la première année. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-evo">
+    <h2 id="t-evo" class="fr-h3">Les ports n'ont jamais retrouvé leur niveau de 2008</h2>
+    <dsfr-data-repeat source="evo-v">
+      <template>
+        <p class="odv-lecture">
+          Le record de la série est {{mx_ANNEE}}&nbsp;: {{mx_Tous:number:1}}&nbsp;millions de tonnes. En {{ANNEE}},
+          {{Tous:number:1}}&nbsp;millions, soit <strong>{{var_tous:number:1}}&nbsp;%</strong>. Mais la liste des ports
+          déclarants est passée de {{npanel}} en {{z_ANNEE}} à {{nports}} en {{ANNEE}}&nbsp;: les nouveaux venus
+          gonflent la série. À liste constante — les {{npanel}}&nbsp;ports déclarants dès {{z_ANNEE}} —, le recul
+          depuis {{mx_ANNEE}} est de <strong>{{var_const:number:1}}&nbsp;%</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-normalize id="evo-r" source="evo-t" rename="Annee:Année | Tous:Tous les ports déclarants (Mt) | Constants:Ports déclarants dès la première année (Mt)"></dsfr-data-normalize>
+    <div class="odv-chart-slot odv-viz" data-code="Fret des ports par année, série publiée et liste constante">
+      <dsfr-data-chart id="g-evo" source="evo-r" type="line"
+        label-field="Année" value-field="Tous les ports déclarants (Mt)"
+        value-fields="Ports déclarants dès la première année (Mt)"
+        unit-tooltip="Mt" y-min="0"
+        databox databox-title="Fret traité par les ports français, par année (millions de tonnes, entrées et sorties)"
+        databox-source="SDES — transport maritime de marchandises (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-evo" table download source="evo-r" label-field="Année" value-field="Tous les ports déclarants (Mt),Ports déclarants dès la première année (Mt)"
+        description="Deux courbes, de 2000 à la dernière année publiée, sur un axe qui part de zéro. Le fret monte jusqu'à un sommet en 2008, un peu au-dessus de 380 millions de tonnes, chute en 2009, oscille ensuite entre 340 et 370 millions, tombe en 2020 autour de 310 et remonte à peine depuis. La courbe à liste constante suit la même forme mais s'écarte vers le bas à partir de 2011 : l'écart entre les deux est le tonnage des ports entrés dans la déclaration après 2000.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LE RAIL ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-rail">
+    <h2 id="t-rail" class="fr-h3">Le rail transporte deux fois moins qu'en 1980, et plafonne depuis 2009</h2>
+    <dsfr-data-repeat source="rail-evo">
+      <template>
+        <p class="odv-lecture">
+          En {{p_ANNEE}}, les trains de fret faisaient {{p_md:number:1}}&nbsp;milliards de tonnes-kilomètres&nbsp;;
+          en {{ANNEE}}, <strong>{{md:number:1}}&nbsp;milliards ({{var_prem:number:0}}&nbsp;%)</strong>. Depuis 2009,
+          la série ne sort plus d'une fourchette étroite&nbsp;: de {{mn:number:1}}&nbsp;milliards ({{mn_ANNEE}}) à
+          {{mx:number:1}} ({{mx_ANNEE}}). Les années de hausse sont suivies d'années de baisse&nbsp;; aucune tendance
+          ne se dessine.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-normalize id="rail-r" source="rail-an" rename="Annee:Année | Mdtkm:Fret ferroviaire (Md t-km)"></dsfr-data-normalize>
+    <div class="odv-chart-slot odv-viz" data-code="Fret ferroviaire par année depuis 1980">
+      <dsfr-data-chart id="g-rail" source="rail-r" type="line"
+        label-field="Année" value-field="Fret ferroviaire (Md t-km)"
+        unit-tooltip="Md t-km" y-min="0"
+        databox databox-title="Transport ferroviaire de marchandises en France, par année (milliards de tonnes-kilomètres)"
+        databox-source="SDES — transport ferroviaire de marchandises (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-rail" table download source="rail-r" label-field="Année" value-field="Fret ferroviaire (Md t-km)"
+        description="Courbe du fret ferroviaire en milliards de tonnes-kilomètres, de 1980 à la dernière année publiée, sur un axe qui part de zéro. Elle part d'environ 66 milliards en 1980, descend sous 50 en 1993, remonte à 55 vers 2000, puis décroche jusqu'à 30 en 2010. Depuis, elle oscille entre 30 et 37 milliards, sans tendance.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Trafic sur le réseau ferré national, tous opérateurs, y compris le transit entre deux pays étrangers et les
+      échanges internationaux. La série est celle de la ligne de total du fichier&nbsp;; la somme des quatre types
+      de transport (national, international entrant, sortant, transit) lui est égale chaque année.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — le combiné ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-combine">
+    <h2 id="t-combine" class="fr-h3">Seul le transport combiné progresse&nbsp;: il fait presque la moitié du rail</h2>
+    <dsfr-data-repeat source="cc-evo">
+      <template>
+        <p class="odv-lecture">
+          Le transport combiné — des conteneurs et des remorques de camion posés sur des wagons — est passé de
+          {{p_comb_md:number:1}} à <strong>{{comb_md:number:1}}&nbsp;milliards de tonnes-kilomètres</strong> entre
+          {{p_ANNEE}} et {{ANNEE}} (+{{var_comb:number:0}}&nbsp;%). Le conventionnel — trains entiers et wagons
+          isolés, pour les céréales, l'acier, la chimie — a reculé de {{p_conv_md:number:1}} à
+          {{conv_md:number:1}}&nbsp;milliards ({{var_conv:number:0}}&nbsp;%). Le combiné fait désormais
+          {{part_comb:number:0}}&nbsp;% du fret ferroviaire&nbsp;: sans sa hausse, le total aurait suivi la baisse du conventionnel.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-normalize id="cc-r" source="cc-t" rename="Annee:Année | Conventionnel:Conventionnel — trains entiers et wagons isolés (Md t-km) | Combine:Combiné — conteneurs et remorques sur wagons (Md t-km)"></dsfr-data-normalize>
+    <div class="odv-chart-slot odv-viz" data-code="Rail : combiné et conventionnel">
+      <dsfr-data-chart id="g-cc" source="cc-r" type="line"
+        label-field="Année" value-field="Conventionnel — trains entiers et wagons isolés (Md t-km)"
+        value-fields="Combiné — conteneurs et remorques sur wagons (Md t-km)"
+        unit-tooltip="Md t-km" y-min="0"
+        databox databox-title="Fret ferroviaire conventionnel et combiné, par année (milliards de tonnes-kilomètres)"
+        databox-source="SDES — transport ferroviaire de marchandises (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-cc" table download source="cc-r" label-field="Année" value-field="Conventionnel — trains entiers et wagons isolés (Md t-km),Combiné — conteneurs et remorques sur wagons (Md t-km)"
+        description="Deux courbes de 2016 à la dernière année publiée, sur un axe qui part de zéro. Le conventionnel baisse d'environ 25 à moins de 19 milliards de tonnes-kilomètres ; le combiné monte d'environ 10 à près de 16 milliards. Les deux courbes se rapprochent sans se croiser.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Ce fichier ne commence qu'en 2016. Le conventionnel y est publié en un seul poste jusqu'en 2018, en deux
+      (train entier, wagons isolés) ensuite&nbsp;: la page les additionne.
+    </p>
+  </section>
+
+  <!-- ======================= CONCLUSION — trois modes ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-fleuve">
+    <h2 id="t-fleuve" class="fr-h3">Aucun des trois ne progresse, et le fleuve a perdu près d'un tiers</h2>
+    <dsfr-data-repeat source="base-der">
+      <template>
+        <p class="odv-lecture">
+          Base 100 en {{b_ANNEE}}, première année commune aux trois fichiers. En {{ANNEE}}, le rail est à
+          {{Rail:number:0}}, les ports (à liste constante) à {{Ports:number:0}}, et <strong>le fleuve à
+          {{Fleuve:number:0}}</strong>&nbsp;: {{b_fl_md:number:1}} puis {{fl_md:number:1}}&nbsp;milliards de
+          tonnes-kilomètres sur les voies navigables.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-normalize id="base-r" source="base-t" rename="Annee:Année | Ports:Ports en tonnes à liste constante | Rail:Rail en tonnes-kilomètres | Fleuve:Fleuve en tonnes-kilomètres"></dsfr-data-normalize>
+    <div class="odv-chart-slot odv-viz" data-code="Ports, rail et fleuve en base 100">
+      <dsfr-data-chart id="g-base" source="base-r" type="line"
+        label-field="Année" value-field="Ports en tonnes à liste constante"
+        value-fields="Rail en tonnes-kilomètres, Fleuve en tonnes-kilomètres"
+        unit-tooltip="base 100"
+        databox databox-title="Ports, rail et fleuve : évolution du fret en base 100 la première année commune"
+        databox-source="SDES — transports maritime, ferroviaire et fluvial de marchandises (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-base" table download source="base-r" label-field="Année" value-field="Ports en tonnes à liste constante,Rail en tonnes-kilomètres,Fleuve en tonnes-kilomètres"
+        description="Trois courbes en base 100, de la première à la dernière année commune aux trois fichiers. Le rail oscille autour de 100, entre 88 et 107. Les ports reculent lentement, touchent 87 en 2020 et finissent autour de 90. Le fleuve recule par paliers et finit autour de 68, le plus bas des trois.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Une base 100 compare des évolutions, pas des volumes&nbsp;: une tonne traitée par un port et une
+      tonne-kilomètre sur rail ne s'additionnent pas. Le fichier fluvial s'arrête un an avant les deux autres.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — tous les ports ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Et mon port&nbsp;? Tous les ports déclarants, dernière année</h2>
+    <p class="fr-text--sm">
+      Tonnage total (tare comprise), marchandises hors tare, part du total national et conteneurs en
+      équivalents vingt pieds (EVP). Filtrer par façade maritime&nbsp;; les parts restent calculées sur la
+      France entière.
+    </p>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="ports-f" source="ports"
+          fields="Facade, Statut" labels="Facade:Façade maritime | Statut:Statut du port" hide-counts>
+        </dsfr-data-facets>
+      </details>
+      <div>
+        <dsfr-data-list source="ports-f"
+          columns="Port:Port, Facade:Façade, REGION:Région, Statut:Statut, Mt:Tonnage total (Mt), Mt_m:Marchandises hors tare (Mt), part:Part du total (%), evp:Conteneurs (EVP), ANNEE:Année"
+          sort="Mt:desc" search pagination="15" count-label="port|ports" export="csv"
+          caption="Ports de commerce : tonnage traité la dernière année publiée">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>La route.</strong> Aucun de ces trois jeux ne compte le transport routier, qui porte la grande
+        majorité des marchandises en France&nbsp;: la page ne peut donc pas dire la part du rail ou du fleuve dans
+        le transport, seulement leur évolution.</li>
+      <li><strong>Des volumes comparables d'un mode à l'autre.</strong> Les ports comptent des tonnes chargées ou
+        déchargées&nbsp;; un conteneur transbordé d'un navire à un autre est compté deux fois. Le rail et le fleuve
+        comptent des tonnes-kilomètres. Les trois ne s'additionnent pas.</li>
+      <li><strong>Les ports d'avant leur déclaration.</strong> La liste des ports s'allonge au fil des années&nbsp;;
+        la série publiée mélange donc croissance du trafic et élargissement du champ. D'où la seconde courbe, à
+        liste constante.</li>
+      <li><strong>Mayotte et les collectivités d'outre-mer</strong>, absentes du fichier des ports.</li>
+      <li>
+        <dsfr-data-repeat source="rail-sec">
+          <template>
+            <strong>Le secret statistique</strong>&nbsp;: {{sec}}&nbsp;cellules de tonnes-kilomètres du fichier ferroviaire
+            valent «&nbsp;secret&nbsp;», et {{nd}}&nbsp;cellules de tonnes valent «&nbsp;nd&nbsp;» (non disponible), sur
+            {{lignes}}&nbsp;lignes. Toutes sont dans le détail par marchandise ou par mois, que la page n'utilise
+            pas&nbsp;: les lignes de total utilisées en comptent {{sec_tot}}. Le détail par marchandise n'est
+            donc pas montré&nbsp;: sommé, il sous-estimerait le total sans le dire.
+          </template>
+        </dsfr-data-repeat>
+      </li>
+      <li><strong>Le détail par région et par marchandise</strong> du rail et du fleuve, publié dans d'autres
+        fichiers des mêmes jeux, et que cette page laisse de côté.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création à partir de quatre fichiers du SDES servis par
+        l'API DiDo, sans adaptateur dédié. La concentration des ports tenait telle que cadrée&nbsp;; deux chiffres
+        du cadrage sont tombés au rejeu (un recul qui mélangeait deux listes de ports, une remontée du rail qui
+        n'existe pas), et deux histoires sont apparues&nbsp;: la tare de Calais et le transport combiné.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Une part du total sans seconde source.</strong> <code>t:share_percent:pt</code> sur le
+              regroupement par port, puis un <code>limit="5"</code> et une somme&nbsp;: la part des cinq premiers
+              est calculée sur tous les ports, pas sur le top.</li>
+            <li><strong>Une liste constante de ports</strong> par deux jointures internes (ports de la première
+              année, puis leurs lignes), sans écrire un nom de port ni une année.</li>
+            <li><strong>Réduire la charge</strong> par <code>columns=</code> dans l'URL&nbsp;: 864 → 398&nbsp;Ko
+              pour les ports, 642 → 335&nbsp;Ko pour le rail.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Isoler une ligne de total.</strong> Les fichiers rail et fluvial mêlent total, types, mois
+              et marchandises, distingués par des dimensions <em>vides</em>. DiDo refuse un filtre sur une chaîne
+              vide (HTTP 400, « doit avoir une valeur ») et <code>isnull</code> ne voit pas <code>''</code>&nbsp;:
+              il faut une indicatrice <code>is_empty(…) and …</code> dans un <code>compute</code>.</li>
+            <li><strong>Une base 100 coûte trois jointures</strong> (années communes, puis la première année
+              rejointe sur chaque ligne).</li>
+            <li><strong>Quatre fichiers, trois connexions.</strong> Les deux sources basses partent en
+              <code>lazy</code>&nbsp;; le chapô n'utilise que les deux premières.</li>
+            <li><strong>Une virgule dans un nom de série le découpe.</strong>
+              <code>value-fields="Tare:Tare (conteneurs, camions, voitures)"</code> produit trois entrées de
+              légende au lieu d'une&nbsp;: trois graphiques de cette page avaient une légende de dix entrées pour six
+              séries, décalée, sans un mot en console. Les libellés passent donc par <code>rename</code>, sans
+              virgule ni deux-points — ce qui donne aussi au tableau équivalent des en-têtes lisibles.</li>
+            <li><strong>La vue tableau de la DataBox ne montre que la première série</strong> d'un graphique à
+              plusieurs séries&nbsp;: le tableau complet est celui de <code>dsfr-data-a11y table</code>.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger un fichier DiDo réduit</td><td><code>dsfr-data-source url=</code> avec <code>columns=</code></td><td>Natif</td></tr>
+            <tr><td>Part des cinq premiers ports</td><td><code>dsfr-data-query aggregate="…:share_percent"</code> + <code>limit</code> + somme</td><td>Natif</td></tr>
+            <tr><td>Ligne de total (dimensions vides)</td><td><code>dsfr-data-normalize compute="when is_empty(…)"</code> + <code>where</code></td><td>Faisable, verbeux</td></tr>
+            <tr><td>Série à liste constante</td><td><code>dsfr-data-join type="inner"</code> ×2 + <code>query group-by</code></td><td>Natif</td></tr>
+            <tr><td>Base 100</td><td><code>join</code> sur l'année, <code>join</code> sur la première ligne, <code>compute</code></td><td>Faisable, verbeux</td></tr>
+            <tr><td>Compter les cellules « secret »</td><td><code>compute="when TKM = 'secret' then 1 else 0"</code> + somme</td><td>Natif</td></tr>
+            <tr><td>Rester sous trois connexions DiDo</td><td><code>dsfr-data-source lazy lazy-target</code></td><td>Natif</td></tr>
+            <tr><td>Nommer une série « A (b, c) »</td><td><code>dsfr-data-normalize rename</code> puis le nom nu dans <code>value-fields</code></td><td>Contournement&nbsp;: la virgule de l'alias découpe la série</td></tr>
+            <tr><td>Tableau équivalent de toutes les séries</td><td><code>dsfr-data-a11y table</code> (la vue tableau de la DataBox n'en montre qu'une)</td><td>Natif</td></tr>
+            <tr><td>Tableau filtrable et exportable</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-list</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Tout se fait sans script, mais c'est la forme des fichiers qui coûte.</strong> DiDo publie
+          les totaux et les détails dans le même tableau, distingués par des cases vides&nbsp;; une ligne de
+          total se retrouve par une indicatrice. Le récit, lui, demandait de ne pas prendre la série publiée
+          pour une tendance&nbsp;: la liste des ports change, et c'est la liste constante qui dit le recul.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

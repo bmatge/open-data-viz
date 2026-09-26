@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le livre en trente ans — open-data-viz</title>
+  <meta name="description" content="Où les Français achètent-ils leurs livres ? En trente ans, les clubs et la vente par correspondance ont presque disparu, les grandes surfaces culturelles et Internet ont pris leur place, la librairie a tenu. Création avec dsfr-data à partir des chiffres clés du livre du ministère de la Culture (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 8 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte les « Chiffres clés du secteur du livre »
+       (Observatoire de l'économie du livre, ministère de la Culture), une ligne par
+       année, 105 colonnes, servies par Tabular.
+
+       LE JEU. 33 lignes (1993-2025). La page ne lit que 11 colonnes : l'année, les
+       six lieux d'achat du livre imprimé (pdm_*) et les quatre parts occasion /
+       numérique. Elles sont proprement numériques au profil Tabular (float) ; les
+       colonnes sales signalées au cadrage (virgules décimales, espaces, `tirage_moyen`
+       typé date, noms à espaces de tête) ne sont pas lues.
+
+       LA RUPTURE. Le dictionnaire des variables (ressource f342fe6b) signale pour
+       chaque part de marché « source Kantar, rupture à partir de 2012 », et l'année
+       2011 est vide pour les lieux d'achat. Le poste « autres » passe de 9 à 4 %
+       entre 2010 et 2012 : c'est la rupture, pas le marché. Elle est dessinée
+       (ligne de référence) et dite en page.
+
+       LES PETITS MULTIPLES. Une seule courbe à six séries dessinait Internet à 0 %
+       de 1993 à 2001 (cellules nulles → 0 dans dsfr-data-chart, format large compris) :
+       chaque lieu d'achat a donc son graphique, alimenté par ses seules années.
+
+       LE CALCUL. Aucun chiffre en dur : la première et la dernière année renseignées
+       sont lues par un `group-by` sur une clé constante, rejointes à chaque ligne,
+       puis chaque valeur-repère est isolée par `when annee = … then … else 0` et
+       sommée. Les parts publiées sont des fractions à deux décimales : ×100 et
+       arrondi à l'unité les rend exactes.
+       ========================================================================== -->
+
+  <dsfr-data-source id="livre" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="9f55911c-63b2-4d33-8757-348abde08235"
+    max-records="200"
+    select="annee, pdm_librairies, pdm_gss, pdm_gsa, pdm_internet, pdm_vpc_courtage_club, pdm_autres, pdm_occasion_volumes, pdm_occasion_valeur, pdm_numerique_valeur, pdm_numerique_volumes">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="l-n" source="livre"
+    compute="lib = round(pdm_librairies * 100, 0);
+             gss = round(pdm_gss * 100, 0);
+             gsa = round(pdm_gsa * 100, 0);
+             internet = round(pdm_internet * 100, 0);
+             vpc = round(pdm_vpc_courtage_club * 100, 0);
+             autres = round(pdm_autres * 100, 0);
+             occ_vol = round(pdm_occasion_volumes * 100, 0);
+             occ_val = round(pdm_occasion_valeur * 100, 0);
+             num_val = round(pdm_numerique_valeur * 100, 0);
+             num_vol = round(pdm_numerique_volumes * 100, 0);
+             total = when is_null(lib) then null else lib + gss + gsa + coalesce(internet, 0) + vpc + autres;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- Bornes lues dans la donnée : première et dernière année des lieux d'achat,
+       première année d'Internet, première et dernière année de l'occasion. -->
+  <dsfr-data-query id="bornes" source="l-n" where="lib:isnotnull" group-by="k"
+    aggregate="annee:min:an_min, annee:max:an_max"></dsfr-data-query>
+  <dsfr-data-query id="bornes-int" source="l-n" where="internet:isnotnull" group-by="k"
+    aggregate="annee:min:int_min"></dsfr-data-query>
+  <dsfr-data-query id="bornes-occ" source="l-n" where="occ_vol:isnotnull" group-by="k"
+    aggregate="annee:min:occ_min, annee:max:occ_max"></dsfr-data-query>
+  <dsfr-data-join id="j1" left="l-n" right="bornes" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-join id="j2" left="j1" right="bornes-int" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-join id="j3" left="j2" right="bornes-occ" on="k" type="left"></dsfr-data-join>
+
+  <dsfr-data-normalize id="reperes" source="j3"
+    compute="f_lib = when annee = an_min then lib else 0;
+             f_gss = when annee = an_min then gss else 0;
+             f_gsa = when annee = an_min then gsa else 0;
+             f_vpc = when annee = an_min then vpc else 0;
+             l_lib = when annee = an_max then lib else 0;
+             l_gss = when annee = an_max then gss else 0;
+             l_gsa = when annee = an_max then gsa else 0;
+             l_int = when annee = an_max then internet else 0;
+             l_vpc = when annee = an_max then vpc else 0;
+             i_int = when annee = int_min then internet else 0;
+             p_vpc = when annee = int_min - 1 then vpc else 0;
+             p_gss = when annee = int_min - 1 then gss else 0;
+             p_lib = when annee = int_min - 1 then lib else 0;
+             lib_2010 = when annee = 2010 then lib else 0;
+             lib_post = when annee >= 2012 and not is_null(lib) then lib else 100;
+             aut_2010 = when annee = 2010 then autres else 0;
+             aut_2012 = when annee = 2012 then autres else 0;
+             o_first = when annee = occ_min then occ_vol else 0;
+             o_last = when annee = occ_max then occ_vol else 0;
+             ov_last = when annee = occ_max then occ_val else 0;
+             nv_last = when annee = occ_max then num_val else 0;
+             nvol_last = when annee = occ_max then num_vol else 0;
+             tot_min = when is_null(total) then 1000 else total;
+             tot_max = when is_null(total) then 0 else total;
+             a_lib = when is_null(lib) then 0 else 1">
+  </dsfr-data-normalize>
+
+  <dsfr-data-query id="syn" source="reperes" group-by="k"
+    aggregate="an_min:max:an_min, an_max:max:an_max, int_min:max:int_min, occ_min:max:occ_min, occ_max:max:occ_max,
+               f_lib:sum:f_lib, f_gss:sum:f_gss, f_gsa:sum:f_gsa, f_vpc:sum:f_vpc,
+               l_lib:sum:l_lib, l_gss:sum:l_gss, l_gsa:sum:l_gsa, l_int:sum:l_int, l_vpc:sum:l_vpc,
+               i_int:sum:i_int, p_vpc:sum:p_vpc, p_gss:sum:p_gss, p_lib:sum:p_lib,
+               lib_2010:sum:lib_2010, lib_post:min:lib_min, aut_2010:sum:aut_2010, aut_2012:sum:aut_2012,
+               o_first:sum:o_first, o_last:sum:o_last, ov_last:sum:ov_last, nv_last:sum:nv_last, nvol_last:sum:nvol_last,
+               tot_min:min:tot_min, tot_max:max:tot_max, a_lib:sum:n_ans">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="d_vpc = f_vpc - l_vpc;
+             d_gss = l_gss - f_gss;
+             d_lib = f_lib - l_lib;
+             gi_first = f_gss;
+             gi_last = l_gss + l_int;
+             gain = d_gss + l_int;
+             av_int = int_min - 1;
+             d_vpc_pre = f_vpc - p_vpc;
+             d_gss_pre = p_gss - f_gss;
+             d_lib_pre = f_lib - lib_2010;
+             remonte = l_lib - lib_min;
+             o_un_sur = round(100 / o_last, 0);
+             ans = an_max - an_min">
+  </dsfr-data-normalize>
+
+  <!-- Série annuelle des lieux d'achat, sans l'année vide (2011). -->
+  <dsfr-data-query id="serie" source="l-n" where="lib:isnotnull" order-by="annee:asc"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Le livre en trente ans</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Acheter un livre&nbsp;: les clubs ont disparu, Internet et les grandes surfaces culturelles ont pris leur place, la librairie a tenu</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          En {{an_min}}, les clubs, la vente par correspondance et le courtage vendaient <strong>{{f_vpc}}&nbsp;%</strong>
+          des livres imprimés achetés par les particuliers&nbsp;; en {{an_max}}, <strong>{{l_vpc}}&nbsp;%</strong>. Les
+          grandes surfaces culturelles et Internet, qui pesaient {{gi_first}}&nbsp;% à eux deux en {{an_min}} (Internet
+          n'apparaît dans les relevés qu'en {{int_min}}), en pèsent <strong>{{gi_last}}&nbsp;%</strong>. La librairie, elle,
+          est passée de {{f_lib}} à {{l_lib}}&nbsp;% en {{ans}}&nbsp;ans&nbsp;: elle a reculé jusqu'en 2010, puis s'est
+          stabilisée et remonte.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, Observatoire de l'économie du livre — <em>Chiffres clés du secteur du livre</em>,
+      séries longues&nbsp;; parts de marché des lieux d'achat de livres imprimés, panel Kantar. Rupture de série en 2012,
+      signalée par le dictionnaire des variables. Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/chiffres-cles-dans-le-secteur-du-livre/" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (API Tabular).
+    </p>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <dsfr-data-kpi-group class="fr-mb-6w" per-row="1 md:2 lg:4" aria-label="Parts de marché de la dernière année publiée">
+          <dsfr-data-kpi source="syn-t" value="l_lib:max" format="decimal" decimals="0" unit="%"
+            heading="Librairies" label="en {{an_max}}, contre {{f_lib}} % en {{an_min}}" color-token="blue-ecume"></dsfr-data-kpi>
+          <dsfr-data-kpi source="syn-t" value="l_gss:max" format="decimal" decimals="0" unit="%"
+            heading="Grandes surfaces culturelles" label="en {{an_max}}, contre {{f_gss}} % en {{an_min}}" color-token="orange-terre-battue"></dsfr-data-kpi>
+          <dsfr-data-kpi source="syn-t" value="l_int:max" format="decimal" decimals="0" unit="%"
+            heading="Internet" label="en {{an_max}}, absent des relevés avant {{int_min}}" color-token="purple-glycine"></dsfr-data-kpi>
+          <dsfr-data-kpi source="syn-t" value="l_vpc:max" format="decimal" decimals="0" unit="%"
+            heading="Clubs et vente par correspondance" label="en {{an_max}}, contre {{f_vpc}} % en {{an_min}}" color-token="pink-macaron"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+      </template>
+    </dsfr-data-repeat>
+  </div>
+
+  <!-- ======================= PREUVE — avant / après ======================= -->
+  <dsfr-data-unpivot id="long" source="l-n" id-cols="annee, k"
+    value-cols="lib:Librairies, gss:Grandes surfaces culturelles, internet:Internet, gsa:Grandes surfaces alimentaires, vpc:Clubs et vente par correspondance, autres:Autres lieux"
+    var-name="circuit" value-name="part" drop-empty></dsfr-data-unpivot>
+  <dsfr-data-join id="long-b" left="long" right="bornes" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="long-r" source="long-b"
+    compute="p_first = when annee = an_min then part else 0;
+             p_last = when annee = an_max then part else 0;
+             a_first = when annee = an_min then 1 else 0;
+             code = replace(lower(circuit), ' ', '-')"></dsfr-data-normalize>
+  <dsfr-data-query id="circ" source="long-r" group-by="circuit, code"
+    aggregate="p_first:sum:p_first_s, p_last:sum:p_last, a_first:sum:a_first, part:max:p_max, annee:min:debut, an_min:max:an_min_g, an_max:max:an_max_g"
+    order-by="p_last:desc"></dsfr-data-query>
+  <!-- Internet n'a pas de ligne la première année : sa somme vaut 0, ramenée à null
+       pour que le tableau accessible n'affiche pas un « 0 % » que la source ne dit pas. -->
+  <dsfr-data-normalize id="circ-t" source="circ"
+    compute="p_first = when a_first = 0 then null else p_first_s;
+             ecart = when a_first = 0 then null else p_last - p_first_s;
+             evol = when a_first = 0 then concat('absent des relevés avant ', debut, ', ', p_last, ' % en ', an_max_g)
+                    else concat(p_first_s, ' % en ', an_min_g, ', ', p_last, ' % en ', an_max_g);
+             p_first_txt = when a_first = 0 then concat('absente (première année ', debut, ')') else concat(p_first_s, ' %')"></dsfr-data-normalize>
+  <!-- Lignes longues triées par année, partitionnées par lieu d'achat pour les petits multiples. -->
+  <dsfr-data-query id="long-s" source="long-r" order-by="annee:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-avant-apres">
+    <h2 id="t-avant-apres" class="fr-h3">Ce que les clubs ont perdu, Internet et les grandes surfaces culturelles l'ont gagné</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Entre {{an_min}} et {{an_max}}, les clubs et la vente par correspondance ont perdu {{d_vpc}}&nbsp;points de part
+          de marché. Les grandes surfaces culturelles en ont gagné {{d_gss}}, Internet {{l_int}}&nbsp;: {{gain}}&nbsp;points à eux
+          deux, pour {{d_vpc}} perdus par les clubs. La librairie a cédé {{d_lib}}&nbsp;points, les hypermarchés et
+          supermarchés sont passés de {{f_gsa}} à {{l_gsa}}&nbsp;%.
+        </p>
+        <div class="odv-chart-slot odv-viz" data-code="Parts de marché des lieux d'achat de livres imprimés, première et dernière année">
+          <dsfr-data-chart id="g-avant-apres" source="circ-t" type="bar" horizontal
+            label-field="circuit" value-field="p_first:{{an_min}}" value-fields="p_last:{{an_max}}"
+            color-map="{{an_min}}:#929292,{{an_max}}:#000091" unit-tooltip="%"
+            databox databox-title="Part de marché de chaque lieu d'achat de livres imprimés, {{an_min}} et {{an_max}} (%)"
+            databox-source="Ministère de la Culture — Chiffres clés du secteur du livre (Kantar), data.gouv.fr" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-avant-apres" source="circ-t" label-field="circuit" value-field="p_first, p_last, ecart"
+            description="Barres horizontales groupées, une paire par lieu d'achat, triées par part de la dernière année : en gris {{an_min}}, en bleu {{an_max}}. Les grandes surfaces culturelles ({{l_gss}} %), la librairie ({{l_lib}} %) et Internet ({{l_int}} %) sont en tête en {{an_max}} ; les clubs et la vente par correspondance, à {{f_vpc}} % en {{an_min}}, sont à {{l_vpc}} %. Internet n'a pas de barre en {{an_min}} : il n'est relevé qu'à partir de {{int_min}}. Colonne ecart : différence en points.">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Internet n'a pas de valeur la première année&nbsp;: il est absent des relevés, pas compté à zéro, et n'a donc pas de
+      barre grise. Les parts publiées sont arrondies au point&nbsp;: leur somme varie de 99 à 102&nbsp;% selon l'année.
+    </p>
+  </section>
+
+  <!-- ======================= PREUVE — la trajectoire ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-trajectoire">
+    <h2 id="t-trajectoire" class="fr-h3">Deux temps&nbsp;: les grandes surfaces d'abord, Internet ensuite</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Les clubs n'ont pas attendu Internet pour décliner&nbsp;: de {{an_min}} à {{av_int}}, avant le premier relevé
+          d'Internet, ils perdent déjà {{d_vpc_pre}}&nbsp;points (de {{f_vpc}} à {{p_vpc}}&nbsp;%), et les grandes surfaces
+          culturelles en gagnent {{d_gss_pre}}. Internet entre en {{int_min}} à {{i_int}}&nbsp;% et atteint {{l_int}}&nbsp;% en
+          {{an_max}}&nbsp;; les clubs finissent à {{l_vpc}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <!-- PETITS MULTIPLES. Une courbe par lieu d'achat, mêmes axes (x 1993-2025 lu dans
+         la donnée, y 0-40) : la comparaison se fait à l'œil d'un graphique à l'autre.
+         Pourquoi pas une seule courbe à six séries : dsfr-data-chart trace une cellule
+         vide à 0 (toNumber non strict, `value-fields` comme `series-field`), et Internet
+         aurait eu une ligne à 0 % de 1993 à 2001 que la source ne publie pas. Ici,
+         chaque graphique ne reçoit que ses propres années (unpivot drop-empty). -->
+    <dsfr-data-repeat source="circ-t" key-field="code" scopes="long-s:code:s" per-row="1 md:2 lg:3">
+      <template>
+        <div class="odv-chart-slot odv-viz fr-mb-2w" data-code="Part de marché : {{circuit}}">
+          <dsfr-data-chart id="g-{{code}}" source="{{$scope.s}}" type="line"
+            label-field="annee" value-field="part:{{circuit}}" name="{{circuit}}"
+            x-min="{{an_min_g}}" x-max="{{an_max_g}}" y-min="0" y-max="40" unit-tooltip="%"
+            reference-lines='[{"axis":"x","value":"2012","label":"Rupture","dash":true,"color":"#666666"}]'
+            databox databox-title="{{circuit}} : {{evol}}"
+            databox-source="Ministère de la Culture — Chiffres clés du livre (Kantar)">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-{{code}}" source="{{$scope.s}}" label-field="annee" value-field="part"
+            description="Courbe de la part de marché de « {{circuit}} », en %, de sa première année publiée ({{debut}}) à la dernière, sur un axe de 0 à 40 % commun aux six graphiques. Première valeur {{p_first_txt}}, dernière {{p_last}} %, maximum {{p_max}} %. Une ligne pointillée marque la rupture de série de 2012.">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Mêmes axes pour les six graphiques. La ligne pointillée marque 2012&nbsp;: le dictionnaire des variables y signale une
+      rupture de série, et 2011 n'est pas publiée&nbsp;; les courbes relient 2010 à 2012 par-dessus ce trou. La courbe
+      d'Internet commence en 2002, première année où la série le relève.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — la librairie ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-librairie">
+    <h2 id="t-librairie" class="fr-h3">La librairie a reculé jusqu'en 2010, puis elle a tenu</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          De {{an_min}} à 2010, la librairie perd {{d_lib_pre}}&nbsp;points (de {{f_lib}} à {{lib_2010}}&nbsp;%). Depuis
+          2012, elle ne descend jamais sous {{lib_min}}&nbsp;%, alors que les grandes surfaces culturelles et Internet
+          continuent de grimper, et elle est à {{l_lib}}&nbsp;% en {{an_max}}, {{remonte}}&nbsp;points au-dessus de ce plancher.
+          Elle n'a pas regagné son niveau de {{an_min}}, mais elle n'a pas suivi les clubs.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <div class="fr-callout fr-icon-information-line">
+          <p class="fr-callout__text">
+            Attention à la marche de 2010-2012&nbsp;: le poste «&nbsp;autres lieux&nbsp;» passe de {{aut_2010}} à
+            {{aut_2012}}&nbsp;% en deux ans, au moment précis de la rupture de série. Ce n'est pas le marché qui change,
+            c'est la mesure. Les mouvements lus de part et d'autre de 2012 sont solides&nbsp;; un écart d'un ou deux
+            points à cheval sur la rupture ne l'est pas.
+          </p>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= NUANCE — l'occasion ======================= -->
+  <dsfr-data-query id="occ" source="l-n" where="occ_vol:isnotnull" order-by="annee:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="occ-tab" source="occ"
+    rename="annee:Année | occ_vol:Occasion en volume (%) | occ_val:Occasion en valeur (%) | num_vol:Numérique en volume (%) | num_val:Numérique en valeur (%)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-occasion">
+    <h2 id="t-occasion" class="fr-h3">Pendant ce temps, l'occasion a pris un livre sur cinq, le numérique plafonne</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          En {{occ_min}}, {{o_first}}&nbsp;% des livres achetés par les particuliers (hors scolaire) étaient d'occasion&nbsp;;
+          en {{occ_max}}, {{o_last}}&nbsp;%, soit environ un sur {{o_un_sur}}. En valeur, l'occasion pèse moins,
+          {{ov_last}}&nbsp;%&nbsp;: ce sont des livres moins chers. Le livre numérique, lui, reste à {{nv_last}}&nbsp;% des
+          dépenses et {{nvol_last}}&nbsp;% des volumes.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part de l'occasion et du numérique dans les achats de livres">
+      <dsfr-data-chart id="g-occ" source="occ" type="line"
+        label-field="annee"
+        value-field="occ_vol:Occasion (en volume)"
+        value-fields="occ_val:Occasion (en valeur), num_val:Numérique (en valeur)"
+        y-min="0" unit-tooltip="%"
+        databox databox-title="Part du livre d'occasion et du livre numérique dans les achats des particuliers, hors scolaire (%)"
+        databox-source="Ministère de la Culture — Chiffres clés du secteur du livre (Kantar), data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-occ" source="occ-tab" label-field="Année"
+        value-field="Occasion en volume (%), Occasion en valeur (%), Numérique en volume (%), Numérique en valeur (%)"
+        description="Trois courbes depuis 2011. L'occasion en volume, la plus haute, monte d'environ 13 % à environ 20 %. L'occasion en valeur, plus basse, monte d'environ 4 % à environ 10 %. Le numérique en valeur reste presque plat, entre 1 et 4 %.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Ces parts portent sur tout le marché des particuliers hors scolaire (neuf, occasion, numérique), pas sur les lieux
+      d'achat du livre imprimé des graphiques précédents. Les deux ne s'additionnent pas.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: toutes les années, tous les lieux d'achat</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Parts de marché publiées, en %, une ligne par année (2011 n'est pas publiée). Triez par colonne pour trouver l'année où un lieu d'achat a
+      dépassé un autre&nbsp;; la dernière colonne donne la somme des parts publiées, que l'arrondi écarte de 100.
+    </p>
+    <dsfr-data-list source="serie"
+      columns="annee:Année, lib:Librairies, gss:Grandes surfaces culturelles, internet:Internet, gsa:Grandes surfaces alimentaires, vpc:Clubs et VPC, autres:Autres lieux, total:Somme"
+      sort="annee:desc" pagination="40" count-label="année|années" export="csv"
+      caption="Parts de marché des lieux d'achat de livres imprimés, par année (%)">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>2011, et la continuité de part et d'autre de 2012.</strong> Le dictionnaire des variables signale une
+            rupture de série à partir de 2012 et l'année 2011 est vide pour les lieux d'achat. Les courbes relient 2010 et 2012
+            par-dessus ce trou&nbsp;: {{n_ans}}&nbsp;années tracées de {{an_min}} à {{an_max}}.</li>
+          <li><strong>Des parts qui ne font pas exactement 100.</strong> Publiées au point près, elles somment de
+            {{tot_min}} à {{tot_max}}&nbsp;% selon l'année. La page ne les rééchelonne pas.</li>
+          <li><strong>Si ces parts sont en valeur ou en volume.</strong> Le dictionnaire dit «&nbsp;parts de marché, livres
+            imprimés, lieux d'achat&nbsp;», source Kantar, sans préciser. Les écarts de plusieurs dizaines de points racontés
+            ici ne dépendent pas de ce choix&nbsp;; un point d'écart en dépendrait.</li>
+          <li><strong>La méthode de mesure.</strong> Le dictionnaire nomme la source (Kantar) sans décrire la méthode&nbsp;; les
+            séries portent sur les achats des particuliers, pas sur les ventes des éditeurs ni sur les achats des
+            bibliothèques et des écoles.</li>
+          <li><strong>Qui vend sur Internet.</strong> Le fichier ne distingue pas les vendeurs en ligne (plateformes, sites
+            des enseignes, sites de libraires)&nbsp;: il ne permet pas de dire quelle part de la croissance d'Internet
+            revient à des librairies.</li>
+          <li><strong>Les autres séries du fichier</strong> (prix, production, traductions, emploi, poches…)&nbsp;: une
+            centaine d'autres colonnes, dont plusieurs mal typées par l'API (virgules décimales, espaces dans les nombres, un tirage moyen lu
+            comme une date). Elles méritent leur propre page, colonne par colonne.</li>
+          <li><strong>Les librairies sur le territoire.</strong> Leur implantation (Base des librairies du ministère)
+            est une autre question, que cette page ne traite pas.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'un fichier de séries longues du ministère de la Culture, servi
+        par l'API Tabular. Le titre provisoire du cadrage tient, avec deux corrections&nbsp;: la dernière année est 2025
+        (clubs à 2&nbsp;%, librairie à 26&nbsp;%), et la série porte une rupture en 2012 que le cadrage ne mentionnait pas.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Une requête.</strong> 33&nbsp;lignes, <code>select</code> ne lit que 11 colonnes sur 105.</li>
+            <li><strong>Des petits multiples en une balise.</strong> <code>dsfr-data-unpivot</code> bascule le format
+              large en long&nbsp;; <code>dsfr-data-repeat scopes</code> donne à chaque lieu d'achat son graphique et ses
+              seules années, avec les mêmes axes.</li>
+            <li><strong>La rupture dessinée.</strong> <code>reference-lines</code> pose la ligne de 2012 sur chaque courbe.</li>
+            <li><strong>Aucune année en dur.</strong> Les bornes sont lues dans la donnée et interpolées jusque dans les
+              noms de séries et les libellés des KPI, par des composants placés dans un <code>dsfr-data-repeat</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Lire « la valeur de telle année ».</strong> Pas de fonction « première / dernière valeur » par
+              champ&nbsp;: trois <code>group-by</code> sur une clé constante, trois jointures, puis un
+              <code>when annee = an_max then … else 0</code> par repère et une somme. Une vingtaine de lignes
+              <code>compute</code> pour écrire un chapô.</li>
+            <li><strong>Un minimum conditionnel.</strong> «&nbsp;Le plancher depuis 2012&nbsp;» s'obtient en remplaçant
+              les autres années par 100 avant un <code>:min</code>&nbsp;: juste, mais peu lisible.</li>
+            <li><strong>Une valeur absente est tracée à 0.</strong> La première version mettait les six lieux d'achat
+              sur une courbe (<code>value-fields</code>)&nbsp;: Internet, non relevé avant 2002, y apparaissait à 0&nbsp;%
+              de 1993 à 2001 (attribut <code>y</code> du <code>line-chart</code> relevé au DOM). Le format large ne protège
+              donc pas du remplissage à zéro de <code>series-field</code>. D'où les petits multiples, où chaque courbe ne
+              reçoit que ses années.</li>
+            <li><strong><code>color-map</code> ne recolore pas les points d'une courbe.</strong> Sur la même version, les
+              traits prenaient les couleurs demandées et les points gardaient la palette par défaut (pixels du canvas
+              comptés&nbsp;: environ 700 par couleur demandée, 2&nbsp;800 par couleur de la palette). La page n'utilise
+              plus <code>color-map</code> sur ses courbes.</li>
+            <li><strong>La rupture n'est pas dans la donnée.</strong> Elle est dans le dictionnaire des variables, une
+              ressource xlsx à part que la page ne lit pas&nbsp;: la ligne de 2012 est écrite à la main.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 33 lignes, 11 colonnes sur 105</td><td><code>dsfr-data-source api-type="tabular" select</code></td><td>Natif</td></tr>
+            <tr><td>Fractions → points de %</td><td><code>normalize compute</code> (<code>round(x * 100, 0)</code>)</td><td>Natif</td></tr>
+            <tr><td>Première, dernière année et leurs valeurs</td><td><code>query group-by</code> constant + <code>join</code> + <code>compute when</code> + somme</td><td>Contournement (verbeux)</td></tr>
+            <tr><td>Six séries dont une commence plus tard</td><td>petits multiples&nbsp;: <code>unpivot drop-empty</code> + <code>dsfr-data-repeat scopes</code> + <code>chart type="line"</code></td><td>Contournement (une seule courbe à six séries trace le trou à 0)</td></tr>
+            <tr><td>Couleur fixée par série sur une courbe</td><td><code>color-map</code></td><td>Partiel (traits oui, points non)</td></tr>
+            <tr><td>Marquer une rupture de série</td><td><code>reference-lines</code> (axe x)</td><td>Natif</td></tr>
+            <tr><td>Avant/après par lieu d'achat</td><td><code>dsfr-data-unpivot</code> + <code>query group-by</code> + barres groupées</td><td>Natif</td></tr>
+            <tr><td>Années dans les noms de séries et libellés</td><td>composants dans <code>dsfr-data-repeat</code></td><td>Natif</td></tr>
+            <tr><td>Tableau accessible et exploration</td><td><code>dsfr-data-a11y</code>, <code>dsfr-data-list</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un petit fichier, une page simple à tracer, verbeuse à raconter.</strong> Les graphiques sont natifs,
+          à une réserve près qui touche l'honnêteté&nbsp;: une courbe multisérie dessine à 0 ce que la source ne publie
+          pas, et il a fallu passer aux petits multiples pour ne pas inventer un Internet à 0&nbsp;% avant 2002. Ce qui coûte
+          ensuite, c'est d'écrire une phrase qui compare deux années sans les écrire en dur&nbsp;: la bibliothèque n'a pas
+          d'agrégat «&nbsp;valeur à la première / dernière ligne&nbsp;», et chaque chiffre du chapô passe par une jointure
+          et une condition.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

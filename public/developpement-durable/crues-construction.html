@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crues et construction — open-data-viz</title>
+  <meta name="description" content="Un logement exposé aux crues sur sept a été construit après 2005, et les intercommunalités les plus exposées construisent à peine moins que les autres. Création avec dsfr-data à partir des fichiers d'exposition aux inondations (Fideli 2021), de Sitadel et de l'ITDD, servis par DiDo (SDES).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — D4 du cadrage docs/portail-developpement-durable/proposition.md.
+       Pas d'original : la page croise quatre fichiers servis par DiDo (SDES).
+
+       LE CHAMP. « Exposé » = situé dans l'enveloppe approchée des inondations
+       potentielles (EAIP) par débordement de cours d'eau, d'après Fideli 2021. C'est
+       une enveloppe MAXIMALISTE, pas une zone réglementaire (PPRI).
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE. Le cadrage classait les EPCI par
+       Part_logements_exposes. Rejoué, le fichier ne tient pas par EPCI : la part
+       publiée ne se retrouve pas en divisant le compte publié par la population
+       (Insee, via l'ITDD) pour 1 081 EPCI sur 1 249, et 114 EPCI comptent plus de
+       personnes exposées que d'habitants. Les totaux nationaux, eux, sont cohérents
+       (18,0 M par les comptes, 17,7 M par part × population). La page :
+         - lit les TOTAUX nationaux et la période de construction (niveau logement,
+           pas d'erreur écologique) pour le titre ;
+         - ne donne, par EPCI, que des TRANCHES d'exposition, et montre que la
+           conclusion tient avec la part publiée comme avec la part recalculée ;
+         - n'affiche aucun classement d'EPCI, et dit pourquoi.
+
+       DIDO : 3 connexions simultanées au maximum. Trois sources partent au
+       chargement (exposition, périodes, Sitadel) ; la population (ITDD) et la
+       submersion marine sont en `lazy`. La cible de la population est placée DEUX
+       sections sous le graphique qui en dépend : avec #t-rythme, elle entrait dans
+       la marge de 200 px dès l'ouverture (1400×1000, page encore courte faute de
+       données) et la 4e requête faisait refuser l'une des trois autres.
+
+       ANNÉES ÉCRITES. Sitadel 2019-2024 (six ans) : écrites dans l'URL et dans le
+       « / 6 » du rythme annuel. LOG_COM 2025 est null partout (non publié). Population
+       2022 : colonne A2022 de l'ITDD (dernière année renseignée au 2026-09-26).
+       ========================================================================== -->
+
+  <!-- ---------- Exposition par débordement, par EPCI (3 indicateurs × 1 255 EPCI) ---------- -->
+  <dsfr-data-source id="exp"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/63c3cde7-ae7e-4985-9e80-44f591ed2047/json?INDICATEUR_EXPOSITION=in:Pop_exposee,Logements_exposes,Part_pop_exposee&amp;columns=EPCI_CODE,EPCI_LIBELLE,INDICATEUR_EXPOSITION,VALEUR_EXPOSITION">
+  </dsfr-data-source>
+  <!-- Pivot : une ligne par EPCI. Une cellule « secret » n'a pas de valeur numérique :
+       le `sum` du pivot la rend null (jamais 0). -->
+  <dsfr-data-pivot id="exp-w" source="exp" row="EPCI_CODE, EPCI_LIBELLE"
+    column="INDICATEUR_EXPOSITION" value="VALEUR_EXPOSITION" aggregate="sum">
+  </dsfr-data-pivot>
+
+  <!-- ---------- Logements exposés par période de construction (6 périodes × 1 255 EPCI) ---------- -->
+  <dsfr-data-source id="per"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/9312e60b-09d6-42dd-98e0-27d2c8adaa60/json?columns=EPCI_CODE,PERIODE_CONSTRUCTION,LOGEMENTS_EXPOSES">
+  </dsfr-data-source>
+  <!-- Les périodes sont des bornes textuelles (« <1919 », « >2005 ») : ordre explicite. -->
+  <dsfr-data-normalize id="per-n" source="per"
+    compute="ordre = when PERIODE_CONSTRUCTION = '<1919' then 1 when PERIODE_CONSTRUCTION = '1919-1945' then 2 when PERIODE_CONSTRUCTION = '1945-1970' then 3 when PERIODE_CONSTRUCTION = '1970-1990' then 4 when PERIODE_CONSTRUCTION = '1990-2005' then 5 else 6;
+             periode = when ordre = 1 then 'Avant 1919' when ordre = 6 then 'Après 2005' else PERIODE_CONSTRUCTION;
+             sec = when LOGEMENTS_EXPOSES = 'secret' then 1 else 0;
+             recent = when ordre = 6 then LOGEMENTS_EXPOSES else 0;
+             p9005 = when ordre = 5 then LOGEMENTS_EXPOSES else 0;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="per-g" source="per-n" group-by="ordre, periode"
+    aggregate="LOGEMENTS_EXPOSES:sum:n" order-by="ordre:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="per-syn" source="per-n" group-by="k"
+    aggregate="LOGEMENTS_EXPOSES:sum:connus, recent:sum:recent, p9005:sum:p9005, sec:sum:sec">
+  </dsfr-data-query>
+  <dsfr-data-query id="per-2005" source="per" where="PERIODE_CONSTRUCTION:eq:>2005"></dsfr-data-query>
+
+  <!-- ---------- Sitadel : logements commencés 2019-2024, tous types, par EPCI ---------- -->
+  <dsfr-data-source id="sit"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/cb3c0612-e7d9-4a87-91be-cc0fb6448a4f/json?TYPE_LGT=eq:Tous%20Logements&amp;ANNEE=in:2019,2020,2021,2022,2023,2024&amp;columns=EPCI,LOG_COM">
+  </dsfr-data-source>
+  <!-- group-by AVANT la jointure : une ligne par année et par EPCI dans le fichier,
+       la clé doit être unique du côté droit (ADR-122). -->
+  <dsfr-data-query id="sit-epci" source="sit" group-by="EPCI" aggregate="LOG_COM:sum:com"></dsfr-data-query>
+
+  <!-- ---------- Synthèse nationale (exposition + périodes + Sitadel) ---------- -->
+  <dsfr-data-normalize id="exp-k" source="exp-w" compute="k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="exp-syn" source="exp-k" group-by="k"
+    aggregate="Pop_exposee:sum:pe, Logements_exposes:sum:le, EPCI_CODE:count:n_epci">
+  </dsfr-data-query>
+  <dsfr-data-join id="syn-j" left="exp-syn" right="per-syn" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="syn" source="syn-j"
+    compute="part_recent = recent / connus * 100;
+             sans_periode = le - connus">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Population par EPCI (ITDD, Insee) — lazy ---------- -->
+  <!-- La population figure cinq fois dans l'ITDD (cinq numéros d'indicateur) : filtre
+       serveur sur i017, une ligne par EPCI. -->
+  <dsfr-data-source id="pop" lazy lazy-target="#t-explorer, #t-hors"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/9b27ee21-5a2f-4c1d-964a-e06dad6ab1ec/json?VARIABLE=eq:pop&amp;NO_INDIC=eq:i017&amp;columns=CODGEO_CODE,A2022">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="pop-n" source="pop" rename="A2022:pop"></dsfr-data-normalize>
+
+  <!-- ---------- Le croisement par EPCI ---------- -->
+  <dsfr-data-join id="j1" left="exp-w" right="sit-epci" on="EPCI_CODE=EPCI" type="left"></dsfr-data-join>
+  <dsfr-data-join id="j2" left="j1" right="pop-n" on="EPCI_CODE=CODGEO_CODE" type="left"></dsfr-data-join>
+  <dsfr-data-join id="j3" left="j2" right="per-2005" on="EPCI_CODE" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="epci" source="j3"
+    compute="ordre = when Part_pop_exposee < 10 then 1 when Part_pop_exposee < 20 then 2 when Part_pop_exposee < 30 then 3 when Part_pop_exposee < 50 then 4 else 5;
+             tranche = when ordre = 1 then 'Moins de 10 %' when ordre = 2 then '10 à 20 %' when ordre = 3 then '20 à 30 %' when ordre = 4 then '30 à 50 %' else '50 % et plus';
+             part_calc = round(Pop_exposee / pop * 100, 1);
+             ordre_c = when Pop_exposee / pop * 100 < 10 then 1 when Pop_exposee / pop * 100 < 30 then 2 else 3;
+             rythme = round(com / pop / 6 * 1000, 1);
+             incoh = when Pop_exposee > pop then 1 else 0;
+             coh = when abs(Pop_exposee / pop * 100 / Part_pop_exposee - 1) < 0.1 then 1 else 0;
+             alerte = when Pop_exposee > pop then 'Oui' else '';
+             retenu = when is_null(Part_pop_exposee) or is_null(pop) then 0 else 1;
+             un = 1;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ret" source="epci" where="retenu:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="tr" source="ret" group-by="ordre, tranche"
+    aggregate="un:sum, pop:sum, com:sum, pop__sum:share_percent:part_pop, com__sum:share_percent:part_com" order-by="ordre:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tr-t" source="tr"
+    compute="rythme = round(com__sum / pop__sum / 6 * 1000, 1);
+             part_pop_r = round(part_pop, 1);
+             part_com_r = round(part_com, 1)">
+  </dsfr-data-normalize>
+
+  <!-- Phrase du rythme : très exposés (≥ 30 %) face aux peu exposés (< 10 %). -->
+  <dsfr-data-query id="hi" source="ret" where="Part_pop_exposee:gte:30" group-by="k" aggregate="un:sum:n, pop:sum:pop, com:sum:com"></dsfr-data-query>
+  <dsfr-data-query id="lo" source="ret" where="Part_pop_exposee:lt:10" group-by="k" aggregate="un:sum:n, pop:sum:pop, com:sum:com"></dsfr-data-query>
+  <dsfr-data-query id="tot" source="ret" group-by="k" aggregate="un:sum:n, pop:sum:pop, com:sum:com"></dsfr-data-query>
+  <dsfr-data-join id="r1" left="hi" right="lo" on="k" prefix-right="lo_"></dsfr-data-join>
+  <dsfr-data-join id="r2" left="r1" right="tot" on="k" prefix-right="t_"></dsfr-data-join>
+  <dsfr-data-normalize id="rythme-syn" source="r2"
+    compute="rh = com / pop / 6 * 1000;
+             rl = lo_com / lo_pop / 6 * 1000;
+             ecart = (1 - rh / rl) * 100;
+             part_com = com / t_com * 100;
+             part_pop = pop / t_pop * 100;
+             pe_nat = t_pop">
+  </dsfr-data-normalize>
+
+  <!-- Même calcul avec la part RECALCULÉE (Pop_exposee / population), EPCI incohérents écartés. -->
+  <dsfr-data-query id="okc" source="ret" where="incoh:eq:0, part_calc:isnotnull"></dsfr-data-query>
+  <dsfr-data-query id="hic" source="okc" where="ordre_c:eq:3" group-by="k" aggregate="un:sum:n, pop:sum:pop, com:sum:com"></dsfr-data-query>
+  <dsfr-data-query id="loc" source="okc" where="ordre_c:eq:1" group-by="k" aggregate="un:sum:n, pop:sum:pop, com:sum:com"></dsfr-data-query>
+  <dsfr-data-join id="c1" left="hic" right="loc" on="k" prefix-right="lo_"></dsfr-data-join>
+  <dsfr-data-normalize id="calc-syn" source="c1"
+    compute="rh = com / pop / 6 * 1000; rl = lo_com / lo_pop / 6 * 1000">
+  </dsfr-data-normalize>
+
+  <!-- Cohérence du fichier par EPCI. -->
+  <dsfr-data-query id="inc" source="ret" group-by="k" aggregate="incoh:sum:incoh, coh:sum:coh, un:sum:n"></dsfr-data-query>
+  <dsfr-data-query id="toulon" source="epci" where="EPCI_CODE:eq:248300543"></dsfr-data-query>
+
+  <!-- Ce qui sort du croisement : EPCI sans part (secret) ou sans population (Mayotte), et
+       logements commencés dans des EPCI absents du fichier d'exposition. -->
+  <dsfr-data-query id="exclus" source="epci" where="retenu:eq:0" group-by="k" aggregate="un:sum:n, com:sum:com"></dsfr-data-query>
+  <dsfr-data-join id="sit-x" left="sit-epci" right="exp-w" on="EPCI=EPCI_CODE" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="sit-x-n" source="sit-x" compute="hors = when is_null(EPCI_LIBELLE) then 1 else 0; k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="hors" source="sit-x-n" where="hors:eq:1" group-by="k" aggregate="hors:sum:n_hors, com:sum:hors"></dsfr-data-query>
+
+  <!-- ---------- Submersion marine — lazy, « ce qu'on ne montre pas » ---------- -->
+  <dsfr-data-source id="sub" lazy lazy-target="#t-hors"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/ef9ea429-fe81-4832-9a82-51249e830f03/json?INDICATEUR_EXPOSITION=in:Pop_exposee,Logements_exposes&amp;columns=EPCI_CODE,INDICATEUR_EXPOSITION,VALEUR_EXPOSITION">
+  </dsfr-data-source>
+  <dsfr-data-pivot id="sub-w" source="sub" row="EPCI_CODE" column="INDICATEUR_EXPOSITION" value="VALEUR_EXPOSITION" aggregate="sum"></dsfr-data-pivot>
+  <dsfr-data-normalize id="sub-k" source="sub-w" compute="k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="sub-syn" source="sub-k" group-by="k" aggregate="Pop_exposee:sum:pe, Logements_exposes:sum:le, EPCI_CODE:count:n"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Crues et construction</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Un logement exposé aux crues sur sept a été construit après 2005</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          {{pe:number}}&nbsp;personnes et {{le:number}}&nbsp;logements se trouvent dans l'enveloppe où un cours d'eau
+          peut déborder. Parmi les logements dont la date de construction est publiée, <strong>{{recent:number}} ont
+          été bâtis après 2005</strong>, soit {{part_recent:number:1}}&nbsp;%&nbsp;: on a continué de construire là où l'eau
+          peut monter, à peu près au même rythme qu'avant. Et les intercommunalités les plus exposées construisent
+          encore aujourd'hui, à peine moins que les autres.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      SDES, exposition des logements et des individus au risque d'inondation par débordement de cours d'eau, par
+      intercommunalité, d'après Fideli 2021 (Insee)&nbsp;; Sitadel, logements commencés en date réelle&nbsp;; Insee,
+      population par intercommunalité (indicateurs territoriaux de développement durable). «&nbsp;Exposé&nbsp;» veut
+      dire situé dans l'enveloppe approchée des inondations potentielles (EAIP)&nbsp;: une enveloppe
+      <strong>maximaliste</strong>, pas une zone réglementaire — elle couvre plus d'un habitant sur quatre. Données
+      lues à l'ouverture de la page sur <a href="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/" target="_blank" rel="noopener external">l'API DiDo</a>.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="pe:max" format="nombre" span="4"
+        heading="Personnes exposées" label="dans l'enveloppe d'inondation par débordement (Fideli 2021)"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="le:max" format="nombre" span="4"
+        heading="Logements exposés" label="même enveloppe, tous logements"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="recent:max" format="nombre" span="4"
+        heading="Logements exposés construits après 2005" label="parmi ceux dont la période est publiée"
+        lines='[{"value":"part_recent:max","decimals":1,"suffix":"des logements exposés datés"}]'></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les périodes de construction ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-periodes">
+    <h2 id="t-periodes" class="fr-h3">Depuis 2005, on a bâti dans l'enveloppe inondable autant qu'entre 1990 et 2005</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          {{recent:number}}&nbsp;logements exposés datent d'après 2005, contre {{p9005:number}} pour la période
+          1990-2005&nbsp;: sur une durée comparable (une quinzaine d'années chacune), le rythme n'a pas ralenti. Les
+          logements anciens restent les plus nombreux — mais les périodes n'ont pas la même longueur, et
+          «&nbsp;avant 1919&nbsp;» les cumule toutes.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Logements exposés aux crues selon leur période de construction">
+      <dsfr-data-chart id="g-periodes" source="per-g" type="bar"
+        label-field="periode" value-field="n:Logements exposés" name="Logements exposés"
+        selected-palette="neutral" highlight-index="[5]" unit-tooltip="logements"
+        databox databox-title="Logements situés dans l'enveloppe d'inondation par débordement, selon leur période de construction (France, Fideli 2021)"
+        databox-source="SDES — exposition au risque d'inondation par débordement de cours d'eau (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-periodes" source="per-g" label-field="periode" value-field="n"
+        description="Barres verticales, une par période de construction, de « avant 1919 » à « après 2005 » : le nombre de logements situés dans l'enveloppe d'inondation par débordement. Avant 1919 et 1970-1990 dépassent chacune 2 millions ; la dernière barre, après 2005, mise en évidence, est un peu plus haute que celle de 1990-2005.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Somme des intercommunalités. {{sec:number}}&nbsp;cellules intercommunalité × période sont couvertes par le
+          secret statistique et sortent de la somme&nbsp;; avec les logements dont la période n'est pas publiée, cela
+          fait {{sans_periode:number}}&nbsp;logements exposés absents de ce graphique ({{connus:number}} y figurent sur
+          {{le:number}}).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= LE RYTHME PAR INTERCOMMUNALITÉ ======================= -->
+  <!-- highlight-index="[3, 4]" : les deux tranches les plus exposées (30 % et plus). -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-rythme">
+    <h2 id="t-rythme" class="fr-h3">Les intercommunalités les plus exposées construisent à peine moins que les autres</h2>
+    <dsfr-data-repeat source="rythme-syn">
+      <template>
+        <p class="odv-lecture">
+          Entre 2019 et 2024, les {{n:number}}&nbsp;intercommunalités où au moins 30&nbsp;% des habitants vivent dans
+          l'enveloppe d'inondation ont mis en chantier <strong>{{rh:number:1}}&nbsp;logements pour 1&nbsp;000&nbsp;habitants
+          par an</strong>, contre {{rl:number:1}} dans les {{lo_n:number}} où moins de 10&nbsp;% le sont&nbsp;: un rythme
+          inférieur de {{ecart:number:0}}&nbsp;%, pas un arrêt. Elles réunissent {{part_pop:number:1}}&nbsp;% de la population
+          et ont reçu {{part_com:number:1}}&nbsp;% des logements commencés.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Logements commencés pour 1 000 habitants par an, selon la part des habitants exposés">
+      <dsfr-data-chart id="g-rythme" source="tr-t" type="bar"
+        label-field="tranche" value-field="rythme:Logements commencés pour 1 000 habitants par an" name="Logements commencés pour 1 000 habitants par an"
+        selected-palette="neutral" highlight-index="[3, 4]" unit-tooltip="pour 1 000 hab. / an" y-min="0"
+        databox databox-title="Logements commencés pour 1 000 habitants par an (2019-2024), selon la part des habitants de l'intercommunalité situés dans l'enveloppe d'inondation par débordement"
+        databox-source="SDES — Sitadel, exposition au risque d'inondation (Fideli 2021) ; Insee — population 2022 via l'ITDD (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-rythme" source="tr-t" label-field="tranche" value-field="rythme, un__sum, part_pop_r, part_com_r"
+        description="Barres verticales sur un axe partant de zéro, une par tranche d'exposition des intercommunalités (part de leurs habitants dans l'enveloppe d'inondation, selon le fichier du SDES) : le nombre de logements commencés pour 1 000 habitants par an entre 2019 et 2024. Environ 5 dans les intercommunalités exposées à moins de 10 %, environ 4 dans les autres tranches ; les deux tranches les plus exposées, mises en évidence, sont à peine plus basses. Le tableau donne aussi le nombre d'intercommunalités, leur part de la population et leur part des logements commencés.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Rythme = logements commencés de 2019 à 2024 dans les intercommunalités de la tranche ÷ leur population 2022 ÷ 6 ans
+      × 1&nbsp;000 (un ratio de sommes, pas une moyenne des intercommunalités). Tranche&nbsp;: part des habitants exposés
+      publiée par le SDES. C'est une lecture à l'échelle de l'intercommunalité&nbsp;: le fichier ne dit pas si les
+      logements neufs d'une intercommunalité exposée sont eux-mêmes dans l'enveloppe.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — le fichier par EPCI ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-fichier">
+    <h2 id="t-fichier" class="fr-h3">Par intercommunalité, le fichier se contredit&nbsp;: la page ne classe pas</h2>
+    <dsfr-data-repeat source="inc">
+      <template>
+        <p class="odv-lecture">
+          Pour chaque intercommunalité, le fichier publie un nombre de personnes exposées et une part de la population
+          exposée. Rapporté à la population de l'Insee, le nombre ne redonne la part publiée (à 10&nbsp;% près) que
+          pour <strong>{{coh:number}}&nbsp;intercommunalités sur {{n:number}}</strong>, et {{incoh:number}}&nbsp;comptent
+          plus de personnes exposées que d'habitants.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="toulon">
+      <template>
+        <p class="odv-lecture">
+          Exemple&nbsp;: {{EPCI_LIBELLE}}, {{pop:number}}&nbsp;habitants. Le fichier y publie {{Part_pop_exposee:number:1}}&nbsp;%
+          d'habitants exposés, mais {{Pop_exposee:number}}&nbsp;personnes exposées, soit {{part_calc:number:1}}&nbsp;% de la
+          population.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="calc-syn">
+      <template>
+        <p class="odv-lecture">
+          Les totaux nationaux, eux, se recoupent, et la conclusion du bloc précédent ne dépend pas de la colonne
+          choisie&nbsp;: avec la part recalculée (personnes exposées ÷ population, intercommunalités incohérentes écartées),
+          les {{n:number}}&nbsp;intercommunalités exposées à 30&nbsp;% ou plus construisent {{rh:number:1}}&nbsp;logements pour
+          1&nbsp;000&nbsp;habitants par an, les {{lo_n:number}} exposées à moins de 10&nbsp;% {{rl:number:1}}. C'est pourquoi la
+          page raisonne par tranches et ne publie <strong>aucun classement</strong> d'intercommunalités&nbsp;: un palmarès
+          reposerait sur des lignes dont on ne sait pas laquelle des deux colonnes est juste.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: et dans votre intercommunalité&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Les chiffres tels que le SDES les publie, à lire avec la réserve du bloc précédent. La colonne «&nbsp;Plus
+      d'exposés que d'habitants&nbsp;» signale les lignes que le fichier rend impossibles&nbsp;: leur part publiée et
+      leur nombre d'exposés ne peuvent pas être justes ensemble.
+    </p>
+    <dsfr-data-list source="epci"
+      columns="EPCI_LIBELLE:Intercommunalité, Part_pop_exposee:Habitants exposés (% publié), Pop_exposee:Personnes exposées, pop:Population 2022, part_calc:Exposés ÷ population (%), com:Logements commencés 2019-2024, rythme:Pour 1 000 hab. par an, LOGEMENTS_EXPOSES:Logements exposés bâtis après 2005, alerte:Plus d'exposés que d'habitants"
+      sort="com:desc" search pagination="15" count-label="intercommunalité|intercommunalités" export="csv"
+      caption="Exposition aux crues (Fideli 2021) et logements commencés de 2019 à 2024, par intercommunalité">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm fr-mb-0">
+      <li><strong>Si les logements neufs sont eux-mêmes en zone inondable.</strong> Sitadel donne les mises en chantier
+        par intercommunalité, pas leur position par rapport à l'enveloppe&nbsp;: conclure «&nbsp;on construit en zone
+        inondable&nbsp;» à partir du rythme d'une intercommunalité exposée serait une erreur écologique. Le seul chiffre
+        à l'échelle du logement est celui des périodes de construction, qui s'arrête à Fideli 2021.</li>
+      <li><strong>Les règles d'urbanisme.</strong> L'enveloppe n'est pas un plan de prévention des risques&nbsp;: la page
+        ne dit rien de la constructibilité réglementaire des terrains, ni de la façon dont les logements récents ont été
+        bâtis. Elle constate, elle ne juge pas.</li>
+    </ul>
+    <dsfr-data-repeat source="sub-syn">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>La submersion marine</strong>, publiée à part&nbsp;: {{le:number}}&nbsp;logements et {{pe:number}}&nbsp;personnes
+            exposés dans {{n:number}}&nbsp;intercommunalités. Les deux fichiers sont publiés séparément&nbsp;; la page ne
+            les additionne pas, faute de savoir combien de logements se trouvent dans les deux enveloppes.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="exclus">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>{{n:number}}&nbsp;intercommunalités sorties du croisement</strong>&nbsp;: une dont toutes les valeurs
+            d'exposition sont sous secret statistique, et celles de Mayotte, sans population dans l'ITDD.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="hors">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>{{hors:number}}&nbsp;logements commencés hors du fichier d'exposition</strong>, dans {{n_hors:number}}
+            codes d'intercommunalité de Sitadel (dont un code vide) absents du fichier d'exposition&nbsp;: la page ne
+            les rapproche pas.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>L'année 2025</strong>&nbsp;: les mises en chantier n'y sont pas encore publiées (valeur vide dans
+        toutes les intercommunalités), elle est écartée.</li>
+      <li><strong>Un palmarès des intercommunalités</strong>, pour la raison dite plus haut.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir de quatre fichiers servis par DiDo (exposition par débordement,
+        exposition par période de construction, Sitadel par intercommunalité, population de l'ITDD), plus la submersion
+        marine. Le cadrage titrait sur «&nbsp;les intercommunalités exposées continuent de construire&nbsp;» et classait les
+        intercommunalités par leur part exposée&nbsp;; rejouée, cette part ne tient pas ligne à ligne, et le titre a
+        basculé sur le seul chiffre qui se lit à l'échelle du logement.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Un fichier long devenu large.</strong> <code>dsfr-data-pivot</code> fait d'un indicateur par ligne une
+              colonne par indicateur, et rend null (jamais 0) une cellule «&nbsp;secret&nbsp;».</li>
+            <li><strong>Trois producteurs joints par le code d'intercommunalité.</strong> <code>on="EPCI_CODE=EPCI"</code>
+              puis <code>on="EPCI_CODE=CODGEO_CODE"</code>&nbsp;: les clés de noms différents se déclarent sans renommer.</li>
+            <li><strong>Des tranches et des parts sans script.</strong> <code>when … then</code> pour la tranche,
+              <code>share_percent</code> pour la part de population et de logements commencés de chaque tranche.</li>
+            <li><strong>Rester sous la limite de DiDo.</strong> Trois sources au chargement, deux en <code>lazy</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Le fichier, pas la bibliothèque.</strong> La part publiée et le nombre publié ne se recoupent pas
+              pour la plupart des intercommunalités&nbsp;: le contrôle a demandé une troisième source (la population), et la
+              page a renoncé au classement prévu.</li>
+            <li><strong>Une porte <code>lazy</code> ouverte trop tôt.</strong> Avec <code>lazy-target</code> sur la
+              section du rythme, la population partait dès l'ouverture sur un écran de 1&nbsp;000&nbsp;px de haut&nbsp;: avant
+              l'arrivée des données, les phrases calculées sont vides et la page est plus courte, la section entrait dans la
+              marge de 200&nbsp;px et quatre requêtes partaient ensemble&nbsp;; la recette a échoué trois fois de suite, une source
+              refusée (erreur CORS, indicateurs en erreur). Cible déplacée deux sections plus bas&nbsp;: trois requêtes au
+              chargement. Un échec isolé a encore été vu pendant que d'autres pages interrogeaient DiDo depuis la même
+              adresse&nbsp;: la limite est par adresse, pas par page.</li>
+            <li><strong>Des périodes en texte.</strong> «&nbsp;&lt;1919&nbsp;» et «&nbsp;&gt;2005&nbsp;» ne se trient pas&nbsp;: un
+              <code>when</code> à six branches pose l'ordre.</li>
+            <li><strong>Comparer deux groupes demande des jointures.</strong> «&nbsp;30&nbsp;% et plus face à moins de
+              10&nbsp;%&nbsp;» passe par deux requêtes d'une ligne jointes sur une clé constante, deux fois (part publiée,
+              part recalculée).</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Lire DiDo filtré</td><td><code>dsfr-data-source url=".../json?COL=in:v&amp;columns=…"</code></td><td>Natif (mode URL)</td></tr>
+            <tr><td>Un indicateur par ligne → une colonne par indicateur</td><td><code>dsfr-data-pivot</code></td><td>Natif</td></tr>
+            <tr><td>Secret statistique compté</td><td><code>compute sec = when … = 'secret'</code> + <code>sum</code></td><td>Natif</td></tr>
+            <tr><td>Croiser trois fichiers par intercommunalité</td><td><code>query group-by</code> puis <code>dsfr-data-join on="a=b"</code></td><td>Natif</td></tr>
+            <tr><td>Tranches ordonnées, rythme, parts</td><td><code>compute when</code>, <code>group-by</code>, <code>share_percent</code></td><td>Natif</td></tr>
+            <tr><td>Contrôler la cohérence d'un fichier</td><td><code>compute</code> + <code>sum</code> d'indicateurs 0/1</td><td>Natif</td></tr>
+            <tr><td>Rester sous 3 requêtes simultanées</td><td><code>lazy lazy-target</code></td><td>Natif</td></tr>
+            <tr><td>Tableau exportable</td><td><code>dsfr-data-list</code> (recherche, tri, CSV)</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>La bibliothèque a servi de contrôle qualité.</strong> Tout ce que la page calcule est natif — pivot,
+          jointures, tranches, parts. Ce qui a coûté, c'est le fichier&nbsp;: croisé avec la population, il se contredit
+          intercommunalité par intercommunalité, et la page le dit au lieu de publier un classement qui aurait eu l'air
+          juste.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

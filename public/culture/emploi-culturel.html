@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>L'emploi culturel par département — open-data-viz</title>
+  <meta name="description" content="Paris pèse 8 % de l'emploi salarié du pays, mais 32 % de l'emploi salarié des secteurs culturels ; avec les Hauts-de-Seine, 44 %. Création avec dsfr-data sur deux jeux du ministère de la Culture (API Tabular de data.gouv.fr), 2016-2022.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 9 de docs/portail-culture/proposition.md.
+
+       DEUX JEUX du ministère de la Culture (Deps-Doc), lus par l'adaptateur Tabular
+       en export Parquet (une requête chacun, 700 lignes = 100 départements × 7 ans) :
+       - établissements culturels employeurs par département, 2016-2022 (ed8f9703…) ;
+       - équivalents temps plein salariés des secteurs culturels, 2016-2022 (2308f8e2…).
+       Unicité code × millésime vérifiée des deux côtés (700 clés distinctes chacun).
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué le 2026-09-26 sur les jeux complets) :
+       - « 9 % des établissements parisiens, 1,6 % dans les Ardennes » tient (9,1 / 1,6 en
+         2022). Mais l'histoire est ailleurs : Paris pèse 7,7 % de l'emploi salarié du pays
+         et 31,9 % de l'emploi salarié culturel ; avec les Hauts-de-Seine, 43,6 %. Titre
+         recentré sur la concentration de l'EMPLOI, plus forte que celle des établissements.
+       - Le nombre total d'établissements bondit de 15 % entre 2016 et 2017 (1,97 → 2,27 M),
+         puis progresse de 1 à 4 % par an : rupture de série non documentée. Aucune
+         évolution d'effectif d'établissements n'est tracée ; l'écart est pris 2017-2022.
+       - Les clés s'écrivent code_insee (établissements) et Code_insee (salariés) : jointure
+         on="code_insee=Code_insee".
+       - Pct_culturel publié n'est jamais moyenné : tous les taux sont recalculés en ratio
+         de sommes depuis les effectifs.
+       ========================================================================== -->
+
+  <!-- ---------------- Les deux jeux, export Parquet ---------------- -->
+  <dsfr-data-source id="src-e" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="ed8f9703-ad77-48d2-bc24-99fcc6f81b74" fetch-mode="export"
+    select="millesime, code_insee, libelle_geographique, nombre_etablissements_culturels, nombre_etablissements">
+  </dsfr-data-source>
+  <dsfr-data-source id="src-s" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="2308f8e2-211b-425a-bb38-0e08700e14ab" fetch-mode="export"
+    select="millesime, Code_insee, libelle_geographique, EQTP_culturels, EQTP_total">
+  </dsfr-data-source>
+
+  <!-- ---------------- 2022, une ligne par département ---------------- -->
+  <dsfr-data-query id="e22" source="src-e" where="millesime:eq:2022" group-by="code_insee, libelle_geographique"
+    aggregate="nombre_etablissements_culturels:sum, nombre_etablissements:sum,
+               nombre_etablissements_culturels__sum:share_percent:part_ec"></dsfr-data-query>
+  <dsfr-data-query id="s22" source="src-s" where="millesime:eq:2022" group-by="Code_insee"
+    aggregate="EQTP_culturels:sum, EQTP_total:sum,
+               EQTP_culturels__sum:share_percent:part_sc, EQTP_total__sum:share_percent:part_st"></dsfr-data-query>
+  <dsfr-data-query id="s17-q" source="src-s" where="millesime:eq:2017"></dsfr-data-query>
+  <dsfr-data-normalize id="s17" source="s17-q" compute="p17 = 100 * EQTP_culturels / EQTP_total"></dsfr-data-normalize>
+  <dsfr-data-join id="j22" left="e22" right="s22" on="code_insee=Code_insee" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="j22b" left="j22" right="s17" on="code_insee=Code_insee" type="left" prefix-right="a17_"></dsfr-data-join>
+  <dsfr-data-normalize id="dep" source="j22b"
+    compute="k = 'fr';
+             Departement = libelle_geographique;
+             ec = nombre_etablissements_culturels__sum;
+             et = nombre_etablissements__sum;
+             sc = EQTP_culturels__sum;
+             st = EQTP_total__sum;
+             pct_e = round(100 * ec / et, 1);
+             pct_s = round(100 * sc / st, 1);
+             etp_etab = round(sc / ec, 1);
+             part_sc_r = round(part_sc, 1);
+             part_st_r = round(part_st, 1);
+             part_ec_r = round(part_ec, 1);
+             evol = round(100 * sc / st - p17, 2)">
+  </dsfr-data-normalize>
+
+  <!-- Paris, le département le moins culturel, la France entière -->
+  <dsfr-data-query id="paris" source="dep" where="code_insee:eq:75"></dsfr-data-query>
+  <dsfr-data-query id="dep-min" source="dep" order-by="pct_e:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="chapo" left="paris" right="dep-min" on="k" type="inner" prefix-right="min_"></dsfr-data-join>
+  <dsfr-data-normalize id="chapo-t" source="chapo"
+    compute="un_sur = round(et / ec, 0); min_un_sur = round(min_et / min_ec, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="nat-g" source="dep" group-by="k"
+    aggregate="ec:sum:ec, et:sum:et, sc:sum:sc, st:sum:st"></dsfr-data-query>
+  <dsfr-data-normalize id="nat" source="nat-g"
+    compute="pct_e = 100 * ec / et; pct_s = 100 * sc / st; etp_etab = sc / ec"></dsfr-data-normalize>
+
+  <!-- Les deux premiers départements -->
+  <dsfr-data-query id="top10" source="dep" order-by="part_sc:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-query id="top2-q" source="dep" order-by="part_sc:desc" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="top2" source="top2-q" group-by="k"
+    aggregate="part_sc:sum:sc2, part_ec:sum:ec2, part_st:sum:st2"></dsfr-data-query>
+
+  <!-- Taille moyenne des établissements culturels -->
+  <dsfr-data-query id="etp-max" source="dep" order-by="etp_etab:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="etp-min" source="dep" order-by="etp_etab:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="etp-j0" left="etp-max" right="etp-min" on="k" type="inner" prefix-right="min_"></dsfr-data-join>
+  <dsfr-data-join id="etp-j" left="etp-j0" right="nat" on="k" type="inner" prefix-right="nat_"></dsfr-data-join>
+
+  <!-- Évolution 2017-2022 de la part de l'emploi culturel -->
+  <dsfr-data-query id="evol-max" source="dep" order-by="evol:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="evol-min" source="dep" order-by="evol:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="evol-j" left="evol-min" right="evol-max" on="k" type="inner" prefix-right="max_"></dsfr-data-join>
+
+  <!-- ---------------- Série 2016-2022 : la part de Paris ---------------- -->
+  <dsfr-data-normalize id="e-an-n" source="src-e"
+    compute="p = when code_insee = '75' then nombre_etablissements_culturels else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="e-an" source="e-an-n" group-by="millesime"
+    aggregate="p:sum:p, nombre_etablissements_culturels:sum:tot"></dsfr-data-query>
+  <dsfr-data-normalize id="s-an-n" source="src-s"
+    compute="p = when Code_insee = '75' then EQTP_culturels else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="s-an" source="s-an-n" group-by="millesime"
+    aggregate="p:sum:p, EQTP_culturels:sum:tot, EQTP_total:sum:tot_all"></dsfr-data-query>
+  <dsfr-data-join id="an-j" left="s-an" right="e-an" on="millesime" type="inner" prefix-right="e_"></dsfr-data-join>
+  <dsfr-data-normalize id="an-n" source="an-j"
+    compute="k = 'fr';
+             Annee = millesime;
+             part_s = round(100 * p / tot, 1);
+             part_e = round(100 * e_p / e_tot, 1);
+             pct_nat = round(100 * tot / tot_all, 2)"></dsfr-data-normalize>
+  <dsfr-data-query id="an" source="an-n" order-by="Annee:asc"></dsfr-data-query>
+  <dsfr-data-query id="an-first" source="an" order-by="Annee:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-last" source="an" order-by="Annee:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="an-fl" left="an-first" right="an-last" on="k" type="inner" prefix-right="d_"></dsfr-data-join>
+  <dsfr-data-query id="an-min" source="an" order-by="pct_nat:asc" limit="1"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">L'emploi culturel par département</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Emploi culturel&nbsp;: Paris pèse 8&nbsp;% de l'emploi salarié du pays, mais 32&nbsp;% de celui de la culture</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="paris">
+        <template>
+          En 2022, Paris concentre {{part_st_r:number:1}}&nbsp;% des emplois salariés de France, en équivalents temps plein,
+          mais <strong>{{part_sc_r:number:1}}&nbsp;% de ceux des secteurs culturels</strong>&nbsp;: {{sc:number:0}}&nbsp;postes
+          dans l'architecture, l'audiovisuel, le livre et la presse, le patrimoine, la publicité, le spectacle vivant.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="chapo-t">
+        <template>
+          À Paris, un établissement employeur sur {{un_sur:number:0}} est culturel ({{pct_e:number:1}}&nbsp;%)&nbsp;;
+          dans le département qui en compte le moins — {{min_Departement}} —, un sur {{min_un_sur:number:0}}
+          ({{min_pct_e:number:1}}&nbsp;%).
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture (Deps-Doc)&nbsp;: établissements culturels employeurs et salariés des secteurs culturels par
+      département, 2016-2022, publiés sur data.gouv.fr et lus par l'API Tabular au chargement de la page. Secteurs
+      culturels au sens de la nomenclature d'activités de l'Insee&nbsp;: architecture, arts visuels, audiovisuel et
+      multimédia, enseignement culturel, livre et presse, patrimoine, publicité, spectacle vivant. Salariés seulement.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="paris" value="part_sc:max" decimals="1" unit="%" span="4"
+        heading="Paris, emploi culturel" label="part de Paris dans l'emploi salarié des secteurs culturels (ETP, 2022)"></dsfr-data-kpi>
+      <dsfr-data-kpi source="paris" value="part_st:max" decimals="1" unit="%" span="4"
+        heading="Paris, emploi total" label="part de Paris dans l'emploi salarié de tous les secteurs (ETP, 2022)"></dsfr-data-kpi>
+      <dsfr-data-kpi source="dep" value="sc:sum / st:sum" format="pourcentage" decimals="1" span="4"
+        heading="France, part de la culture" label="de l'emploi salarié est dans un secteur culturel (100 départements, 2022)"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — où sont les emplois ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-top">
+    <h2 id="t-top" class="fr-h3">Paris et les Hauts-de-Seine réunissent plus de quatre emplois culturels sur dix</h2>
+    <dsfr-data-repeat source="top2">
+      <template>
+        <p class="odv-lecture">
+          Les deux premiers départements portent ensemble {{sc2:number:1}}&nbsp;% de l'emploi salarié culturel du pays,
+          pour {{st2:number:1}}&nbsp;% de l'emploi salarié tout court. Dès le troisième, l'écart s'inverse&nbsp;: le Rhône,
+          les Bouches-du-Rhône, le Nord ou la Gironde pèsent moins dans l'emploi culturel que dans l'emploi total —
+          seule la Seine-Saint-Denis, voisine de Paris, fait un peu mieux.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part de chaque département dans l'emploi culturel et dans l'emploi total">
+      <dsfr-data-chart id="g-top" source="top10" type="bar" horizontal
+        label-field="Departement" value-field="part_sc_r:Part de l'emploi salarié culturel du pays"
+        value-fields="part_st_r:Part de l'emploi salarié total du pays" unit-tooltip="%"
+        databox databox-title="Les dix départements qui portent le plus d'emploi culturel : leur part de l'emploi salarié culturel et de l'emploi salarié total, 2022 (%)"
+        databox-source="Ministère de la Culture (Deps-Doc) — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-top" source="top10" label-field="Departement" value-field="part_sc_r,part_st_r,part_ec_r"
+        description="Barres horizontales groupées pour les dix départements qui portent la plus grande part de l'emploi salarié culturel du pays en 2022, du premier au dixième. Pour chacun, deux barres : sa part de l'emploi salarié culturel, puis sa part de l'emploi salarié total. Paris dépasse de très loin tous les autres, avec une part de l'emploi culturel quatre fois supérieure à sa part de l'emploi total ; les Hauts-de-Seine suivent avec un écart du même ordre ; à partir du Rhône, troisième, les deux barres sont de taille voisine, et la part de l'emploi total est souvent la plus longue, sauf en Seine-Saint-Denis. Le tableau donne aussi la part de chaque département dans les établissements culturels.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Parts du total des 100 départements du fichier (Mayotte n'y est pas). Emploi en équivalents temps plein salariés&nbsp;:
+      un intermittent, un auteur ou un indépendant n'y figure pas.
+    </p>
+  </section>
+
+  <!-- ======================= LA CARTE — les établissements ======================= -->
+  <!-- map-summary="weighted" pondéré par le nombre d'établissements : le résumé est le
+       ratio des sommes (3,7 %), pas la moyenne des 100 taux (3,0 %). -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-carte">
+    <h2 id="t-carte" class="fr-h3">Paris et les Hauts-de-Seine mis à part, aucun département ne compte 5&nbsp;% d'établissements culturels</h2>
+    <dsfr-data-repeat source="nat">
+      <template>
+        <p class="odv-lecture">
+          En France, {{pct_e:number:1}}&nbsp;% des établissements employeurs sont culturels. La carte ne dessine pas une
+          France culturelle et une France qui ne l'est pas, mais un gradient&nbsp;: Paris et la petite couronne, puis les
+          départements des grandes métropoles — Rhône, Haute-Garonne, Gironde, Bouches-du-Rhône, Hérault —, puis un fond
+          à peu près uniforme, du Nord-Est au Massif central.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Carte de la part des établissements culturels par département">
+      <dsfr-data-chart id="g-carte" source="dep" type="map"
+        code-field="code_insee" value-field="pct_e" name="Part des établissements culturels (%)" unit-tooltip="%"
+        selected-palette="sequentialAscending" map-summary="weighted" map-summary-weight="et"
+        databox databox-title="Part des établissements culturels parmi les établissements employeurs, par département, 2022 (%)"
+        databox-source="Ministère de la Culture (Deps-Doc) — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="dep" label-field="Departement" value-field="pct_e,ec,et"
+        description="Carte des départements colorés selon la part des établissements culturels parmi les établissements employeurs en 2022. Paris est le plus foncé, suivi des Hauts-de-Seine, de la Seine-Saint-Denis, du Rhône, de la Haute-Garonne et du Val-de-Marne ; les plus clairs sont les Ardennes, la Meuse, la Haute-Marne, l'Aisne, la Mayenne et la Haute-Saône. Le résumé national est pondéré par le nombre d'établissements. Le tableau donne la part, le nombre d'établissements culturels et le nombre total d'établissements employeurs de chaque département.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Résumé national = établissements culturels ÷ établissements employeurs, sur les 100 départements, et non la
+      moyenne des 100 taux, qui donnerait à la Lozère le poids de Paris. Mayotte est absente du fichier.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — la taille des employeurs ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-taille">
+    <h2 id="t-taille" class="fr-h3">L'emploi se concentre plus que les établissements&nbsp;: les plus gros employeurs culturels sont à Paris et dans les Hauts-de-Seine</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="top2">
+        <template>
+          <p class="fr-mb-1w">Les deux premiers départements comptent {{ec2:number:1}}&nbsp;% des établissements culturels,
+          mais {{sc2:number:1}}&nbsp;% de l'emploi culturel salarié.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="etp-j">
+        <template>
+          <p class="fr-mb-0">Un établissement culturel emploie en moyenne {{nat_etp_etab:number:1}}&nbsp;équivalents temps plein en
+          France&nbsp;; {{etp_etab:number:1}} dans le département où ils sont les plus gros — {{Departement}} —,
+          {{min_etp_etab:number:1}} dans celui où ils sont les plus petits — {{min_Departement}}. Le fichier ne dit pas
+          quels employeurs font cette moyenne&nbsp;; il rattache chaque emploi à l'établissement qui le déclare, pas
+          forcément au lieu où le travail se fait.</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des départements dans les établissements culturels et dans l'emploi culturel">
+      <dsfr-data-chart id="g-etab" source="top10" type="bar" horizontal
+        label-field="Departement" value-field="part_ec_r:Part des établissements culturels du pays"
+        value-fields="part_sc_r:Part de l'emploi salarié culturel du pays" unit-tooltip="%"
+        databox databox-title="Les dix départements qui portent le plus d'emploi culturel : leur part des établissements et de l'emploi culturels, 2022 (%)"
+        databox-source="Ministère de la Culture (Deps-Doc) — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-etab" source="top10" label-field="Departement" value-field="part_ec_r,part_sc_r,etp_etab"
+        description="Barres horizontales groupées pour les mêmes dix départements : leur part des établissements culturels du pays, puis leur part de l'emploi salarié culturel, en 2022. À Paris et plus encore dans les Hauts-de-Seine, la barre de l'emploi dépasse nettement celle des établissements ; dans les huit autres départements, c'est l'inverse ou presque l'égalité. Le tableau donne aussi le nombre moyen d'équivalents temps plein par établissement culturel.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — le temps ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-an">
+    <h2 id="t-an" class="fr-h3">En six ans, la part de Paris dans l'emploi culturel n'a pas reculé</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="an-fl">
+        <template>
+          <p class="fr-mb-1w">Paris portait {{part_s:number:1}}&nbsp;% de l'emploi salarié culturel en {{Annee}},
+          {{d_part_s:number:1}}&nbsp;% en {{d_Annee}}&nbsp;; sa part des établissements culturels est restée voisine de
+          {{d_part_e:number:0}}&nbsp;%.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-min">
+        <template>
+          <p class="fr-mb-0">Le creux est ailleurs&nbsp;: en {{Annee}}, la culture ne pèse plus que {{pct_nat:number:2}}&nbsp;%
+          de l'emploi salarié du pays — l'année de la fermeture des salles —, et c'est hors de Paris qu'elle perd le plus,
+          d'où la hausse de la part parisienne cette année-là.</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part de Paris dans l'emploi et les établissements culturels, 2016-2022">
+      <dsfr-data-chart id="g-an" source="an" type="line"
+        label-field="Annee" value-field="part_s:Part de Paris dans l'emploi salarié culturel"
+        value-fields="part_e:Part de Paris dans les établissements culturels" unit-tooltip="%" y-min="0"
+        databox databox-title="Part de Paris dans l'emploi salarié culturel et dans les établissements culturels du pays, 2016-2022 (%)"
+        databox-source="Ministère de la Culture (Deps-Doc) — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-an" source="an" label-field="Annee" value-field="part_s,part_e,pct_nat"
+        description="Deux courbes de 2016 à 2022, sur un axe qui part de zéro : la part de Paris dans l'emploi salarié culturel du pays, autour de 30 à 32 %, en légère hausse avec une marche en 2020 ; la part de Paris dans les établissements culturels, autour de 19 à 20 %, à peu près plate. Le tableau donne aussi, chaque année, la part de la culture dans l'emploi salarié du pays, au plus bas en 2020.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Parts et non effectifs&nbsp;: le nombre d'établissements employeurs du fichier bondit de 15&nbsp;% entre 2016 et 2017,
+      puis progresse de 1 à 4&nbsp;% par an. Ce saut, que la fiche du jeu n'explique pas, ressemble à un changement de
+      source&nbsp;; il n'est tracé nulle part en effectif.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: votre département</h2>
+    <dsfr-data-repeat source="evol-j">
+      <template>
+        <p class="odv-lecture">
+          Entre 2017 et 2022, la part de la culture dans l'emploi salarié a le plus progressé — {{max_Departement}}, +{{max_evol:number:2}}&nbsp;point — et le plus reculé —
+          {{Departement}}, {{evol:number:2}}&nbsp;point. Des écarts de quelques dixièmes de point&nbsp;: la géographie de l'emploi culturel
+          bouge peu.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-list source="dep"
+      columns="Departement:Département, code_insee:Code, ec:Établissements culturels, pct_e:% des établissements, sc:ETP culturels, pct_s:% de l'emploi salarié, part_sc_r:Part de l'emploi culturel du pays (%), etp_etab:ETP par établissement culturel, evol:Évolution 2017-2022 (points)"
+      sort="sc:desc" search pagination="20" count-label="département" export="csv"
+      caption="Établissements et emploi salarié des secteurs culturels par département, 2022">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>L'emploi non salarié.</strong> Intermittents du spectacle rémunérés au cachet par des employeurs hors
+        champ, artistes-auteurs, indépendants, micro-entrepreneurs&nbsp;: une large part de l'emploi culturel n'est pas
+        dans ces fichiers. La concentration parisienne décrite ici est celle de l'emploi salarié en entreprise culturelle.</li>
+      <li><strong>Les professions culturelles hors secteur culturel.</strong> Un graphiste salarié d'une banque n'est pas
+        compté, un comptable d'une maison d'édition l'est&nbsp;: le fichier classe les établissements par activité, pas
+        les personnes par métier.</li>
+      <li><strong>Le lieu du travail.</strong> Un emploi est rattaché à l'établissement qui le déclare. Une compagnie ou
+        une chaîne dont le siège est à Paris ou à Boulogne compte à Paris ou à Boulogne, où que tournent ses équipes.</li>
+      <li><strong>Les effectifs d'établissements dans le temps.</strong> Rupture de série entre 2016 et 2017 (voir plus
+        haut)&nbsp;: les évolutions se lisent en parts, et depuis 2017 dans le tableau.</li>
+      <li><strong>Mayotte</strong>, absente des deux fichiers (100 départements).</li>
+      <li><strong>Le taux publié.</strong> Chaque fichier porte une colonne <code>Pct_culturel</code> arrondie au
+        dixième&nbsp;; elle n'est pas utilisée. Tous les taux de la page sont recalculés depuis les effectifs, et les
+        totaux nationaux sont des ratios de sommes.</li>
+      <li><strong>La description des jeux</strong> dit «&nbsp;Données 2018&nbsp;» et parle de «&nbsp;part des salariés dans
+        l'ensemble des actifs de la zone d'emploi&nbsp;», alors que les fichiers couvrent 2016 à 2022, par département, en
+        équivalents temps plein salariés&nbsp;: la page suit les colonnes, pas la notice.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création à partir de deux fichiers du ministère de la Culture
+        servis par l'API Tabular de data.gouv.fr. Le cadrage titrait sur les établissements (9,1&nbsp;% à Paris,
+        1,6&nbsp;% dans les Ardennes)&nbsp;; rejoué, c'est vrai, mais l'emploi raconte une concentration bien plus forte.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Deux jeux, deux requêtes.</strong> <code>fetch-mode="export"</code> lit l'export Parquet de
+              chaque fichier en une fois&nbsp;; les filtres par année se font en aval, dans les <code>dsfr-data-query</code>.</li>
+            <li><strong>Deux clés de casse différente.</strong> <code>on="code_insee=Code_insee"</code> sur
+              <code>dsfr-data-join</code>, sans renommer.</li>
+            <li><strong>Une part du total.</strong> <code>share_percent</code> dans l'<code>aggregate</code> d'un
+              <code>group-by</code>&nbsp;: la part de chaque département dans l'emploi culturel, sans seconde source.</li>
+            <li><strong>Un résumé de carte honnête.</strong> <code>map-summary="weighted"</code> +
+              <code>map-summary-weight</code>&nbsp;: le taux national est un ratio de sommes, pas une moyenne de taux.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>La donnée, d'abord.</strong> Une rupture de série non documentée (+15&nbsp;% d'établissements en
+              un an), une notice qui ne décrit pas les colonnes&nbsp;: rien ne le signale, tout s'est lu en recalculant.</li>
+            <li><strong>Les extrêmes nommés coûtent trois balises chacun.</strong> Deux <code>query limit="1"</code> et une
+              jointure sur une clé constante pour une phrase «&nbsp;de X à Y&nbsp;»&nbsp;: c'est natif, mais répétitif.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger un jeu data.gouv.fr en une requête</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export"</code></td><td>Natif</td></tr>
+            <tr><td>Croiser deux jeux dont la clé change de casse</td><td><code>dsfr-data-join on="a=B"</code></td><td>Natif</td></tr>
+            <tr><td>Part de chaque département dans le total</td><td><code>dsfr-data-query aggregate="…:share_percent"</code></td><td>Natif</td></tr>
+            <tr><td>Taux national de la carte</td><td><code>map-summary="weighted"</code> + <code>map-summary-weight</code></td><td>Natif</td></tr>
+            <tr><td>Série annuelle d'une part</td><td><code>compute when … then</code> + <code>group-by</code> + <code>type="line" y-min="0"</code></td><td>Natif</td></tr>
+            <tr><td>Phrases de lecture calculées</td><td><code>dsfr-data-repeat</code> sur <code>query limit="1"</code> + <code>dsfr-data-join</code></td><td>Natif, sans nom en dur</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Deux petits fichiers, sept années, une jointure&nbsp;: rien n'a résisté côté bibliothèque.</strong> Le
+          travail a été de lire la donnée contre sa notice — une rupture de série, une description périmée — et de choisir
+          l'histoire&nbsp;: la part des établissements dit «&nbsp;métropoles&nbsp;», la part de l'emploi dit «&nbsp;Paris&nbsp;».</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; type="map" est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
