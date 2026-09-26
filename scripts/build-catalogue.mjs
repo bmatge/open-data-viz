@@ -360,7 +360,9 @@ for (const [dossier, portail] of Object.entries(PORTAILS)) {
       nature_libelle: NATURES[nature].libelle,
       nature_badge: NATURES[nature].badge,
       methode_metier: Boolean(preuve),
-      methode_libelle: preuve ? 'Méthode dataviz-metier' : 'Sans la méthode dataviz-metier',
+      // Les démonstrations ne portent aucune mention : elles ont précédé la méthode et en
+      // ont fait naître le besoin (Bertrand, 2026-09-27).
+      methode_libelle: preuve ? 'Méthode dataviz-metier' : nature === 'demonstration' ? null : 'Sans la méthode dataviz-metier',
       methode_preuve: preuve ? `${preuve.h} — ${preuve.s}` : null,
       origine_url: orig[0]?.url ?? null,
       origine_libelle: orig[0] ? `${orig[0].libelle} (${orig[0].hote})` : null,
