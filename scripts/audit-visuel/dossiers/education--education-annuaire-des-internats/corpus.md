@@ -1,0 +1,31 @@
+# Corpus — Annuaire des internats
+
+> Le contexte de la dataviz : de quoi elle parle, d'ou viennent les chiffres,
+> ce qu'il faut savoir pour ne pas les lire de travers.
+> **Ce fichier n'est jamais ecrase par un script.**
+
+## Source
+
+- Original : <https://data.education.gouv.fr/explore/dataset/fr-en-internats/carte-des-internats/>
+- Reprise : `http://localhost:3000/education/annuaire-des-internats`
+- Page du banc : `public/education/annuaire-des-internats.html`
+
+## Jeux de donnees mobilises
+
+- `fr-en-internats`
+
+Sources generiques (`url=`) :
+- `https://data.education.gouv.fr`
+
+
+## Millesime et perimetre
+
+_Sur quelle annee portent les chiffres ? Quel territoire ? Quelle population exclue ?_
+
+## Definitions a connaitre
+
+_Les termes que le lecteur doit comprendre pour ne pas se tromper de lecture._
+
+## Ce que la note du registre en dit
+
+> Gabarit annuaire éprouvé chez Bercy, rejoué sur un jeu à 44 colonnes vides sur 79
