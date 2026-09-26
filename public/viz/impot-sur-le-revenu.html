@@ -42,11 +42,12 @@
             <a href="https://data.economie.gouv.fr/explore/dataset/ir-declarations-2042-nat/"
                target="_blank" rel="noopener external"><code>ir-declarations-2042-nat</code></a>
             — pour chaque case des déclarations 2042 et complémentaires, de 2006 à 2024, le nombre de foyers
-            qui l'ont remplie et le montant total déclaré (DGFiP, 19&nbsp;388 lignes, 2&nbsp;253 cases).
+            qui l'ont remplie et le total déclaré — en euros, ou un effectif selon la case (DGFiP&nbsp;; 19&nbsp;388 lignes
+            et 2&nbsp;253 codes relevés à l'API le 26/09/2026).
             Le catalogue ne renvoie à aucune visualisation, seulement à la page du jeu&nbsp;: c'est une
             entrée de type «&nbsp;Jeu de données&nbsp;». Cette page propose l'exploration que le portail
             offre dans son onglet «&nbsp;Analyse&nbsp;»&nbsp;: choisir une case, suivre son nombre de
-            déclarants et son montant sur dix-neuf ans.
+            déclarants et son total sur dix-neuf ans.
           </p>
     </details>
       </div>
@@ -65,51 +66,32 @@
   </div>
 
   <!-- ==========================================================================
-       Recherche sur libellé et code, facette « case » en liste déroulante
-       pré-remplie depuis l'URL (?nom=1AJ), puis une agrégation par année pour
-       deux courbes et un tableau.
+       Architecture (relecture dataviz-metier du 2026-09-26) : un contexte, deux
+       sources sur le même jeu, et chacune ne répond qu'à sa question.
 
-       Lot 13, deux nouveautés de dsfr-data 0.25.0 sur la même source.
+       - `ir` : la RECHERCHE. `server-search` lui pose `search("…")`, le contexte
+         lui ajoute la case choisie. Elle nourrit la facette « case », la liste
+         et le compteur. `require-where` : rien ne part tant qu'aucun filtre
+         n'est arrivé par commande (AM-035, 0.25.0).
+       - `ir2` : la CASE. Elle ne reçoit QUE le filtre du contexte (nom = …) —
+         jamais la recherche. Les courbes, les KPI de pic et la fiche de la case
+         la lisent. `require-where` : tant qu'aucune case n'est choisie, elle
+         reste en attente. Avant, une recherche sans case choisie levait
+         l'attente et les courbes additionnaient toutes les cases trouvées
+         (« pensions » : 96 cases sommées sous un titre qui parlait de « la
+         case »). La facette, en mode client, ne commandait rien à la source.
+       - `dsfr-data-facets context="ctx"` : la facette devient un filtre du
+         contexte, qui diffuse `nom = "…"` aux deux sources et porte l'URL
+         (`?nom=1AJ` : les liens d'exemple restent vivants). La recherche passe
+         sur `?q=` pour ne pas se disputer `nom` avec le contexte.
 
-       1. AM-011 — la source était écrite en mode générique (`url=` vers
-          /exports/json, sans `params`), contournement qui achetait la requête
-          unique au prix du mode adaptateur : plus de délégation serveur du
-          where/order-by, plus de server-facets, plus de meta.truncated, et une
-          source qui n'annonçait plus quel jeu elle lit. La mesure d'origine
-          reste la justification : /records plafonne à 100 lignes par requête,
-          soit 194 allers-retours séquentiels pour les 19 388 lignes de ce jeu
-          (585 Ko, 1,1 s par l'export). `fetch-mode="export"` (#689) rend la même
-          requête unique EN restant en mode adaptateur. Conséquence directe :
-          `max-records` s'applique de nouveau, et son plafond par défaut (1 000)
-          tronquerait en silence — le jeu compte 19 388 lignes (relevé à l'API le
-          2026-09-10, `metas.default.records_count`), d'où le max-records="25000".
-
-       2. AM-035 — la page s'ouvrait sur une courbe absurde : sans case choisie,
-          les deux graphiques additionnaient 2 253 cases hétérogènes d'une
-          déclaration de revenus. Le contournement était éditorial (liens
-          d'exemple + texte d'aide), et il ne changeait rien au fait que la page
-          rapatriait 19 388 lignes que personne ne regardait. `require-where`
-          (#690) le règle à la racine : tant qu'aucun filtre n'est arrivé PAR
-          COMMANDE, la source n'émet aucune requête, publie `dsfr-data-idle`, et
-          les afficheurs rendent leur `idle-message` au lieu d'un chiffre faux.
-          Retirer le dernier filtre y ramène — jamais de requête « tout »
-          implicite.
-
-          Le JSDoc est explicite sur ce qui compte comme filtre : les clauses
-          reçues par COMMANDE (facettes serveur, recherche serveur, contexte,
-          délégation d'une query). Une facette en mode CLIENT, elle, ne commande
-          rien — elle filtre l'aval. C'est pourquoi la recherche passe ici en
-          `server-search` : c'est elle qui porte le filtre jusqu'à la source
-          (template ODS par défaut, `search("{q}")`), et la facette « case »
-          reste en aval, peuplée des seules cases rapportées par la recherche —
-          le comportement d'avant, mais délégué au portail.
-
-          `url-search-param="nom"` garde les liens d'exemple (?nom=1AJ) vivants :
-          le paramètre amorce le terme de recherche, donc le chargement, et la
-          facette y lit sa sélection comme avant. La recherche ne pose pas
-          `url-sync` — c'est la facette qui écrit l'URL, et deux composants sur
-          le même paramètre se marcheraient dessus.
+       `fetch-mode="export"` (#689, 0.25.0) : une requête au lieu de 194 pages
+       de 100 ; `max-records` relevé à 25 000 parce que le jeu dépasse le
+       plafond par défaut de 1 000, qui tronquerait en silence (19 388 lignes
+       relevées à l'API le 2026-09-10).
        ========================================================================== -->
+
+  <dsfr-data-context id="ctx" sources="ir ir2" url-sync></dsfr-data-context>
 
   <dsfr-data-source id="ir" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
@@ -117,18 +99,41 @@
     api-key-ref="ods-mef">
   </dsfr-data-source>
 
-  <dsfr-data-query id="ir-annees" source="ir-f" group-by="annee"
+  <dsfr-data-source id="ir2" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
+    fetch-mode="export" max-records="25000" require-where
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- L'unité du « montant » n'est pas dans le jeu : pour les cases à cocher,
+       la DGFiP recopie le nombre de foyers dans `montant` ; pour les cases
+       « Nombre de … », `montant` compte des personnes. Règle heuristique, dite
+       comme telle en page : montant = nombre, ou libellé qui contient
+       « nombre » ou « coch » → effectif, sinon euros. -->
+  <dsfr-data-normalize id="ir2-u" source="ir2"
+    compute="unite = when montant = nombre or contains(lower(libelle), 'nombre') or contains(lower(libelle), 'coch') then 'effectif' else 'euros'">
+  </dsfr-data-normalize>
+
+  <dsfr-data-query id="ir-annees" source="ir2" group-by="annee"
     aggregate="nombre:sum:nombre, montant:sum:montant" order-by="annee:asc">
   </dsfr-data-query>
 
+  <dsfr-data-query id="ir-libelles" source="ir2-u" group-by="libelle, unite"
+    aggregate="annee:min:de, annee:max:a, annee:count:n" order-by="de:asc">
+  </dsfr-data-query>
+
+  <dsfr-data-query id="ir-bornes" source="ir2"
+    aggregate="annee:min:premiere, annee:max:derniere, annee:count:n">
+  </dsfr-data-query>
+
   <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+       Elle compte des LIGNES (une par case et par année), pas des cases. -->
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="ir-q" source="ir"
           fields="libelle, nom" label="Libellé ou code de la case" placeholder="Ex. : salaires, pensions, 1AJ…"
-          server-search url-search-param="nom" count count-label="case">
+          server-search url-search-param="q" count count-label="ligne">
         </dsfr-data-search>
       </div>
     </div>
@@ -145,63 +150,110 @@
 
         <dsfr-data-facets id="ir-f" source="ir-q"
           fields="nom" labels="nom:Case de la déclaration" display="nom:select"
-          url-params url-sync>
+          context="ctx">
         </dsfr-data-facets>
         <p class="fr-text--xs fr-hint-text">
-          La liste se restreint aux cases qui correspondent à la recherche. Sans case choisie, les courbes
-          additionnent toutes les cases, ce qui n'a pas de sens&nbsp;: choisissez-en une. Depuis
-          <code>dsfr-data</code> 0.25.0 la page ne se contente plus de le dire&nbsp;: tant qu'aucun filtre
-          n'est posé, <code>require-where</code> retient la requête et les blocs restent en attente.
+          La recherche restreint la liste des cases&nbsp;; les courbes n'apparaissent qu'une fois une case
+          choisie. Une recherche seule ne trace rien&nbsp;: additionner des cases différentes n'a pas de sens.
         </p>
       </details>
 
       <div class="fr-col-12 fr-col-lg-9">
-        <dsfr-data-kpi-group class="fr-mb-4w">
-          <dsfr-data-kpi source="ir-f" value="count" format="nombre" col="4"
+        <h2 class="fr-h3 fr-mb-1w">
+          <dsfr-data-context-value for="ctx" template="Case {{nom}}" fallback="Choisissez une case" live>
+          </dsfr-data-context-value>
+        </h2>
+        <p class="fr-text--sm fr-hint-text fr-mb-2w">
+          Année des revenus déclarés&nbsp;; effectifs et totaux nationaux, DGFiP, jeu
+          <code>ir-declarations-2042-nat</code> mis à jour le 07/04/2026 (métadonnées du jeu, relevées le 26/09/2026).
+        </p>
+
+        <!-- La fiche de la case : ce que ce code a désigné au fil des ans, et
+             dans quelle unité. Un code libéré est réattribué à une autre case
+             (1BI : case à cocher jusqu'en 2017, pensions en capital depuis 2019). -->
+        <div class="odv-viz" data-code="Fiche de la case : libellés, années, unité">
+        <dsfr-data-repeat source="ir-bornes">
+          <template>
+            <p class="fr-mb-1w"><strong>{{n}} années couvertes</strong>, de {{premiere}} à {{derniere}}.
+              Une année absente n'est pas un zéro&nbsp;: la case n'existait pas cette année-là, ou elle
+              est soumise au secret statistique (le jeu ne publie alors aucune ligne).</p>
+          </template>
+        </dsfr-data-repeat>
+        <h3 class="fr-h6 fr-mb-1w fr-mt-2w">Libellés portés par ce code, et unité du montant</h3>
+        <dsfr-data-display source="ir-libelles" cols="1" count-label="libellé"
+          idle-message="Choisissez une case pour afficher ses libellés.">
+          <template>
+            <p class="fr-text--sm fr-mb-1v">«&nbsp;{{libelle}}&nbsp;» — de {{de}} à {{a}}, présent {{n}}&nbsp;an(s) — montant en <strong>{{unite}}</strong></p>
+          </template>
+        </dsfr-data-display>
+        <p class="fr-text--xs fr-hint-text fr-mt-1w">
+          Plusieurs libellés&nbsp;: la formulation a changé, ou le code a été <strong>réattribué à une
+          autre case</strong> — les courbes ne décrivent alors pas la même chose avant et après.
+          «&nbsp;Effectif&nbsp;»&nbsp;: pour une case à cocher, la DGFiP recopie le nombre de foyers dans
+          le montant&nbsp;; pour une case «&nbsp;Nombre de…&nbsp;», le montant compte des personnes.
+          L'unité est déduite de la donnée et du libellé (règle approchée&nbsp;: quelques cases, comme
+          7FZ en m², ne sont ni l'un ni l'autre).
+        </p>
+        </div>
+
+        <dsfr-data-kpi-group class="fr-mb-4w fr-mt-4w">
+          <dsfr-data-kpi source="ir" value="nom:distinct" format="nombre" col="3"
+            idle-message="Lancez une recherche ou choisissez une case"
+            heading="Cases dans la sélection" label="codes distincts trouvés"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ir2" value="libelle:distinct" format="nombre" col="3"
             idle-message="Choisissez une case pour afficher les données"
-            heading="Lignes" label="années × cases dans la sélection"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ir-f" value="nombre:max" format="nombre" col="4"
+            heading="Libellés portés par ce code" label="plus d'un : lire la fiche"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ir2" value="nombre:max" format="nombre" col="3"
             idle-message="Choisissez une case pour afficher les données"
             heading="Pic de déclarants" label="foyers, meilleure année"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ir-f" value="montant:max" format="euro" col="4"
+          <dsfr-data-kpi source="ir2" value="montant:max" format="compact" col="3"
             idle-message="Choisissez une case pour afficher les données"
-            heading="Pic de montant" label="euros déclarés, meilleure année"></dsfr-data-kpi>
+            heading="Pic de montant" label="meilleure année, en euros ou en effectif selon la case"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
 
         <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
           <div class="fr-col-12 fr-col-lg-6">
             <div class="odv-chart-slot">
               <div class="odv-viz" data-code="Nombre de foyers ayant rempli la case, par année">
-              <dsfr-data-chart id="g-nombre" source="ir-annees" type="line"
+              <dsfr-data-chart id="g-nombre" source="ir-annees" type="line" y-min="0"
                 idle-message="Choisissez une case pour afficher les données"
-                label-field="annee" value-field="nombre" name='["Foyers déclarants"]'
+                label-field="annee" value-field="nombre:Foyers déclarants"
                 databox databox-title="Nombre de foyers ayant rempli la case, par année"
                 databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr" databox-download>
               </dsfr-data-chart>
-              <dsfr-data-a11y for="g-nombre" source="ir-annees" table download></dsfr-data-a11y>
+              <dsfr-data-a11y for="g-nombre" source="ir-annees" table download
+                description="Nombre de foyers ayant rempli la case, par année de revenus. Une année absente n'est pas un zéro : la case n'existait pas cette année-là, ou elle est soumise au secret statistique ; la courbe relie alors les années voisines. Un libellé qui change peut signaler la réattribution du code à une autre case : les deux parties de la courbe ne décrivent alors pas la même chose (voir la fiche de la case)."></dsfr-data-a11y>
               </div>
             </div>
           </div>
           <div class="fr-col-12 fr-col-lg-6">
             <div class="odv-chart-slot">
               <div class="odv-viz" data-code="Montant total déclaré dans la case, par année">
-              <dsfr-data-chart id="g-montant" source="ir-annees" type="line"
+              <dsfr-data-chart id="g-montant" source="ir-annees" type="line" y-min="0"
                 idle-message="Choisissez une case pour afficher les données"
-                label-field="annee" value-field="montant" name='["Montant déclaré (€)"]' unit-tooltip="€"
+                label-field="annee" value-field="montant:Montant déclaré"
                 databox databox-title="Montant total déclaré dans la case, par année"
                 databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr" databox-download>
               </dsfr-data-chart>
-              <dsfr-data-a11y for="g-montant" source="ir-annees" table download></dsfr-data-a11y>
+              <dsfr-data-a11y for="g-montant" source="ir-annees" table download
+                description="Total déclaré dans la case, par année de revenus, en euros ou en effectif selon la case (voir la fiche de la case : pour une case à cocher, le montant recopie le nombre de foyers). Une année absente n'est pas un zéro : la case n'existait pas cette année-là, ou elle est soumise au secret statistique. Une rupture d'une seule année peut venir d'un changement de périmètre de la case que le jeu ne documente pas."></dsfr-data-a11y>
               </div>
             </div>
           </div>
         </div>
 
         <h2 class="fr-h4">Le détail</h2>
+        <p class="fr-text--xs fr-hint-text">
+          Le tableau garde la recherche <em>et</em> la case&nbsp;; les courbes, la case entière. Avec
+          «&nbsp;pensions&nbsp;» et la case 1BI, le tableau ne montre que les années où le libellé contient le mot.
+        </p>
+        <dsfr-data-normalize id="ir-lu" source="ir-f"
+          compute="unite = when montant = nombre or contains(lower(libelle), 'nombre') or contains(lower(libelle), 'coch') then 'effectif' else 'euros'">
+        </dsfr-data-normalize>
         <div class="odv-viz" data-code="Graphique">
-        <dsfr-data-list source="ir-f"
-          idle-message="Choisissez une case pour afficher les données"
-          columns="annee:Année, nom:Case, libelle:Libellé, nombre:Foyers, montant:Montant (€)"
+        <dsfr-data-list source="ir-lu"
+          idle-message="Lancez une recherche ou choisissez une case"
+          columns="annee:Année, nom:Case, libelle:Libellé, nombre:Foyers, montant:Montant, unite:Unité du montant"
           sort="annee:desc" pagination="20" export="csv" count-label="ligne">
         </dsfr-data-list>
         </div>
@@ -223,79 +275,109 @@
         test à une question du banc d'essai&nbsp;: <em>que vaut ChartsBuilder comme outil d'exploration,
         et pas seulement de restitution&nbsp;?</em>
       </p>
+      <p class="fr-text--sm">
+        La page a été relue le 26/09/2026 avec la grille <code>dataviz-metier</code>, au navigateur et à
+        l'API (export complet du jeu ce jour-là&nbsp;: 19&nbsp;388 lignes, 2&nbsp;253 codes). Cette relecture
+        a trouvé deux affichages faux que la première version portait sans le savoir, et une affirmation
+        fausse dans cette analyse même. Ils sont décrits ci-dessous, avec ce qui les a corrigés.
+      </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>L'URL comme état.</strong> <code>dsfr-data-facets url-params url-sync</code> lit
-              <code>?nom=1AJ</code> au chargement et réécrit l'URL à chaque choix&nbsp;: chaque case a une
-              adresse, on peut la partager, et le catalogue pointe directement sur les salaires.</li>
-            <li><strong>Une facette qui se restreint avec la recherche.</strong> 2&nbsp;253 cases dans une
+            <li><strong>L'URL comme état.</strong> Le contexte (<code>dsfr-data-context url-sync</code>) lit
+              <code>?nom=1AJ</code> au chargement et réécrit l'URL à chaque choix de case&nbsp;: chaque case a
+              une adresse, les liens d'exemple continuent de marcher.</li>
+            <li><strong>Une facette qui se restreint avec la recherche.</strong> Plus de 2&nbsp;000 codes dans une
               liste déroulante seraient inutilisables&nbsp;; comme la facette est en aval de la recherche,
-              taper «&nbsp;pensions&nbsp;» la ramène à une vingtaine d'entrées.</li>
-            <li><strong>Deux courbes pour une agrégation.</strong> Un <code>dsfr-data-query group-by="annee"</code>
-              nourrit les deux graphiques&nbsp;; chaque courbe est un <code>value-field</code>.</li>
+              taper «&nbsp;pensions&nbsp;» la ramène aux seules cases trouvées (96 le 26/09/2026).</li>
+            <li><strong>Séparer ce que la recherche trouve de ce que la courbe trace.</strong> Deux sources
+              sur le même jeu, un contexte qui les pilote toutes deux&nbsp;: la recherche ne va qu'à la
+              première (liste, facette), la case choisie va aux deux. Aucune ligne de JavaScript, et
+              exactement deux requêtes pour une case ouverte par son URL (mesuré).</li>
+            <li><strong>Calculer dans la donnée ce que la donnée ne dit pas.</strong> L'unité du montant et
+              la liste des libellés portés par un code se dérivent en trois balises
+              (<code>dsfr-data-normalize compute</code>, <code>dsfr-data-query group-by="libelle, unite"</code>,
+              <code>dsfr-data-display</code>), et le titre suit la case par
+              <code>dsfr-data-context-value</code>.</li>
           </ul>
         </div>
 
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>L'état vide n'a pas de sens.</strong> Sans case choisie, les courbes additionnent
-              19&nbsp;388 lignes hétérogènes. Rien ne permet de dire au graphique «&nbsp;n'affiche rien tant
-              qu'aucun filtre n'est posé&nbsp;»&nbsp;: le composant dessine ce qu'il reçoit. D'où les liens
-              d'exemple et le texte d'aide (AM-035).</li>
-            <li><strong>Le libellé d'une case change avec les années</strong> («&nbsp;Salaires -
-              Déclarant 1&nbsp;» n'a pas toujours été formulé ainsi)&nbsp;: 193 couples (libellé, année) portent
-              plusieurs codes. La facette sur le <em>code</em> est la seule clé stable&nbsp;; c'est le jeu, pas
-              l'outil (LIM-003).</li>
-            <li><strong>Les montants en centaines de milliards</strong> s'affichent en notation complète
-              («&nbsp;616 007 685 378 €&nbsp;») faute d'un format compact (M€, Md€) sur les KPI et les axes
-              — même famille qu'AM-031.</li>
+            <li><strong>Le «&nbsp;montant&nbsp;» n'est pas toujours des euros.</strong> Pour les cases à
+              cocher, la DGFiP recopie le nombre de foyers dans <code>montant</code>&nbsp;; pour les cases
+              «&nbsp;Nombre de…&nbsp;», il compte des personnes. Relevé à l'export le 26/09/2026&nbsp;:
+              1&nbsp;242 lignes (209 codes) où <code>montant</code> égale <code>nombre</code>. La première
+              version affichait «&nbsp;17&nbsp;934&nbsp;123&nbsp;€&nbsp;» pour la case 0AC (célibataires), l'un
+              de ses propres liens d'exemple. La description du champ à l'API l'annonce à moitié («&nbsp;il
+              peut s'agir de la somme d'un nombre de personnes&nbsp;») et se trompe sur l'autre moitié
+              («&nbsp;la case est vide s'il s'agit d'une case à cocher&nbsp;»&nbsp;: aucune valeur vide dans le
+              jeu). C'est le jeu, pas l'outil&nbsp;; la page ne pose plus aucun «&nbsp;€&nbsp;» statique et
+              déduit l'unité par une règle approchée qu'elle dit comme telle.</li>
+            <li><strong>Un code n'est pas une case.</strong> La première version écrivait ici qu'un code
+              suffisait à suivre une case dans le temps. C'était faux&nbsp;: la DGFiP réattribue des codes
+              libérés. 1BI a été «&nbsp;Conjoint demandeur d'emploi + 1 an&nbsp;» (case à cocher, jusqu'en
+              2017) puis «&nbsp;Pensions en capital des nouveaux PER&nbsp;» (euros, depuis 2019)&nbsp;; la
+              courbe «&nbsp;chute&nbsp;» de 147&nbsp;652 à 409 foyers et c'est un changement de case. 1AI, 1CT,
+              1DV, 7HW suivent le même schéma. La page affiche désormais les libellés portés par le code et
+              leurs années. Ce qui reste vrai&nbsp;: les libellés changent aussi pour les cases pérennes
+              (1AJ «&nbsp;Salaires - vous&nbsp;» devenu «&nbsp;Salaires - Déclarant 1&nbsp;»), et le jeu ne
+              distingue pas une reformulation d'une réattribution (LIM-003).</li>
+            <li><strong>Séparer les courbes par libellé comble les trous par zéro.</strong>
+              <code>series-field="libelle"</code> sépare bien les séries, mais le pivot remplit les cellules
+              (année, série) absentes par <code>0</code>&nbsp;: sur 1BI, la série 2019-2020 est prolongée à
+              plat sur zéro jusqu'en 2024. Une donnée manquante n'est pas un zéro&nbsp;; la page n'utilise
+              donc pas cette voie, et la fiche des libellés en tient lieu. À remonter à la bibliothèque.</li>
+            <li><strong>Les années absentes sont reliées sans marque.</strong> 1CT n'a pas de ligne entre 2008
+              et 2020&nbsp;: la courbe tire un segment droit à travers onze ans vides. Aucun geste natif
+              n'insère une valeur nulle pour une année manquante. La page dit à la place les bornes et le
+              nombre d'années couvertes («&nbsp;8 années couvertes, de 2006 à 2024&nbsp;»), et que le secret
+              statistique, que la documentation du jeu annonce comme une valeur vide, ne peut être qu'une
+              ligne absente&nbsp;: le jeu ne contient aucune valeur vide.</li>
+            <li><strong>L'infobulle écrit l'année «&nbsp;2,024&nbsp;».</strong> DSFR Chart met en forme
+              l'étiquette d'axe comme un nombre en anglais, et c'était déjà le cas avant la relecture. Rien
+              à régler depuis la page&nbsp;: à remonter chez <code>GouvernementFR/dsfr-chart</code>.</li>
+            <li><strong>Deux avertissements en console</strong> (pas des erreurs)&nbsp;: trois queries lisent
+              la même source de courbes, la bibliothèque garde donc leurs agrégats côté client et le dit.
+              C'est le comportement voulu&nbsp;: une case fait au plus dix-neuf lignes, et une délégation au
+              serveur ferait recevoir des lignes agrégées aux KPI de pic.</li>
           </ul>
         </div>
       </div>
 
       <div class="fr-alert fr-alert--success fr-mt-4w fr-mb-4w odv-corrige-depuis">
-        <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
+        <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.22.0 et 0.25.0</h4>
         <p class="fr-text--sm">
-          Deux des frictions décrites ci-dessus ont été comblées par la bibliothèque <em>après</em> cette
-          reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace du banc d'essai —
-          mais les contournements, eux, ont été retirés de la page au lot 13. Détail et vérification au
-          <a href="/retours#AM-035">registre des retours</a>.
+          Trois frictions notées à la première reproduction ont été comblées par la bibliothèque <em>après</em>
+          coup. La trace reste écrite, les contournements ont été retirés. Détail au
+          <a href="/retours">registre des retours</a>.
         </p>
         <ul class="fr-text--sm">
-          <li><strong>AM-035</strong> — <strong>0.25.0</strong> (#690)&nbsp;: <code>require-where</code> sur
-            <code>dsfr-data-source</code> (et son pendant sur <code>dsfr-data-query</code>). Tant qu'aucun
-            filtre n'est arrivé <em>par commande</em>, la source ne part rien chercher, publie
-            <code>dsfr-data-idle</code>, et chaque afficheur rend son <code>idle-message</code> — un état
-            distinct d'un chargement, d'une erreur et d'un «&nbsp;aucune donnée&nbsp;». Retirer le dernier
-            filtre y ramène. Les liens d'exemple et le texte d'aide restent dans la page, mais ils ne sont
-            plus la seule réponse&nbsp;: ce sont désormais des raccourcis de confort, pas un pansement.
-            <strong>Vérifié au navigateur&nbsp;:</strong> zéro requête vers
-            <code>data.economie.gouv.fr</code> au chargement (les seules requêtes sont le CDN DSFR)&nbsp;;
-            le premier terme de recherche en déclenche exactement une, sur
-            <code>/exports/json?where=search("1AJ")</code>&nbsp;; vider le champ ramène les six blocs à
-            l'état d'attente sans qu'aucune requête «&nbsp;tout&nbsp;» ne parte.
-            <em>Ce que cela coûte&nbsp;:</em> une facette en mode client ne commande rien à sa source — elle
-            filtre son aval. Le filtre qui lève l'attente doit donc être un filtre <em>serveur</em>&nbsp;;
-            ici la recherche est passée en <code>server-search</code>, et la facette «&nbsp;case&nbsp;»
-            reste en aval, peuplée des seules cases rapportées. Cela ne se devine pas au nom de l'attribut,
-            mais le JSDoc de <code>require-where</code> le dit noir sur blanc.
-            <em>Un angle mort observé au passage&nbsp;:</em> <code>dsfr-data-search count</code> n'a pas
-            d'état d'attente — il affiche «&nbsp;0 résultats&nbsp;» tant que la source est en
-            <code>idle</code>, là où les six autres afficheurs rendent leur <code>idle-message</code>.
-            Le composant ne connaît ni <code>idle-message</code> ni l'événement
-            <code>dsfr-data-idle</code>&nbsp;: c'est le seul endroit de la page où l'attente ressemble
-            à un résultat vide.</li>
-          <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;:
-            <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du
-            portail, en une requête et <em>sans</em> quitter le mode adaptateur. La source de cette page
-            était écrite en mode générique pour cette seule raison&nbsp;; elle est redevenue une source
-            adaptateur, et le <code>where</code> de la recherche est maintenant délégué au portail.
-            Contrepartie&nbsp;: <code>max-records</code> redevient actif, et son plafond par défaut de
-            1 000 aurait tronqué les 19 388 lignes en silence.</li>
+          <li><strong>AM-031</strong> — <strong>0.22.0</strong> (#665)&nbsp;: la première analyse imputait la
+            notation complète des montants («&nbsp;616 007 685 378 €&nbsp;») à l'absence d'un format compact,
+            et son verdict concluait «&nbsp;AM-031 confirmé&nbsp;». C'était périmé&nbsp;: <code>format="compact"</code>
+            existe, et la page chargeait déjà une version qui le porte. Le KPI de montant lit désormais
+            «&nbsp;616 Md&nbsp;» pour 1AJ (vérifié au navigateur), sans unité accolée puisque l'unité dépend
+            de la case. Ce qui reste vrai&nbsp;: les graduations d'axe de DSFR Chart restent en notation
+            anglaise abrégée («&nbsp;600B&nbsp;»).</li>
+          <li><strong>AM-035</strong> — <strong>0.25.0</strong> (#690)&nbsp;: <code>require-where</code>. Tant
+            qu'aucun filtre n'est arrivé <em>par commande</em>, une source ne part rien chercher et chaque
+            afficheur rend son <code>idle-message</code>. <strong>Vérifié au navigateur le 26/09/2026&nbsp;:</strong>
+            zéro requête vers <code>data.economie.gouv.fr</code> sur la page vide. Ce que la relecture a
+            ajouté&nbsp;: une recherche serveur lève l'attente de sa source, donc, avec une seule source, taper
+            «&nbsp;pensions&nbsp;» sans choisir de case traçait la somme des 96 cases trouvées, avec un
+            «&nbsp;décollage&nbsp;» en 2019 qui n'était que l'arrivée de nouveaux libellés. La facette, en
+            mode client, ne commandait rien. D'où la seconde source réservée aux courbes, qui ne reçoit que
+            la case&nbsp;: après «&nbsp;pensions&nbsp;», une seule requête part, la liste compte 762 lignes,
+            courbes et KPI de pic restent en attente&nbsp;; le choix de 1BI envoie
+            <code>search("pensions") AND nom = "1BI"</code> à la liste et <code>nom = "1BI"</code> aux
+            courbes.</li>
+          <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>,
+            le chargement en une requête sans quitter le mode adaptateur. Contrepartie&nbsp;:
+            <code>max-records</code> redevient actif, relevé à 25&nbsp;000 sur les deux sources.</li>
         </ul>
       </div>
 
@@ -306,30 +388,33 @@
             <tr><th scope="col">Portail (explore / analyse)</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>filtre par facette + recherche plein texte</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code> en select</td><td>Équivalent</td></tr>
-            <tr><td>axe X année, mesure somme, courbe</td><td><code>dsfr-data-query group-by</code> + <code>dsfr-data-chart type="line"</code></td><td>Équivalent, figé plutôt que libre</td></tr>
-            <tr><td>onglet tableau + export</td><td><code>dsfr-data-list</code> + <code>export="csv"</code></td><td>Équivalent</td></tr>
-            <tr><td>URL de l'état d'exploration</td><td><code>url-params url-sync</code></td><td>Équivalent</td></tr>
+            <tr><td>filtre par facette + recherche plein texte</td><td><code>dsfr-data-search server-search</code> + <code>dsfr-data-facets display="nom:select" context</code></td><td>Équivalent</td></tr>
+            <tr><td>axe X année, mesure somme, courbe</td><td><code>dsfr-data-query group-by="annee"</code> + <code>dsfr-data-chart type="line" y-min="0"</code>, sur une source qui ne reçoit que la case</td><td>Équivalent, figé plutôt que libre&nbsp;; axe à zéro</td></tr>
+            <tr><td>onglet tableau + export</td><td><code>dsfr-data-list</code> + <code>export="csv"</code></td><td>Équivalent, avec une colonne d'unité calculée</td></tr>
+            <tr><td>URL de l'état d'exploration</td><td><code>dsfr-data-context url-sync</code> (case) + <code>url-search-param="q"</code> (recherche, lue au chargement)</td><td>Équivalent pour la case&nbsp;; la recherche n'est pas réécrite dans l'URL</td></tr>
+            <tr><td>l'onglet « Analyse » n'affiche rien avant qu'on ait choisi</td><td><code>require-where</code> + <code>idle-message</code> (0.25.0)</td><td>Équivalent</td></tr>
+            <tr><td>(aucun) libellés d'un code, unité du montant</td><td><code>dsfr-data-normalize compute</code> + <code>dsfr-data-query group-by="libelle, unite"</code> + <code>dsfr-data-display</code></td><td>Plus que l'original, par une règle approchée</td></tr>
             <tr><td>choix libre de l'axe et de la mesure</td><td>—</td><td>Absent&nbsp;: c'est une page, pas un explorateur</td></tr>
-            <tr><td>l'onglet « Analyse » n'affiche rien avant qu'on ait choisi</td><td><code>require-where</code> + <code>idle-message</code> (0.25.0)</td><td>Équivalent&nbsp;: le contournement éditorial n'était pas la seule réponse</td></tr>
-            <tr><td>contexte ODS paginé à 100</td><td><code>fetch-mode="export"</code> (0.25.0&nbsp;; source générique auparavant)</td><td>1 requête au lieu de 194</td></tr>
+            <tr><td>contexte ODS paginé à 100</td><td><code>fetch-mode="export"</code> (0.25.0)</td><td>1 requête au lieu de 194</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Une page d'exploration utile en une vingtaine de balises</strong>, là où le catalogue
-          n'offrait qu'un lien vers la donnée brute. Ce n'est pas une reproduction — il n'y avait rien à
-          reproduire — mais un test de la partie exploratoire de ChartsBuilder, qui tient grâce à deux
-          attributs (<code>url-params</code>, <code>display="…:select"</code>). Le manque est structurel et
-          assumé&nbsp;: une page déclarative fige les axes, elle ne remplace pas l'onglet «&nbsp;Analyse&nbsp;».</p>
-        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AM-035 (état vide d'un graphique) et AM-011
-          (chargement par l'endpoint d'export) <strong>corrigés en 0.25.0</strong> et mis en œuvre ici&nbsp;;
-          AM-031 et LIM-003 confirmés.</p>
+        <p><strong>Une page d'exploration utile, et plus honnête que l'onglet qu'elle remplace</strong> — à
+          condition d'avoir regardé la donnée. La première version tenait techniquement et se trompait sur
+          le sens&nbsp;: des effectifs affichés en euros, un code réattribué lu comme une chute, une somme de
+          cases sous un titre qui parlait d'une case. Les trois corrections sont natives (une seconde source
+          et un contexte, une colonne calculée, une fiche calculée), aucune n'a demandé de code. Le manque
+          structurel reste assumé&nbsp;: une page déclarative fige les axes. Deux manques relèvent des
+          outils&nbsp;: le pivot par série qui comble par zéro (<code>dsfr-data</code>) et l'année écrite
+          «&nbsp;2,024&nbsp;» dans l'infobulle (DSFR Chart).</p>
+        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AM-011, AM-031 et AM-035 corrigés et mis en œuvre
+          ici&nbsp;; LIM-003 (le jeu, pas l'outil) précisé par les codes réattribués et le montant-effectif.</p>
       </div>
     </div>
-  
+
       </details></section>
 
 </main>
