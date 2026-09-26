@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sibil : ce que publie la billetterie du spectacle vivant — open-data-viz</title>
+  <meta name="description" content="Le fichier ouvert de Sibil ne contient aucun billet vendu, seulement des lieux et des dates : 204 628 déclarations de représentations en deux ans, dont plus d'une sur cinq dans un lieu parisien — et plus d'une date sur trois publiée dans le mauvais mois. Création avec dsfr-data à partir de l'API Tabular de data.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 16 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte le fichier ouvert de Sibil (système d'information
+       billetterie du spectacle vivant, ministère de la Culture), 204 628 lignes, servi par
+       Tabular. Le fichier est ré-exporté quotidiennement (dernière version lue : 26/09/2026).
+
+       L'UNITÉ. Une ligne = une déclaration, avec UNE date de représentation, UN lieu, un
+       déclarant, parfois un festival. Les champs de billetterie (billets, recettes, prix) sont
+       exclus de la diffusion (avis CADA n° 20235072 du 12 octobre 2023, cité par le producteur).
+       La page compte donc des déclarations et des lieux, jamais un public.
+
+       LES DATES — le piège de la page. Le CSV du producteur écrit ses dates en JJ-MM-AAAA.
+       L'analyse de data.gouv.fr (celle qui alimente l'API Tabular ET l'export Parquet) les lit
+       en MM-JJ quand c'est possible, en JJ-MM sinon : « 10-08-2026 » (10 août) devient
+       2026-10-08, « 31-08-2026 » reste 2026-08-31. Une date publiée dont le jour est ≤ 12 a donc
+       son jour et son mois intervertis ; une date dont le jour est > 12 est juste. La règle est
+       sans ambiguïté et se corrige ligne à ligne (compute : jour ≤ 12 → mois = jour).
+       Vérifié sur le CSV brut (2026-09-27) : les 12 premières lignes, confrontées à l'API.
+       Après correction, représentations du 26/09/2024 au 24/09/2026 ; dernière création
+       25/09/2026, la veille de l'export. Sans correction : représentations « jusqu'en
+       décembre 2026 » et 11 498 déclarations « créées » après le 1er octobre 2026.
+
+       L'ENCODAGE. Le CSV est en ISO-8859-15 et l'analyse l'a lu en Windows-1250 : È→Č, À→Ŕ,
+       Ê→Ę, è→č, Ï→Ď, Û→Ű, Œ→Ľ… (« Isčre », « THÉÂTRE Ŕ L'OUEST »). Recodé par `replace` sur
+       les noms de lieux et de villes, APRÈS agrégation (14 752 lieux, pas 204 628 lignes).
+
+       LE CHARGEMENT. Export Parquet (9,4 Mo) : `fetch-mode="export"` + `select` de huit
+       colonnes, `max-records="250000"` (le défaut, 25 000, tronquerait en silence).
+
+       LA POPULATION. Fichier départemental 2023 du ministère (95 lignes) : pas de ligne pour
+       Paris (ni Martinique ni Guyane, collectivités uniques), et l'Alsace en une ligne
+       « 67,68 ». Paris vient du fichier communal (75056), Martinique et Guyane du fichier
+       régional (02, 03) : trois sources empilées par dsfr-data-concat.
+       ========================================================================== -->
+
+  <dsfr-data-source id="sib" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="cc51d662-d0e0-4a84-bca0-bd26c643b879"
+    fetch-mode="export" max-records="250000"
+    select="declaration_statut, declaration_date_representation, lieu_ID_sibil, lieu_nom, lieu_ville, lieu_departement_code, lieu_departement_nom, festival_ID_sibil">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="sib-n" source="sib"
+    rename="lieu_departement_code:dep | lieu_departement_nom:dep_nom | declaration_date_representation:d"
+    compute="un = 1; k = 1;
+             clo = when declaration_statut = 'CLOTURE' then 1 else 0;
+             enr = when declaration_statut = 'ENREGISTRE' then 1 else 0;
+             brou = when declaration_statut = 'BROUILLON' then 1 else 0;
+             fest = when is_null(festival_ID_sibil) then 0 else 1;
+             hfest = 1 - fest;
+             par = when dep = '75' then 1 else 0;
+             sans_dep = when is_empty(dep) then 1 else 0;
+             sans_lieu = when is_null(lieu_ID_sibil) then 1 else 0;
+             dep_k = when dep = '67' or dep = '68' then '67,68' else dep;
+             jr = day(d); mo = month(d); an = year(d);
+             sans_date = when is_null(jr) then 1 else 0;
+             avec_date = 1 - sans_date;
+             inv = when jr <= 12 and jr != mo then 1 else 0;
+             mv = when jr <= 12 then jr else mo;
+             jv = when jr <= 12 then mo else jr;
+             mois = when sans_date = 1 then null else an * 100 + mv;
+             mois_pub = when sans_date = 1 then null else an * 100 + mo;
+             date_v = when sans_date = 1 then null else an * 10000 + mv * 100 + jv">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="sib-n" group-by="k"
+    aggregate="un:sum:n, clo:sum:clo, enr:sum:enr, brou:sum:brou, fest:sum:fest, par:sum:par, sans_dep:sum:sans_dep,
+               sans_lieu:sum:sans_lieu, sans_date:sum:sans_date, avec_date:sum:avec_date, inv:sum:inv">
+  </dsfr-data-query>
+  <!-- Première et dernière date : `date_v:min` sur les 204 628 lignes lève « Maximum call
+       stack size exceeded » (Math.min(...valeurs) dans dsfr-data-query, 0.42.0). On regroupe
+       d'abord par date (730 groupes), puis on prend le minimum et le maximum des groupes. -->
+  <dsfr-data-query id="dts" source="sib-n" where="date_v:isnotnull" group-by="k, date_v" aggregate="un:sum:n_j"></dsfr-data-query>
+  <dsfr-data-query id="dts-mm" source="dts" group-by="k" aggregate="date_v:min:dmin, date_v:max:dmax"></dsfr-data-query>
+  <dsfr-data-join id="syn-j" left="syn" right="dts-mm" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="syn-t" source="syn-j"
+    compute="p_clo = clo / n * 100;
+             p_fest = fest / n * 100;
+             p_par = par / n * 100;
+             p_inv = inv / avec_date * 100;
+             a1 = floor(dmin / 10000); m1 = floor(dmin / 100) - a1 * 100; j1 = dmin - floor(dmin / 100) * 100;
+             a2 = floor(dmax / 10000); m2 = floor(dmax / 100) - a2 * 100; j2 = dmax - floor(dmax / 100) * 100;
+             nm1 = when m1 = 1 then 'janvier' when m1 = 2 then 'février' when m1 = 3 then 'mars' when m1 = 4 then 'avril'
+                   when m1 = 5 then 'mai' when m1 = 6 then 'juin' when m1 = 7 then 'juillet' when m1 = 8 then 'août'
+                   when m1 = 9 then 'septembre' when m1 = 10 then 'octobre' when m1 = 11 then 'novembre' else 'décembre';
+             nm2 = when m2 = 1 then 'janvier' when m2 = 2 then 'février' when m2 = 3 then 'mars' when m2 = 4 then 'avril'
+                   when m2 = 5 then 'mai' when m2 = 6 then 'juin' when m2 = 7 then 'juillet' when m2 = 8 then 'août'
+                   when m2 = 9 then 'septembre' when m2 = 10 then 'octobre' when m2 = 11 then 'novembre' else 'décembre';
+             debut = concat(j1, ' ', nm1, ' ', a1);
+             fin = concat(j2, ' ', nm2, ' ', a2)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Les lieux : une ligne par identifiant de lieu ---------- -->
+  <dsfr-data-query id="lie" source="sib-n" where="lieu_ID_sibil:isnotnull"
+    group-by="lieu_ID_sibil, lieu_nom, lieu_ville, dep, dep_nom"
+    aggregate="un:sum:n, fest:sum:fest">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="lie-n" source="lie"
+    compute="k = 1; un = 1;
+             par = when dep = '75' then 1 else 0;
+             unique = when n = 1 then 1 else 0;
+             cent = when n >= 100 then 1 else 0;
+             n_cent = when n >= 100 then n else 0;
+             nom = replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(lieu_nom,
+                   'Č', 'È'), 'Ŕ', 'À'), 'Ę', 'Ê'), 'č', 'è'), 'ę', 'ê'), 'ŕ', 'à'), 'Ď', 'Ï'), 'ď', 'ï'), 'Ű', 'Û'), 'ű', 'û'), 'Ľ', 'Œ'), 'ľ', 'Ÿ'), 'ň', 'ò');
+             ville = replace(replace(replace(replace(replace(replace(replace(replace(lieu_ville,
+                   'Č', 'È'), 'Ŕ', 'À'), 'Ę', 'Ê'), 'Ď', 'Ï'), 'Ű', 'Û'), 'Ľ', 'Œ'), 'ľ', 'Ÿ'), 'Ő', '’');
+             departement = replace(replace(dep_nom, 'č', 'è'), 'Č', 'È');
+             lieu = concat(nom, ' (', ville, ')')">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="lie-syn" source="lie-n" group-by="k"
+    aggregate="un:sum:nl, par:sum:nl_par, unique:sum:nl_unique, cent:sum:nl_cent, n_cent:sum:n_cent, n:sum:n">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="lie-syn-t" source="lie-syn"
+    compute="p_par = nl_par / nl * 100;
+             p_unique = nl_unique / nl * 100;
+             p_cent = nl_cent / nl * 100;
+             p_n_cent = n_cent / n * 100">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Sibil, les lieux du spectacle</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>La billetterie du spectacle vivant ne publie aucun billet&nbsp;: elle dit où l'on joue, et plus d'une fois sur cinq, c'est à Paris</h1>
+
+    <p class="fr-text--lead">
+      <dsfr-data-repeat source="syn-t"><template>Le fichier ouvert de Sibil compte {{n:number}}&nbsp;déclarations de
+        représentations, datées du {{debut}} au {{fin}}. Il ne contient <strong>ni billets vendus, ni recettes, ni
+        prix</strong>&nbsp;: seulement une date, un lieu, un déclarant, parfois un festival. Ce qu'il permet de mesurer,
+        c'est la géographie de l'activité déclarée&nbsp;: <strong>{{p_par:number:1}}&nbsp;% des déclarations concernent un
+        lieu parisien</strong>,</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="nat-t"><template>pour une ville qui compte {{part_pop:number:1}}&nbsp;% des
+        habitants.</template></dsfr-data-repeat>
+    </p>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture (DGCA, DEPS) — <em>Données du système de déclaration de billetterie du spectacle vivant
+      Sibil</em>, fichier ré-exporté par le producteur, version du 26&nbsp;septembre 2026. Une ligne par déclaration.
+      Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/donnees-du-systeme-de-declaration-de-billetterie-du-spectacle-vivant-sibil" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular). Dates de représentation corrigées d'une inversion jour-mois (voir plus bas).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="3"
+        heading="Déclarations" label="une par représentation datée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="lie-syn-t" value="nl:max" format="nombre" span="3"
+        heading="Lieux" label="identifiants de lieu distincts"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_par:max" format="decimal" decimals="1" unit="%" span="3"
+        heading="Paris" label="part des déclarations dans un lieu parisien"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_fest:max" format="decimal" decimals="1" unit="%" span="3"
+        heading="Festivals" label="part des déclarations rattachées à un festival"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= CE QUE LE FICHIER NE CONTIENT PAS ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-absent">
+    <h2 id="t-absent" class="fr-h3">Pas un billet, pas un euro&nbsp;: le fichier a été vidé de ce qui mesure le public</h2>
+    <div class="fr-callout">
+      <p class="fr-callout__text">
+        Depuis la loi du 7&nbsp;juillet 2016 (LCAP), les entrepreneurs de spectacles déclarent chaque trimestre dans
+        Sibil les données de billetterie de leurs représentations. Le producteur précise que, <em>«&nbsp;pour des raisons
+        ayant trait au secret des affaires&nbsp;»</em> et selon l'avis de la CADA n°&nbsp;20235072 du 12&nbsp;octobre 2023,
+        ont été exclus de la diffusion&nbsp;: le total de billetterie, la recette TTC, les prix moyens, les billets à plein
+        tarif, les abonnements, forfaits et adhésions, les billets exonérés ou gratuits. Le détail des spectacles est lui
+        aussi retiré.
+      </p>
+    </div>
+    <p class="odv-lecture fr-mt-3w">
+      Une déclaration pèse donc la même chose ici, qu'elle porte sur 40&nbsp;spectateurs dans un café-théâtre ou sur
+      15&nbsp;000 dans une salle de concert. Tout ce qui suit compte des <strong>représentations déclarées</strong> et
+      des <strong>lieux</strong>&nbsp;; aucun classement de fréquentation ne peut en être tiré. Les chiffres de public
+      existent&nbsp;: le DEPS les publie chaque année, agrégés, sur le site du ministère — pas dans ce fichier.
+    </p>
+  </section>
+
+  <!-- ======================= PREUVE — Paris, rapporté aux habitants ======================= -->
+  <dsfr-data-source id="pop-d" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="6126f348-eb0b-49e6-8850-5fe1e1a350e3"
+    select="code_insee, libelle_departement, population_annee">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="pop-d-n" source="pop-d"
+    rename="code_insee:code | libelle_departement:lib | population_annee:pop"></dsfr-data-normalize>
+
+  <dsfr-data-source id="pop-c" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="f27f0329-1a0c-487c-9186-cc6f387fe155"
+    select="code_insee, nom_commune, population_annee">
+  </dsfr-data-source>
+  <dsfr-data-query id="pop-c-q" source="pop-c" where="code_insee:eq:75056"></dsfr-data-query>
+  <dsfr-data-normalize id="pop-c-n" source="pop-c-q"
+    rename="code_insee:code | nom_commune:lib | population_annee:pop"
+    compute="code = '75'; lib = 'Paris'"></dsfr-data-normalize>
+
+  <dsfr-data-source id="pop-r" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="4dfccc0d-962c-4800-8599-b47730823a33"
+    select="code_insee, libelle_region, population_annee">
+  </dsfr-data-source>
+  <dsfr-data-query id="pop-r-q" source="pop-r" where="code_insee:in:02|03"></dsfr-data-query>
+  <dsfr-data-normalize id="pop-r-n" source="pop-r-q"
+    rename="code_insee:code | libelle_region:lib | population_annee:pop"
+    compute="code = when code = '02' then '972' else '973'"></dsfr-data-normalize>
+
+  <dsfr-data-concat id="pop" sources="pop-d-n, pop-c-n, pop-r-n"></dsfr-data-concat>
+
+  <dsfr-data-query id="dep" source="sib-n" where="dep_k:isnotnull" group-by="dep_k" aggregate="un:sum:n, fest:sum:fest"></dsfr-data-query>
+  <dsfr-data-join id="dep-j" left="dep" right="pop" on="dep_k=code" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="dep-t" source="dep-j"
+    compute="k = 1;
+             taux = round(n / pop * 100000, 0);
+             p_fest = round(fest / n * 100, 0);
+             par = when dep_k = '75' then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-tri" source="dep-t" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="dep-all" source="dep-tri"
+    rename="lib:Département | taux:Déclarations pour 100 000 habitants | n:Déclarations | p_fest:Dont festival (%)"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-top" source="dep-all" limit="20"></dsfr-data-query>
+
+  <dsfr-data-query id="nat" source="dep-t" group-by="k" aggregate="n:sum:n, pop:sum:pop"></dsfr-data-query>
+  <dsfr-data-query id="hp" source="dep-t" where="par:eq:0" group-by="k" aggregate="n:sum:n_hp, pop:sum:pop_hp"></dsfr-data-query>
+  <dsfr-data-query id="dep-par" source="dep-t" where="par:eq:1"></dsfr-data-query>
+  <dsfr-data-join id="nat-j1" left="nat" right="hp" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="nat-j" left="nat-j1" right="dep-par" on="k" type="inner" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-normalize id="nat-t" source="nat-j"
+    compute="taux_nat = n / pop * 100000;
+             taux_hp = n_hp / pop_hp * 100000;
+             part_pop = p_pop / pop * 100;
+             rapport = taux / taux_hp"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-2" source="dep-tri" where="par:eq:0" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-bas" source="dep-t" order-by="taux:asc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dep">
+    <h2 id="t-dep" class="fr-h3">Rapporté aux habitants, Paris déclare neuf fois plus de représentations que le reste de la France</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="nat-t"><template>Paris compte {{taux:number}}&nbsp;déclarations pour 100&nbsp;000&nbsp;habitants,
+        contre {{taux_hp:number:0}} dans le reste de la France, soit <strong>{{rapport:number:1}}&nbsp;fois plus</strong>&nbsp;;
+        avec {{part_pop:number:1}}&nbsp;% des habitants des départements comparés, la ville concentre {{p_n:number}} déclarations.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dep-2"><template>Deuxième du classement, loin derrière&nbsp;: {{lib}} ({{taux:number}}), où
+        {{p_fest:number}}&nbsp;% des déclarations sont rattachées à un festival.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dep-bas"><template>Au bas du classement&nbsp;: {{lib}}, {{taux:number}}.</template></dsfr-data-repeat>
+    </p>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Déclarations Sibil pour 100 000 habitants, par département">
+      <dsfr-data-chart id="g-dep" source="dep-top" type="bar" horizontal
+        label-field="Département" value-field="Déclarations pour 100 000 habitants" name="Déclarations pour 100 000 habitants"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="pour 100 000 hab."
+        databox databox-title="Les vingt départements qui déclarent le plus de représentations pour 100 000 habitants"
+        databox-source="Ministère de la Culture — Sibil ; dépenses culturelles des départements, communes et régions 2023 (population) — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dep" source="dep-all" label-field="Département" value-field="Déclarations pour 100 000 habitants, Déclarations, Dont festival (%)"
+        description="Vingt barres horizontales triées de la plus longue à la plus courte : le nombre de déclarations de représentations pour 100 000 habitants, par département du lieu. La barre de Paris, mise en évidence, dépasse 2 000 et fait plus du double de la suivante, le Vaucluse, un peu au-dessus de 850 ; le Rhône suit vers 630, puis la Loire-Atlantique vers 450. Les seize autres départements s'étagent entre 300 et 400. Le tableau de données donne les quatre-vingt-dix-sept départements comparés, l'Alsace comptant pour un.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Département du lieu de la représentation, pas du déclarant. Population 2023 des fichiers de dépenses culturelles
+      du ministère&nbsp;: départements (le Bas-Rhin et le Haut-Rhin y forment une seule ligne, la Collectivité européenne
+      d'Alsace, et leurs déclarations sont additionnées), Paris depuis le fichier des communes, Martinique et Guyane
+      depuis le fichier des régions. Le Rhône inclut la Métropole de Lyon, dans Sibil comme dans la population.
+      Mayotte n'a aucune déclaration.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — les lieux qui déclarent le plus ======================= -->
+  <dsfr-data-query id="lie-top" source="lie-n" order-by="n:desc" limit="15"></dsfr-data-query>
+  <dsfr-data-normalize id="lie-top-g" source="lie-top" rename="lieu:Lieu | n:Déclarations"></dsfr-data-normalize>
+  <dsfr-data-query id="lie-top-par" source="lie-top" group-by="k" aggregate="par:sum:par, un:sum:nt"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-lieux">
+    <h2 id="t-lieux" class="fr-h3">Les lieux qui déclarent le plus ne sont pas les grandes salles, mais de petites scènes qui jouent chaque soir</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="lie-syn-t"><template>Paris ne compte que {{p_par:number:1}}&nbsp;% des lieux du fichier
+        ({{nl_par:number}} sur {{nl:number}})&nbsp;: sa part des déclarations tient moins au nombre de ses salles qu'à
+        leur rythme.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="lie-top-par"><template>Sur les {{nt}}&nbsp;lieux qui déclarent le plus, {{par}} sont
+        parisiens&nbsp;;</template></dsfr-data-repeat>
+      les noms parlent d'eux-mêmes — Point-Virgule, The Joke, Comédie Bastille, Spotlight, Improvidence&nbsp;: des
+      cafés-théâtres, des scènes d'humour et d'improvisation, des théâtres de poche, où plusieurs spectacles peuvent se
+      succéder le même soir, toute l'année. Une grande salle de concert, qui accueille dix fois plus de public par soirée mais joue moins
+      souvent, n'apparaît pas dans ce classement&nbsp;: <strong>la déclaration mesure un rythme de programmation, pas une
+      audience</strong>.
+    </p>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Les quinze lieux qui déclarent le plus de représentations dans Sibil">
+      <dsfr-data-chart id="g-lieux" source="lie-top-g" type="bar" horizontal
+        label-field="Lieu" value-field="Déclarations" name="Déclarations"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="déclarations"
+        databox databox-title="Les quinze lieux qui déclarent le plus de représentations"
+        databox-source="Ministère de la Culture — Sibil (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-lieux" source="lie-top-g" label-field="Lieu" value-field="Déclarations"
+        description="Quinze barres horizontales triées de la plus longue à la plus courte : les lieux qui totalisent le plus de déclarations de représentations sur les deux ans du fichier. En tête, deux salles du Point-Virgule à Paris, autour de 2 600 et 2 400 déclarations, puis The Joke, un peu au-dessus de 2 100 ; les douze suivantes, entre 870 et 1 350, sont pour l'essentiel des théâtres de poche et des scènes d'humour parisiennes, avec quelques salles de Lille, Rouen et Lyon.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="lie-syn-t">
+      <template>
+        <p class="odv-lecture fr-mt-3w">
+          La concentration se lit aussi dans l'autre sens. <strong>{{nl_cent:number}}&nbsp;lieux</strong>
+          ({{p_cent:number:1}}&nbsp;% du total) déclarent chacun au moins cent représentations et portent à eux seuls
+          {{p_n_cent:number:0}}&nbsp;% des déclarations. À l'autre bout, {{nl_unique:number}}&nbsp;lieux
+          ({{p_unique:number:0}}&nbsp;%) n'apparaissent qu'une fois en deux ans&nbsp;: une église, une salle des fêtes,
+          une place de village qui accueille un spectacle.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Un lieu est compté par son identifiant Sibil. Le déclarant n'est pas toujours l'exploitant du lieu&nbsp;: un
+      producteur de tournée déclare les représentations qu'il donne dans la salle d'un autre. Certains identifiants ont été
+      fusionnés depuis avec un autre lieu (statut «&nbsp;FUSIONNE&nbsp;») et la même salle peut ainsi figurer deux fois&nbsp;;
+      la page ne les regroupe pas. Noms recodés d'une erreur d'encodage (voir plus bas).
+    </p>
+  </section>
+
+  <!-- ======================= QUAND — la saison, dates corrigées ======================= -->
+  <dsfr-data-query id="moi" source="sib-n" where="mois:gte:202410, mois:lte:202606"
+    group-by="mois" aggregate="un:sum:n, fest:sum:fest, hfest:sum:hfest" order-by="mois:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="moi-t" source="moi"
+    compute="k = 1;
+             a = floor(mois / 100); m = mois - a * 100;
+             nm = when m = 1 then 'janv.' when m = 2 then 'févr.' when m = 3 then 'mars' when m = 4 then 'avr.'
+                  when m = 5 then 'mai' when m = 6 then 'juin' when m = 7 then 'juil.' when m = 8 then 'août'
+                  when m = 9 then 'sept.' when m = 10 then 'oct.' when m = 11 then 'nov.' else 'déc.';
+             Mois = concat(nm, ' ', a);
+             nml = when m = 1 then 'janvier' when m = 2 then 'février' when m = 3 then 'mars' when m = 4 then 'avril'
+                   when m = 5 then 'mai' when m = 6 then 'juin' when m = 7 then 'juillet' when m = 8 then 'août'
+                   when m = 9 then 'septembre' when m = 10 then 'octobre' when m = 11 then 'novembre' else 'décembre';
+             mois_txt = concat(nml, ' ', a);
+             p_fest = round(fest / n * 100, 1)"></dsfr-data-normalize>
+  <dsfr-data-query id="moi-hi" source="moi-t" order-by="p_fest:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="moi-bas" source="moi-t" order-by="n:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="moi-haut" source="moi-t" order-by="n:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="moi-lo" source="moi-t" order-by="p_fest:asc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-mois">
+    <h2 id="t-mois" class="fr-h3">L'été, l'activité déclarée s'effondre et les festivals prennent le relais&nbsp;: plus de quatre déclarations sur dix en juillet</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="moi-haut"><template>Le mois le plus chargé est {{mois_txt}}, avec {{n:number}}&nbsp;déclarations&nbsp;;</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="moi-bas"><template>le plus creux, {{mois_txt}}, n'en compte que {{n:number}}.</template></dsfr-data-repeat>
+      La saison des salles va d'octobre à avril. L'été, le volume s'effondre, mais sa composition change&nbsp;:
+      <dsfr-data-repeat source="moi-hi"><template>en {{mois_txt}}, <strong>{{p_fest:number:0}}&nbsp;% des représentations déclarées
+        sont rattachées à un festival</strong>,</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="moi-lo"><template>contre {{p_fest:number:1}}&nbsp;% en {{mois_txt}}.</template></dsfr-data-repeat>
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations Sibil par mois de représentation, festival et hors festival">
+      <dsfr-data-chart id="g-mois" source="moi-t" type="bar" stacked
+        label-field="Mois"
+        value-field="hfest:Hors festival"
+        value-fields="fest:Rattachées à un festival"
+        color-map="Hors festival:#929292,Rattachées à un festival:#000091"
+        unit-tooltip="déclarations"
+        databox databox-title="Déclarations par mois de représentation, octobre 2024 à juin 2026"
+        databox-source="Ministère de la Culture — Sibil (data.gouv.fr) ; dates corrigées de l'inversion jour-mois" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-mois" source="moi-t" label-field="Mois" value-field="n, hfest, fest, p_fest"
+        description="Vingt et une barres verticales empilées, d'octobre 2024 à juin 2026 : le nombre de déclarations par mois de représentation, hors festival en gris, rattachées à un festival en bleu. D'octobre à avril, les barres oscillent entre 9 000 et 13 000, avec des sommets en mars et en octobre-novembre et un léger creux en décembre ; elles tombent à 6 000 en juin 2025 et à un peu plus de 3 000 en août 2025. La part bleue, un mince filet l'hiver, occupe plus de deux cinquièmes des barres de juillet et d'août.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Mois de la date de représentation, après correction. Seuls les trimestres clôturés sont tracés&nbsp;: septembre
+      2024 ne commence qu'au 26 dans le fichier, et le troisième trimestre 2026 est encore en cours de déclaration
+      (voir plus bas). Un rattachement à un festival est déclaré par l'entrepreneur&nbsp;: une représentation jouée
+      pendant un festival sans y être rattachée compte «&nbsp;hors festival&nbsp;».
+    </p>
+  </section>
+
+  <!-- ======================= L'HONNÊTETÉ — les dates publiées ======================= -->
+  <dsfr-data-query id="cmp-p" source="sib-n" where="mois_pub:isnotnull" group-by="mois_pub" aggregate="un:sum:n_pub" order-by="mois_pub:asc"></dsfr-data-query>
+  <dsfr-data-query id="cmp-c" source="sib-n" where="mois:isnotnull" group-by="mois" aggregate="un:sum:n_cor"></dsfr-data-query>
+  <dsfr-data-join id="cmp-j" left="cmp-p" right="cmp-c" on="mois_pub=mois" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="cmp-t" source="cmp-j"
+    compute="a = floor(mois_pub / 100); m = mois_pub - a * 100;
+             nm = when m = 1 then 'janv.' when m = 2 then 'févr.' when m = 3 then 'mars' when m = 4 then 'avr.'
+                  when m = 5 then 'mai' when m = 6 then 'juin' when m = 7 then 'juil.' when m = 8 then 'août'
+                  when m = 9 then 'sept.' when m = 10 then 'oct.' when m = 11 then 'nov.' else 'déc.';
+             Mois = concat(nm, ' ', a);
+             Publiées = n_pub;
+             Corrigées = coalesce(n_cor, 0)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dates">
+    <h2 id="t-dates" class="fr-h3">Telles que l'API les publie, plus d'une date sur trois tombe dans le mauvais mois</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Le producteur écrit ses dates «&nbsp;jour-mois-année&nbsp;». L'analyse de data.gouv.fr, qui alimente l'API
+          Tabular et l'export Parquet, les relit «&nbsp;mois-jour&nbsp;» chaque fois que c'est possible&nbsp;: le
+          10&nbsp;août devient le 8&nbsp;octobre, le 31&nbsp;août reste le 31&nbsp;août. <strong>{{inv:number}}&nbsp;dates
+          de représentation sur {{avec_date:number}}, soit {{p_inv:number:0}}&nbsp;%, sont ainsi publiées avec le jour et le
+          mois intervertis.</strong> Lues telles quelles, elles font commencer le fichier en janvier 2024 et le prolongent
+          jusqu'en décembre 2026, trois mois après sa date d'export. L'erreur se corrige sans ambiguïté&nbsp;: une date dont
+          le jour est au plus 12 a été retournée, une autre est juste. Toute la page utilise les dates corrigées.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations Sibil par mois, dates publiées et dates corrigées">
+      <dsfr-data-chart id="g-dates" source="cmp-t" type="line"
+        label-field="Mois" value-field="Publiées:Dates telles que publiées" value-fields="Corrigées:Dates corrigées"
+        y-min="0" unit-tooltip="déclarations"
+        databox databox-title="Déclarations par mois de représentation : dates publiées par l'API et dates corrigées"
+        databox-source="Ministère de la Culture — Sibil (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dates" source="cmp-t" label-field="Mois" value-field="Publiées, Corrigées"
+        description="Deux courbes mensuelles de janvier 2024 à décembre 2026. La courbe bleu clair des dates corrigées est nulle jusqu'en août 2024, monte au-dessus de 10 000 à l'automne et au printemps, creuse chaque été et retombe à zéro après septembre 2026. La courbe violette des dates telles que publiées démarre dès janvier 2024, autour de 1 000 par mois, et se prolonge jusqu'en décembre 2026, vers 2 000 par mois, après la date d'export du fichier ; entre les deux, ses pics et ses creux ne tombent pas les mêmes mois que ceux de la courbe corrigée.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: quels lieux déclarent, dans quel département&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Une ligne par lieu, avec le nombre de représentations déclarées sur les deux ans du fichier. Les filtres agissent
+      sur les chiffres et sur la liste&nbsp;; la recherche porte sur le nom du lieu et la ville.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="fac" value="count" format="nombre"
+        heading="Lieux" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="n:sum" format="nombre"
+        heading="Déclarations" label="dans ces lieux"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="fest:sum / n:sum" format="pourcentage" decimals="0"
+        heading="Festivals" label="part des déclarations rattachées à un festival"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="fac" source="lie-n"
+          fields="departement, ville"
+          labels="departement:Département | ville:Ville"
+          display="departement:multiselect | ville:multiselect"
+          disjunctive="departement, ville"
+          searchable="departement, ville"
+          sort="departement:alpha:asc | ville:alpha:asc"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-list source="fac"
+          columns="nom:Lieu, ville:Ville, departement:Département, n:Déclarations, fest:Dont festival"
+          search sort="n:desc" pagination="20" count-label="lieu|lieux" export="csv"
+          caption="Lieux déclarés dans Sibil (sélection courante)">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Un public, une recette, un prix.</strong> Exclus du fichier par le producteur (avis CADA de 2023)&nbsp;:
+            aucun chiffre de la page ne dit combien de spectateurs ont assisté à quoi que ce soit.</li>
+          <li><strong>Une évolution de l'activité.</strong> D'octobre à juin, la seconde saison compte un peu plus de
+            déclarations que la première, mais le fichier ne permet pas de séparer une hausse de l'activité d'une hausse de
+            la déclaration elle-même&nbsp;: un dispositif obligatoire depuis 2018 gagne encore des déclarants. La page ne
+            parle pas de croissance.</li>
+          <li><strong>L'exhaustivité.</strong> Le fichier ne dit pas quelle part des représentations données en France y
+            est déclarée. Les comptes sont ceux des déclarations reçues, pas ceux des spectacles joués.</li>
+          <li><strong>Le trimestre en cours.</strong> {{enr:number}}&nbsp;déclarations sont «&nbsp;enregistrées&nbsp;» sans
+            être clôturées&nbsp;: ce sont celles de juillet à septembre 2026, que les entrepreneurs ont jusqu'au 10&nbsp;octobre
+            pour compléter. Elles sont comptées dans les totaux, pas dans la courbe mensuelle. Les {{clo:number}}
+            autres déclarations ({{p_clo:number:1}}&nbsp;%) sont clôturées&nbsp;; {{brou:number}} restent à l'état de
+            brouillon.</li>
+          <li><strong>{{sans_date:number}}&nbsp;déclarations sans date</strong> de représentation (des brouillons),
+            <strong>{{sans_lieu:number}} sans lieu</strong> et {{sans_dep:number}} sans département du lieu&nbsp;: comptées
+            dans les totaux, hors du mois, du classement des lieux ou du taux départemental.</li>
+          <li><strong>Les déclarants.</strong> Le fichier nomme l'entreprise qui déclare et son numéro de licence. Il n'est
+            pas croisé ici avec le fichier des licences d'entrepreneurs de spectacles&nbsp;: les numéros n'y ont pas le même
+            format (<code>2-1058290</code> d'un côté, <code>PLATESV-R-2020-005380</code> de l'autre), et un déclarant n'est
+            pas l'exploitant du lieu.</li>
+          <li><strong>Une carte de points.</strong> Le fichier donne une adresse, pas de coordonnées.</li>
+          <li><strong>Des noms parfaitement orthographiés.</strong> L'analyse de data.gouv.fr a lu le fichier dans un
+            mauvais jeu de caractères («&nbsp;Isčre&nbsp;», «&nbsp;THÉÂTRE Ŕ L'OUEST&nbsp;»)&nbsp;; la page recode les treize
+            lettres concernées dans les noms de lieux, de villes et de départements. Les apostrophes typographiques et
+            quelques caractères perdus dès la source restent faux.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir du fichier ouvert de Sibil. Les comptes du cadrage tiennent
+        (204&nbsp;628 déclarations, 46&nbsp;314 à Paris, soit 22,6&nbsp;%, le 27&nbsp;septembre 2026)&nbsp;; deux choses ont
+        changé. La part rattachée à un festival est de 9,6&nbsp;% (19&nbsp;683), pas de 8&nbsp;%. Et la date «&nbsp;la plus
+        ancienne&nbsp;» du cadrage (10&nbsp;janvier 2024) n'existe pas&nbsp;: c'est le 1er&nbsp;octobre 2024, lu à
+        l'envers. La page en a tiré sa quatrième section.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>204&nbsp;628 lignes en une requête.</strong> Le cadrage prévoyait des agrégats serveur (1&nbsp;023
+              pages sinon)&nbsp;; la ressource a un export Parquet de 9,4&nbsp;Mo, que <code>fetch-mode="export"</code> lit en
+              ne demandant que les huit colonnes du <code>select</code>.</li>
+            <li><strong>Corriger une date retournée.</strong> <code>day()</code>, <code>month()</code> et un
+              <code>when</code> dans <code>compute</code> suffisent&nbsp;: la règle d'inversion est déterministe.</li>
+            <li><strong>Un taux départemental avec trois fichiers de population.</strong> <code>dsfr-data-concat</code>
+              empile le fichier départemental, la ligne de Paris et celles de Martinique et de Guyane, alignées par
+              <code>rename</code>.</li>
+            <li><strong>Deux lignes dans une phrase.</strong> Paris et le reste de la France, joints sur une clé
+              constante.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Des dates fausses sans erreur.</strong> L'API et l'export Parquet publient 37&nbsp;% des dates avec
+              jour et mois intervertis. Aucun message&nbsp;: seule une date d'après l'export a trahi l'erreur. Le défaut est
+              dans l'analyse de data.gouv.fr, pas dans la bibliothèque, qui restitue fidèlement ce que l'API sert.</li>
+            <li><strong>Un encodage lu de travers.</strong> Même origine&nbsp;: treize <code>replace()</code> imbriqués par
+              champ, appliqués après agrégation pour ne traiter que 14&nbsp;752 lignes.</li>
+            <li><strong>Une population sans Paris.</strong> Le fichier départemental du ministère n'a pas de ligne pour
+              Paris, ville où se trouve l'histoire de la page&nbsp;: il a fallu aller la chercher dans le fichier des
+              communes. Limite des jeux publiés, pas de la bibliothèque.</li>
+            <li><strong>Un minimum sur 204&nbsp;628 lignes.</strong> <code>aggregate="date_v:min"</code> lève
+              «&nbsp;Maximum call stack size exceeded&nbsp;» au-delà d'environ 120&nbsp;000 lignes par groupe
+              (<code>Math.min(...valeurs)</code> dans <code>dsfr-data-query</code>)&nbsp;; rejoué sur une page minimale&nbsp;:
+              100&nbsp;000 lignes passent, 200&nbsp;000 échouent. Contournement&nbsp;: regrouper d'abord par date, puis prendre
+              le minimum des 730 groupes.</li>
+            <li><strong>Une somme de deux absents qui n'est pas absente.</strong> Dans <code>compute</code>,
+              <code>an * 100 + mo</code> sur une ligne sans date rend une chaîne vide, pas <code>null</code>&nbsp;: le
+              <code>+</code> concatène dès qu'un côté n'est pas un nombre, et le filtre <code>isnotnull</code> laisse passer
+              la ligne. Un point «&nbsp;déc.&nbsp;» sans année est apparu en tête de la courbe. Garde explicite&nbsp;:
+              <code>when sans_date = 1 then null else …</code>.</li>
+            <li><strong>Des points de courbe qui ne suivent pas <code>color-map</code>.</strong> Sur une courbe,
+              <code>color-map</code> recolore les lignes et la légende, pas les points, qui gardent la palette par
+              défaut&nbsp;: le point gris se posait sur la ligne bleue. Rejoué sans <code>databox</code> sur trois lignes de
+              données. La page garde la palette par défaut sur ce graphique.</li>
+            <li><strong>Le mois en toutes lettres.</strong> Pas de format de date dans <code>compute</code>&nbsp;: un
+              <code>when</code> à douze branches par libellé de mois.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 204&nbsp;628 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select max-records</code></td><td>Natif (Parquet)</td></tr>
+            <tr><td>Remettre le jour et le mois à l'endroit</td><td><code>normalize compute</code> (<code>day</code>, <code>month</code>, <code>when</code>)</td><td>Natif</td></tr>
+            <tr><td>Première et dernière date sur 204&nbsp;628 lignes</td><td><code>query aggregate="date_v:min"</code> après un premier <code>group-by</code> par date</td><td>Contournement (pile dépassée)</td></tr>
+            <tr><td>Recoder un encodage fautif</td><td><code>normalize compute</code> (<code>replace</code> imbriqués)</td><td>Natif, verbeux</td></tr>
+            <tr><td>Population de trois fichiers</td><td><code>dsfr-data-concat</code> + <code>normalize rename</code></td><td>Natif</td></tr>
+            <tr><td>Déclarations pour 100&nbsp;000 habitants</td><td><code>dsfr-data-join on="dep_k=code"</code> + <code>compute</code></td><td>Natif</td></tr>
+            <tr><td>Dates publiées contre dates corrigées</td><td>deux <code>query group-by</code> + <code>join type="left"</code> + <code>chart type="line"</code></td><td>Natif</td></tr>
+            <tr><td>Chercher un lieu</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-list search</code> sur les lieux agrégés</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>La bibliothèque suit&nbsp;; c'est la donnée qu'il a fallu vérifier.</strong> Un jeu sans la mesure qui
+          lui donne son nom, des dates retournées et un encodage lu de travers par la plateforme&nbsp;: rien de cela ne
+          produit d'erreur, et tout se corrige dans la page, à condition de l'avoir vu.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte Leaflet sur la page. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>La vacance qu'on peut lire : longue durée, loyers bas, zone C — open-data-viz</title>
+  <meta name="description" content="Là où le chiffre est publié, un logement privé sur trente est vide depuis plus de deux ans ; c'est un sur dix-neuf en zone C, un sur treize là où le loyer d'annonce est sous 9 €/m², et un sur quarante-huit en zones A et A bis — quatre jeux de trois producteurs (LOVAC, carte des loyers, zonage ABC, référentiel INSEE) joints commune par commune dans le navigateur.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+  <link rel="preconnect" href="https://equipements.sports.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <!-- DSFR Chart livre SA PROPRE feuille, et elle n'est pas optionnelle des
+       qu'une page porte un graphique : sans elle, l'infobulle rend son HTML
+       sans aucun style. Rien en console : seul le survol le montre. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <link rel="stylesheet" href="/assets/demo.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <div class="fr-container fr-mt-4w">
+    <nav role="navigation" class="fr-breadcrumb fr-mb-0" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/demo">Démonstrations</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">La vacance qu'on peut lire</a></li>
+        </ol>
+      </div>
+    </nav>
+  </div>
+
+  <!-- ==========================================================================
+       BANDEAU D'OUVERTURE
+       ========================================================================== -->
+  <section class="odv-hero">
+    <div class="fr-container odv-hero__corps">
+      <p class="fr-badge fr-badge--new fr-mb-3v">Démonstration — quatre jeux, trois producteurs, une clé</p>
+      <h1 class="odv-hero__titre">La vacance qu'on peut lire&nbsp;:<br>longue durée, loyers bas, zone C</h1>
+      <p class="odv-hero__chapo">
+        «&nbsp;Trois millions de logements vacants&nbsp;» fait un titre, pas une politique. Le chiffre
+        change de source d'un millésime à l'autre, la moitié des communes le voient secrétisé, et
+        personne ne le pose à côté du loyer ni du zonage qui décide des aides. Cette page le fait,
+        commune par commune&nbsp;: <strong>la vacance de plus de deux ans suit le loyer bas et la
+        zone C</strong> — avec une exception, l'outre-mer.
+      </p>
+      <p class="odv-hero__source fr-text--sm">
+        LOVAC (Cerema / DGALN) × carte des loyers (ANIL / DHUP) × zonage ABC (DHUP), lus en
+        <strong>export Parquet</strong> de l'API Tabular de <code>data.gouv.fr</code>, ×
+        référentiel communal INSEE (<code>equipements.sports.gouv.fr</code>) — joints à la volée,
+        sans serveur.
+      </p>
+      <a class="fr-btn fr-btn--lg fr-icon-arrow-down-line fr-btn--icon-right" href="#rupture">Commencer par le piège</a>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       LE PIPELINE
+       Quatre sources, 139 762 lignes, quatre requêtes de données (plus trois
+       petites requêtes de métadonnées data.gouv qui donnent l'adresse de
+       chaque Parquet). Tabular pagine par 200 : les trois jeux data.gouv
+       coûteraient 525 allers-retours. `fetch-mode="export"` lit à la place
+       l'export Parquet de chaque ressource, par plages, en quelques requêtes.
+
+       ⚠️ AUCUN where / group-by / aggregate / order-by SUR CES SOURCES : le
+       Parquet ne porte que des lignes brutes ; une clause déléguée ferait
+       retomber la source sur la pagination (et la bibliothèque le dit en
+       console). Tout calcul se fait en aval, après un `dsfr-data-normalize`
+       qui renomme — ce qui coupe aussi toute délégation depuis une query.
+
+       ⚠️ `max-records="40000"` PARTOUT : le plafond par défaut de Tabular est
+       25 000 lignes et il tronque (en le disant en console, mais en
+       tronquant). Les trois jeux font 34 875 à 34 912 lignes.
+
+       UNICITÉ DU CÔTÉ DROIT (PG-001), relevée sur les exports complets avant
+       d'écrire une seule jointure : 34 912 codes pour 34 912 lignes (LOVAC),
+       34 900 / 34 900 (loyers), 34 875 / 34 875 (zonage), 35 075 / 35 075
+       (INSEE). Aucune jointure ne peut dupliquer une commune.
+       ========================================================================== -->
+
+  <!-- LOVAC : logements du parc PRIVÉ vacants, par commune, millésimes 2020 à
+       2026 en colonnes. Tabular type toutes les colonnes en TEXTE, parce
+       qu'elles portent « s » (secret statistique) : `numeric` rend « s » →
+       null, et toute somme en aval ignore les null.
+       ⚠️ Les libellés de ce jeu (LIBGEO_26, LIB_DEP) ne sont PAS chargés : le
+       CSV du producteur est en Latin-1 et l'analyse data.gouv l'a décodé en
+       Europe centrale — « Ničvre », « Asničres-sur-Saône » (2 436 lignes sur
+       le département, 2 261 sur la commune). Les noms viennent du référentiel
+       INSEE, qui est propre. C'est une raison d'être de la quatrième source. -->
+  <dsfr-data-source id="lovac" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="2e0417b4-902d-4c60-90e7-bf5df148cb87"
+    fetch-mode="export" max-records="40000"
+    select="CODGEO_26, ff_pp_total_25, pp_vacant_20, pp_vacant_21, pp_vacant_22, pp_vacant_23, pp_vacant_24, pp_vacant_25, pp_vacant_26, pp_vacant_plus_2ans_20, pp_vacant_plus_2ans_21, pp_vacant_plus_2ans_22, pp_vacant_plus_2ans_23, pp_vacant_plus_2ans_24, pp_vacant_plus_2ans_25, pp_vacant_plus_2ans_26">
+  </dsfr-data-source>
+
+  <!-- `pub` : la commune compte seulement si le NUMÉRATEUR et le DÉNOMINATEUR
+       sont publiés tous les deux. Le parc aussi est secrétisé (18 321
+       communes), et pas toujours avec la vacance : 4 692 communes publient
+       leur vacance longue mais pas leur parc, 4 138 l'inverse. Sommer chaque
+       colonne sur ce qu'elle a de publié donnerait un ratio de deux
+       populations différentes.
+
+       `code_abc` : Paris, Lyon et Marseille sont publiés PAR ARRONDISSEMENT
+       dans LOVAC, les loyers et le référentiel INSEE, mais le zonage ABC
+       classe la COMMUNE (75056, 69123, 13055). Sans cette clé dérivée, la
+       jointure perdait 45 lignes et 1,8 million de logements — Paris entier
+       sortait de la zone A bis ; seule la console le disait (clés orphelines). Les comparaisons d'ordre sont
+       numériques quand les deux côtés le sont ; « 2A004 » se compare en texte
+       et ne tombe dans aucun intervalle. -->
+  <dsfr-data-normalize id="lovac-n" source="lovac"
+    numeric="ff_pp_total_25, pp_vacant_20, pp_vacant_21, pp_vacant_22, pp_vacant_23, pp_vacant_24, pp_vacant_25, pp_vacant_26, pp_vacant_plus_2ans_20, pp_vacant_plus_2ans_21, pp_vacant_plus_2ans_22, pp_vacant_plus_2ans_23, pp_vacant_plus_2ans_24, pp_vacant_plus_2ans_25, pp_vacant_plus_2ans_26"
+    rename="CODGEO_26:code"
+    compute="code_abc = when code &gt;= '75101' and code &lt;= '75120' then '75056'
+                        when code &gt;= '13201' and code &lt;= '13216' then '13055'
+                        when code &gt;= '69381' and code &lt;= '69389' then '69123'
+                        else code;
+             pub = when is_null(pp_vacant_plus_2ans_26) or is_null(ff_pp_total_25) then 0 else 1;
+             vl_c = when pub = 1 then pp_vacant_plus_2ans_26 else null;
+             parc_c = when pub = 1 then ff_pp_total_25 else null;
+             s_20 = when is_null(pp_vacant_plus_2ans_20) then 1 else 0;
+             s_21 = when is_null(pp_vacant_plus_2ans_21) then 1 else 0;
+             s_22 = when is_null(pp_vacant_plus_2ans_22) then 1 else 0;
+             s_23 = when is_null(pp_vacant_plus_2ans_23) then 1 else 0;
+             s_24 = when is_null(pp_vacant_plus_2ans_24) then 1 else 0;
+             s_25 = when is_null(pp_vacant_plus_2ans_25) then 1 else 0;
+             s_26 = when is_null(pp_vacant_plus_2ans_26) then 1 else 0">
+  </dsfr-data-normalize>
+
+  <!-- Carte des loyers 2025, appartements : un loyer d'annonce estimé par m²,
+       charges comprises. `TYPPRED` dit si l'estimation vient des annonces de
+       la commune ou d'une « maille » de communes voisines. -->
+  <dsfr-data-source id="loyers" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="55b34088-0964-415f-9df7-d87dd98a09be"
+    fetch-mode="export" max-records="40000"
+    select="INSEE_C, loypredm2, TYPPRED, nbobs_com">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="loyers-n" source="loyers"
+    rename="INSEE_C:code_loyer | loypredm2:loyer | TYPPRED:type_pred | nbobs_com:annonces">
+  </dsfr-data-normalize>
+
+  <!-- Zonage ABC en vigueur au 26 juin 2026. Le nom de la colonne PORTE LA
+       DATE de l'arrêté : à la prochaine révision, ce `select` et ce `rename`
+       seront à reprendre — une colonne absente est signalée en console. -->
+  <dsfr-data-source id="zonage" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="13f7282b-8a25-43ab-9713-8bb4e476df55"
+    fetch-mode="export" max-records="40000"
+    select="CODGEO, Zonage ABC en vigueur depuis le 26 juin 2026">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="zonage-n" source="zonage"
+    rename="CODGEO:code_zone | Zonage ABC en vigueur depuis le 26 juin 2026:zone">
+  </dsfr-data-normalize>
+
+  <!-- Le référentiel communal INSEE (géographie 2023), servi par un portail
+       Opendatasoft : les NOMS propres et la grille communale de densité. -->
+  <dsfr-data-source id="insee" api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="insee-2020-geoapi-2023"
+    select="code_geographique, nomcommune, codedepartement, nom_departement, dens_lib"
+    fetch-mode="export" max-records="40000">
+  </dsfr-data-source>
+
+  <!-- Trois jointures en chaîne. `inner` partout, et ce que chacune écarte est
+       dit en page (Notes) : 18 communes sans loyer (Mayotte, que la carte des
+       loyers ne couvre pas, et Saint-Martin), 0 sans zonage une fois les
+       arrondissements rattachés, 10 absentes du référentiel de 2023 (communes
+       nouvelles). 34 912 → 34 884. -->
+  <dsfr-data-join id="j-loyer" left="lovac-n" right="loyers-n" on="code=code_loyer" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="j-zone" left="j-loyer" right="zonage-n" on="code_abc=code_zone" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="j-insee" left="j-zone" right="insee" on="code=code_geographique" type="inner"></dsfr-data-join>
+
+  <!-- Tranches et rangs. Les rangs mettent la vacance À DROITE dans les trois
+       découpages : zone la plus tendue → la moins tendue, loyer le plus cher →
+       le moins cher, densité la plus forte → la plus faible. Même lecture pour
+       les trois petits graphiques. -->
+  <dsfr-data-normalize id="donnees" source="j-insee"
+    compute="rang_zone = when zone = 'Abis' then 1 when zone = 'A' then 2 when zone = 'B1' then 3 when zone = 'B2' then 4 else 5;
+             zone_lib = when zone = 'Abis' then 'A bis' else zone;
+             rang_loyer = when loyer &lt; 9 then 5 when loyer &lt; 11 then 4 when loyer &lt; 13 then 3 when loyer &lt; 16 then 2 else 1;
+             tranche_loyer = when rang_loyer = 5 then 'Moins de 9 €' when rang_loyer = 4 then '9 à 11 €' when rang_loyer = 3 then '11 à 13 €' when rang_loyer = 2 then '13 à 16 €' else '16 € et plus';
+             rang_dens = when dens_lib = 'Grands centres urbains' then 1
+                         when dens_lib = 'Centres urbains intermédiaires' then 2
+                         when dens_lib = 'Ceintures urbaines' then 3
+                         when dens_lib = 'Petites villes' then 4
+                         when dens_lib = 'Bourgs ruraux' then 5
+                         when dens_lib = 'Rural à habitat dispersé' then 6
+                         when dens_lib = 'Rural à habitat très dispersé' then 7 else 8;
+             densite = when rang_dens = 1 then 'Grands centres' when rang_dens = 2 then 'Centres intermédiaires'
+                       when rang_dens = 3 then 'Ceintures urbaines' when rang_dens = 4 then 'Petites villes'
+                       when rang_dens = 5 then 'Bourgs ruraux' when rang_dens = 6 then 'Rural dispersé'
+                       when rang_dens = 7 then 'Rural très dispersé' else 'Non renseignée';
+             loyer_aff = round(loyer, 1);
+             loyer_base = when type_pred = 'maille' then 'Voisines' else 'Commune';
+             commune_dep = nomcommune + ' (' + nom_departement + ')';
+             maille_pub = when pub = 1 and type_pred = 'maille' then 1 else 0;
+             taux_vl = when pub = 1 then round(vl_c / parc_c * 100, 1) else null;
+             statut = when pub = 1 then 'Publié' else 'Secrétisé';
+             vl_zc = when rang_zone = 5 then vl_c else null;
+             parc_zc = when rang_zone = 5 then parc_c else null;
+             vl_za = when rang_zone &lt;= 2 then vl_c else null;
+             parc_za = when rang_zone &lt;= 2 then parc_c else null;
+             vl_lb = when rang_loyer = 5 then vl_c else null;
+             parc_lb = when rang_loyer = 5 then parc_c else null;
+             vl_lh = when rang_loyer = 1 then vl_c else null;
+             parc_lh = when rang_loyer = 1 then parc_c else null;
+             un = 1">
+  </dsfr-data-normalize>
+
+  <!-- La ligne de synthèse, d'où sortent toutes les phrases de lecture. -->
+  <dsfr-data-query id="syn" source="donnees"
+    aggregate="un:sum:communes, pub:sum:publiees, vl_c:sum:vl, parc_c:sum:parc, vl_zc:sum:vl_zc, parc_zc:sum:parc_zc, vl_za:sum:vl_za, parc_za:sum:parc_za, vl_lb:sum:vl_lb, parc_lb:sum:parc_lb, vl_lh:sum:vl_lh, parc_lh:sum:parc_lh">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="taux = vl / parc * 100;
+             part_pub = publiees / communes * 100;
+             caches = communes - publiees;
+             taux_zc = vl_zc / parc_zc * 100;
+             taux_za = vl_za / parc_za * 100;
+             rapport_zone = taux_zc / taux_za;
+             taux_lb = vl_lb / parc_lb * 100;
+             taux_lh = vl_lh / parc_lh * 100;
+             un_sur = parc / vl;
+             un_sur_zc = parc_zc / vl_zc;
+             un_sur_za = parc_za / vl_za;
+             un_sur_lb = parc_lb / vl_lb">
+  </dsfr-data-normalize>
+
+  <!-- ==========================================================================
+       CHAPITRE 1 — Le compteur qui ne se lit pas dans le temps
+       Le jeu est LARGE : sept millésimes en colonnes. On somme chaque colonne
+       sur toutes les communes (une ligne), puis `dsfr-data-unpivot` bascule
+       cette ligne en sept : un par millésime. Trois bascules (vacants,
+       vacants > 2 ans, communes secrétisées), jointes sur le millésime.
+       ========================================================================== -->
+  <dsfr-data-query id="serie" source="lovac-n"
+    aggregate="pp_vacant_20:sum:pp_vacant_20, pp_vacant_21:sum:pp_vacant_21, pp_vacant_22:sum:pp_vacant_22, pp_vacant_23:sum:pp_vacant_23, pp_vacant_24:sum:pp_vacant_24, pp_vacant_25:sum:pp_vacant_25, pp_vacant_26:sum:pp_vacant_26, pp_vacant_plus_2ans_20:sum:pp_vacant_plus_2ans_20, pp_vacant_plus_2ans_21:sum:pp_vacant_plus_2ans_21, pp_vacant_plus_2ans_22:sum:pp_vacant_plus_2ans_22, pp_vacant_plus_2ans_23:sum:pp_vacant_plus_2ans_23, pp_vacant_plus_2ans_24:sum:pp_vacant_plus_2ans_24, pp_vacant_plus_2ans_25:sum:pp_vacant_plus_2ans_25, pp_vacant_plus_2ans_26:sum:pp_vacant_plus_2ans_26, s_20:sum:s_20, s_21:sum:s_21, s_22:sum:s_22, s_23:sum:s_23, s_24:sum:s_24, s_25:sum:s_25, s_26:sum:s_26">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="serie-n" source="serie"
+    compute="baisse_25 = (1 - pp_vacant_25 / pp_vacant_24) * 100;
+             hausse_26 = (pp_vacant_26 / pp_vacant_25 - 1) * 100">
+  </dsfr-data-normalize>
+  <!-- Le motif est ANCRÉ : `pp_vacant_{YY}` ne prend pas `pp_vacant_plus_2ans_26`
+       ({YY} = exactement deux chiffres), et `s_{YY}` ne prend que s_20…s_26. -->
+  <dsfr-data-unpivot id="u-vac" source="serie-n" value-cols-pattern="pp_vacant_{YY}"
+    var-name="millesime" var-format="20{YY}" value-name="vacants"></dsfr-data-unpivot>
+  <dsfr-data-unpivot id="u-vl" source="serie-n" value-cols-pattern="pp_vacant_plus_2ans_{YY}"
+    var-name="millesime" var-format="20{YY}" value-name="vacants_2ans"></dsfr-data-unpivot>
+  <dsfr-data-unpivot id="u-s" source="serie-n" value-cols-pattern="s_{YY}"
+    var-name="millesime" var-format="20{YY}" value-name="secretes"></dsfr-data-unpivot>
+  <dsfr-data-join id="u-1" left="u-vac" right="u-vl" on="millesime" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="u-2" left="u-1" right="u-s" on="millesime" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="millesimes" source="u-2" numeric="millesime"
+    compute="annee = '' + millesime;
+             situation = '1er janvier ' + (millesime - 1);
+             origine = when millesime &gt;= 2025 then 'Vacants déclarés par le propriétaire seulement'
+                       when millesime &gt;= 2023 then 'GMBI (fin de la taxe d’habitation)'
+                       else 'Taxe d’habitation'">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mt-8w" id="rupture">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 1 — le piège</p>
+    <h2 class="fr-h3">Le compteur ne se lit pas dans le temps</h2>
+    <dsfr-data-repeat source="serie-n">
+      <template>
+        <p class="fr-text--lead">
+          D'un millésime à l'autre, le nombre de logements vacants du parc privé perd
+          <strong>{{baisse_25:number:0}}&nbsp;%</strong>, puis en regagne
+          <strong>{{hausse_26:number:0}}&nbsp;%</strong>. Ni crise ni reprise&nbsp;: la source a
+          changé deux fois. La taxe d'habitation a disparu (la vacance se lit depuis 2023 dans les
+          déclarations GMBI), puis le fichier fiscal a cessé de compter les vacants «&nbsp;par
+          défaut&nbsp;» pour ne garder que ceux que leur propriétaire déclare.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-lg-8">
+        <h3 class="fr-h6">Sept millésimes, trois sources</h3>
+        <!-- Un tableau, et pas une courbe : une courbe inviterait à lire une
+             tendance que la note de version du producteur interdit. -->
+        <dsfr-data-list source="millesimes" sort="millesime:asc" decimals="0"
+          caption="Logements vacants du parc privé par millésime LOVAC, somme des communes publiées"
+          columns="annee:Millésime, situation:Situation au, vacants:Logements vacants, vacants_2ans:Vacants depuis plus de deux ans, secretes:Communes où la vacance longue est secrétisée, origine:Ce que compte la source">
+        </dsfr-data-list>
+        <p class="fr-hint-text fr-mt-1w">
+          Sommes des 34&nbsp;912 communes, secrétisées exclues&nbsp;: elles sont donc un peu en
+          dessous des totaux France du producteur (3&nbsp;687&nbsp;140, 2&nbsp;380&nbsp;076 et
+          3&nbsp;160&nbsp;235 vacants pour 2024, 2025 et 2026). La dernière colonne montre que le
+          secret lui-même change d'un millésime à l'autre&nbsp;: même la somme des communes
+          publiées ne porte pas sur le même champ d'une année sur l'autre.
+        </p>
+      </div>
+      <div class="fr-col-12 fr-col-lg-4">
+        <div class="fr-callout fr-icon-warning-line">
+          <h3 class="fr-callout__title fr-text--md">Ce que la page s'interdit</h3>
+          <p class="fr-callout__text fr-text--sm">
+            <strong>Aucune évolution.</strong> Le reste de la page ne regarde qu'une photographie,
+            le millésime 2026 (vacance au 1<sup>er</sup>&nbsp;janvier 2025), et une seule
+            mesure&nbsp;: la vacance <em>de plus de deux ans</em>, celle que le plan national vise.
+            Elle n'échappe pas aux ruptures — elle gagne 32&nbsp;% l'année où le total en perd
+            36 (tableau)&nbsp;: on ne la compare donc qu'à elle-même, la même année.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       CHAPITRE 2 — Ce qu'on peut lire
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w" id="lisible">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 2</p>
+    <h2 class="fr-h3">Un logement privé sur trente est vide depuis plus de deux ans — là où on peut le compter</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead fr-mb-4w">
+          Le secret statistique masque la vacance longue, le parc privé, ou les deux, dans
+          {{caches:number}} communes. Dans les
+          <strong>{{publiees:number}}</strong> où les deux sont publiés
+          ({{part_pub:number:0}}&nbsp;% des communes, mais les plus grandes), on compte
+          <strong>{{vl:number}} logements vides depuis plus de deux ans</strong> pour
+          {{parc:number}} logements privés&nbsp;: {{taux:number:2}}&nbsp;%, un sur
+          {{un_sur:number:0}}.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <dsfr-data-kpi-group cols="4" gap="md">
+      <dsfr-data-kpi source="donnees" value="vl_c:sum" format="nombre"
+        heading="Vacants depuis plus de deux ans" label="communes où le chiffre est publié"></dsfr-data-kpi>
+      <!-- Un taux se calcule en RATIO DE SOMMES, jamais en moyenne des taux :
+           la moyenne des 12 426 taux communaux (quatre communes lisibles n'ont aucun logement privé) donne 4,8 %. -->
+      <dsfr-data-kpi source="donnees" value="vl_c:sum / parc_c:sum" format="pourcentage" decimals="2"
+        heading="Part du parc privé" label="vacante depuis plus de deux ans"></dsfr-data-kpi>
+      <dsfr-data-kpi source="donnees" value="pub:sum" format="nombre"
+        heading="Communes lisibles" label="vacance et parc publiés tous deux"></dsfr-data-kpi>
+      <dsfr-data-kpi source="donnees" value="pub:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Part des communes lisibles" label="des communes appariées"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-callout fr-icon-information-line fr-my-4w">
+      <h3 class="fr-callout__title fr-text--md">Ce que le secret cache, et dans quel sens</h3>
+      <p class="fr-callout__text fr-text--sm">
+        Les communes lisibles portent 86&nbsp;% du parc privé et 81&nbsp;% de la vacance longue du
+        total France publié par le producteur (33&nbsp;194&nbsp;351 logements,
+        1&nbsp;179&nbsp;845 vacants depuis plus de deux ans). <strong>Ce qui manque est plus vacant
+        que ce qui reste</strong>&nbsp;: 4,8&nbsp;% sur les 14&nbsp;% du parc qu'on ne voit pas,
+        contre 3,35&nbsp;% sur ce qu'on voit — d'où 3,55&nbsp;% pour la France entière. Le secret
+        frappe les petites communes, et les petites communes rurales sont les plus vacantes&nbsp;:
+        tout ce qui suit <em>sous-estime</em> plutôt la vacance des territoires peu denses. Ce biais
+        va dans le sens de la conclusion, il ne la fabrique pas.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       CHAPITRE 3 — Trois découpages, une même pente
+       ========================================================================== -->
+  <dsfr-data-query id="par-zone" source="donnees" group-by="rang_zone, zone_lib"
+    aggregate="vl_c:sum:vl, parc_c:sum:parc, pub:sum:publiees, un:sum:communes" order-by="rang_zone:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="par-zone-t" source="par-zone"
+    compute="taux = round(vl / parc * 100, 2); part_pub = round(publiees / communes * 100, 0)"></dsfr-data-normalize>
+
+  <dsfr-data-query id="par-loyer" source="donnees" group-by="rang_loyer, tranche_loyer"
+    aggregate="vl_c:sum:vl, parc_c:sum:parc, pub:sum:publiees, un:sum:communes, maille_pub:sum:maille" order-by="rang_loyer:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="par-loyer-t" source="par-loyer"
+    compute="taux = round(vl / parc * 100, 2); part_maille = round(maille / publiees * 100, 0)"></dsfr-data-normalize>
+
+  <!-- Une commune n'a pas de densité au référentiel (Conques-en-Rouergue) :
+       écartée de CE graphique seulement, et dit dans les notes. -->
+  <dsfr-data-query id="par-dens" source="donnees" group-by="rang_dens, densite"
+    aggregate="vl_c:sum:vl, parc_c:sum:parc, pub:sum:publiees, un:sum:communes"
+    where="rang_dens:lte:7" order-by="rang_dens:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="par-dens-t" source="par-dens"
+    compute="taux = round(vl / parc * 100, 2); part_pub = round(publiees / communes * 100, 0)"></dsfr-data-normalize>
+
+  <div class="odv-bande fr-mt-8w" id="pente">
+    <div class="fr-container">
+      <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 3 — le croisement</p>
+      <h2 class="fr-h3">Trois découpages, une même pente&nbsp;: la vacance longue est là où le logement ne vaut pas cher</h2>
+
+      <dsfr-data-repeat source="syn-t">
+        <template>
+          <div class="odv-exergue fr-my-4w">
+            <span class="odv-exergue__nombre">× {{rapport_zone:number:1}}</span>
+            <p class="odv-exergue__phrase">
+              En zone C, {{taux_zc:number:1}}&nbsp;% du parc privé est vide depuis plus de deux ans
+              — un logement sur {{un_sur_zc:number:0}}. En zones A et A bis, où l'État reconnaît la
+              pénurie, {{taux_za:number:1}}&nbsp;%, un sur {{un_sur_za:number:0}}. Sous 9&nbsp;€/m²
+              de loyer d'annonce, {{taux_lb:number:1}}&nbsp;%&nbsp;; à 16&nbsp;€ et plus,
+              {{taux_lh:number:1}}&nbsp;%.
+            </p>
+          </div>
+        </template>
+      </dsfr-data-repeat>
+
+      <p class="fr-text--sm">
+        Trois graphiques, <strong>une seule échelle</strong> (0 à 10&nbsp;%) et le même sens de
+        lecture&nbsp;: de gauche à droite, le marché se détend, et la dernière barre est mise en
+        évidence. Chaque barre est un ratio de sommes sur les communes lisibles.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mt-2w">
+        <div class="fr-col-12 fr-col-lg-4">
+          <h3 class="fr-h6">Par zone du zonage ABC</h3>
+          <div class="odv-viz" data-code="Vacance de plus de deux ans par zone ABC">
+            <dsfr-data-chart id="g-zone" source="par-zone-t" type="bar"
+              label-field="zone_lib" value-field="taux:Vacants depuis plus de deux ans (%)"
+              selected-palette="neutral" highlight-index="[4]"
+              unit-tooltip="%" y-min="0" y-max="10"
+              databox databox-title="Part du parc privé vacante depuis plus de deux ans, par zone ABC (%)"
+              databox-source="LOVAC 2026 (Cerema) × zonage ABC du 26 juin 2026 (DHUP)"
+              databox-download></dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-zone" source="par-zone-t" table download
+            label-field="zone_lib" value-field="taux, vl, parc, publiees, communes, part_pub"
+            filename="vacance-par-zone-abc.csv"
+            description="Part du parc privé vacante depuis plus de deux ans par zone du zonage ABC, de la plus tendue (A bis) à la moins tendue (C). La part croît à chaque zone, et la zone C a la plus forte. Le tableau donne aussi le nombre de communes lisibles : 29 % en zone C, contre 90 % en A et 97 % en A bis."></dsfr-data-a11y>
+        </div>
+
+        <div class="fr-col-12 fr-col-lg-4">
+          <h3 class="fr-h6">Par loyer d'annonce estimé (appartement, €/m²)</h3>
+          <div class="odv-viz" data-code="Vacance de plus de deux ans par tranche de loyer">
+            <dsfr-data-chart id="g-loyer" source="par-loyer-t" type="bar"
+              label-field="tranche_loyer" value-field="taux:Vacants depuis plus de deux ans (%)"
+              selected-palette="neutral" highlight-index="[4]"
+              unit-tooltip="%" y-min="0" y-max="10"
+              databox databox-title="Part du parc privé vacante depuis plus de deux ans, par loyer d'annonce estimé (%)"
+              databox-source="LOVAC 2026 (Cerema) × carte des loyers 2025 (estimations ANIL, données SeLoger et leboncoin)"
+              databox-download></dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-loyer" source="par-loyer-t" table download
+            label-field="tranche_loyer" value-field="taux, vl, parc, publiees, part_maille"
+            filename="vacance-par-loyer.csv"
+            description="Part du parc privé vacante depuis plus de deux ans par tranche de loyer d'annonce estimé, du plus cher au moins cher. La part croît quand le loyer baisse et atteint son maximum sous 9 euros par mètre carré. La dernière colonne donne la part des communes lisibles dont le loyer est estimé à partir des communes voisines."></dsfr-data-a11y>
+        </div>
+
+        <div class="fr-col-12 fr-col-lg-4">
+          <h3 class="fr-h6">Par densité de la commune (grille INSEE)</h3>
+          <div class="odv-viz" data-code="Vacance de plus de deux ans par densité">
+            <dsfr-data-chart id="g-dens" source="par-dens-t" type="bar"
+              label-field="densite" value-field="taux:Vacants depuis plus de deux ans (%)"
+              selected-palette="neutral" highlight-index="[6]"
+              unit-tooltip="%" y-min="0" y-max="10"
+              databox databox-title="Part du parc privé vacante depuis plus de deux ans, par densité communale (%)"
+              databox-source="LOVAC 2026 (Cerema) × référentiel communal INSEE"
+              databox-download></dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-dens" source="par-dens-t" table download
+            label-field="densite" value-field="taux, vl, parc, publiees, communes, part_pub"
+            filename="vacance-par-densite.csv"
+            description="Part du parc privé vacante depuis plus de deux ans selon la grille communale de densité, des grands centres urbains au rural très dispersé. La part est la plus basse dans les grands centres et les ceintures urbaines, et la plus haute dans le rural très dispersé."></dsfr-data-a11y>
+        </div>
+      </div>
+
+      <div class="fr-callout fr-icon-information-line fr-mt-4w">
+        <h3 class="fr-callout__title fr-text--md">Ce que ces barres ne disent pas</h3>
+        <ul class="fr-callout__text fr-text--sm">
+          <li><strong>Le zonage ne cause rien.</strong> Il est une décision administrative qui
+            <em>suit</em> la tension du marché&nbsp;: la zone C n'est pas vacante parce qu'elle est
+            en C, elle est en C parce que la demande y est faible. La barre dit où sont les
+            logements vides, pas pourquoi.</li>
+          <li><strong>Le loyer est une estimation, souvent empruntée.</strong> Quatre communes
+            lisibles sur cinq de la tranche «&nbsp;moins de 9&nbsp;€&nbsp;» n'ont pas assez
+            d'annonces&nbsp;: leur loyer est celui d'une maille de communes voisines (colonne
+            «&nbsp;part_maille&nbsp;» du tableau). La tranche situe un marché, pas un bail.</li>
+          <li><strong>Le secret n'est pas le même partout.</strong> 29&nbsp;% des communes de
+            zone C sont lisibles, contre 97&nbsp;% en A bis (tableaux ci-dessus). Les communes
+            cachées sont les plus petites, donc, en moyenne, les plus vacantes.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       CHAPITRE 4 — Où
+       ========================================================================== -->
+  <dsfr-data-query id="par-dep" source="donnees" group-by="codedepartement, nom_departement"
+    aggregate="vl_c:sum:vl, parc_c:sum:parc, pub:sum:publiees"></dsfr-data-query>
+  <!-- `taux` brut pour le résumé pondéré, `taux_aff` arrondi pour le tracé :
+       arrondir AVANT une pondération fausse le résumé sans le dire. -->
+  <dsfr-data-normalize id="par-dep-t" source="par-dep"
+    compute="taux = vl / parc * 100; taux_aff = round(taux, 1)"></dsfr-data-normalize>
+
+  <dsfr-data-query id="villes" source="donnees" where="parc_c:gte:10000"
+    order-by="taux_vl:desc" limit="10"></dsfr-data-query>
+
+  <section class="fr-container fr-mt-8w" id="ou">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 4</p>
+    <h2 class="fr-h3">Où&nbsp;: la diagonale du centre, et l'outre-mer qui contredit la pente</h2>
+    <p class="fr-text--lead">
+      La Creuse, la Nièvre, l'Allier, l'Indre, la Lozère&nbsp;: les départements où le parc privé
+      se vide sont ceux du centre, peu denses et bon marché. Les Antilles et la Guyane sont aussi en
+      tête — mais leurs grandes villes affichent <strong>des loyers d'annonce de ville
+      chère</strong>.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-lg-7">
+        <div class="odv-viz" data-code="Vacance de plus de deux ans par département">
+          <dsfr-data-chart id="c-dep" source="par-dep-t" type="map"
+            code-field="codedepartement" value-field="taux_aff" name="Vacants depuis plus de deux ans"
+            unit-tooltip="%" selected-palette="sequentialAscending"
+            map-summary="weighted" map-summary-weight="parc" map-summary-field="taux"
+            databox databox-title="Part du parc privé vacante depuis plus de deux ans, par département (%)"
+            databox-source="LOVAC 2026 (Cerema), communes lisibles"
+            databox-download></dsfr-data-chart>
+        </div>
+        <p class="fr-hint-text">
+          Le résumé «&nbsp;en France&nbsp;» est pondéré par le parc privé lisible
+          (<code>map-summary="weighted"</code>) et calculé sur le taux non arrondi
+          (<code>map-summary-field</code>)&nbsp;: c'est le ratio national du chapitre 2, pas la
+          moyenne de cent pourcentages. <strong>Mayotte n'a pas de valeur</strong>&nbsp;: la carte des
+          loyers ne la couvre pas. Son encart est pourtant peint d'un bleu vif, que la légende n'a
+          pas&nbsp;: c'est la couleur que DSFR&nbsp;Chart donne à un territoire absent des données
+          (AM-104). Il ne se lit pas.
+        </p>
+      </div>
+
+      <div class="fr-col-12 fr-col-lg-5">
+        <h3 class="fr-h6">Les dix villes de plus de 10&nbsp;000 logements privés les plus vacantes</h3>
+        <p class="fr-hint-text fr-mb-2v">
+          Montluçon, Nevers, Moulins, Vierzon suivent la pente&nbsp;: loyer bas, zone B2 ou C.
+          Cayenne, Fort-de-France et les communes de Guadeloupe la contredisent&nbsp;: zone A ou
+          B1, loyer estimé à 15&nbsp;€/m² ou plus. Le zonage et le loyer ne suffisent pas à décrire
+          ces marchés, et cette page ne dit pas pourquoi.
+        </p>
+        <dsfr-data-list source="villes" decimals="1"
+          caption="Les dix communes de plus de 10 000 logements privés où la part vacante depuis plus de deux ans est la plus forte"
+          columns="commune_dep:Commune, zone_lib:Zone, loyer_aff:Loyer (€/m²), taux_vl:Vacants > 2 ans (%)">
+        </dsfr-data-list>
+      </div>
+    </div>
+
+    <dsfr-data-a11y for="c-dep" source="par-dep-t" table download
+      label-field="nom_departement" value-field="taux_aff, vl, parc, publiees"
+      filename="vacance-par-departement.csv"
+      description="Pour chaque département, la part du parc privé vacante depuis plus de deux ans, calculée sur les communes où la vacance et le parc sont publiés, avec les effectifs et le nombre de ces communes. Les parts les plus fortes sont dans le centre de la France et aux Antilles et en Guyane ; les plus faibles en Île-de-France hors Paris et dans l'Ouest."></dsfr-data-a11y>
+  </section>
+
+  <!-- ==========================================================================
+       CHAPITRE 5 — L'explorateur
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w fr-mb-8w" id="explorer">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 5</p>
+    <h2 class="fr-h3">Et votre commune&nbsp;?</h2>
+    <p class="fr-text--lead">
+      Toutes les communes appariées, lisibles ou non. Le taux de la sélection, au-dessus du
+      tableau, est toujours un ratio de sommes&nbsp;: il ne compte que les communes lisibles.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres odv-filtres--md" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Chercher<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Chercher</h3>
+        <dsfr-data-search id="q" source="donnees"
+          fields="nomcommune, nom_departement"
+          label="Votre commune" placeholder="Nom de commune, département…"
+          operator="words" count count-label="commune"></dsfr-data-search>
+        <dsfr-data-facets id="f" source="q"
+          fields="zone_lib, tranche_loyer, densite, statut, nom_departement"
+          labels="zone_lib:Zone ABC | tranche_loyer:Loyer d'annonce (€/m²) | densite:Densité | statut:Vacance longue | nom_departement:Département"
+          display="zone_lib:multiselect | tranche_loyer:multiselect | densite:multiselect | statut:select | nom_departement:multiselect"
+          sort="zone_lib:alpha:asc"
+          searchable="nom_departement" max-values="120"></dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-3w">
+          <dsfr-data-kpi source="f" value="vl_c:sum / parc_c:sum" format="pourcentage" decimals="1"
+            heading="Vacants depuis plus de deux ans" label="part du parc privé de la sélection"></dsfr-data-kpi>
+          <dsfr-data-kpi source="f" value="vl_c:sum" format="nombre"
+            heading="Logements concernés" label="dans les communes lisibles"></dsfr-data-kpi>
+          <dsfr-data-kpi source="f" value="pub:sum" format="nombre"
+            heading="Communes lisibles" label="dans la sélection"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+        <dsfr-data-list source="f" count-label="commune" sort="parc_c:desc"
+          columns="nomcommune:Commune, nom_departement:Département, zone_lib:Zone, loyer_aff:Loyer (€/m²), loyer_base:Loyer tiré des annonces de, densite:Densité, parc_c:Parc privé, vl_c:Vacants > 2 ans, taux_vl:Part (%), statut:Chiffre"
+          search pagination="15" export="csv">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       NOTES — les hypothèses éditoriales
+       ========================================================================== -->
+  <section class="fr-container fr-mb-8w odv-analyse fr-pt-6w" id="notes">
+    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
+    <p>Tout ce qui suit est un choix. Il est écrit pour pouvoir être discuté.</p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on a choisi</h3>
+        <ul>
+          <li><strong>La vacance de plus de deux ans, pas la vacance totale.</strong> La vacance
+            courte est frictionnelle (un logement entre deux locataires, en vente, en travaux)&nbsp;;
+            la longue est celle que le plan national vise. Elle aussi saute d'un millésime à
+            l'autre&nbsp;: la choisir ne dispense pas de s'en tenir à une seule année.</li>
+          <li><strong>Une photographie, pas une évolution.</strong> Le chapitre 1 montre la série
+            pour dire pourquoi on ne la trace pas.</li>
+          <li><strong>Un ratio sur les communes où numérateur ET dénominateur sont
+            publiés.</strong> Le parc aussi est secrétisé, et pas dans les mêmes communes que la
+            vacance&nbsp;: 4&nbsp;692 publient leur vacance longue mais pas leur parc. Diviser la
+            somme de l'une par la somme de l'autre aurait rapporté deux populations différentes
+            (l'exploration préalable l'avait fait&nbsp;: 3,55&nbsp;%, un chiffre juste pour la
+            France par coïncidence).</li>
+          <li><strong>Un ratio de sommes, jamais une moyenne de taux.</strong> La moyenne des
+            12&nbsp;426 taux communaux calculables vaut 4,8&nbsp;%&nbsp;: elle donne au village de trente
+            logements le poids de Marseille.</li>
+          <li><strong>Le même axe pour les trois découpages.</strong> Zone, loyer et densité se
+            comparent d'un coup d'œil parce qu'ils partagent l'échelle 0-10&nbsp;%. Un axe propre à
+            chaque graphique aurait fait croire à trois pentes également raides.</li>
+          <li><strong>Paris, Lyon et Marseille par arrondissement, zonés comme leur
+            commune.</strong> LOVAC, les loyers et le référentiel INSEE publient les
+            arrondissements, le zonage ABC la commune&nbsp;: chaque arrondissement reçoit la zone de
+            sa ville (A bis pour Paris, A pour Lyon et Marseille).</li>
+        </ul>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on ne montre pas</h3>
+        <ul>
+          <li><strong>Le parc social.</strong> LOVAC ne compte que le parc privé. «&nbsp;Un
+            logement sur trente&nbsp;» veut dire un logement <em>privé</em> sur trente.</li>
+          <li><strong>Un décalage d'un an entre les deux termes du taux.</strong> Le millésime 2026
+            compte les vacants au 1<sup>er</sup>&nbsp;janvier 2025, et le parc le plus récent du
+            jeu est celui du 1<sup>er</sup>&nbsp;janvier 2024. Sans effet visible sur un ratio de
+            quelques pour cent, mais le dénominateur n'est pas contemporain du numérateur.</li>
+          <li><strong>28 communes.</strong> 18 absentes de la carte des loyers (les 17 de Mayotte et
+            Saint-Martin)&nbsp;; 10 communes nouvelles, absentes du référentiel INSEE de 2023. 34&nbsp;912
+            communes LOVAC, 34&nbsp;884 appariées.</li>
+          <li><strong>Une commune sans densité.</strong> Conques-en-Rouergue n'a pas de niveau de
+            densité au référentiel&nbsp;: elle est dans tous les chiffres, sauf dans le graphique par
+            densité.</li>
+          <li><strong>Un logement vacant n'est pas un logement disponible.</strong> Le jeu compte des
+            logements vides, pas des logements louables&nbsp;: rien n'y dit s'ils sont en indivision,
+            en ruine ou en travaux. La vacance longue est un stock à examiner, pas une offre.</li>
+          <li><strong>L'infobulle ne dit pas l'effectif.</strong> Au survol, une barre donne son
+            pourcentage, pas le nombre de communes lisibles derrière. Le tableau équivalent de
+            chaque graphique le porte.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="odv-verdict fr-mt-4w">
+      <h3 class="fr-h6">Ce que cette page démontre de <code>dsfr-data</code></h3>
+      <p>
+        <strong>Trois ressources data.gouv lues par leur export Parquet, un portail Opendatasoft,
+        trois jointures en chaîne sur le code commune — près de 140&nbsp;000 lignes dans le navigateur, sans
+        serveur.</strong> <code>fetch-mode="export"</code> remplace les 525 pages de l'API Tabular
+        par quelques lectures par plage&nbsp;; <code>dsfr-data-unpivot</code> déplie un jeu à
+        millésimes en colonnes pour le montrer en lignes&nbsp;; et les trois pièges du jeu — le
+        secret sur les deux termes du taux, les arrondissements que le zonage ignore, la série
+        cassée — se règlent par une colonne calculée, une clé dérivée et un tableau.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       ANALYSE TECHNIQUE — repliée
+       ========================================================================== -->
+  <section class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que ces quatre jeux ont coûté</summary>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mt-3w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h6">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>L'export Parquet de Tabular.</strong> Un attribut,
+              <code>fetch-mode="export"</code>, et un <code>select</code> qui projette les
+              colonnes&nbsp;: les trois ressources se lisent par plages sur le stockage de
+              data.gouv, sans clé, CORS ouvert. Même une colonne dont le nom porte des espaces et
+              une date («&nbsp;Zonage ABC en vigueur depuis le 26 juin 2026&nbsp;») se projette
+              et se renomme sans échappement.</li>
+            <li><strong>Le « s » du secret statistique.</strong> Tabular type en texte toute
+              colonne qui le porte&nbsp;; <code>numeric</code> le rend <code>null</code>, et les
+              agrégats l'ignorent. Aucun remplacement à écrire.</li>
+            <li><strong>Trois jointures en chaîne.</strong> Clés uniques des quatre côtés
+              (vérifié sur les exports complets), zéros de tête identiques partout&nbsp;: les
+              jointures sur le code tombent juste — hors arrondissements, voir à droite. La source
+              Opendatasoft arrive la dernière (2,3&nbsp;s contre moins d'une seconde pour les trois
+              Parquet) et la chaîne se calcule à son arrivée, sans rien à ordonner.</li>
+            <li><strong>Le jeu large.</strong> Sommer d'abord (une ligne), déplier ensuite (sept
+              lignes)&nbsp;: <code>dsfr-data-unpivot</code> travaille sur une ligne au lieu de
+              244&nbsp;000, et le motif ancré <code>pp_vacant_{YY}</code> ne confond pas
+              <code>pp_vacant_26</code> et <code>pp_vacant_plus_2ans_26</code>.</li>
+            <li><strong>Trois petits multiples comparables.</strong> <code>y-max</code> commun,
+              <code>selected-palette="neutral"</code> + <code>highlight-index</code> sur la
+              dernière barre triée&nbsp;: le contraste se pose en deux attributs.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h6">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Les arrondissements de Paris, Lyon et Marseille.</strong> La jointure au
+              zonage perdait 45 lignes et 1,8&nbsp;million de logements&nbsp;: Paris sortait de la
+              zone A bis, et le taux national passait de 3,35 à 3,40&nbsp;%. Rien ne cassait à
+              l'écran&nbsp;; <strong>la bibliothèque, elle, le disait en console</strong> — «&nbsp;45
+              ligne(s) gauche sans correspondance… clés orphelines&nbsp;: 13201, 13202…&nbsp;»
+              (rejoué en retirant la clé dérivée). C'est ce message, et le recalcul indépendant des
+              lignes perdues à chaque jointure, qui l'ont fait voir. Pas de
+              <code>substr()</code> dans <code>compute</code>&nbsp;: la clé parente s'écrit par
+              intervalles de codes (<code>code &gt;= '75101' and code &lt;= '75120'</code>), ce qui
+              marche parce que les comparaisons d'ordre sont numériques entre codes numériques.
+              Défaut d'aucun composant&nbsp;: deux jeux publics qui n'ont pas la même maille.</li>
+            <li><strong>Des libellés illisibles dans LOVAC.</strong> Le CSV du producteur est en
+              Latin-1, et l'analyse de data.gouv l'a décodé en Europe centrale&nbsp;: «&nbsp;Nièvre&nbsp;»
+              devient «&nbsp;Ničvre&nbsp;» dans l'API Tabular <em>et</em> dans le Parquet
+              (2&nbsp;436 lignes sur le département, 2&nbsp;261 sur la commune). Vérifié sur les
+              octets du CSV d'origine. Contournement&nbsp;: les noms viennent du référentiel INSEE.
+              Défaut de data.gouv (détection d'encodage), à leur signaler.</li>
+            <li><strong>Le secret sur les deux termes du ratio.</strong> Aucun attribut ne peut
+              savoir qu'un taux exige que numérateur et dénominateur soient publiés
+              <em>ensemble</em>. Une colonne <code>pub</code> et deux colonnes conditionnelles le
+              disent&nbsp;; c'est éditorial, pas une limite.</li>
+            <li><strong>Pas d'écart d'une ligne à la précédente.</strong> <code>compute</code> ne
+              lit pas la ligne précédente&nbsp;: la chute de 36&nbsp;% et la remontée de
+              34&nbsp;% se calculent sur la ligne large, <em>avant</em> le dépliage, où les deux
+              millésimes sont côte à côte.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="fr-h6 fr-mt-4w">Correspondance — le besoin, le composant</h3>
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Ce que chaque besoin de la page a demandé, et où la réponse se trouve</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Réponse <code>dsfr-data</code></th><th scope="col">Statut</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>35 000 lignes Tabular sans 175 pages</td><td><code>fetch-mode="export"</code> (export Parquet) + <code>select</code></td><td>Natif (0.38.0)</td></tr>
+            <tr><td>Plafond de 25 000 lignes</td><td><code>max-records="40000"</code></td><td>Natif</td></tr>
+            <tr><td>Cellules « s » dans une colonne texte</td><td><code>dsfr-data-normalize numeric</code> → <code>null</code></td><td>Natif</td></tr>
+            <tr><td>Taux sous double secret</td><td><code>compute</code> : <code>pub</code>, <code>vl_c</code>, <code>parc_c</code></td><td>Natif</td></tr>
+            <tr><td>Quatre jeux sur le code commune</td><td>trois <code>dsfr-data-join</code> en chaîne</td><td>Natif</td></tr>
+            <tr><td>Arrondissements contre commune</td><td>clé parente par <code>compute</code> et intervalles de codes</td><td>Contournement (pas de <code>substr</code>)</td></tr>
+            <tr><td>Libellés mal décodés</td><td>noms du référentiel INSEE</td><td>Défaut de data.gouv</td></tr>
+            <tr><td>Sept millésimes en colonnes</td><td><code>query</code> globale puis <code>dsfr-data-unpivot value-cols-pattern</code></td><td>Natif</td></tr>
+            <tr><td>Écart entre deux millésimes</td><td><code>compute</code> sur la ligne large, avant le dépliage</td><td>Natif</td></tr>
+            <tr><td>Tranches ordonnées</td><td><code>compute when</code> → rang, <code>order-by</code></td><td>Natif</td></tr>
+            <tr><td>Trois graphiques comparables</td><td><code>y-max</code> commun, <code>neutral</code> + <code>highlight-index</code></td><td>Natif</td></tr>
+            <tr><td>Moyenne nationale d'une carte de taux</td><td><code>map-summary="weighted"</code> + <code>map-summary-field</code></td><td>Natif</td></tr>
+            <tr><td>Phrases de lecture calculées</td><td><code>dsfr-data-repeat</code> sur une ligne de synthèse</td><td>Natif</td></tr>
+            <tr><td>Taux d'une sélection</td><td>KPI <code>vl_c:sum / parc_c:sum</code> sur la facette</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <h3 class="fr-h6">Verdict</h3>
+        <p>
+          <strong>Le chargement, qui devait être le sujet, n'en est plus un&nbsp;; ce sont les jeux
+          qui mordent.</strong> Trois exports Parquet et un export Opendatasoft se chargent en
+          quelques secondes et se joignent sans une ligne de script. Ce qui a coûté est venu des
+          données publiques elles-mêmes&nbsp;: deux mailles différentes pour les trois grandes
+          villes, un encodage mal détecté par la plateforme, un secret posé sur les deux termes du
+          taux, une série que son producteur déclare cassée. Aucun n'est une limite de
+          <code>dsfr-data</code>&nbsp;; un seul, l'absence de <code>substr()</code>, a demandé un
+          détour.
+        </p>
+      </div>
+    </details>
+
+    <details class="odv-contexte fr-mt-3w">
+      <summary>Les jeux de données utilisés</summary>
+      <ul class="fr-mt-2w">
+        <li><strong>LOVAC</strong> — «&nbsp;Logements vacants du parc privé par commune,
+          département, région, France, de 2020 à 2026&nbsp;», Cerema pour la DGALN (ministère de la
+          Transition écologique), juin 2026. Ressource communale
+          <code>2e0417b4-902d-4c60-90e7-bf5df148cb87</code>, 34&nbsp;912 lignes, géographie au
+          1<sup>er</sup>&nbsp;janvier 2026, secret sous 11 logements («&nbsp;s&nbsp;»).
+          <a href="https://www.data.gouv.fr/datasets/logements-vacants-du-parc-prive-par-commune-departement-region-france-de-2020-a-2026" target="_blank" rel="noopener external">Fiche
+          <code>data.gouv.fr</code></a>.</li>
+        <li><strong>Carte des loyers 2025</strong> — indicateurs de loyer d'annonce par commune,
+          appartements (52&nbsp;m² de référence, charges comprises, 3<sup>e</sup>&nbsp;trimestre
+          2025). «&nbsp;Estimations ANIL, à partir des données du Groupe SeLoger et de
+          leboncoin&nbsp;». Ressource <code>55b34088-0964-415f-9df7-d87dd98a09be</code>,
+          34&nbsp;900 lignes, France hors Mayotte.
+          <a href="https://www.data.gouv.fr/datasets/carte-des-loyers-indicateurs-de-loyers-dannonce-par-commune-en-2025" target="_blank" rel="noopener external">Fiche
+          <code>data.gouv.fr</code></a>.</li>
+        <li><strong>Zonage ABC</strong> — liste des communes selon le zonage en vigueur depuis le
+          26&nbsp;juin 2026 (arrêté du 23&nbsp;juin 2026), DHUP. Ressource
+          <code>13f7282b-8a25-43ab-9713-8bb4e476df55</code>, 34&nbsp;875 lignes.
+          <a href="https://www.data.gouv.fr/datasets/liste-des-communes-selon-le-zonage-abc" target="_blank" rel="noopener external">Fiche
+          <code>data.gouv.fr</code></a>.</li>
+        <li><strong>Référentiel communal INSEE</strong> — <code>insee-2020-geoapi-2023</code>,
+          portail <code>equipements.sports.gouv.fr</code>&nbsp;: noms de communes et de
+          départements, grille communale de densité. 35&nbsp;075 lignes.</li>
+        <li><strong>Licence</strong> — Licence Ouverte v2.0 (Etalab) pour les quatre jeux.</li>
+      </ul>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

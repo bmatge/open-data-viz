@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Presse : le registre de la CPPAP et les aides — open-data-viz</title>
+  <meta name="description" content="Moins d'une publication sur cinq passée par le registre de la CPPAP y est encore inscrite, mais près d'un site de presse en ligne sur deux ; plus de la moitié des titres inscrits sont édités en Île-de-France, et un titre aidé sur dix reçoit les trois quarts de l'aide à l'exemplaire posté. Création avec dsfr-data à partir des données presse du ministère de la Culture (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 17 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte le registre des publications de presse de la
+       Commission paritaire des publications et agences de presse (CPPAP), puis les
+       aides à la presse publiées par le ministère de la Culture.
+
+       L'UNITÉ. Une ligne du registre = un titre (numéro CPPAP), inscrit aujourd'hui ou
+       non. Le registre est un HISTORIQUE : 26 731 titres, dont 4 965 inscrits le
+       2026-09-27. Le stock vivant, c'est « Inscrit ».
+
+       LE CHARGEMENT. La ressource a un export Parquet (0,9 Mo) : `fetch-mode="export"`
+       le lit en une requête, `select` ne garde que les colonnes utiles, `max-records`
+       relevé à 40 000 (le défaut, 25 000, tronquerait EN SILENCE : le registre compte
+       26 731 lignes). Aides : 382 + 110 + 32 lignes, lues en pages de 200.
+
+       LA JOINTURE QU'ON NE FAIT PAS. Les titres aidés s'écrivent « CROIX (LA) », le
+       registre « LA CROIX » : aucun rapprochement aides × registre sans normalisation
+       des noms. Les deux volets restent séparés.
+       ========================================================================== -->
+
+  <dsfr-data-source id="reg" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="a98cced2-babe-45b4-95dd-ce5336155dbc"
+    fetch-mode="export" max-records="40000"
+    select="numero_cppap, nom_du_titre_de_presse, editeur, departement, type_de_presse, statut_inscription, demande_en_cours, date_derniere_decision, date_expiration_inscription">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="reg-n" source="reg" trim
+    rename="nom_du_titre_de_presse:titre | statut_inscription:statut | type_de_presse:type"
+    compute="un = 1; k = 1;
+             ins = when statut = 'Inscrit' then 1 else 0;
+             spel = when type = 'Service de presse en ligne' then 1 else 0;
+             imp = 1 - spel;
+             ins_spel = ins * spel; ins_imp = ins * imp;
+             p75 = when departement = '75' then 1 else 0;
+             idf = when departement = '75' or departement = '92' or departement = '93' or departement = '94'
+                        or departement = '77' or departement = '78' or departement = '91' or departement = '95' then 1 else 0;
+             dep_vide = when is_empty(departement) then 1 else 0;
+             ins_75 = ins * p75; ins_92 = when ins = 1 and departement = '92' then 1 else 0;
+             ins_idf = ins * idf; ins_dep_vide = ins * dep_vide;
+             ins_corse = when ins = 1 and departement = '20' then 1 else 0;
+             zone = when departement = '75' then 'Paris'
+                    when departement = '92' then 'Hauts-de-Seine'
+                    when idf = 1 then 'Autres départements franciliens'
+                    when dep_vide = 1 then 'Département non renseigné'
+                    else 'Hors Île-de-France';
+             ordre_zone = when zone = 'Paris' then 1 when zone = 'Hauts-de-Seine' then 2
+                          when idf = 1 then 3 when dep_vide = 1 then 5 else 4;
+             statut_lib = when ins = 1 then 'Inscrit aujourd’hui' else 'Plus inscrit';
+             an_exp = year(date_expiration_inscription);
+             an_exp_txt = concat(an_exp, '');
+             ech_2026 = when ins = 1 and an_exp = 2026 then 1 else 0;
+             renouv_ins = when ins = 1 and demande_en_cours = 'Demande de renouvellement en cours' then 1 else 0;
+             renouv_non = when ins = 0 and demande_en_cours = 'Demande de renouvellement en cours' then 1 else 0;
+             premiere = when contains(demande_en_cours, 'première demande') then 1 else 0;
+             sans_date = when is_empty(date_expiration_inscription) then 1 else 0">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="reg-n" group-by="k"
+    aggregate="un:sum:n, ins:sum:ins, spel:sum:spel, imp:sum:imp, ins_spel:sum:ins_spel, ins_imp:sum:ins_imp,
+               p75:sum:p75, ins_75:sum:ins_75, ins_92:sum:ins_92, ins_idf:sum:ins_idf, ins_dep_vide:sum:ins_dep_vide,
+               ins_corse:sum:ins_corse, dep_vide:sum:dep_vide, ech_2026:sum:ech_2026, renouv_ins:sum:renouv_ins,
+               renouv_non:sum:renouv_non, premiere:sum:premiere, sans_date:sum:sans_date">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="part_ins = ins / n * 100;
+             part_ins_spel = ins_spel / spel * 100;
+             part_ins_imp = ins_imp / imp * 100;
+             part_spel_stock = ins_spel / ins * 100;
+             part_75 = ins_75 / ins * 100;
+             ins_dep = ins - ins_dep_vide;
+             part_idf = ins_idf / ins_dep * 100;
+             part_75_hist = p75 / n * 100;
+             non = n - ins">
+  </dsfr-data-normalize>
+
+  <!-- Dernière décision enregistrée : un tri + limit (l'agrégat `min`/`max` de query rend
+       l'année d'une date ISO, pas la date — constat de la page entrepreneurs-spectacles). -->
+  <dsfr-data-query id="derniere" source="reg-n" where="date_derniere_decision:isnotnull" order-by="date_derniere_decision:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="syn-d" left="syn-t" right="derniere" on="k" type="inner" prefix-right="d_"></dsfr-data-join>
+
+  <!-- ---------- Les aides : aide à l'exemplaire posté 2023 ---------- -->
+  <dsfr-data-source id="aid" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="126591d3-a0cd-4b99-b898-dc99c0215102" max-records="2000">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="aid-n" source="aid" trim
+    rename="Titre:titre | Montant (€):montant | Année:annee | Catégorie:categorie"
+    compute="un = 1; k = 1;
+             cat_lib = when categorie = 'QUOTIDIENS IPG' then 'Quotidiens d’information politique et générale'
+                       when categorie = 'HEBDOMADAIRES NATIONAUX' then 'Hebdomadaires nationaux'
+                       when categorie = 'HEBDOMADAIRES REGIONAUX' then 'Hebdomadaires régionaux'
+                       when categorie = 'QFRP-QFRA ≥ 35 g' then 'Faibles ressources publicitaires, 35 g et plus'
+                       when categorie = 'QFRP-QFRA &lt; 35 g' then 'Faibles ressources publicitaires, moins de 35 g'
+                       else categorie">
+  </dsfr-data-normalize>
+
+  <!-- Un titre = une ligne (CROIX DU MIDI (LA) porte quatre lignes : 382 lignes, 379 titres). -->
+  <dsfr-data-query id="aid-tit" source="aid-n" group-by="titre, cat_lib" aggregate="montant:sum:m"></dsfr-data-query>
+  <dsfr-data-normalize id="aid-tit-n" source="aid-tit" compute="t = 1; k = 1; m_k = round(m / 1000, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="aid-part" source="aid-tit-n" order-by="m:desc" aggregate="m:share_percent, t:share_percent"></dsfr-data-query>
+  <dsfr-data-query id="aid-cum" source="aid-part" order-by="m:desc"
+    aggregate="m__share_percent:running_sum, t__share_percent:running_sum, t:running_sum"></dsfr-data-query>
+  <!-- Le premier dixième des titres (rang cumulé ≤ 10 % des titres) : combien, et quelle part. -->
+  <dsfr-data-query id="aid-d1" source="aid-cum" where="t__share_percent__running_sum:lte:10"
+    group-by="k" aggregate="t:sum:nb, m__share_percent__running_sum:max:part"></dsfr-data-query>
+  <!-- La moitié des titres les moins aidés. -->
+  <dsfr-data-query id="aid-bas" source="aid-cum" where="t__share_percent__running_sum:gt:50"
+    group-by="k" aggregate="t:sum:nb, m__share_percent:sum:part"></dsfr-data-query>
+
+  <dsfr-data-query id="aid-syn" source="aid-tit-n" group-by="k" aggregate="m:sum:total, t:sum:titres, m:max:max"></dsfr-data-query>
+  <dsfr-data-normalize id="aid-syn-t" source="aid-syn" compute="total_m = round(total / 1000000, 1); max_m = round(max / 1000000, 2)"></dsfr-data-normalize>
+  <dsfr-data-query id="aid-top" source="aid-tit-n" order-by="m:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aid-top-t" source="aid-top" compute="m_m = round(m / 1000000, 2)"></dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Presse : registre CPPAP et aides</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Presse&nbsp;: moins d'un titre sur cinq passé par le registre de la CPPAP y est encore inscrit, et plus d'un sur deux est francilien</h1>
+
+    <dsfr-data-repeat source="syn-d">
+      <template>
+        <p class="fr-text--lead">
+          Le registre de la Commission paritaire des publications et agences de presse garde la trace de
+          {{n:number}}&nbsp;titres. <strong>{{ins:number}} y sont inscrits aujourd'hui</strong>, soit
+          {{part_ins:number:1}}&nbsp;%&nbsp;: les autres n'y sont plus inscrits — inscription expirée sans
+          renouvellement, radiée ou refusée. Les sites de presse en ligne tiennent mieux&nbsp;: {{part_ins_spel:number:0}}&nbsp;% de ceux qui y sont
+          passés restent inscrits, contre {{part_ins_imp:number:0}}&nbsp;% des publications imprimées. Et le registre est
+          d'abord francilien&nbsp;: {{part_idf:number:0}}&nbsp;% des titres inscrits dont le département est connu sont
+          édités en Île-de-France, {{ins_75:number}} à Paris.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture — <em>Liste des publications de presse</em> (registre CPPAP, mis à jour chaque jour) et
+      aides à la presse (aide à l'exemplaire posté 2023, aide au pluralisme des services de presse tout en ligne
+      2022-2023, aide au pluralisme des titres ultramarins 2021-2023). Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/liste-des-publications-de-presse" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet et API Tabular).
+      <dsfr-data-repeat source="syn-d"><template>Dernière décision enregistrée&nbsp;: {{date_derniere_decision:date}}.</template></dsfr-data-repeat>
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="ins:max" format="nombre" span="3"
+        heading="Titres inscrits" label="au registre de la CPPAP aujourd'hui"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_ins:max" format="decimal" decimals="1" unit="%" span="3"
+        heading="Encore inscrits" label="part des titres passés par le registre"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_spel_stock:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="En ligne" label="part des services de presse en ligne parmi les inscrits"></dsfr-data-kpi>
+      <dsfr-data-kpi source="aid-syn-t" value="total_m:max" format="decimal" decimals="1" unit="M€" span="3"
+        heading="Aide à l'exemplaire posté" label="versée en 2023, seule année publiée"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — type × statut ======================= -->
+  <dsfr-data-query id="ts" source="reg-n" group-by="type" aggregate="ins:sum:ins, un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="ts-t" source="ts" compute="non = n - ins"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-type">
+    <h2 id="t-type" class="fr-h3">Un site de presse en ligne sur deux est encore inscrit, une publication imprimée sur six</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{imp:number}}&nbsp;publications imprimées sont passées par le registre&nbsp;; {{ins_imp:number}} y restent
+          inscrites ({{part_ins_imp:number:0}}&nbsp;%). Les services de presse en ligne, reconnus depuis 2009, sont dix fois
+          moins nombreux au registre ({{spel:number}}) mais {{ins_spel:number}} restent inscrits
+          ({{part_ins_spel:number:0}}&nbsp;%). Résultat&nbsp;: les sites en ligne font {{part_spel_stock:number:0}}&nbsp;% des titres inscrits
+          aujourd'hui.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Titres passés par le registre CPPAP, selon le type de presse et l'inscription actuelle">
+      <dsfr-data-chart id="g-type" source="ts-t" type="bar" horizontal stacked
+        label-field="type" value-field="ins:Inscrits aujourd'hui" value-fields="non:Plus inscrits"
+        color-map="Inscrits aujourd'hui:#000091,Plus inscrits:#c1c1c1"
+        unit-tooltip="titres"
+        databox databox-title="Titres passés par le registre de la CPPAP, selon le type de presse et leur inscription aujourd'hui"
+        databox-source="Ministère de la Culture — Liste des publications de presse (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-type" source="ts-t" label-field="type" value-field="ins, non, n"
+        description="Deux barres horizontales empilées. Publications imprimées : une barre très longue, plus de 24 000 titres, dont un segment bleu d'environ un sixième pour les titres inscrits aujourd'hui, le reste en gris. Services de presse en ligne : une barre dix fois plus courte, un peu moins de 2 400 titres, dont près de la moitié en bleu.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      «&nbsp;Plus inscrit&nbsp;»&nbsp;: inscription expirée sans renouvellement, radiation ou refus. Le registre ne dit pas
+      lequel, ni si le titre paraît encore.
+    </p>
+  </section>
+
+  <!-- ======================= OÙ — la concentration francilienne ======================= -->
+  <dsfr-data-query id="zone" source="reg-n" where="ins:eq:1" group-by="zone, ordre_zone" aggregate="un:sum:n, n:share_percent" order-by="ordre_zone:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="zone-g" source="zone" rename="zone:Département de l'éditeur | n:Titres inscrits"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-zone">
+    <h2 id="t-zone" class="fr-h3">Plus d'un titre inscrit sur deux est édité en Île-de-France, trois sur dix à Paris</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Paris compte {{ins_75:number}}&nbsp;titres inscrits ({{part_75:number:0}}&nbsp;% du total), les Hauts-de-Seine
+          {{ins_92:number}}. Avec le reste de la région, l'Île-de-France en édite {{ins_idf:number}}, soit
+          {{part_idf:number:0}}&nbsp;% des {{ins_dep:number}}&nbsp;titres inscrits dont le département est renseigné. Ce n'est
+          pas nouveau&nbsp;: sur tout l'historique du registre, Paris pèse {{part_75_hist:number:0}}&nbsp;% des titres.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Titres inscrits au registre CPPAP selon le département de l'éditeur">
+      <dsfr-data-chart id="g-zone" source="zone-g" type="bar" horizontal
+        label-field="Département de l'éditeur" value-field="Titres inscrits" name="Titres inscrits"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="titres"
+        databox databox-title="Titres inscrits aujourd'hui au registre de la CPPAP, selon le département de l'éditeur"
+        databox-source="Ministère de la Culture — Liste des publications de presse (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-zone" source="zone" label-field="zone" value-field="n, n__share_percent"
+        description="Cinq barres horizontales. Paris, mise en évidence : environ 1 500 titres inscrits. Hauts-de-Seine : environ 650. Autres départements franciliens : environ 430. Hors Île-de-France, tous les autres départements réunis : un peu plus de 2 100, à peine plus que Paris et les Hauts-de-Seine ensemble. Département non renseigné : moins de 300.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Département du siège de l'éditeur, pas de la diffusion&nbsp;: un hebdomadaire régional édité en province compte en
+      province, un magazine national édité à Boulogne compte dans les Hauts-de-Seine. Le tableau donne aussi la part de
+      chaque ligne.
+    </p>
+  </section>
+
+  <!-- ======================= LE CYCLE — les échéances d'inscription ======================= -->
+  <dsfr-data-query id="ech" source="reg-n" where="ins:eq:1" group-by="an_exp_txt"
+    aggregate="ins_imp:sum:imp, ins_spel:sum:spel" order-by="an_exp_txt:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ech">
+    <h2 id="t-ech" class="fr-h3">Une inscription vaut le plus souvent cinq ans&nbsp;: le stock d'aujourd'hui se renouvelle en continu</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          L'inscription a une date d'échéance, le plus souvent cinq ans après la décision. {{ech_2026:number}}&nbsp;titres
+          inscrits arrivent à échéance d'ici la fin de 2026&nbsp;; {{renouv_ins:number}} ont déjà une demande de
+          renouvellement en cours. {{renouv_non:number}} autres attendent un renouvellement alors que leur inscription a
+          déjà expiré, et {{premiere:number}} titres attendent une première décision. Le registre est un flux&nbsp;: le
+          «&nbsp;moins d'un sur cinq&nbsp;» mesure l'usure de décennies de titres, pas une hécatombe récente.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Titres inscrits selon l'année d'échéance de leur inscription">
+      <dsfr-data-chart id="g-ech" source="ech" type="bar" stacked
+        label-field="an_exp_txt"
+        value-field="imp:Publications imprimées" value-fields="spel:Services de presse en ligne"
+        color-map="Publications imprimées:#6a6af4,Services de presse en ligne:#000091"
+        unit-tooltip="titres"
+        databox databox-title="Titres inscrits aujourd'hui, selon l'année où leur inscription arrive à échéance"
+        databox-source="Ministère de la Culture — Liste des publications de presse (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ech" source="ech" label-field="an_exp_txt" value-field="imp, spel"
+        description="Barres empilées, une par année d'échéance de 2026 à 2031. 2026, qui ne compte plus que les derniers mois de l'année : un peu plus de 600 titres. 2027 est l'année la plus chargée, plus de 1 100 titres, puis les barres décroissent régulièrement jusqu'à 2031, un peu plus de 500. Dans chaque barre, les services de presse en ligne forment environ un cinquième.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Année de <code>date_expiration_inscription</code> pour les titres au statut «&nbsp;Inscrit&nbsp;». 2026 ne compte que les
+      échéances des derniers mois de l'année&nbsp;; 2031 ne reçoit que les décisions les plus récentes et se remplit chaque jour.
+    </p>
+  </section>
+
+  <!-- ======================= L'ARGENT — aide à l'exemplaire posté 2023 ======================= -->
+  <dsfr-data-query id="aid-cat" source="aid-tit-n" group-by="cat_lib" aggregate="t:sum:n, m:sum:m, n:share_percent, m:share_percent" order-by="m:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="aid-cat-t" source="aid-cat" round="n__share_percent:1, m__share_percent:1"
+    compute="m_m = round(m / 1000000, 1)"></dsfr-data-normalize>
+  <dsfr-data-query id="aid-hr" source="aid-cat-t" where="cat_lib:eq:Hebdomadaires régionaux"></dsfr-data-query>
+  <dsfr-data-query id="aid-ipg" source="aid-cat-t" where="cat_lib:contains:politique"></dsfr-data-query>
+
+  <dsfr-data-query id="aid-15" source="aid-cum" limit="15"></dsfr-data-query>
+  <dsfr-data-normalize id="aid-15-g" source="aid-15" rename="titre:Titre | m_k:Aide (milliers d'euros)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-aid">
+    <h2 id="t-aid" class="fr-h3">Un titre aidé sur dix reçoit les trois quarts de l'aide à l'exemplaire posté</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="aid-syn-t"><template>En 2023, l'aide à l'exemplaire posté a versé {{total_m:number:1}}&nbsp;millions d'euros à {{titres:number}}&nbsp;titres.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="aid-d1"><template>Les {{nb:number}} premiers, un sur dix, en reçoivent {{part:number:0}}&nbsp;%.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="aid-bas"><template>La moitié la moins aidée ({{nb:number}}&nbsp;titres) se partage {{part:number:1}}&nbsp;%.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="aid-top-t"><template>Le premier, {{titre}}, touche à lui seul {{m_m:number:2}}&nbsp;M€.</template></dsfr-data-repeat>
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Les quinze titres les plus aidés par l'aide à l'exemplaire posté en 2023">
+      <dsfr-data-chart id="g-aid" source="aid-15-g" type="bar" horizontal
+        label-field="Titre" value-field="Aide (milliers d'euros)" name="Aide (milliers d'euros)"
+        unit-tooltip="k€"
+        databox databox-title="Les quinze titres les plus aidés par l'aide à l'exemplaire posté, 2023 (milliers d'euros)"
+        databox-source="Ministère de la Culture — Aide à l'exemplaire des titres de presse postés (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-aid" source="aid-cum" label-field="titre" value-field="m, m__share_percent, m__share_percent__running_sum, cat_lib"
+        description="Quinze barres horizontales triées de la plus longue à la plus courte. Télérama, en tête, dépasse 5 millions d'euros ; La Croix suit avec un peu plus de 4 millions ; La Montagne, Le Figaro, Ouest-France, Sud Ouest et La Nouvelle République sont entre 2 et 3 millions ; les suivants entre 1 et 2 millions. Le tableau donne les 379 titres, avec la part de chacun et la part cumulée.">
+      </dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-4w">Les hebdomadaires régionaux font sept titres aidés sur dix et un dixième de l'argent</h3>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="aid-hr"><template>{{n:number}}&nbsp;hebdomadaires régionaux sont aidés ({{n__share_percent:number:0}}&nbsp;% des titres) pour {{m_m:number:1}}&nbsp;M€, {{m__share_percent:number:0}}&nbsp;% de l'enveloppe.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="aid-ipg"><template>À l'inverse, {{n:number}}&nbsp;quotidiens d'information politique et générale reçoivent {{m_m:number:1}}&nbsp;M€, {{m__share_percent:number:0}}&nbsp;% du total.</template></dsfr-data-repeat>
+      Une aide proportionnelle aux exemplaires postés suit la diffusion&nbsp;: elle va aux gros tirages.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Part des titres aidés et part des montants, par catégorie d'aide">
+      <dsfr-data-chart id="g-cat" source="aid-cat-t" type="bar" horizontal
+        label-field="cat_lib"
+        value-field="n__share_percent:Part des titres aidés (%)" value-fields="m__share_percent:Part des montants (%)"
+        color-map="Part des titres aidés (%):#c1c1c1,Part des montants (%):#000091"
+        unit-tooltip="%"
+        databox databox-title="Part des titres aidés et part des montants de l'aide à l'exemplaire posté, par catégorie, 2023"
+        databox-source="Ministère de la Culture — Aide à l'exemplaire des titres de presse postés (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-cat" source="aid-cat-t" label-field="cat_lib" value-field="n, n__share_percent, m, m__share_percent"
+        description="Pour chaque catégorie d'aide, deux barres : en gris la part des titres aidés, en bleu la part des montants. Quotidiens d'information politique et générale : 15 % des titres, 41 % de l'argent. Hebdomadaires nationaux : 10 % des titres, 30 % de l'argent. Faibles ressources publicitaires de 35 g et plus : 4 % des titres, 13 % de l'argent. Hebdomadaires régionaux : 70 % des titres, 10 % de l'argent. Faibles ressources publicitaires de moins de 35 g : 1 % des titres, 6 % de l'argent.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Catégories et libellés du fichier («&nbsp;QFRP-QFRA&nbsp;» y désigne les titres à faibles ressources
+      publicitaires&nbsp;; «&nbsp;35 g&nbsp;» est le poids de l'exemplaire). Un titre est compté une fois, ses lignes
+      additionnées&nbsp;: <em>La Croix du Midi</em> en porte quatre.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — les aides au pluralisme ======================= -->
+  <dsfr-data-source id="sptel" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="90207bad-994d-4998-8cac-531842a709f8" max-records="2000">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="sptel-n" source="sptel" rename="Montant (€):montant | Année:annee | Titre:titre" compute="un = 1; an = concat(annee, '')"></dsfr-data-normalize>
+  <dsfr-data-query id="sptel-an" source="sptel-n" group-by="an" aggregate="montant:sum:m, un:sum:n" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="sptel-an-t" source="sptel-an" compute="m_m = round(m / 1000000, 1); moy_k = round(m / n / 1000, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="sptel-22" source="sptel-an-t" where="an:eq:2022"></dsfr-data-query>
+  <dsfr-data-query id="sptel-23" source="sptel-an-t" where="an:eq:2023"></dsfr-data-query>
+
+  <dsfr-data-source id="ultra" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="ea9eab5e-6a34-4afb-b6b6-e7e0d89a3538" max-records="2000">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="ultra-n" source="ultra" rename="Montant (€):montant | Année:annee | Titre:titre" compute="un = 1; an = concat(annee, '')"></dsfr-data-normalize>
+  <dsfr-data-query id="ultra-an" source="ultra-n" group-by="an" aggregate="montant:sum:m, un:sum:n" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="ultra-an-t" source="ultra-an" compute="m_m = round(m / 1000000, 2)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="ultra-g" source="ultra-an" rename="an:Année | n:Titres aidés | m:Montant (€)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="sptel-g" source="sptel-an" rename="an:Année | n:Sites aidés | m:Montant (€)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-plur">
+    <h2 id="t-plur" class="fr-h3">L'aide aux sites tout en ligne a été divisée par deux entre 2022 et 2023, pour plus de bénéficiaires</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="sptel-22"><template>En 2022, l'aide au pluralisme des services de presse tout en ligne a versé {{m_m:number:1}}&nbsp;M€ à {{n:number}}&nbsp;sites, {{moy_k:number}}&nbsp;000&nbsp;€ en moyenne.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="sptel-23"><template>En 2023, {{m_m:number:1}}&nbsp;M€ pour {{n:number}}&nbsp;sites, {{moy_k:number}}&nbsp;000&nbsp;€ en moyenne.</template></dsfr-data-repeat>
+      Les montants ronds disent une enveloppe fixée d'avance et répartie entre les demandeurs, pas un besoin mesuré.
+      Le jeu s'arrête à 2023.
+    </p>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="fr-table fr-table--no-caption">
+          <dsfr-data-list source="sptel-g" columns="Année:Année, Sites aidés:Sites aidés, Montant (€):Montant (€)"
+            caption="Aide au pluralisme des services de presse tout en ligne, par année"></dsfr-data-list>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="fr-table fr-table--no-caption">
+          <dsfr-data-list source="ultra-g" columns="Année:Année, Titres aidés:Titres aidés, Montant (€):Montant (€)"
+            caption="Aide au pluralisme des titres ultramarins, par année"></dsfr-data-list>
+        </div>
+        <p class="fr-text--xs fr-hint-text">
+          <dsfr-data-repeat source="ultra-an-t"><template>{{an}}&nbsp;: {{m_m:number:2}}&nbsp;M€. </template></dsfr-data-repeat>
+          Les titres ultramarins changent de libellé d'une année à l'autre («&nbsp;Le Quotidien de la Réunion&nbsp;»,
+          puis en majuscules avec «&nbsp;et océan Indien&nbsp;»)&nbsp;: pas de suivi titre par titre.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: un titre est-il inscrit, et depuis où est-il édité&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      La sélection s'ouvre sur les titres inscrits aujourd'hui&nbsp;; décochez le statut pour voir tout l'historique du
+      registre. Les filtres agissent sur les chiffres et sur la liste.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="fac" value="count" format="nombre"
+        heading="Titres" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="ins:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Inscrits" label="part de la sélection inscrite aujourd'hui"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="spel:sum / un:sum" format="pourcentage" decimals="0"
+        heading="En ligne" label="part de services de presse en ligne"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="fac" source="reg-n"
+          fields="statut_lib, type, zone, departement, demande_en_cours"
+          labels="statut_lib:Inscription | type:Type de presse | zone:Zone de l'éditeur | departement:Département de l'éditeur (code) | demande_en_cours:Demande en cours"
+          display="statut_lib:checkbox | type:checkbox | zone:checkbox | departement:multiselect | demande_en_cours:checkbox"
+          disjunctive="statut_lib, type, zone, departement, demande_en_cours"
+          searchable="departement"
+          sort="departement:alpha:asc"
+          default="statut_lib:Inscrit aujourd’hui"
+          max-values="6" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-list source="fac"
+          columns="titre:Titre, editeur:Éditeur, type:Type, departement:Département, statut_lib:Inscription, date_expiration_inscription:Échéance, numero_cppap:N° CPPAP"
+          search sort="titre:asc" pagination="20" count-label="titre|titres" export="csv"
+          caption="Titres du registre de la CPPAP (sélection courante)">
+        </dsfr-data-list>
+      </div>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">Tous les titres aidés en 2023</h3>
+    <dsfr-data-list source="aid-cum"
+      columns="titre:Titre, cat_lib:Catégorie, m:Aide 2023 (€), m__share_percent:Part (%), m__share_percent__running_sum:Part cumulée (%)"
+      search sort="m:desc" pagination="20" count-label="titre|titres" export="csv"
+      caption="Aide à l'exemplaire des titres de presse postés, 2023, par titre">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Les aides d'un titre inscrit.</strong> Les fichiers d'aides écrivent «&nbsp;CROIX (LA)&nbsp;», le registre
+            «&nbsp;LA CROIX&nbsp;», sans numéro CPPAP commun&nbsp;: aucun rapprochement n'est tenté, aucun taux d'«&nbsp;inscrits
+            aidés&nbsp;» n'est écrit.</li>
+          <li><strong>Une série des aides.</strong> Chaque fichier publié couvre une ou deux années (aide à l'exemplaire posté&nbsp;:
+            2023 seulement). Le classement pluriannuel des titres aidés (2012-2023), jeu le plus consulté du ministère, n'est
+            pas servi par l'API Tabular.</li>
+          <li><strong>La presse d'information politique et générale inscrite.</strong> La colonne
+            <code>qualification</code> porte le motif de la dernière décision, pas la nature du titre&nbsp;: <em>Le Figaro</em>
+            ou <em>Libération</em> y sont en «&nbsp;ciblage postal&nbsp;», pas en «&nbsp;IPG&nbsp;». Compter les IPG dessus
+            ferait croire qu'ils sont surtout en ligne. La catégorie de publication n'est remplie que pour 28&nbsp;titres.</li>
+          <li><strong>Pourquoi un titre n'est plus inscrit.</strong> Expiration, radiation ou refus se confondent sous
+            «&nbsp;Non Inscrit&nbsp;»&nbsp;; {{sans_date:number}}&nbsp;titres n'ont aucune date.</li>
+          <li><strong>{{ins_dep_vide:number}}&nbsp;titres inscrits sans département</strong> ({{dep_vide:number}} sur tout le
+            registre)&nbsp;: dans les totaux, hors du calcul de la part francilienne. Aucun titre n'a de code
+            ultramarin&nbsp;; la Corse est codée «&nbsp;20&nbsp;» ({{ins_corse:number}}&nbsp;inscrits). D'où l'absence de carte
+            départementale&nbsp;: elle aurait tu l'outre-mer et, rapportée aux habitants, n'aurait montré que Paris
+            (70&nbsp;titres pour 100&nbsp;000&nbsp;habitants, contre 7 pour la France entière, calcul fait hors de la page le
+            27&nbsp;septembre 2026).</li>
+          <li><strong>La diffusion.</strong> Un titre inscrit est un titre reconnu, pas un titre lu&nbsp;: le registre ne dit ni
+            tirage ni audience.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir du registre de la CPPAP et de trois fichiers d'aides à la presse,
+        servis par l'API Tabular. Les comptes du cadrage tiennent (26&nbsp;731 titres, 4&nbsp;965 inscrits, 2&nbsp;385 services
+        en ligne le 27&nbsp;septembre 2026)&nbsp;; la piste «&nbsp;IPG&nbsp;» a été écartée, la colonne ne dit pas ce qu'elle
+        semble dire.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>26&nbsp;731 lignes en une requête.</strong> Le cadrage prévoyait des agrégats serveur&nbsp;; le registre a
+              un export Parquet de 0,9&nbsp;Mo, lu par <code>fetch-mode="export"</code>. Toutes les vues en dérivent côté
+              client, facettes comprises.</li>
+            <li><strong>Une concentration sans script.</strong> <code>share_percent</code> puis <code>running_sum</code> sur
+              deux <code>dsfr-data-query</code> chaînées donnent part et part cumulée de chaque titre aidé&nbsp;; un
+              <code>where</code> sur la part cumulée des titres isole le premier dixième.</li>
+            <li><strong>Des parts qui somment à 100&nbsp;%.</strong> <code>n:share_percent, m:share_percent</code> dans la même
+              query que le regroupement&nbsp;: part des titres et part de l'argent côte à côte, sans jointure.</li>
+            <li><strong>Des colonnes à parenthèses.</strong> <code>Montant (€)</code> se renomme dans <code>rename</code>
+              sans échappement.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Une jointure impossible.</strong> «&nbsp;CROIX (LA)&nbsp;» contre «&nbsp;LA CROIX&nbsp;»&nbsp;: sans
+              identifiant commun ni fonction de sous-chaîne pour déplacer l'article, aides et registre restent deux volets.
+              C'est le jeu, pas la bibliothèque.</li>
+            <li><strong>Une colonne trompeuse.</strong> <code>qualification</code> suggère une part de presse IPG&nbsp;; il a
+              fallu chercher <em>Le Figaro</em> dans le fichier pour voir qu'elle ne porte que le motif de la dernière
+              décision.</li>
+            <li><strong>Le plafond par défaut.</strong> 26&nbsp;731 lignes dépassent les 25&nbsp;000 de <code>max-records</code>&nbsp;:
+              sans le relever, 1&nbsp;731 titres disparaissaient sans message.</li>
+            <li><strong>La date de la dernière décision.</strong> Comme sur la page des entrepreneurs de spectacles, un tri et
+              <code>limit="1"</code> joints sur une clé constante, faute d'un <code>max</code> qui rende une date.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 26&nbsp;731 lignes Tabular</td><td><code>dsfr-data-source fetch-mode="export" select max-records</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Recoder statut, zone, échéance</td><td><code>normalize compute</code> (<code>when</code>, <code>year</code>, <code>is_empty</code>)</td><td>Natif</td></tr>
+            <tr><td>Part des inscrits par type</td><td><code>query group-by</code> + barres empilées</td><td>Natif</td></tr>
+            <tr><td>Part de chaque zone</td><td><code>aggregate="n:share_percent"</code></td><td>Natif</td></tr>
+            <tr><td>Concentration des aides (premier dixième)</td><td><code>share_percent</code> → <code>running_sum</code> → <code>where</code></td><td>Natif</td></tr>
+            <tr><td>Rapprocher aides et registre</td><td>—</td><td>Impossible (pas de clé commune dans les jeux)</td></tr>
+            <tr><td>Trouver un titre</td><td><code>dsfr-data-facets</code> (statut par défaut) + <code>dsfr-data-list search</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>La bibliothèque a suivi, la donnée a borné l'histoire.</strong> Chargement, parts et cumuls sont natifs.
+          Ce qui manque est dans les jeux&nbsp;: pas d'identifiant commun entre aides et registre, une seule année d'aides
+          par fichier, une colonne de qualification qui ne qualifie pas le titre.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte Leaflet sur la page. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

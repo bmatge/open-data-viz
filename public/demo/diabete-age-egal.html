@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le diabète à âge égal — open-data-viz</title>
+  <meta name="description" content="La carte brute du diabète met la Nièvre en tête de la métropole parce qu'elle est âgée ; à âge égal, c'est la Seine-Saint-Denis qui passe première et la carte suit la pauvreté — Assurance Maladie (data.ameli.fr) croisée à Filosofi par l'API Melodi de l'INSEE, standardisée par âge dans le navigateur.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.ameli.fr" crossorigin>
+  <link rel="preconnect" href="https://api.insee.fr" crossorigin>
+  <link rel="preconnect" href="https://equipements.sports.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <!-- DSFR Chart livre SA PROPRE feuille : sans elle l'infobulle rend son HTML
+       sans aucun style, et seul le survol le montre. Pas optionnelle dès
+       qu'une page porte un graphique. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+  <link rel="stylesheet" href="/assets/demo.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       BANDEAU D'OUVERTURE
+       ========================================================================== -->
+  <section class="odv-hero">
+    <div class="fr-container odv-hero__corps">
+      <nav role="navigation" class="fr-breadcrumb fr-mt-0 fr-mb-3w" aria-label="vous êtes ici :">
+        <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+        <div class="fr-collapse" id="fil-ariane">
+          <ol class="fr-breadcrumb__list">
+            <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+            <li><a class="fr-breadcrumb__link" href="/demo">Démonstrations</a></li>
+            <li><a class="fr-breadcrumb__link" aria-current="page">Le diabète à âge égal</a></li>
+          </ol>
+        </div>
+      </nav>
+      <p class="fr-badge fr-badge--new fr-mb-3v">Démonstration — une carte qui change d'avis</p>
+      <h1 class="odv-hero__titre">Le diabète&nbsp;: la carte brute dessine la vieillesse, la carte à âge égal dessine la pauvreté</h1>
+      <p class="odv-hero__chapo">
+        L'Assurance Maladie publie, département par département, la part de ses assurés soignés pour
+        un diabète. Lue telle quelle, cette carte met en tête de la métropole la
+        <strong>Nièvre (9,98&nbsp;%)</strong>, la Creuse et l'Indre. Mais ce sont des départements
+        âgés, et le diabète est une maladie de l'âge. Comparés <strong>à structure d'âge
+        égale</strong>, la Nièvre recule au 11<sup>e</sup>&nbsp;rang métropolitain et la
+        <strong>Seine-Saint-Denis</strong>, 19<sup>e</sup> sur la carte brute, passe première avec
+        <strong>10,41&nbsp;%</strong>. La seconde carte ne suit plus l'âge&nbsp;: elle suit la pauvreté.
+      </p>
+      <p class="odv-hero__source fr-text--sm">
+        <code>effectifs</code> (Assurance Maladie, <code>data.ameli.fr</code>) ×
+        <code>DS_FILOSOFI_CC</code> (INSEE, <strong>API Melodi</strong>) ×
+        <code>insee-2020-geoapi-2023</code> (référentiel, portail Sports) — standardisation par âge
+        calculée dans le navigateur. Premier emploi de l'API Melodi dans les démonstrations (après une page du portail Développement durable).
+      </p>
+      <a class="fr-btn fr-btn--lg fr-icon-arrow-down-line fr-btn--icon-right" href="#cartes">Voir les deux cartes</a>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       LE PIPELINE
+       Trois hôtes, deux fournisseurs d'API (Opendatasoft deux fois, INSEE
+       Melodi une fois), aucune préparation hors ligne. Toute la
+       standardisation par âge se fait en balises : une part (`share`), une
+       jointure 1-N VOULUE sur la classe d'âge, une colonne calculée, un
+       regroupement.
+       ========================================================================== -->
+
+  <!-- Le référentiel des noms de départements (le jeu CNAM ne publie que des
+       codes). ⚠️ PG-001 : le jeu porte une ligne par COMMUNE ; le `group-by`
+       EST le dédoublonnage. Unicité du côté droit contrôlée à l'API :
+       107 groupes, un par code, et les 101 codes CNAM tous couverts. -->
+  <dsfr-data-source id="ref-dep" api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="insee-2020-geoapi-2023"
+    select="codedepartement, nom_departement"
+    group-by="codedepartement, nom_departement"
+    fetch-mode="export" max-records="200">
+  </dsfr-data-source>
+
+  <!-- Le jeu CNAM « effectifs » : 5,8 millions de lignes (pathologie × sexe ×
+       classe d'âge × territoire × année). Le filtre ramène le diabète, tous
+       sexes, 2024 : 2 520 lignes, sous le plafond de 3 000 posé ici — relevé
+       à l'API AVANT d'écrire la balise (le plafond par défaut de 1 000 les
+       tronquerait en silence). `sexe` est un champ TEXTE : '9' entre quotes.
+
+       ⚠️ PIÈGE DU JEU : les lignes régionales et la ligne France portent
+       `dept = "999"` — 18 régions et la France (`region = "99"`), chacune en
+       21 classes d'âge. Un regroupement naïf par `dept` fabrique un 102e
+       « département » de 1,1 million de lignes agrégées. Chaque query ci-dessous
+       dit explicitement de quel côté du 999 elle se place.
+
+       ⚠️ La classe `tsage` est le TOTAL tous âges : elle sert au taux brut et
+       doit être écartée de tout calcul par âge, sous peine de compter chaque
+       patient deux fois. -->
+  <dsfr-data-source id="diab" api-type="opendatasoft"
+    base-url="https://data.ameli.fr" dataset-id="effectifs"
+    select="cla_age_5, dept, region, ntop, npop"
+    where="top = 'DIA_CAT_CAT' and sexe = '9' and annee = date'2024'"
+    fetch-mode="export" max-records="3000">
+  </dsfr-data-source>
+
+  <!-- La population de référence : la France 2024, en 20 classes de cinq ans.
+       `share` sans `group-by` garde une ligne par classe et lui ajoute sa part
+       dans le total des 20 — c'est le POIDS de la classe dans la standardisation.
+       Côté droit de la jointure suivante : 20 lignes, une par `cla_age_5`,
+       contrôlé à l'API (PG-001). -->
+  <dsfr-data-query id="poids" source="diab"
+    where="dept:eq:999, region:eq:99, cla_age_5:neq:tsage"
+    aggregate="npop:share:poids">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="poids-n" source="poids"
+    compute="taux_age = round(ntop / npop * 100, 2); part_pop = round(poids * 100, 2)">
+  </dsfr-data-normalize>
+  <!-- L'export Opendatasoft ne rend pas les classes dans l'ordre (« 95et+ »
+       arrivait en tête) : tri explicite. L'ordre alphabétique des libellés
+       CNAM est l'ordre des âges, « 95et+ » compris. -->
+  <dsfr-data-query id="ages-nat" source="poids-n" order-by="cla_age_5:asc"></dsfr-data-query>
+
+  <!-- La ligne France, tous âges : le taux national. -->
+  <dsfr-data-query id="france" source="diab"
+    where="dept:eq:999, region:eq:99, cla_age_5:eq:tsage">
+  </dsfr-data-query>
+
+  <!-- Les 101 départements × 20 classes d'âge = 2 020 lignes. -->
+  <dsfr-data-query id="dep-ages-brut" source="diab"
+    where="dept:neq:999, cla_age_5:neq:tsage">
+  </dsfr-data-query>
+
+  <!-- LA STANDARDISATION, ÉTAPE 1 : chaque ligne (département × âge) reçoit le
+       poids national de sa classe d'âge. Jointure 1-N VOULUE — 101 lignes à
+       gauche pour une à droite — et c'est pourquoi l'unicité se vérifie à
+       DROITE (20 classes, 20 lignes) : dans ce sens, aucune ligne dupliquée. -->
+  <dsfr-data-join id="dep-ages-p" left="dep-ages-brut" right="poids"
+    on="cla_age_5" type="left"></dsfr-data-join>
+
+  <!-- ÉTAPE 2 : taux de la classe × poids de la classe. `ntop` est NUL sur
+       67 cellules (secret statistique sur les petits effectifs) : la division
+       rend alors `null`, jamais un 0 plausible, et `manque` les compte.
+       `pop65` isole les 65 ans et plus : comparaison de texte sur la classe
+       (« 65-69 » ≥ « 65 », « 95et+ » ≥ « 65 », « 60-64 » < « 65 »). -->
+  <dsfr-data-normalize id="dep-ages" source="dep-ages-p"
+    compute="contrib = ntop / npop * poids * 100;
+             manque = when is_null(ntop) then 1 else 0;
+             pop65 = when cla_age_5 &gt;= '65' then npop else 0">
+  </dsfr-data-normalize>
+
+  <!-- ÉTAPE 3 : la somme des vingt contributions EST le taux standardisé
+       (méthode directe : Σ taux_âge × poids_âge). Une contribution nulle est
+       ignorée par `sum` : le taux est alors calculé sur 17 à 19 classes. -->
+  <dsfr-data-query id="dep-std" source="dep-ages"
+    group-by="dept"
+    aggregate="contrib:sum:std, manque:sum:classes_manquantes, npop:sum:pop_ages, pop65:sum">
+  </dsfr-data-query>
+
+  <!-- Le taux brut : la ligne « tous âges » de chaque département. -->
+  <dsfr-data-query id="dep-tot" source="diab"
+    where="dept:neq:999, cla_age_5:eq:tsage">
+  </dsfr-data-query>
+
+  <!-- Taux de pauvreté 2023 (Filosofi), par l'API Melodi de l'INSEE.
+       `GEO:eq:DEP` part tel quel en `GEO=DEP` : Melodi accepte le TYPE de
+       territoire comme valeur de la dimension et rend les 97 départements
+       publiés (métropole + La Réunion). Un seul appel, pour une API limitée à
+       30 requêtes par minute.
+
+       ⚠️ L'ADAPTATEUR TRADUIT LES CODES EN LIBELLÉS : après chargement, `GEO`
+       vaut « Nièvre » et le code d'origine « 2026-DEP-58 » passe dans
+       `GEO_CODE`. La clé de jointure se dérive donc de `GEO_CODE`, pas de
+       `GEO` — un `replace(GEO, …)` ne rendrait que des noms. -->
+  <dsfr-data-source id="pauv-src" api-type="insee"
+    base-url="https://api.insee.fr/melodi" dataset-id="DS_FILOSOFI_CC"
+    where="FILOSOFI_MEASURE:eq:PR_MD60, GEO:eq:DEP">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="pauv" source="pauv-src"
+    compute="dept = replace(GEO_CODE, '2026-DEP-', ''); pauvrete = OBS_VALUE; annee_pauv = TIME_PERIOD">
+  </dsfr-data-normalize>
+
+  <!-- Trois jointures en chaîne sur le code département. Côté droit, chaque
+       fois une ligne par département : dep-std (101, issu d'un group-by),
+       pauv (97, contrôlé à l'API), ref-dep (107, group-by). -->
+  <dsfr-data-join id="dep-j1" left="dep-tot" right="dep-std" on="dept" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="dep-j2" left="dep-j1" right="pauv" on="dept" type="left"></dsfr-data-join>
+  <dsfr-data-join id="dep-j3" left="dep-j2" right="ref-dep" on="dept=codedepartement" type="left"></dsfr-data-join>
+
+  <!-- PG-031 : la colonne AFFICHÉE est arrondie, la colonne CALCULÉE ne l'est
+       pas (`brut_raw`, `std`) — c'est elle que lisent le résumé des cartes et
+       les regroupements. Les tranches se calculent sur les valeurs brutes. -->
+  <dsfr-data-normalize id="dep" source="dep-j3"
+    compute="brut_raw = ntop / npop * 100;
+             brut = round(brut_raw, 2);
+             std_aff = round(std, 2);
+             ecart = round(std - brut_raw, 2);
+             part65_raw = pop65__sum / pop_ages * 100;
+             part65 = round(part65_raw, 1);
+             metro = when len(dept) = 2 then 1 else 0;
+             tranche_age = when part65_raw &lt; 20 then 'Moins de 20 %' when part65_raw &lt; 23 then 'De 20 à 23 %' when part65_raw &lt; 26 then 'De 23 à 26 %' when part65_raw &lt; 29 then 'De 26 à 29 %' else '29 % et plus';
+             ordre_age = when part65_raw &lt; 20 then 1 when part65_raw &lt; 23 then 2 when part65_raw &lt; 26 then 3 when part65_raw &lt; 29 then 4 else 5;
+             tranche_pauv = when is_null(pauvrete) then null when pauvrete &lt; 13 then 'Moins de 13 %' when pauvrete &lt; 15 then 'De 13 à 15 %' when pauvrete &lt; 17 then 'De 15 à 17 %' when pauvrete &lt; 19 then 'De 17 à 19 %' else '19 % et plus';
+             ordre_pauv = when is_null(pauvrete) then null when pauvrete &lt; 13 then 1 when pauvrete &lt; 15 then 2 when pauvrete &lt; 17 then 3 when pauvrete &lt; 19 then 4 else 5">
+  </dsfr-data-normalize>
+
+  <!-- La métropole seule : les chapitres 2 et 3 comparent des tranches, et le
+       taux de pauvreté n'est publié que pour une seule collectivité d'outre-mer
+       sur cinq. On compare donc les mêmes 96 départements dans les deux. -->
+  <dsfr-data-query id="dep-met" source="dep" where="metro:eq:1"></dsfr-data-query>
+
+  <!-- ==========================================================================
+       REPÈRES
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w" id="reperes">
+    <dsfr-data-kpi-group cols="3" gap="md">
+      <dsfr-data-kpi source="france" value="ntop:sum / npop:sum"
+        format="pourcentage" decimals="2" color-token="bleu"
+        heading="France, 2024"
+        lines='[{"value":"ntop:sum","format":"nombre","suffix":"patients pris en charge pour diabète"}]'
+        label="des 67,6 millions de personnes couvertes par l'Assurance Maladie"></dsfr-data-kpi>
+      <dsfr-data-kpi source="dep" where="dept:eq:58" value="brut_raw:max"
+        format="decimal" decimals="2" unit="%" color-token="orange"
+        heading="Nièvre — taux brut"
+        lines='[{"value":"std:max","format":"decimal","decimals":2,"prefix":"à âge égal : ","unit":"%"}]'
+        label="1er de métropole sur la carte brute, 11e à âge égal"></dsfr-data-kpi>
+      <dsfr-data-kpi source="dep" where="dept:eq:93" value="brut_raw:max"
+        format="decimal" decimals="2" unit="%" color-token="orange"
+        heading="Seine-Saint-Denis — taux brut"
+        lines='[{"value":"std:max","format":"decimal","decimals":2,"prefix":"à âge égal : ","unit":"%"}]'
+        label="19e de métropole sur la carte brute, 1er à âge égal"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </section>
+
+  <!-- ==========================================================================
+       CHAPITRE 1 — Deux cartes, deux palmarès
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w" id="cartes">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 1</p>
+    <h2 class="fr-h3">La même maladie, deux cartes qui ne se ressemblent pas</h2>
+    <p class="fr-text--lead fr-mb-4w">
+      À gauche, la part des assurés soignés pour un diabète, telle que publiée. À droite, le taux
+      qu'aurait chaque département <strong>s'il avait la pyramide des âges de la France</strong>.
+      La première se fonce au centre du pays&nbsp;; la seconde au nord, dans l'est et autour de
+      Paris.
+    </p>
+
+    <div class="odv-viz" data-code="Prévalence du diabète par département, brute et standardisée par âge">
+      <div class="odv-face-a-face">
+        <div>
+          <p class="fr-badge fr-badge--sm fr-mb-2v">Taux brut — ce que publie le jeu</p>
+          <dsfr-data-chart id="c-brut" source="dep" type="map"
+            code-field="dept" value-field="brut" name="Taux brut"
+            unit-tooltip="%" selected-palette="sequentialAscending"
+            map-summary="weighted" map-summary-weight="npop" map-summary-field="brut_raw"
+            databox heading-level="3"
+            databox-title="Patients pris en charge pour diabète, en % des assurés — taux brut, 2024"
+            databox-source="Assurance Maladie — cartographie des pathologies, effectifs 2024"
+            databox-download></dsfr-data-chart>
+          <p class="fr-hint-text">
+            Résumé&nbsp;: <code>map-summary="weighted"</code> pondéré par les assurés
+            (<code>npop</code>) — la somme des patients sur la somme des assurés des 101
+            départements.
+          </p>
+        </div>
+        <div>
+          <p class="fr-badge fr-badge--sm fr-badge--purple-glycine fr-mb-2v">À âge égal — structure France 2024</p>
+          <!-- `map-summary="none"` : un résumé des taux standardisés n'existe pas.
+               Pondérée par les assurés, leur moyenne vaut 6,70 % — un nombre
+               sans définition. La référence nationale est, par construction,
+               le taux brut de la France (6,61 %) : la France standardisée sur
+               sa propre pyramide EST la France. La phrase le dit. -->
+          <dsfr-data-chart id="c-std" source="dep" type="map"
+            code-field="dept" value-field="std_aff" name="Taux à âge égal"
+            unit-tooltip="%" selected-palette="sequentialAscending"
+            map-summary="none"
+            databox heading-level="3"
+            databox-title="Patients pris en charge pour diabète, en % — standardisé sur la pyramide des âges France 2024"
+            databox-source="Assurance Maladie, effectifs 2024 — standardisation directe calculée par la page"
+            databox-download></dsfr-data-chart>
+          <p class="fr-hint-text">
+            Pas de résumé (<code>map-summary="none"</code>)&nbsp;: la référence est la France
+            elle-même, 6,61&nbsp;%, puisqu'elle sert d'étalon.
+          </p>
+        </div>
+      </div>
+      <p class="odv-lecture fr-mt-3w">
+        Les deux cartes portent les mêmes patients et les mêmes assurés&nbsp;; seule change la
+        question. La première répond à «&nbsp;où soigne-t-on le plus de diabétiques, par
+        habitant&nbsp;?&nbsp;» — utile pour organiser l'offre de soins. La seconde répond à
+        «&nbsp;où le diabète est-il plus fréquent <em>qu'il ne devrait l'être vu l'âge des
+        habitants</em>&nbsp;?&nbsp;» — la question de santé publique. Les écarts d'outre-mer, plus
+        forts encore, se lisent dans les encarts&nbsp;: Mayotte, 81<sup>e</sup> des 101 sur la carte
+        brute, y passe 1<sup>re</sup> (12,29&nbsp;%).
+      </p>
+      <dsfr-data-a11y for="c-std" source="dep" table download
+        label-field="nom_departement" value-field="brut, std_aff, ecart, classes_manquantes"
+        filename="diabete-brut-et-age-egal.csv"
+        description="Pour chacun des 101 départements, la part des assurés pris en charge pour diabète en 2024 : taux brut, taux standardisé sur la pyramide des âges de la France 2024, écart entre les deux en points, et nombre de classes d'âge secrétisées dans le calcul standardisé."></dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">Les dix premiers de métropole, avant et après</h3>
+    <p class="fr-mb-3w">
+      Trois départements seulement figurent dans les deux palmarès — l'Aisne, la Moselle et les
+      Ardennes. Les sept autres de la carte brute sont des départements ruraux et âgés du centre et
+      de l'est, dont la barre violette (à âge égal) tombe de 1,0 à 2,4&nbsp;points sous la
+      grise. Les sept nouveaux venus de la carte à âge égal sont dans le nord et en
+      Île-de-France&nbsp;: la Seine-Saint-Denis y gagne 2,6&nbsp;points, le Val-d'Oise 1,8.
+    </p>
+    <!-- Deux barres par département plutôt qu'un podium : `dsfr-data-podium`
+         arrondit sa valeur à l'unité, sans attribut de décimales (0.42.0) —
+         la Nièvre y affichait « 10 % » comme la Seine-Saint-Denis. Et la
+         seconde barre montre d'un coup d'œil ce que le département perd ou
+         gagne à âge égal, ce qu'un podium ne dirait pas. -->
+    <dsfr-data-query id="top-brut" source="dep-met" order-by="brut_raw:desc" limit="10"></dsfr-data-query>
+    <dsfr-data-query id="top-std" source="dep-met" order-by="std:desc" limit="10"></dsfr-data-query>
+    <div class="odv-face-a-face">
+      <div class="odv-viz" data-code="Top 10 métropolitain, taux brut">
+        <h4 class="fr-h6">Les dix premiers de la carte brute</h4>
+        <dsfr-data-chart id="g-top-brut" source="top-brut" type="bar" horizontal
+          label-field="nom_departement"
+          value-field="brut:Taux brut" value-fields="std_aff:À âge égal"
+          color-map="Taux brut:#929292, À âge égal:#6e445a"
+          unit-tooltip="%" x-min="0" x-max="11"
+          databox heading-level="5"
+          databox-title="Top 10 métropolitain du taux brut, 2024"
+          databox-source="Assurance Maladie, effectifs 2024 — standardisation calculée par la page"></dsfr-data-chart>
+        <dsfr-data-a11y for="g-top-brut" source="top-brut" table
+          label-field="nom_departement" value-field="brut, std_aff, part65"
+          description="Les dix départements métropolitains au taux brut de prise en charge pour diabète le plus élevé en 2024, avec leur taux à âge égal et la part des 65 ans et plus. Pour sept d'entre eux le taux à âge égal est nettement plus bas."></dsfr-data-a11y>
+      </div>
+      <div class="odv-viz" data-code="Top 10 métropolitain, à âge égal">
+        <h4 class="fr-h6">Les dix premiers à âge égal</h4>
+        <dsfr-data-chart id="g-top-std" source="top-std" type="bar" horizontal
+          label-field="nom_departement"
+          value-field="brut:Taux brut" value-fields="std_aff:À âge égal"
+          color-map="Taux brut:#929292, À âge égal:#6e445a"
+          unit-tooltip="%" x-min="0" x-max="11"
+          databox heading-level="5"
+          databox-title="Top 10 métropolitain du taux à âge égal, 2024"
+          databox-source="Assurance Maladie, effectifs 2024 — standardisation calculée par la page"></dsfr-data-chart>
+        <dsfr-data-a11y for="g-top-std" source="top-std" table
+          label-field="nom_departement" value-field="std_aff, brut, part65, pauvrete"
+          description="Les dix départements métropolitains au taux de prise en charge pour diabète standardisé par âge le plus élevé en 2024, avec leur taux brut, la part des 65 ans et plus et le taux de pauvreté 2023. La Seine-Saint-Denis et le Val-d'Oise y passent en tête."></dsfr-data-a11y>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       CHAPITRE 2 — Ce que la carte brute mesure : l'âge
+       ========================================================================== -->
+  <div class="odv-bande">
+    <div class="fr-container">
+      <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 2</p>
+      <h2 class="fr-h3">Le diabète est une maladie de l'âge — et les départements n'ont pas le même âge</h2>
+      <p class="fr-text--lead">
+        Moins d'un enfant sur mille, un adulte sur quarante à 40&nbsp;ans, un sur cinq entre 70
+        et 90&nbsp;ans&nbsp;: le taux est multiplié par plus de cinq cents d'un bout à l'autre de la
+        vie. Un département où les plus de 65&nbsp;ans pèsent un tiers de la population — la
+        Creuse, la Nièvre — a donc mécaniquement plus de diabétiques qu'un département où ils
+        pèsent un septième, comme la Seine-Saint-Denis.
+      </p>
+
+      <div class="odv-viz" data-code="Prévalence du diabète par classe d'âge, France 2024">
+        <h3 class="fr-h6">Un assuré sur cinq entre 70 et 90 ans</h3>
+        <p class="odv-lecture">
+          C'est cette courbe, appliquée à la pyramide de chaque département, qui fabrique la carte
+          brute. La standardisation la neutralise en imposant à tous la même pyramide&nbsp;: celle
+          de la France (les barres du tableau équivalent donnent le poids de chaque classe).
+        </p>
+        <dsfr-data-chart id="g-ages" source="ages-nat" type="bar"
+          label-field="cla_age_5" value-field="taux_age:Patients pour 100 assurés"
+          unit-tooltip="%" y-min="0" selected-palette="neutral"
+          databox heading-level="4"
+          databox-title="Part des assurés pris en charge pour diabète, par classe d'âge — France, 2024"
+          databox-source="Assurance Maladie — cartographie des pathologies, effectifs 2024"
+          databox-download></dsfr-data-chart>
+        <dsfr-data-a11y for="g-ages" source="ages-nat" table download
+          label-field="cla_age_5" value-field="taux_age, ntop, npop, part_pop"
+          filename="diabete-par-age-france-2024.csv"
+          description="Pour chacune des vingt classes d'âge de cinq ans, la part des assurés pris en charge pour diabète en France en 2024, le nombre de patients, le nombre d'assurés, et le poids de la classe dans la population (en %), qui sert d'étalon à la standardisation."></dsfr-data-a11y>
+      </div>
+
+      <!-- Taux par tranche de VIEILLISSEMENT (part des 65 ans et plus), sur les
+           96 départements métropolitains. Les deux taux sont des RATIOS DE
+           SOMMES par tranche, jamais des moyennes de taux départementaux :
+           - brut : Σ patients ÷ Σ assurés de la tranche ;
+           - standardisé : pour chaque classe d'âge, Σ patients ÷ Σ assurés de
+             la tranche, pondéré par le poids national, puis sommé.
+           La tranche est reportée sur les lignes (département × âge) par une
+           jointure sur le code — côté droit une ligne par département. -->
+      <dsfr-data-query id="dep-cles" source="dep-met"
+        group-by="dept, tranche_age, tranche_pauv" aggregate="npop:sum:n_cle"></dsfr-data-query>
+      <dsfr-data-join id="ages-t" left="dep-ages" right="dep-cles" on="dept" type="inner"></dsfr-data-join>
+      <dsfr-data-query id="ages-t-ok" source="ages-t" where="ntop:isnotnull"></dsfr-data-query>
+
+      <dsfr-data-query id="ta-grp" source="ages-t-ok"
+        group-by="tranche_age, cla_age_5" aggregate="ntop:sum, npop:sum, poids:max"></dsfr-data-query>
+      <dsfr-data-normalize id="ta-c" source="ta-grp"
+        compute="c = ntop__sum / npop__sum * poids__max * 100"></dsfr-data-normalize>
+      <dsfr-data-query id="ta-std" source="ta-c" group-by="tranche_age" aggregate="c:sum:std"></dsfr-data-query>
+      <dsfr-data-query id="ta-brut" source="dep-met"
+        group-by="tranche_age, ordre_age" aggregate="ntop:sum, npop:sum, dept:count:departements"></dsfr-data-query>
+      <dsfr-data-join id="ta-j" left="ta-brut" right="ta-std" on="tranche_age" type="inner"></dsfr-data-join>
+      <dsfr-data-normalize id="ta-n" source="ta-j"
+        compute="brut = round(ntop__sum / npop__sum * 100, 2); std_aff = round(std, 2)"></dsfr-data-normalize>
+      <dsfr-data-query id="ta" source="ta-n" order-by="ordre_age:asc"></dsfr-data-query>
+
+      <div class="odv-viz fr-mt-6w" data-code="Taux brut et à âge égal, par tranche de vieillissement">
+        <h3 class="fr-h6">Plus un département est âgé, plus son taux brut monte — et plus son taux à âge égal baisse</h3>
+        <p class="odv-lecture">
+          Les treize départements métropolitains où les 65&nbsp;ans et plus pèsent moins de 20&nbsp;%
+          ont le taux brut le plus bas (6,09&nbsp;%) mais le taux à âge égal le plus haut
+          (7,12&nbsp;%). Les douze plus âgés font l'inverse&nbsp;: 7,61&nbsp;% brut, 6,04&nbsp;% à âge
+          égal. <strong>Les deux lectures se croisent</strong>&nbsp;: la carte brute classe les
+          départements selon leur âge, pas selon leur exposition au diabète.
+        </p>
+        <dsfr-data-chart id="g-age" source="ta" type="bar"
+          label-field="tranche_age"
+          value-field="brut:Taux brut" value-fields="std_aff:À âge égal"
+          color-map="Taux brut:#929292, À âge égal:#6e445a"
+          unit-tooltip="%" y-min="0"
+          databox heading-level="4"
+          databox-title="Part des assurés soignés pour diabète selon la part des 65 ans et plus — 96 départements de métropole, 2024"
+          databox-source="Assurance Maladie, effectifs 2024 — tranches et standardisation calculées par la page"
+          databox-download></dsfr-data-chart>
+        <dsfr-data-a11y for="g-age" source="ta" table download
+          label-field="tranche_age" value-field="brut, std_aff, departements, npop__sum"
+          filename="diabete-par-vieillissement.csv"
+          description="Pour cinq tranches de départements métropolitains, définies par la part des 65 ans et plus dans la population assurée : le taux brut et le taux standardisé par âge de prise en charge pour diabète, le nombre de départements et le nombre d'assurés de la tranche. Le taux brut monte avec le vieillissement, le taux à âge égal baisse."></dsfr-data-a11y>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       CHAPITRE 3 — Ce que la carte à âge égal mesure : la pauvreté
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w" id="pauvrete">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 3</p>
+    <h2 class="fr-h3">Une fois l'âge retiré, il reste la pauvreté</h2>
+    <p class="fr-text--lead">
+      Le taux de pauvreté vient d'un autre producteur, sur un autre portail&nbsp;: l'INSEE, par son
+      API Melodi (Filosofi&nbsp;2023, part des habitants sous 60&nbsp;% du niveau de vie médian). En
+      métropole, il va de 9,2&nbsp;% en Vendée à 29,5&nbsp;% en Seine-Saint-Denis. Rangés par tranche de
+      pauvreté, les départements montent régulièrement — et la pente est la plus forte à âge égal.
+    </p>
+
+    <dsfr-data-query id="tp-grp" source="ages-t-ok"
+      group-by="tranche_pauv, cla_age_5" aggregate="ntop:sum, npop:sum, poids:max"></dsfr-data-query>
+    <dsfr-data-normalize id="tp-c" source="tp-grp"
+      compute="c = ntop__sum / npop__sum * poids__max * 100"></dsfr-data-normalize>
+    <dsfr-data-query id="tp-std" source="tp-c" group-by="tranche_pauv" aggregate="c:sum:std"></dsfr-data-query>
+    <dsfr-data-query id="tp-brut" source="dep-met"
+      group-by="tranche_pauv, ordre_pauv" aggregate="ntop:sum, npop:sum, dept:count:departements"></dsfr-data-query>
+    <dsfr-data-join id="tp-j" left="tp-brut" right="tp-std" on="tranche_pauv" type="inner"></dsfr-data-join>
+    <dsfr-data-normalize id="tp-n" source="tp-j"
+      compute="brut = round(ntop__sum / npop__sum * 100, 2); std_aff = round(std, 2)"></dsfr-data-normalize>
+    <dsfr-data-query id="tp" source="tp-n" order-by="ordre_pauv:asc"></dsfr-data-query>
+
+    <div class="odv-viz" data-code="Taux brut et à âge égal, par tranche de pauvreté">
+      <h3 class="fr-h6">Des départements les moins pauvres aux plus pauvres, le taux à âge égal passe de 5,3 à 7,6&nbsp;%</h3>
+      <p class="odv-lecture">
+        Dans les dix-sept départements où la pauvreté touche moins de 13&nbsp;% des habitants,
+        5,31&nbsp;% des assurés sont soignés pour un diabète à âge égal. Dans les quinze où elle
+        dépasse 19&nbsp;%, <strong>7,61&nbsp;%</strong>&nbsp;: 2,3&nbsp;points de plus, soit
+        <strong>+43&nbsp;%</strong>. Sur la carte brute, l'écart n'est que de 1,8&nbsp;point
+        (5,44&nbsp;% → 7,27&nbsp;%), parce que les départements pauvres de métropole sont souvent jeunes et que
+        leur jeunesse masque une partie du diabète.
+      </p>
+      <dsfr-data-chart id="g-pauv" source="tp" type="bar"
+        label-field="tranche_pauv"
+        value-field="brut:Taux brut" value-fields="std_aff:À âge égal"
+        color-map="Taux brut:#929292, À âge égal:#6e445a"
+        unit-tooltip="%" y-min="0"
+        databox heading-level="4"
+        databox-title="Part des assurés soignés pour diabète selon le taux de pauvreté du département — 96 départements de métropole"
+        databox-source="Assurance Maladie, effectifs 2024 ; INSEE, Filosofi 2023 (API Melodi)"
+        databox-download></dsfr-data-chart>
+      <dsfr-data-a11y for="g-pauv" source="tp" table download
+        label-field="tranche_pauv" value-field="brut, std_aff, departements, npop__sum"
+        filename="diabete-par-pauvrete.csv"
+        description="Pour cinq tranches de départements métropolitains, définies par le taux de pauvreté 2023 (INSEE, Filosofi) : le taux brut et le taux standardisé par âge de prise en charge pour diabète en 2024, le nombre de départements et le nombre d'assurés de la tranche. Les deux taux montent avec la pauvreté ; le taux à âge égal monte davantage."></dsfr-data-a11y>
+    </div>
+
+    <div class="fr-callout fr-icon-quote-line fr-my-4w">
+      <h3 class="fr-callout__title fr-text--md">« Suit », pas « explique »</h3>
+      <p class="fr-callout__text fr-text--sm">
+        Ces tranches rapprochent deux mesures prises sur des <em>territoires</em>, pas sur des
+        personnes&nbsp;: elles ne disent pas que les assurés pauvres sont plus souvent diabétiques —
+        ce croisement ne peut pas le montrer. Un département pauvre peut différer d'un autre par
+        bien d'autres traits (urbanisation, métiers, alimentation, origines) que ni l'Assurance
+        Maladie ni Filosofi ne publient à cette maille, et que cette page ne neutralise pas. Le taux de
+        pauvreté est de 2023, les effectifs de 2024&nbsp;: le décalage d'un an est sans effet sur
+        un classement de départements qui bouge lentement, mais il existe.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       CHAPITRE 4 — Le détail, et ce que le calcul laisse de côté
+       ========================================================================== -->
+  <section class="fr-container fr-mt-8w fr-mb-8w" id="detail">
+    <p class="fr-badge fr-badge--info fr-mb-2v">Chapitre 4</p>
+    <h2 class="fr-h3">Les 101 départements, et les cases vides</h2>
+    <p class="fr-text--lead">
+      L'Assurance Maladie ne publie pas les effectifs trop petits&nbsp;: <strong>67 cellules</strong>
+      (département × classe d'âge) sur 2&nbsp;020 sont vides, dans 56 départements — presque
+      toujours chez les enfants de moins de 10&nbsp;ans, où le diabète est rare. Le taux à âge égal
+      de ces départements est calculé sur 17 à 19 classes au lieu de 20. Chez les enfants, la
+      classe manquante pèse moins d'un centième de point&nbsp;; à Mayotte, trois classes manquent
+      dont celle des 95&nbsp;ans et plus, et le taux de 12,29&nbsp;% y est sans doute un peu
+      sous-estimé.
+    </p>
+
+    <dsfr-data-list source="dep" caption="Diabète par département, brut et à âge égal, 2024"
+      columns="nom_departement:Département, dept:Code, brut:Taux brut (%), std_aff:À âge égal (%), ecart:Écart (points), classes_manquantes:Classes d'âge secrétisées, part65:65 ans et plus (%), pauvrete:Pauvreté 2023 (%)"
+      sort="ecart:desc" search pagination="20" export="csv">
+    </dsfr-data-list>
+    <p class="fr-hint-text fr-mt-2v">
+      Écart = taux à âge égal − taux brut&nbsp;: positif pour un département plus jeune que la
+      France, négatif pour un département plus âgé. Pauvreté vide&nbsp;: Guadeloupe, Martinique,
+      Guyane et Mayotte, que Filosofi&nbsp;2023 ne couvre pas.
+    </p>
+  </section>
+
+  <!-- ==========================================================================
+       NOTES — les hypothèses éditoriales
+       ========================================================================== -->
+  <section class="fr-container fr-mb-8w odv-analyse fr-pt-6w" id="notes">
+    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
+    <p>Tout ce qui suit est un choix. Il est écrit pour pouvoir être discuté.</p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on a choisi</h3>
+        <ul>
+          <li><strong>La standardisation directe, sur la France 2024.</strong> Chaque département
+            reçoit la pyramide des âges de la France entière (20 classes de cinq ans, tous sexes).
+            Une autre pyramide de référence donne d'autres niveaux, pas un autre récit&nbsp;:
+            recalculé sur la population standard européenne 2013, le classement métropolitain garde
+            les mêmes dix premiers dans le même ordre, et aucun département ne bouge de plus de trois
+            rangs (la Seine-Saint-Denis passe à 9,81&nbsp;%, la Nièvre à 7,11&nbsp;%).</li>
+          <li><strong>Les deux cartes côte à côte.</strong> La carte brute n'est pas fausse&nbsp;:
+            elle mesure la charge de soins, qui compte pour l'offre de soins. Elle ne répond pas à
+            la question qu'on lui prête — où le diabète est-il plus fréquent — et la page le montre
+            plutôt que de la retirer.</li>
+          <li><strong>Des tranches, pas un nuage de points ni un coefficient.</strong> Une
+            corrélation de 0,5 ou 0,7 ne dit rien au lecteur d'un journal local&nbsp;; «&nbsp;de
+            5,3 à 7,6&nbsp;% des plus aisés aux plus pauvres&nbsp;» se lit. Chaque tranche est un
+            ratio de sommes, jamais une moyenne de taux départementaux.</li>
+          <li><strong>La métropole seule aux chapitres 2 et 3.</strong> Filosofi&nbsp;2023 ne
+            publie pas la pauvreté de quatre DROM sur cinq, et les DROM combinent des pyramides très
+            jeunes à des taux très élevés&nbsp;: les inclure dans une tranche l'aurait tirée seule.
+            Ils restent sur les cartes et dans le tableau.</li>
+          <li><strong>Un titre qui dit «&nbsp;dessine&nbsp;», un encadré qui dit «&nbsp;suit&nbsp;».</strong>
+            La seconde carte ressemble à celle de la pauvreté&nbsp;; ce n'est pas une preuve de
+            cause, et la page ne l'écrit nulle part.</li>
+        </ul>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qu'on ne montre pas</h3>
+        <ul>
+          <li><strong>Le diabète non soigné.</strong> Le jeu compte les assurés <em>pris en
+            charge</em> par l'Assurance Maladie — pas les diabétiques qui ne sont ni diagnostiqués ni
+            traités. Si le recours aux soins varie d'un département à l'autre, l'écart réel peut être
+            plus grand, ou plus petit.</li>
+          <li><strong>Les sexes séparément.</strong> Le calcul porte sur le total «&nbsp;tous
+            sexes&nbsp;» (<code>sexe = 9</code>)&nbsp;; les hommes sont plus souvent pris en charge
+            (7,58&nbsp;% contre 5,73&nbsp;% des femmes en 2024), et la standardisation ne corrige
+            pas un écart de composition par sexe entre départements.</li>
+          <li><strong>Un résumé sous la carte à âge égal.</strong> La moyenne pondérée des taux
+            standardisés (6,70&nbsp;%) ne correspond à aucune population. La référence est la France
+            elle-même.</li>
+          <li><strong>Onze mille patients sans département.</strong> La ligne France compte
+            4&nbsp;471&nbsp;940 patients&nbsp;; les 101 départements en totalisent 4&nbsp;460&nbsp;460.
+            La différence (assurés sans département de résidence connu ou hors des 101) ne figure sur
+            aucune carte, d'où un résumé de carte brute à 6,62&nbsp;% pour un taux France de
+            6,61&nbsp;%.</li>
+          <li><strong>Les médecins.</strong> La densité de généralistes (même producteur) aurait
+            permis de demander si les médecins sont là où sont les malades. C'est une autre page, et
+            ce ne serait pas un croisement entre producteurs.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="odv-verdict fr-mt-4w">
+      <h3 class="fr-h6">Ce que cette page démontre de <code>dsfr-data</code></h3>
+      <p>
+        <strong>Une standardisation par âge écrite en balises, et un troisième fournisseur
+        d'API pour les démonstrations.</strong> La méthode directe tient en quatre composants — une part
+        (<code>aggregate="npop:share:poids"</code>), une jointure 1-N voulue sur la classe d'âge,
+        une colonne calculée, un regroupement — et se replie ensuite par tranche en rejouant les
+        mêmes gestes. Le taux de pauvreté arrive de l'API Melodi de l'INSEE
+        (<code>api-type="insee"</code>) en un appel, et se joint aux données de l'Assurance Maladie
+        sur un code recalculé par <code>replace()</code>. Aucune ligne de JavaScript, aucun fichier
+        préparé&nbsp;: 101 taux standardisés recalculés dans le navigateur, identiques au centième au
+        calcul indépendant.
+      </p>
+    </div>
+  </section>
+
+  <!-- ==========================================================================
+       ANALYSE TECHNIQUE — repliée
+       ========================================================================== -->
+  <section class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que ces jeux et ces API ont coûté</summary>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mt-3w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h6">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>La standardisation n'a demandé aucun attribut nouveau.</strong>
+              <code>share</code> sans <code>group-by</code> garde une ligne par classe et y ajoute sa
+              part&nbsp;: c'est exactement le vecteur de poids. La jointure sur
+              <code>cla_age_5</code> le recopie sur les 2&nbsp;020 lignes, <code>compute</code>
+              multiplie, <code>sum</code> additionne. Le calcul direct d'un manuel d'épidémiologie se
+              lit dans l'ordre des balises.</li>
+            <li><strong>Le secret statistique ne fabrique pas de zéro.</strong> Une cellule
+              <code>ntop</code> vide donne une division <code>null</code>, que <code>sum</code>
+              ignore&nbsp;; <code>when is_null(ntop)</code> la compte à part. Le taux est calculé
+              sur les classes connues, et le tableau dit combien il en manque.</li>
+            <li><strong>Melodi se branche comme les autres.</strong> <code>api-type="insee"</code>,
+              <code>dataset-id</code>, un <code>where</code> en dialecte colon traduit en paramètres
+              de dimension&nbsp;: 97 lignes en un appel, CORS ouvert, sans clé.
+              <code>GEO:eq:DEP</code> — le type de territoire comme valeur — rend tous les
+              départements publiés sans énumérer 101 codes.</li>
+            <li><strong>Le chargement complet d'Opendatasoft tient en une requête.</strong>
+              <code>fetch-mode="export"</code> ramène les 2&nbsp;520 lignes du diabète en une
+              requête de 31&nbsp;Ko (0,1 à 0,7&nbsp;s mesurés), sous un <code>max-records</code> relevé à 3&nbsp;000 avant d'écrire la
+              balise.</li>
+          </ul>
+        </div>
+
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h6">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Melodi renomme la clé en libellé.</strong> L'adaptateur traduit les codes
+              SDMX en libellés (#592)&nbsp;: <code>GEO</code> vaut «&nbsp;Nièvre&nbsp;» et le code
+              «&nbsp;2026-DEP-58&nbsp;» passe dans <code>GEO_CODE</code>. C'est écrit dans un
+              exemple de la fiche <code>dsfr-data-normalize</code>, pas dans celle des
+              fournisseurs&nbsp;; un <code>replace(GEO, '2026-DEP-', '')</code> — la forme qui vient
+              naturellement, et celle que la note de cadrage de cette page avait écrite — rend des
+              noms («&nbsp;Nièvre&nbsp;»), et la jointure ne garde aucune ligne. Rejoué sur une page
+              minimale&nbsp;: zéro ligne, un avertissement de jointure en console, aucune
+              erreur.</li>
+            <li><strong>Pour traduire 97 lignes, l'adaptateur charge tout le référentiel.</strong>
+              Les libellés viennent de <code>/melodi/range/DS_FILOSOFI_CC</code>&nbsp;: 41&nbsp;599
+              territoires, 1,7&nbsp;Mo transférés (13&nbsp;Mo décompressés) en 0,3 à 0,4&nbsp;s, pour
+              une réponse de données de 2&nbsp;Ko transférés. Il ne bloque rien ici — les sources
+              partent en parallèle — mais c'est la plus lourde requête de la page, de loin. Aucun attribut ne permet de s'en passer quand on n'a besoin que
+              des codes.</li>
+            <li><strong>Le « 999 » du jeu CNAM.</strong> Régions et France partagent le code
+              département <code>999</code>, distinguées par <code>region</code>. Rien dans le schéma
+              ne le signale&nbsp;; seul le compte (102 codes pour 101 départements) le trahit. Chaque
+              query de la page porte donc son <code>dept:eq:999</code> ou
+              <code>dept:neq:999</code>.</li>
+            <li><strong>Un taux standardisé par tranche demande de repartir des lignes d'âge.</strong>
+              La moyenne des taux standardisés départementaux d'une tranche n'est pas le taux
+              standardisé de la tranche. Il faut reporter la tranche sur les 2&nbsp;020 lignes
+              (département × âge), regrouper par (tranche × âge), puis refaire la standardisation —
+              sept balises par dimension. Rien de manquant, mais rien de court.</li>
+            <li><strong>Pas de rang.</strong> «&nbsp;11<sup>e</sup> à âge égal&nbsp;» ne se calcule
+              pas en balises&nbsp;: aucun agrégat de fenêtre ne numérote les lignes après un tri. Le
+              podium affiche un rang, mais il arrondit sa valeur à l'unité, sans attribut de
+              décimales&nbsp;: la Nièvre (9,98&nbsp;%) et la Seine-Saint-Denis (10,41&nbsp;%) y
+              affichaient toutes deux «&nbsp;10&nbsp;%&nbsp;». Il a été remplacé par deux graphiques
+              en barres&nbsp;; les rangs du texte ont été vérifiés au recalcul, et la page ne les
+              recalcule pas.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 class="fr-h6 fr-mt-4w">Correspondance — le besoin, le composant</h3>
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Ce que chaque étape du calcul a demandé, et où la réponse se trouve</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Réponse <code>dsfr-data</code></th><th scope="col">Statut</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Poids de chaque classe d'âge dans la France</td><td><code>dsfr-data-query aggregate="npop:share:poids"</code>, sans <code>group-by</code></td><td>Natif (0.33.0)</td></tr>
+            <tr><td>Recopier le poids sur chaque (département × âge)</td><td><code>dsfr-data-join on="cla_age_5"</code>, 1-N voulu, droite unique</td><td>Natif</td></tr>
+            <tr><td>Taux de la classe × poids, secret statistique compris</td><td><code>compute</code> (division nulle → <code>null</code>) + <code>when is_null()</code></td><td>Natif</td></tr>
+            <tr><td>Taux standardisé</td><td><code>group-by="dept" aggregate="contrib:sum:std"</code></td><td>Natif</td></tr>
+            <tr><td>Taux de pauvreté INSEE</td><td><code>api-type="insee"</code> + <code>where="…, GEO:eq:DEP"</code></td><td>Natif</td></tr>
+            <tr><td>Clé de jointure depuis un code SDMX</td><td><code>compute="dept = replace(GEO_CODE, '2026-DEP-', '')"</code></td><td>Natif — sur <code>GEO_CODE</code>, pas <code>GEO</code></td></tr>
+            <tr><td>Libellés Melodi sans le référentiel de 13 Mo</td><td>Aucun attribut</td><td>Demande à la bibliothèque</td></tr>
+            <tr><td>Résumé de la carte brute</td><td><code>map-summary="weighted"</code> + <code>map-summary-field</code> sur la colonne brute</td><td>Natif</td></tr>
+            <tr><td>Pas de résumé pour un taux standardisé</td><td><code>map-summary="none"</code></td><td>Natif</td></tr>
+            <tr><td>Rang après tri (« 11<sup>e</sup> sur 96 »)</td><td>Aucun agrégat de fenêtre ; <code>order-by</code> + <code>limit="10"</code> pour un top 10</td><td>Porté par le texte</td></tr>
+            <tr><td>Classement à deux décimales</td><td><code>dsfr-data-podium</code> arrondit à l'unité, sans <code>decimals</code></td><td>Demande à la bibliothèque</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <h3 class="fr-h6">Verdict</h3>
+        <p>
+          <strong>Un calcul épidémiologique classique s'écrit en balises, et le troisième fournisseur des démonstrations
+          se branche sans effort — à un renommage près.</strong> Ce qui a coûté n'est pas le calcul
+          mais la lecture des jeux&nbsp;: un code «&nbsp;999&nbsp;» qui mélange régions et France,
+          une classe «&nbsp;tsage&nbsp;» qui double les patients si on l'oublie, un adaptateur qui
+          remplace la clé par son libellé. Aucun des trois ne produit d'erreur&nbsp;; les trois
+          produisent un chiffre faux et plausible, que seul le recalcul indépendant a révélé.
+        </p>
+      </div>
+    </details>
+
+    <details class="odv-contexte fr-mt-3w">
+      <summary>Les jeux de données utilisés</summary>
+      <ul class="fr-mt-2w">
+        <li><strong>Effectifs de patients par pathologie</strong> — Assurance Maladie (CNAM),
+          cartographie des pathologies et des dépenses, jeu <code>effectifs</code> sur
+          <a href="https://data.ameli.fr/explore/dataset/effectifs/">data.ameli.fr</a>
+          (<a href="https://www.data.gouv.fr/fr/datasets/62b31f7b128643f46ea1f848/">fiche
+          <code>data.gouv.fr</code></a>). Filtre&nbsp;: diabète (<code>top = DIA_CAT_CAT</code>),
+          tous sexes, 2024 — 2&nbsp;520 lignes. Mis à jour le 2026-07-06.</li>
+        <li><strong>Taux de pauvreté</strong> — INSEE, Filosofi 2023, jeu
+          <code>DS_FILOSOFI_CC</code>, mesure <code>PR_MD60</code> (seuil à 60&nbsp;% du niveau de
+          vie médian), lu par l'<a href="https://portail-api.insee.fr/">API Melodi</a>&nbsp;:
+          97 départements.</li>
+        <li><strong>Noms des départements</strong> — référentiel <code>insee-2020-geoapi-2023</code>
+          du portail <code>equipements.sports.gouv.fr</code>, regroupé par département.</li>
+        <li><strong>Licence</strong> — Licence Ouverte v2.0 (Etalab).</li>
+      </ul>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
