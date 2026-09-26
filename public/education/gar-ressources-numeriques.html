@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Le GAR en 2024-2025 — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du bilan du Gestionnaire d'accès aux ressources : cinq jeux joints, 54 millions d'accès, et un catalogue de 15 630 ressources enfin explorable.">
+  <meta name="description" content="Recréation avec dsfr-data du bilan du Gestionnaire d'accès aux ressources : un service national dont l'usage varie du tout au tout d'une académie à l'autre, le Grand Est en tête.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,146 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un bilan de service : cinq totaux et sept graphiques, sans
+       un seul rapport. La reproduction précédente avait déjà calculé les accès
+       par accédant ; elle le rangeait en troisième bloc. Cette version en fait
+       l'histoire : ce n'est pas la taille d'une académie qui fait l'usage du GAR,
+       c'est sa géographie — les trois académies du Grand Est en tête, les
+       Hauts-de-France et les Antilles-Guyane loin derrière.
+
+       Cinq jeux de la DNE-SN1, lus sans clé :
+         · trois jeux jumeaux par académie (31 lignes chacun : 30 académies +
+           « Autres »), joints sur `libelle_aca` par deux jointures chaînées ;
+         · les accès par profil (5 lignes) ;
+         · le catalogue des ressources (15 630 lignes, une requête d'export).
+       ========================================================================== -->
+
+  <!-- ---------- 1. Les trois jeux académiques, réunis ---------- -->
+  <dsfr-data-source id="gar-acced" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-gar-accedants_academie2024-2025"
+    select="libelle_aca, libelle_region_2016, accedants" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-source id="gar-acces" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-gar-acces_academie"
+    select="libelle_aca, acces" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-source id="gar-affect" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-gar-affectations_academie2024-2025"
+    select="libelle_aca, affectations" max-records="100">
+  </dsfr-data-source>
+
+  <!-- Clé = `libelle_aca`, unique dans les trois jeux (31 valeurs pour 31 lignes,
+       vérifié à l'API) et renseigné pour « Autres ». Les sources de droite ne
+       portent que la clé et leur mesure : aucune collision de colonne. -->
+  <dsfr-data-join id="gar-j1" left="gar-acced" right="gar-acces" on="libelle_aca"></dsfr-data-join>
+  <dsfr-data-join id="gar-j2" left="gar-j1" right="gar-affect" on="libelle_aca"></dsfr-data-join>
+
+  <!-- Les rapports, sur les valeurs brutes (on n'arrondit qu'à l'affichage).
+       Les régions du jeu sont écrites avec des traits d'union (« Grand-Est ») :
+       rendues sous leur nom officiel. « Autres » (Saint-Pierre-et-Miquelon,
+       Polynésie française, Andorre) n'a pas de région. -->
+  <dsfr-data-normalize id="gar-aca" source="gar-j2"
+    replace-fields="libelle_region_2016:Grand-Est:Grand Est | libelle_region_2016:Auvergne-et-Rhône-Alpes:Auvergne-Rhône-Alpes | libelle_region_2016:Bourgogne-et-Franche-Comté:Bourgogne-Franche-Comté | libelle_region_2016:Centre-Val-de-Loire:Centre-Val de Loire | libelle_region_2016:Pays-de-la-Loire:Pays de la Loire | libelle_region_2016:La-Réunion:La Réunion"
+    compute="region = coalesce(libelle_region_2016, 'Autres territoires');
+             app = acces / accedants;
+             aff_app = affectations / accedants;
+             acc_100_aff = acces / affectations * 100;
+             groupe = when region = 'Grand Est' then 'Académies du Grand Est' else 'Autres académies';
+             k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- Les 30 académies : « Autres » n'en est pas une, et ses 7 189 accédants
+       ne se classent pas avec elles. -->
+  <dsfr-data-query id="aca" source="gar-aca" where="libelle_aca:neq:Autres"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-r" source="aca"
+    compute="app_aff = round(app, 1); aff_app_aff = round(aff_app, 1); acc_100_aff_aff = round(acc_100_aff, 0)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="aca-tri" source="aca-r" order-by="app:desc"></dsfr-data-query>
+  <dsfr-data-query id="aca-haut" source="aca-r" order-by="app:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="aca-bas" source="aca-r" order-by="app:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="aca-taille" source="aca-r" where="libelle_aca:in:Créteil|Lille" order-by="accedants:desc"></dsfr-data-query>
+  <dsfr-data-query id="aca-affecte" source="aca-r" order-by="aff_app:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-t" source="aca-tri"
+    rename="libelle_aca:Académie | region:Région | accedants:Accédants | acces:Accès | affectations:Affectations | app_aff:Accès par accédant | aff_app_aff:Affectations par accédant | acc_100_aff_aff:Accès pour 100 affectations">
+  </dsfr-data-normalize>
+
+  <!-- Régions : part de chacune dans les accédants et dans les accès.
+       `share_percent` : dénominateur = la France entière, « Autres » compris. -->
+  <dsfr-data-query id="reg" source="gar-aca" group-by="region"
+    aggregate="accedants:sum:acd, acces:sum:acc, acd:share_percent:part_acd, acc:share_percent:part_acc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="reg-n" source="reg"
+    compute="app = acc / acd; k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="reg-r" source="reg-n"
+    round="part_acd:1, part_acc:1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="reg-tri" source="reg-r" order-by="part_acc:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-t" source="reg-tri"
+    rename="region:Région | part_acd:Part des accédants (%) | part_acc:Part des accès (%) | acd:Accédants | acc:Accès">
+  </dsfr-data-normalize>
+
+  <!-- Une ligne pour le chapô : les totaux nationaux, et les deux régions
+       extrêmes en colonnes. -->
+  <dsfr-data-query id="tot" source="gar-aca" group-by="k"
+    aggregate="accedants:sum:acd, acces:sum:acc, affectations:sum:aff">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tot-n" source="tot"
+    compute="app = acc / acd; acc_100_aff = acc / aff * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-pivot id="reg-w" source="reg-n" row="k" column="region" value="app" aggregate="first"
+    labels="Grand Est:ge | Hauts-de-France:hdf">
+  </dsfr-data-pivot>
+  <dsfr-data-join id="chapo" left="tot-n" right="reg-w" on="k" type="inner"></dsfr-data-join>
+
+  <!-- ---------- 2. Les profils ---------- -->
+  <dsfr-data-source id="gar-profil" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-gar-acces_profil2024-2025"
+    max-records="100">
+  </dsfr-data-source>
+  <!-- « Null » est une chaîne littérale du jeu, pas une valeur manquante. -->
+  <dsfr-data-normalize id="gar-profil-n" source="gar-profil"
+    replace-fields="profil:Null:Profil non renseigné | profil:Elève:Élèves | profil:Autres:Autres profils"
+    compute="k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="gar-profil-tri" source="gar-profil-n" order-by="acces:desc"></dsfr-data-query>
+  <!-- Les deux jeux d'accès ne totalisent pas la même chose : l'écart se calcule. -->
+  <dsfr-data-query id="profil-tot" source="gar-profil-n" group-by="k" aggregate="acces:sum:acc_profil"></dsfr-data-query>
+  <dsfr-data-join id="ecart-j" left="tot-n" right="profil-tot" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="ecart" source="ecart-j" compute="ecart = acc - acc_profil"></dsfr-data-normalize>
+
+  <!-- ---------- 3. Le catalogue ----------
+       15 630 lignes : `fetch-mode="export"` (une requête) et `max-records`
+       relevé — le plafond par défaut de 1 000 tronquerait EN SILENCE. -->
+  <dsfr-data-source id="gar-ress" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-gestionnaire-dacces-aux-ressources-gar-liste_des_ressources-2026"
+    fetch-mode="export" max-records="20000">
+  </dsfr-data-source>
+  <!-- `type` n'est publié qu'en codes, sans table de correspondance : libellés
+       reconstitués depuis la nomenclature ENT du même producteur. -->
+  <dsfr-data-normalize id="gar-ress-n" source="gar-ress"
+    replace-fields="type:[MAN]:Manuel numérique | type:[ACC]:Accompagnement, entraînement | type:[MUL]:Ressource multimédia | type:[DOC]:Ressource documentaire | type:[DIC]:Dictionnaire, encyclopédie | type:[PRO]:Ressource de production | type:[ORI]:Ressource d'orientation"
+    compute="nouveaute = when is_null(nouveau) then 'Déjà au catalogue' else 'Nouveauté'">
+  </dsfr-data-normalize>
+  <!-- Distributeurs commerciaux : la part se calcule sur TOUT le catalogue
+       (le dénominateur de `share_percent` est pris avant `limit`). -->
+  <dsfr-data-query id="dcr" source="gar-ress-n" group-by="libelle_du_distributeur_commercial_dcr"
+    aggregate="ark:count:n, n:share_percent:part" order-by="n:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="dcr-r" source="dcr" round="part:1"></dsfr-data-normalize>
+  <dsfr-data-query id="dcr-top" source="dcr-r" order-by="n:desc" limit="8"></dsfr-data-query>
+  <dsfr-data-query id="dcr-3" source="dcr" order-by="n:desc" limit="3"></dsfr-data-query>
+  <dsfr-data-query id="dcr-3s" source="dcr-3" aggregate="part:sum:p3, n:sum:n3"></dsfr-data-query>
+  <dsfr-data-normalize id="dcr-t" source="dcr-top"
+    rename="libelle_du_distributeur_commercial_dcr:Distributeur commercial | n:Ressources | part:Part du catalogue (%)">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,194 +172,281 @@
       </div>
     </nav>
 
-    <h1>Le GAR en 2024-2025 : ressources numériques éducatives</h1>
+    <h1>Ressources numériques à l'école&nbsp;: le Grand Est s'en sert bien plus que le reste de la France</h1>
 
-    <p class="fr-text--lead">
-      Le Gestionnaire d'accès aux ressources donne aux élèves et aux personnels l'accès aux
-      ressources numériques auxquelles leur établissement est abonné. Sur l'année scolaire
-      2024-2025, il compte <strong>10 829 562 accédants</strong>, <strong>54 096 270 accès</strong>
-      et <strong>86 549 678 affectations</strong> de ressources. L'usage est massivement élève :
-      <strong>48 473 661 accès</strong>, soit 89,6 % du total. Le catalogue, lui, compte
-      <strong>15 630 ressources</strong>.
+    <!-- Chapô CALCULÉ : totaux et rapports lus dans les trois jeux joints. -->
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="fr-text--lead">
+          En 2024-2025, <strong>{{acd:number}}</strong> élèves et personnels pouvaient ouvrir
+          des ressources numériques par le Gestionnaire d'accès aux ressources (GAR)&nbsp;; ils
+          l'ont fait <strong>{{acc:number}}</strong> fois, soit <strong>{{app:number:1}} accès
+          par accédant</strong> en moyenne. Mais un accédant du Grand Est en compte
+          <strong>{{ge:number:1}}</strong>, un accédant des Hauts-de-France
+          <strong>{{hdf:number:1}}</strong>&nbsp;: ce n'est pas la taille d'une académie qui fait
+          l'usage du service, c'est sa géographie.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Le GAR est le guichet par lequel un élève ou un enseignant ouvre, depuis son espace
+      numérique de travail, les manuels et ressources auxquels son établissement est abonné.
+      Un <strong>accédant</strong> est une personne qui a au moins une ressource affectée&nbsp;;
+      un <strong>accès</strong> est une connexion réussie à une ressource&nbsp;; une
+      <strong>affectation</strong> rend une ressource visible pour un accédant. Rapporter les
+      accès aux accédants est ce qui rend les académies comparables&nbsp;: le portail publie
+      les deux mesures dans deux jeux distincts et ne les rapproche jamais.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <strong>Cinq jeux, tous de la DNE-SN1</strong>, tous lus sans clé. Trois d'entre eux —
+      <p class="fr-callout__text fr-text--sm">
+        Cinq jeux de la DNE (ministère de l'Éducation nationale), lus sans clé. Trois
+        d'entre eux —
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-gar-accedants_academie2024-2025/" target="_blank" rel="noopener external"><code>…accedants_academie2024-2025</code></a>,
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-gar-acces_academie/" target="_blank" rel="noopener external"><code>…acces_academie</code></a> et
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-gar-affectations_academie2024-2025/" target="_blank" rel="noopener external"><code>…affectations_academie2024-2025</code></a>
-        — portent <strong>exactement les mêmes 31 lignes</strong> (30 académies plus une ligne
-        « Autres ») et ne diffèrent que par leur colonne de mesure. Ils sont joints ici en une
-        seule table, ce que le portail ne fait pas.
-        S'y ajoutent <a href="https://data.education.gouv.fr/explore/dataset/fr-en-gar-acces_profil2024-2025/" target="_blank" rel="noopener external"><code>…acces_profil2024-2025</code></a>
-        (5 lignes) et le catalogue
-        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-gestionnaire-dacces-aux-ressources-gar-liste_des_ressources-2026/" target="_blank" rel="noopener external"><code>…liste_des_ressources-2026</code></a>
-        (15 630 lignes, 5,2 Mo en 0,7 s).
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Trois observations de qualité, vérifiées à l'API.</strong>
-        (1) <strong>Deux sources se contredisent de 3 535 accès</strong> :
-        <code>acces_academie</code> totalise 54 096 270 et <code>acces_profil</code> 54 092 735.
-        Le portail affiche le premier et décompose le second, sans le signaler.
-        (2) Le cinquième profil s'appelle littéralement <strong><code>Null</code></strong>
-        (79 258 accès) : c'est une chaîne de caractères, pas une valeur manquante.
-        (3) Le catalogue est millésimé <strong>2026</strong> alors que les quatre autres jeux
-        couvrent 2024-2025 : le premier chiffre de la page d'origine n'est pas de la même campagne
-        que les autres.
+        — portent les mêmes 31 lignes (30 académies et une ligne « Autres ») et sont joints
+        ici en une table. S'y ajoutent les accès par profil
+        (<a href="https://data.education.gouv.fr/explore/dataset/fr-en-gar-acces_profil2024-2025/" target="_blank" rel="noopener external"><code>…acces_profil2024-2025</code></a>)
+        et le catalogue des ressources
+        (<a href="https://data.education.gouv.fr/explore/dataset/fr-en-gestionnaire-dacces-aux-ressources-gar-liste_des_ressources-2026/" target="_blank" rel="noopener external"><code>…liste_des_ressources-2026</code></a>),
+        daté 2026 alors que les quatre autres couvrent l'année scolaire 2024-2025.
       </p>
     </details>
-  </div>
 
-  <!-- ==========================================================================
-       98 lignes d'agrégats + un catalogue. Aucune question de volume.
-       Les trois jeux académiques sont joints par DEUX `dsfr-data-join` chaînés :
-       le composant n'accepte que `left` et `right`, pas une liste de sources.
-       Clé = `libelle_aca`, renseigné partout (« Autres » compris) et non
-       `libelle_aca_majuscules`, qui est nul pour « Autres ».
-       Les deux sources de droite ne sélectionnent que la clé et leur mesure :
-       aucune collision de colonne, donc aucun préfixe `right_` à gérer.
-       ========================================================================== -->
-
-  <dsfr-data-source id="gar-acced" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-gar-accedants_academie2024-2025"
-    select="libelle_aca, libelle_aca_majuscules, code_academie, libelle_region_2016, accedants, geo_point"
-    max-records="100">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="gar-acces" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-gar-acces_academie"
-    select="libelle_aca, acces" max-records="100">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="gar-affect" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-gar-affectations_academie2024-2025"
-    select="libelle_aca, affectations" max-records="100">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="gar-profil" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-gar-acces_profil2024-2025"
-    max-records="100">
-  </dsfr-data-source>
-
-  <!-- Le catalogue de ressources : 15 630 lignes en une requête d'export. -->
-  <dsfr-data-source id="gar-ress" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-gestionnaire-dacces-aux-ressources-gar-liste_des_ressources-2026"
-    fetch-mode="export" max-records="20000">
-  </dsfr-data-source>
-
-  <dsfr-data-normalize id="gar-ress-n" source="gar-ress"
-    replace-fields="type:[MAN]:Manuel numérique | type:[ACC]:Accompagnement, entraînement | type:[MUL]:Ressource multimédia | type:[DOC]:Ressource documentaire | type:[DIC]:Dictionnaire, encyclopédie | type:[PRO]:Ressource de production | type:[ORI]:Ressource d'orientation"
-    compute="nouveaute = when is_null(nouveau) then 'Déjà au catalogue' else 'Nouveauté'">
-  </dsfr-data-normalize>
-
-
-  <dsfr-data-join id="gar-j1" left="gar-acced" right="gar-acces" on="libelle_aca"></dsfr-data-join>
-  <dsfr-data-join id="gar-j2" left="gar-j1" right="gar-affect" on="libelle_aca"></dsfr-data-join>
-
-  <!-- Le ratio que l'original ne calcule jamais : combien d'accès par accédant.
-       C'est la seule lecture qui rende les académies comparables. -->
-  <dsfr-data-normalize id="gar-aca" source="gar-j2"
-    compute="acces_par_accedant = round(acces / accedants, 1)">
-  </dsfr-data-normalize>
-
-  <dsfr-data-query id="gar-tri-acced" source="gar-aca" order-by="accedants:desc"></dsfr-data-query>
-  <dsfr-data-query id="gar-tri-acces" source="gar-aca" order-by="acces:desc"></dsfr-data-query>
-  <dsfr-data-query id="gar-tri-ratio" source="gar-aca" order-by="acces_par_accedant:desc"></dsfr-data-query>
-
-  <dsfr-data-normalize id="gar-profil-n" source="gar-profil"
-    replace-fields="profil:Null:Profil non renseigné | profil:Elève:Élèves | profil:Enseignants:Enseignants | profil:Autres:Autres profils">
-  </dsfr-data-normalize>
-  <dsfr-data-query id="gar-profil-tri" source="gar-profil-n" order-by="acces:desc"></dsfr-data-query>
-
-  <div class="fr-container fr-mb-6w">
-    <dsfr-data-kpi-group cols="5" gap="md" class="fr-mb-3w">
-      <dsfr-data-kpi source="gar-acced" value="accedants:sum" format="compact"
-        heading="2024-2025" label="accédants au GAR"></dsfr-data-kpi>
-      <dsfr-data-kpi source="gar-acces" value="acces:sum" format="compact"
-        heading="2024-2025" label="accès aux ressources"></dsfr-data-kpi>
-      <dsfr-data-kpi source="gar-profil" value="acces:sum" where="profil:eq:Elève" format="compact"
-        heading="Dont élèves" label="accès, soit 89,6 % du total"></dsfr-data-kpi>
-      <dsfr-data-kpi source="gar-affect" value="affectations:sum" format="compact"
-        heading="2024-2025" label="affectations de ressources"></dsfr-data-kpi>
-      <dsfr-data-kpi source="gar-ress" value="meta:total" format="nombre"
-        heading="Catalogue 2026" label="ressources référencées"></dsfr-data-kpi>
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="gar-aca" value="acces:sum / accedants:sum" format="decimal" decimals="1"
+        heading="accès par accédant en France"
+        label="ratio des totaux nationaux, 2024-2025"></dsfr-data-kpi>
+      <dsfr-data-kpi source="gar-aca" value="acces:sum{region:eq:Grand Est} / acces:sum" format="pourcentage" decimals="1"
+        heading="des accès viennent du Grand Est"
+        lines='[{"value":"accedants:sum{region:eq:Grand Est} / accedants:sum","format":"pourcentage","decimals":1,"prefix":"pour ","suffix":" des accédants"}]'
+        label="trois académies : Nancy-Metz, Reims, Strasbourg"></dsfr-data-kpi>
+      <dsfr-data-kpi source="gar-aca" value="acces:sum{region:eq:Hauts-de-France} / acces:sum" format="pourcentage" decimals="1"
+        heading="des accès viennent des Hauts-de-France"
+        lines='[{"value":"accedants:sum{region:eq:Hauts-de-France} / accedants:sum","format":"pourcentage","decimals":1,"prefix":"pour ","suffix":" des accédants"}]'
+        label="deux académies : Lille, Amiens"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
-    <div class="fr-callout fr-mb-4w">
-      <p class="fr-callout__text fr-text--sm">
-        <strong>Accédant</strong> : élève, enseignant ou agent de l'éducation nationale qui peut
-        accéder aux ressources qui lui sont affectées dans le GAR.
-        <strong>Accès</strong> : connexion réussie à une ressource, matérialisée par la création
-        d'une session GAR sur cette ressource.
-        <strong>Affectation</strong> : association entre un droit d'accès et un accédant, qui rend
-        la ressource visible dans le médiacentre (ENT ou ÉduGAR).
-        <br>Les trois définitions viennent du portail, où elles sont affichées deux fois chacune —
-        une fois en légende de carte, une fois en description de bloc.
-      </p>
+    <!-- ---------- 1. La preuve : les régions ---------- -->
+    <h2 class="fr-h3">1. Le Grand Est pèse deux fois plus dans les accès que dans les accédants</h2>
+    <p class="odv-lecture">Chaque région a deux barres&nbsp;: sa part des accédants du pays, et sa
+      part des accès. Là où la seconde dépasse la première, on se sert davantage du GAR
+      qu'ailleurs. Le Grand Est réalise à lui seul plus d'accès que toute l'Île-de-France, avec
+      deux fois moins d'accédants&nbsp;; les Hauts-de-France, deuxième région par le nombre
+      d'accédants, pèsent trois fois moins dans les accès.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Part des accédants et des accès au GAR par région">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-reg" source="reg-tri" type="bar" horizontal
+        label-field="region" value-field="part_acd:Part des accédants (%)"
+        value-fields="part_acc:Part des accès (%)"
+        unit-tooltip="%"
+        databox databox-title="Part de chaque région dans les accédants et dans les accès au GAR, 2024-2025"
+        databox-source="DNE — jeux GAR accédants et accès par académie, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-reg" source="reg-t" table download
+        filename="gar-regions-2024-2025.csv"
+        label-field="Région" value-field="Part des accédants (%), Part des accès (%), Accédants, Accès"
+        description="Pour chaque région académique, sa part des accédants au GAR et sa part des accès, année scolaire 2024-2025, triées par part des accès. Le Grand Est pèse environ deux fois plus dans les accès que dans les accédants ; les Hauts-de-France, les Antilles et la Guyane beaucoup moins. « Autres territoires » regroupe Saint-Pierre-et-Miquelon, la Polynésie française et Andorre."></dsfr-data-a11y>
     </div>
+
+    <!-- ---------- 2. Le détail : les académies ---------- -->
+    <h2 class="fr-h3">2. D'une académie à l'autre, l'usage va du simple au trentuple</h2>
+    <dsfr-data-repeat source="aca-haut">
+      <template>
+        <p class="odv-lecture">Un accédant de l'académie de <strong>{{libelle_aca}}</strong> a
+          ouvert en moyenne <strong>{{app_aff:number:1}} ressources</strong> dans l'année&nbsp;;</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="aca-bas">
+      <template>
+        <p class="odv-lecture">un accédant de l'académie de <strong>{{libelle_aca}}</strong>,
+          <strong>{{app_aff:number:1}}</strong>. Les trois académies du Grand Est occupent les
+          trois premières places&nbsp;; Lille, la Guyane et la Guadeloupe ferment la marche.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-mb-4w">
+        <div class="odv-viz" data-code="Accès par accédant, par académie, trié">
+          <div class="odv-chart-slot odv-chart-slot--haut">
+          <!-- Mise en évidence par `highlight-index` sur palette neutre : les
+               trois premières barres du tri, qui SONT les trois académies du
+               Grand Est dans ce millésime (vérifié à l'API ; la phrase au-dessus
+               le recalcule). Écarté : `series-field="groupe"` en barres empilées,
+               qui colore juste mais remplit la série absente de ZÉROS — l'infobulle
+               affichait « 0 accès par accédant » sous chaque académie. Écarté
+               aussi : `color-map` (pastilles d'infobulle fausses, BUG-022). -->
+          <dsfr-data-chart id="g-aca" source="aca-tri" type="bar" horizontal
+            label-field="libelle_aca" value-field="app_aff:Accès par accédant"
+            selected-palette="neutral" highlight-index="[0, 1, 2]"
+            unit-tooltip="accès par accédant"
+            databox databox-title="Accès par accédant, par académie, 2024-2025 — en bleu, les trois académies du Grand Est"
+            databox-source="DNE — jointure des jeux GAR accédants et accès par académie"
+            databox-download heading-level="3">
+          </dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-aca" source="aca-t" table download
+            filename="gar-academies-2024-2025.csv"
+            label-field="Académie"
+            value-field="Accès par accédant, Accédants, Accès, Affectations, Affectations par accédant, Accès pour 100 affectations, Région"
+            description="Nombre moyen d'accès aux ressources par accédant du GAR, pour chacune des 30 académies, année scolaire 2024-2025, du plus élevé au plus bas. Les trois académies du Grand Est sont en tête ; Lille, la Guyane et la Guadeloupe en queue. Le tableau donne aussi les volumes et les affectations."></dsfr-data-a11y>
+        </div>
+      </div>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Carte des accès par accédant, par académie">
+          <!-- Carte d'un TAUX : le résumé est pondéré par les accédants, sinon il
+               afficherait la moyenne des académies, qui n'est pas le chiffre
+               national. -->
+          <dsfr-data-chart id="g-carte" source="aca-r" type="map-aca"
+            code-field="libelle_aca" value-field="app_aff" name="Accès par accédant"
+            selected-palette="sequentialAscending"
+            map-summary="weighted" map-summary-weight="accedants" map-summary-field="app"
+            databox databox-title="Accès par accédant : l'Est devant, le Nord et les Antilles-Guyane derrière"
+            databox-source="DNE — jointure des jeux GAR accédants et accès par académie"
+            heading-level="3">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-carte" source="aca-t"
+            description="Carte des académies colorées selon le nombre moyen d'accès par accédant du GAR en 2024-2025. Les teintes les plus foncées se concentrent dans le Grand Est ; les plus claires dans les Hauts-de-France, en Guyane et en Guadeloupe. Le résumé national est pondéré par le nombre d'accédants. Les données sont dans le tableau du graphique précédent."></dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <h3 class="fr-h6">Une frontière plus qu'un gradient</h3>
+        <p class="fr-text--sm">La carte montre ce que le classement ne dit pas&nbsp;: l'usage
+          intense du GAR s'arrête aux limites du Grand Est. Reims et Amiens sont voisines&nbsp;: en
+          2024-2025, la première est deuxième sur trente, la seconde vingt-sixième. Ailleurs, les académies d'une même région
+          divergent souvent&nbsp;: en Île-de-France, Versailles est quatrième, Créteil dans la
+          seconde moitié.</p>
+        <p class="fr-text--sm">Le résumé affiché sous le titre de la carte est la moyenne
+          nationale <strong>pondérée par les accédants</strong>, c'est-à-dire le ratio des
+          totaux&nbsp;— et non la moyenne simple des trente académies, qui ferait peser la Corse
+          autant que Créteil.</p>
+      </div>
+    </div>
+
+    <!-- ---------- 3. La nuance ---------- -->
+    <h2 class="fr-h3">3. Être équipé n'est pas s'en servir</h2>
+    <p class="fr-text--sm">Les deux plus grandes académies par le nombre d'accédants ne sont pas
+      celles qui utilisent le plus le service&nbsp;:</p>
+    <dsfr-data-repeat source="aca-taille" key-field="libelle_aca">
+      <template>
+        <p class="odv-lecture fr-mb-1v"><strong>{{libelle_aca}}</strong>&nbsp;:
+          {{accedants:number}} accédants, <strong>{{app_aff:number:1}} accès</strong> chacun en
+          moyenne.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">Même écart entre ce qui est mis à disposition et ce qui est
+      ouvert. Une affectation rend une ressource visible&nbsp;; elle ne dit pas qu'on l'ouvre.</p>
+    <dsfr-data-repeat source="tot-n">
+      <template>
+        <p class="odv-lecture fr-mb-1v">En France, <strong>{{acc_100_aff:number:0}} accès pour
+          100 affectations</strong> sur l'année.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="aca-affecte">
+      <template>
+        <p class="odv-lecture">L'académie qui affecte le plus de ressources par accédant,
+          <strong>{{libelle_aca}}</strong> ({{aff_app_aff:number:1}} par accédant), n'en ouvre
+          que {{app_aff:number:1}} par accédant&nbsp;: {{acc_100_aff_aff:number:0}} accès pour 100
+          affectations.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mb-6w">Le jeu ne dit pas pourquoi. Ni le niveau d'enseignement
+      (école, collège, lycée), ni les ressources ouvertes, ni la façon dont les collectivités et
+      les établissements achètent et affectent les manuels n'y figurent&nbsp;: la géographie de
+      l'usage se constate, elle ne s'explique pas avec ces données.</p>
+
+    <!-- ---------- 4. Les profils ---------- -->
+    <h2 class="fr-h3">4. Neuf accès sur dix sont ceux d'élèves</h2>
+    <dsfr-data-kpi-group per-row="1 md:2" gap="md" class="fr-mb-3w" aria-label="Les accès par profil">
+      <dsfr-data-kpi source="gar-profil-n" value="acces:sum{profil:eq:Élèves} / acces:sum" format="pourcentage" decimals="1"
+        heading="des accès sont le fait d'élèves"
+        label="année scolaire 2024-2025"></dsfr-data-kpi>
+      <dsfr-data-kpi source="gar-profil-n" value="acces:sum{profil:eq:Enseignants} / acces:sum" format="pourcentage" decimals="1"
+        heading="le fait d'enseignants"
+        label="année scolaire 2024-2025"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+    <div class="odv-viz" data-code="Accès au GAR par profil">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-profil" source="gar-profil-tri" type="bar" horizontal
+        label-field="profil" value-field="acces:Accès"
+        databox databox-title="Les élèves font l'essentiel des accès au GAR, 2024-2025"
+        databox-source="DNE — fr-en-gar-acces_profil2024-2025, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-profil" source="gar-profil-tri" table download
+        filename="gar-profils-2024-2025.csv" label-field="profil" value-field="acces"
+        description="Nombre d'accès aux ressources du GAR par profil d'utilisateur, année scolaire 2024-2025 : élèves, enseignants, documentalistes, autres profils, et un profil non renseigné (publié « Null » dans le jeu)."></dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="ecart">
+      <template>
+        <p class="fr-text--xs fr-mt-1w fr-mb-6w">Ce jeu totalise {{acc_profil:number}} accès, le jeu
+          par académie {{acc:number}}&nbsp;: <strong>{{ecart:number}} accès d'écart</strong> entre
+          deux publications du même producteur pour la même année, que rien ne signale. Le
+          profil « non renseigné » est publié sous la chaîne « Null ».</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <!-- ---------- 5. Le catalogue ---------- -->
+    <h2 class="fr-h3">5. Ce qu'on ouvre&nbsp;: des manuels payants, venus de trois distributeurs</h2>
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-3w" aria-label="Le catalogue en chiffres">
+      <dsfr-data-kpi source="gar-ress-n" value="count" format="nombre"
+        heading="ressources au catalogue 2026"
+        lines='[{"value":"titre:distinct","format":"nombre","suffix":" titres distincts"}]'
+        label="une version élève et une version enseignant comptent pour deux"></dsfr-data-kpi>
+      <dsfr-data-kpi source="gar-ress-n" value="count{type:eq:Manuel numérique} / count" format="pourcentage" decimals="0"
+        heading="sont des manuels numériques"
+        label="du catalogue 2026"></dsfr-data-kpi>
+      <dsfr-data-kpi source="gar-ress-n" value="count{cout:eq:payant} / count" format="pourcentage" decimals="0"
+        heading="sont payantes"
+        lines='[{"value":"count{cout:eq:gratuit} / count","format":"pourcentage","decimals":0,"suffix":" gratuites, le reste sans coût renseigné"}]'
+        label="du catalogue 2026"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+    <dsfr-data-repeat source="dcr-3s">
+      <template>
+        <p class="odv-lecture">Les trois premiers distributeurs commerciaux portent
+          <strong>{{p3:number:1}}&nbsp;%</strong> du catalogue ({{n3:number}} ressources)&nbsp;;
+          quelque 150 autres se partagent le reste.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Les huit premiers distributeurs commerciaux du catalogue GAR">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-dcr" source="dcr-top" type="bar" horizontal
+        label-field="libelle_du_distributeur_commercial_dcr" value-field="part:Part du catalogue (%)"
+        unit-tooltip="%"
+        databox databox-title="Trois distributeurs portent l'essentiel du catalogue GAR 2026 (huit premiers)"
+        databox-source="DNE — GAR-Liste_des_ressources 2026, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-dcr" source="dcr-t" table download
+        filename="gar-distributeurs-2026.csv"
+        label-field="Distributeur commercial" value-field="Part du catalogue (%), Ressources"
+        description="Part des ressources du catalogue GAR 2026 portées par chacun des huit premiers distributeurs commerciaux. Les parts sont calculées sur l'ensemble du catalogue ; les autres distributeurs ne sont pas montrés."></dsfr-data-a11y>
+    </div>
+    <p class="fr-text--sm">Le catalogue dit ce qui <em>peut</em> être ouvert, pas ce qui l'est&nbsp;:
+      aucun jeu publié ne relie les accès aux ressources. On ne sait donc pas si le Grand Est
+      ouvre plus de manuels, ou d'autres ressources.</p>
   </div>
 
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Les accédants par académie</h2>
-    <p class="fr-text--sm">
-      Le portail rend ici trois cartes de points où <strong>tous les cercles ont le même rayon</strong> :
-      une carte de quantités où la quantité n'est pas représentée. Ici, le rayon porte la mesure.
-      Les cinq académies ultramarines, que l'original exclut en dur de ses trois cartes,
-      sont rendues en encarts.
-    </p>
-
-    <div class="odv-viz" data-code="Accédants au GAR par académie">
-    <dsfr-data-map id="carte-gar" name="Accédants au GAR par académie"
-      height="600px" tiles="ign-plan" tiles-style="muted"
-      center="46.6,2.3" zoom="5" insets="drom">
-      <dsfr-data-map-layer id="couche-gar" source="gar-aca" type="circle"
-        geo-field="geo_point" radius-field="accedants" radius-min="6" radius-max="34"
-        fill-opacity="0.6" tooltip-field="libelle_aca" max-items="200">
-      </dsfr-data-map-layer>
-      <dsfr-data-map-legend for="couche-gar" label="Accédants au GAR"></dsfr-data-map-legend>
-      <dsfr-data-map-popup mode="panel-right" title-field="libelle_aca" width="360px">
-        <template>
-          <p class="fr-text--sm fr-mb-3v">Académie de {{libelle_aca}} · région {{libelle_region_2016|non renseignée}}</p>
-          <ul class="fr-text--sm fr-mb-3v">
-            <li><strong>{{accedants:number}}</strong> accédants</li>
-            <li><strong>{{acces:number}}</strong> accès</li>
-            <li><strong>{{affectations:number}}</strong> affectations</li>
-          </ul>
-          <p class="fr-text--sm fr-mb-0">Soit <strong>{{acces_par_accedant}}</strong> accès par accédant.</p>
-        </template>
-      </dsfr-data-map-popup>
-    </dsfr-data-map>
-    </div>
-    <p class="fr-hint-text">
-      La ligne « Autres » du jeu — Saint-Pierre-et-Miquelon, Polynésie française et Andorre,
-      7 189 accédants — n'a aucune coordonnée et n'apparaît donc pas sur la carte. Elle figure en
-      revanche dans tous les graphiques ci-dessous, ce qui n'est le cas que d'un graphique sur
-      trois sur le portail.
-    </p>
-    <dsfr-data-a11y source="gar-tri-acced" for="carte-gar" table download
-      filename="gar-par-academie.csv" label="Données de la carte"
-      description="Une ligne par académie : accédants, accès, affectations et accès par accédant."
-      label-field="libelle_aca"
-      value-field="accedants, acces, affectations, acces_par_accedant">
-    </dsfr-data-a11y>
+  <!-- ---------- 6. Exploration : le catalogue ----------
+       Gabarit famille C (corpus) : recherche en bandeau, facettes en colonne. -->
+  <div class="fr-container">
+    <h2 class="fr-h3">6. Chercher une ressource</h2>
+    <p class="fr-text--sm">Les ressources du catalogue 2026, par type, coût, éditeur et
+      distributeur. La recherche et les filtres ne touchent que ce tableau.</p>
   </div>
-
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="gar-ress-q" source="gar-ress-n"
-        fields="titre, libelle_de_l_editeur, libelle_du_distributeur_commercial_dcr"
-        label="Rechercher une ressource" placeholder="Titre, éditeur, distributeur…"
-        operator="words" count count-label="ressource" url-sync>
+          fields="titre, libelle_de_l_editeur, libelle_du_distributeur_commercial_dcr"
+          label="Rechercher une ressource" placeholder="Titre, éditeur, distributeur…"
+          operator="words" count count-label="ressource" url-sync>
         </dsfr-data-search>
       </div>
     </div>
@@ -227,109 +454,10 @@
 
   <div class="fr-container fr-mb-8w">
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <div class="fr-col-12 fr-col-md-6">
-        <h2 class="fr-h5">Les accédants, académie par académie</h2>
-        <div class="odv-viz" data-code="Accédants au GAR par académie, 2024-2025">
-        <dsfr-data-chart id="g-gar-acced" source="gar-tri-acced" type="bar" horizontal
-          label-field="libelle_aca" value-field="accedants" name="Accédants"
-          databox databox-title="Accédants au GAR par académie, 2024-2025"
-          databox-source="DNE-SN1 — fr-en-gar-accedants_academie2024-2025"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-gar-acced" source="gar-tri-acced" table download
-          label-field="libelle_aca" value-field="accedants"></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          Créteil est première avec <strong>987 220</strong> accédants, devant Lille (865 143) et
-          Versailles (747 564).
-        </p>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <h2 class="fr-h5">Accès et affectations</h2>
-        <div class="odv-viz" data-code="Accès et affectations par académie, 2024-2025">
-        <dsfr-data-chart id="g-gar-usage" source="gar-tri-acces" type="bar" horizontal
-          label-field="libelle_aca" value-field="acces:Accès" value-fields="affectations:Affectations"
-          databox databox-title="Accès et affectations par académie, 2024-2025"
-          databox-source="DNE-SN1 — fr-en-gar-acces_academie et …affectations_academie2024-2025"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-gar-usage" source="gar-tri-acces" table download
-          label-field="libelle_aca" value-field="acces, affectations"></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          Versailles domine les deux mesures (<strong>6 312 657</strong> accès et
-          <strong>11 343 027</strong> affectations) alors qu'elle n'est que troisième en accédants.
-          Guadeloupe ferme la marche avec 39 857 accès.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Combien d'accès par accédant ?</h2>
-    <p class="fr-text--sm">
-      C'est le chiffre que le portail ne calcule jamais, alors qu'il dispose des trois mesures dans
-      trois jeux jumeaux. Il change complètement le classement : <strong>Nancy-Metz</strong> compte
-      <strong>12,7 accès par accédant</strong> et <strong>Lille</strong>, deuxième académie en
-      nombre d'accédants, seulement <strong>1,1</strong>. Rapporter la mesure d'usage à sa
-      population est ce qui rend les académies comparables.
-    </p>
-    <div class="odv-viz" data-code="Accès par accédant, GAR 2024-2025">
-    <dsfr-data-chart id="g-gar-ratio" source="gar-tri-ratio" type="bar" horizontal
-      label-field="libelle_aca" value-field="acces_par_accedant" name="Accès par accédant"
-      databox databox-title="Accès par accédant, GAR 2024-2025"
-      databox-source="DNE-SN1 — calcul sur la jointure des trois jeux académiques"
-      databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-gar-ratio" source="gar-tri-ratio" table download
-      label-field="libelle_aca" value-field="acces_par_accedant"></dsfr-data-a11y>
-    </div>
-  </div>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Les accès par profil d'utilisateur</h2>
-    <p class="fr-text--sm">
-      Le portail rend ici un camembert à deux parts (96,4 % / 3,6 %) construit sur quatre clauses
-      dont deux s'annulent, qui écarte silencieusement <strong>166 803 accès</strong>. Les
-      <strong>cinq</strong> profils du jeu sont ici, y compris celui qui s'appelle littéralement
-      « Null ».
-    </p>
-    <div class="odv-viz" data-code="Accès au GAR par profil, 2024-2025">
-    <dsfr-data-chart id="g-gar-profil" source="gar-profil-tri" type="bar" horizontal
-      label-field="profil" value-field="acces" name="Accès"
-      databox databox-title="Accès au GAR par profil, 2024-2025"
-      databox-source="DNE-SN1 — fr-en-gar-acces_profil2024-2025" databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-gar-profil" source="gar-profil-tri" table download></dsfr-data-a11y>
-    </div>
-    <p class="fr-text--xs fr-mt-1w">
-      Élèves 48 473 661 · Enseignants 5 255 190 · Documentaliste 197 081 · Autres profils 87 545 ·
-      profil non renseigné 79 258. Somme : <strong>54 092 735</strong>, soit 3 535 de moins que le
-      total du jeu par académie.
-    </p>
-  </div>
-
-  <!-- ==========================================================================
-       Le jeu le plus riche de la page d'origine — 15 630 ressources, éditeur,
-       distributeurs, coût, type — n'y sert qu'à afficher son nombre de lignes.
-       ========================================================================== -->
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Les 15 630 ressources du catalogue</h2>
-    <p class="fr-text--sm">
-      Sur le portail, ce jeu ne produit qu'un nombre : « Nombre de ressources 15 630 ». Il porte
-      pourtant le type, le coût, l'éditeur et les deux distributeurs de chaque ressource.
-    </p>
-
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-            Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
+      <details class="fr-col-12 fr-col-md-3 odv-filtres odv-filtres--md" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
         <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="gar-ress-f" source="gar-ress-q"
           fields="type, cout, nouveaute, libelle_de_l_editeur, libelle_du_distributeur_commercial_dcr"
@@ -339,100 +467,106 @@
           disjunctive="type, libelle_de_l_editeur, libelle_du_distributeur_commercial_dcr"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
-        </details>
-      </div>
+      </details>
       <div class="fr-col-12 fr-col-md-9">
-        <div class="odv-viz" data-code="Graphique">
+        <div class="odv-viz" data-code="Catalogue des ressources GAR">
         <dsfr-data-list source="gar-ress-f"
-          columns="titre, type, cout, libelle_de_l_editeur, libelle_du_distributeur_commercial_dcr"
-          caption="Ressources numériques accessibles via le GAR"
+          columns="titre:Titre, type:Type, cout:Coût, libelle_de_l_editeur:Éditeur, libelle_du_distributeur_commercial_dcr:Distributeur commercial"
+          caption="Ressources numériques accessibles via le GAR, catalogue 2026"
           sort pagination="20" count-label="ressource">
         </dsfr-data-list>
         </div>
-        <p class="fr-text--xs fr-mt-1w">
-          <strong>Le champ <code>type</code> n'est publié qu'en codes</strong> :
-          <code>[MAN]</code>, <code>[ACC]</code>, <code>[MUL]</code>, <code>[DOC]</code>,
-          <code>[DIC]</code>, <code>[PRO]</code>, <code>[ORI]</code>, sans aucune table de
-          correspondance dans le jeu ni dans sa description. Les libellés affichés ici sont
-          reconstitués depuis la nomenclature de services ENT du jeu
-          <code>fr-en-dnma-par-uai-services</code>, du même producteur et du même portail, qui
-          nomme en toutes lettres « ressource multimédia », « ressource documentaire »,
-          « ressource orientation », « ressource production » et « ressource
-          référence/dictionnaire ».
-        </p>
       </div>
     </div>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Le GAR est un service de masse — plus de dix millions
+        d'accédants, plus de cinquante millions d'accès en 2024-2025, neuf sur dix par des
+        élèves. Mais son usage n'a rien d'uniforme&nbsp;: rapporté au nombre d'accédants, il
+        varie d'un facteur trente entre académies, et c'est une géographie — le Grand Est
+        devant, les Hauts-de-France et les Antilles-Guyane derrière — plus qu'un effet de
+        taille. Ce que ces données ne disent pas&nbsp;: pourquoi, ni quelles ressources sont
+        ouvertes.</p>
+    </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Le rapport, pas le volume.</strong> Les volumes par académie suivent d'abord
+          la population scolaire&nbsp;: Créteil a le plus d'accédants parce qu'elle a le plus
+          d'élèves. Le nombre d'accès par accédant est un ratio de sommes, calculé ici sur les
+          valeurs brutes et arrondi à l'affichage&nbsp;; la moyenne nationale n'est pas la
+          moyenne des académies.</li>
+        <li><strong>Accédant n'est pas élève.</strong> Un accédant est une personne qui a au moins
+          une ressource affectée. Une académie où peu d'élèves ont une ressource affectée peut
+          avoir peu d'accédants et un ratio élevé&nbsp;; le jeu ne donne pas le nombre d'élèves
+          scolarisés, et l'on ne peut pas calculer un taux de couverture.</li>
+        <li><strong>« Autres » écarté du classement.</strong> Saint-Pierre-et-Miquelon, la
+          Polynésie française et Andorre forment une ligne « Autres » sans région ni
+          coordonnées&nbsp;: elle compte dans les totaux et les parts régionales (« Autres
+          territoires »), pas dans le classement ni sur la carte des académies.</li>
+        <li><strong>Deux totaux d'accès.</strong> Le jeu par académie et le jeu par profil ne
+          somment pas au même nombre&nbsp;: les parts de la section&nbsp;4 portent sur le second,
+          tout le reste sur le premier.</li>
+        <li><strong>Deux campagnes.</strong> Le catalogue est celui de 2026&nbsp;; les usages sont
+          ceux de 2024-2025. Aucun jeu ne relie un accès à une ressource.</li>
+        <li><strong>Angles écartés.</strong> Le classement des académies par volume (il ne mesure
+          que leur taille)&nbsp;; les cartes à cercles de même rayon de l'original (une quantité
+          qui ne se voit pas)&nbsp;; le camembert « hors élèves » à deux parts de l'original, qui
+          écartait 166 803 accès.</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — GAR — ce que la reproduction a coûté</summary>
+  <!-- ====================== Analyse ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — GAR, ressources numériques éducatives</h2>
 
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine : une <strong>page ODS Studio</strong>,
+        Cible d'origine&nbsp;: une <strong>page ODS Studio</strong>,
         <a href="https://data.education.gouv.fr/explore/assets/gar-les-donnees-sur-les-ressources-numeriques-educatives/view/" target="_blank" rel="noopener external">/explore/assets/gar-les-donnees-sur-les-ressources-numeriques-educatives/view/</a>
-        — onze blocs, cinq jeux, aucun filtre. Fiche d'audit :
-        <code>docs/portail-education/gar-ressources-numeriques.md</code>.
+        — onze blocs, cinq jeux, aucun filtre, aucun rapport. Fiche d'audit&nbsp;:
+        <code>docs/portail-education/gar-ressources-numeriques.md</code>. Recréée le 2026-09-26
+        en page éditoriale.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le rayon qui porte la quantité.</strong> <code>radius-field</code> +
-              <code>radius-min</code> / <code>radius-max</code> : une ligne, et les trois cartes
-              de l'original — où tous les cercles ont le même diamètre — deviennent une carte
-              qui dit quelque chose. C'est le correctif le plus rentable de la page.</li>
-            <li><strong>Les cinq académies ultramarines rendues au lieu d'être exclues.</strong>
-              L'original les retire en dur, avec deux syntaxes différentes selon la carte et deux
-              conditions dupliquées. Ici, <code>insets="drom"</code> les affiche en encarts et
-              cadre automatiquement la métropole.</li>
-            <li><strong>Le ratio accès / accédant.</strong> Une fois les trois jeux joints,
-              <code>compute="acces_par_accedant = round(acces / accedants, 1)"</code> suffit. Il
-              renverse le classement, et il n'existe nulle part sur le portail alors que les trois
-              mesures y sont publiées côte à côte.</li>
-            <li><strong>Le catalogue des 15 630 ressources.</strong> <code>fetch-mode="export"</code>
-              le charge en une requête (5,2 Mo, 0,7 s), et recherche, facettes et tableau paginé
-              s'écrivent d'un trait. Le jeu le plus riche de la page cesse d'être un simple
-              compteur.</li>
+            <li><strong>Trois jeux jumeaux en une table.</strong> Deux
+              <code>dsfr-data-join</code> chaînés sur <code>libelle_aca</code>, et chaque source
+              de droite réduite par <code>select</code> à la clé et à sa mesure&nbsp;: aucune
+              collision.</li>
+            <li><strong>Les parts régionales en un attribut.</strong>
+              <code>aggregate="acd:share_percent:part_acd"</code> sur un <code>group-by</code>&nbsp;:
+              pas de seconde source pour le dénominateur.</li>
+            <li><strong>Une carte de taux honnête.</strong> <code>type="map-aca"</code> avec
+              <code>map-summary="weighted"</code> pondéré par les accédants et calculé sur la
+              colonne brute (<code>map-summary-field</code>).</li>
+            <li><strong>Des phrases qui ne vieillissent pas.</strong> Chapô, extrêmes, écart
+              entre les deux jeux d'accès&nbsp;: <code>dsfr-data-repeat</code> sur une ligne
+              calculée (<code>pivot</code> + <code>join</code> sur une clé constante).</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong><code>dsfr-data-join</code> ne joint que deux sources.</strong> La fiche
-              d'audit avait esquissé <code>sources="a,b,c"</code> ; l'attribut n'existe pas. Le
-              composant porte <code>left</code> et <code>right</code>, et rien d'autre. Il faut
-              donc <strong>chaîner deux jointures</strong> pour trois jeux — ce qui marche
-              parfaitement, une jointure acceptant une autre jointure comme source gauche, mais
-              qui n'est écrit nulle part. Sur un portail dont trois jeux jumeaux ne diffèrent que
-              par leur colonne de mesure, le cas n'a rien d'exotique.</li>
-            <li><strong>Les collisions de colonnes se gèrent en amont, pas dans la jointure.</strong>
-              Les trois jeux partagent six colonnes identiques (libellé en majuscules, région,
-              codes, <code>geo_point</code>, <code>geo_shape</code>). Le préfixe par défaut
-              <code>right_</code> les aurait toutes dupliquées, et <code>geo_shape</code> pèse à
-              lui seul l'essentiel du jeu. La solution a été de restreindre les deux sources de
-              droite à <code>select="libelle_aca, mesure"</code> : plus aucune collision, et
-              l'export tombe de plusieurs mégaoctets à 5 Ko.</li>
-            <li><strong>Le KPI du catalogue ne pouvait pas être un <code>count</code>.</strong>
-              Il est déclaré avant le chargement du gros jeu dans l'ordre de lecture de la page ;
-              <code>value="meta:total"</code> lit le total publié par la source, ce qui évite
-              d'attendre les 15 630 lignes pour afficher « 15 630 ».</li>
-            <li><strong>Un champ publié en codes, sans table de correspondance.</strong>
-              <code>type</code> ne contient que <code>[MAN]</code>, <code>[ACC]</code>,
-              <code>[MUL]</code>, <code>[DOC]</code>, <code>[DIC]</code>, <code>[PRO]</code>,
-              <code>[ORI]</code>. Ni le schéma, ni la description du jeu ne les explicitent. Ce
-              n'est pas un problème de bibliothèque — <code>replace-fields</code> les traduit en
-              une ligne — c'est un défaut de publication, et il rend le jeu inutilisable tel quel
-              par un tiers.</li>
-            <li><strong><code>nouveau</code> n'a qu'une modalité.</strong> 76 lignes à « Oui »,
-              15 554 à <code>null</code> : jamais « Non ». Une facette brute y aurait donc affiché
-              une seule valeur pour 0,5 % du catalogue. La colonne <code>nouveaute</code>, dérivée
-              en <code>compute</code>, rend la modalité absente et permet de filtrer les deux
-              sens.</li>
+            <li><strong>Mettre un groupe en évidence dans un classement.</strong> La voie
+              « une série par groupe » (<code>series-field</code>, barres empilées) colore juste,
+              mais remplit la série absente de <strong>zéros</strong>, pas de vides&nbsp;:
+              l'infobulle affichait « 0 accès par accédant » sous chaque académie.
+              <code>color-map</code> est écarté (BUG-022). Reste <code>highlight-index="[0, 1, 2]"</code>,
+              un index de rang&nbsp;: juste ici parce que les trois premières académies sont
+              celles du Grand Est, faux si le tri changeait de tête.</li>
+            <li><strong>Treize avertissements en console pour une page correcte.</strong>
+              Chaque transformateur lu par plusieurs consommateurs signale que son calcul reste
+              côté client (#765). C'est exact et sans effet ici (98 lignes d'agrégats, catalogue
+              complet chargé), mais le bruit noie un vrai message.</li>
           </ul>
         </div>
       </div>
@@ -441,36 +575,29 @@
         <table>
           <caption>Correspondance bloc Studio → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">Page Studio d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>5 <code>data_providers</code> indépendants</td><td>4 sources + 2 <code>dsfr-data-join</code> chaînés</td><td><strong>Partiel</strong> : la jointure est binaire, il faut la chaîner</td></tr>
-            <tr><td>5 blocs <code>kpi</code> en notation <code>standard</code></td><td><code>dsfr-data-kpi</code> dont un en <code>meta:total</code>, <code>format="compact"</code></td><td>Équivalent</td></tr>
-            <tr><td>3 cartes POI à rayon uniforme</td><td>1 carte, <code>radius-field</code> + <code>insets="drom"</code></td><td>Meilleur : la taille dit la quantité, les DROM sont là</td></tr>
-            <tr><td>légende affichant l'identifiant du jeu</td><td><code>dsfr-data-map-legend label="…"</code></td><td>Meilleur</td></tr>
-            <tr><td>3 graphiques jumeaux, 3 conventions typographiques</td><td>2 graphiques sur la table jointe + 1 graphique de ratio</td><td>Meilleur : « Autres » présent partout, tri par valeur</td></tr>
-            <tr><td>camembert « hors élèves » à 2 parts</td><td>barres horizontales, 5 profils</td><td>Meilleur : 166 803 accès cessent de disparaître</td></tr>
-            <tr><td>jeu de 15 630 ressources réduit à un compteur</td><td><code>fetch-mode="export"</code> + recherche + facettes + tableau</td><td>Sans équivalent sur le portail</td></tr>
+            <tr><td>5 <code>data_providers</code> indépendants</td><td>5 <code>dsfr-data-source</code> + 2 <code>dsfr-data-join</code> chaînés</td><td>Équivalent, et les jeux se parlent</td></tr>
+            <tr><td>5 blocs <code>kpi</code> de volumes</td><td><code>dsfr-data-kpi</code> en ratios (<code>expr / expr</code>, filtres par côté)</td><td>Meilleur : des rapports, pas des totaux</td></tr>
+            <tr><td>3 cartes POI à rayon uniforme</td><td><code>dsfr-data-chart type="map-aca"</code> + résumé pondéré</td><td>Meilleur : la carte porte la mesure</td></tr>
+            <tr><td>3 graphiques de volumes par académie</td><td>parts régionales + accès par accédant triés</td><td>Meilleur : comparables</td></tr>
+            <tr><td>camembert « hors élèves » à 2 parts</td><td>barres, 5 profils</td><td>Meilleur : rien n'est écarté</td></tr>
+            <tr><td>catalogue réduit à un compteur</td><td><code>fetch-mode="export"</code> + <code>share_percent</code> + recherche, facettes, tableau</td><td>Sans équivalent sur le portail</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, avec une seule friction réelle :
-          <strong><code>dsfr-data-join</code> est binaire</strong>, et il faut le chaîner pour
-          réunir trois jeux — ce qui fonctionne, mais n'est ni documenté ni évident. Le reste de
-          la page est un cas d'école du renversement que ce banc d'essai cherche : le portail
-          publie <strong>trois jeux jumeaux qu'il ne rapproche jamais</strong>, et c'est
-          précisément leur rapprochement — un ratio de 12,7 accès par accédant à Nancy-Metz contre
-          1,1 à Lille — qui porte l'information. Deux <code>dsfr-data-join</code> et un
-          <code>compute</code> suffisent à la faire apparaître. Le second apport tient au
-          catalogue : <strong>15 630 ressources qui ne servaient qu'à afficher leur propre
-          nombre</strong> deviennent explorables par type, coût, éditeur et distributeur.</p>
+        <p>La bibliothèque n'a pas résisté au récit&nbsp;: chaque chiffre du texte est calculé
+          dans la page. <strong>Le travail a été de rapprocher des jeux que le portail publie
+          côte à côte sans jamais les croiser</strong>&nbsp;: c'est leur rapport, pas leurs
+          volumes, qui porte l'information.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 

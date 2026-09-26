@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 8 demandes cadrées — 1 bugs,
+> 9 demandes cadrées — 2 bugs,
 > 4 améliorations,
 > 3 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
@@ -39,9 +39,9 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-20 critiques ont été **retirées** au fil du
+24 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
-`faux-probleme` du registre), et 108
+`faux-probleme` du registre), et 109
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
 registre, avec ce qui en demeure vrai). Ce rapport ne liste que ce qui a résisté à la vérification.
 
@@ -53,7 +53,7 @@ apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux const
 (AM-017, AM-039) en sont sortis.
 
 Le dépôt est désormais monté en `dsfr-data@0.28.0`, et le registre en tire les conséquences :
-les jalons 0.21.1 à 0.28.0 ont comblé 108 des constats déposés,
+les jalons 0.21.1 à 0.28.0 ont comblé 109 des constats déposés,
 passés au statut `corrige` et sortis de ce rapport. Chaque constat restant a été **rejoué contre
 la 0.28.0** avant d'entrer ici : ce qui suit n'est ni livré ni planifié à la date de ce rapport.
 
@@ -64,8 +64,9 @@ la 0.28.0** avant d'entrer ici : ce qui suit n'est ni livré ni planifié à la 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
 | PG-033 | API Tabular : un tri serveur combiné à la pagination **perd des lignes en silence** — 177 distinctes sur 180 rendues, et une courbe qui plonge à zéro | piege | S | 1 | Déposer chez dsfr-data |
+| BUG-026 | Une source groupée perd son `group_by` quand un `dsfr-data-normalize` s'intercale devant une `dsfr-data-query group-by` seule lectrice | bug | S | 1 | Déposer chez dsfr-data |
 
-_1 demandes — S 1, M 0, L 0._
+_2 demandes — S 2, M 0, L 0._
 
 ### P2 — prochain cycle : gain net, effort mesuré
 
@@ -128,7 +129,7 @@ Structurel tant que l'API Tabular pagine par offset sans clé de départage. Le 
 
 ### Comment ça a été vérifié
 
-Relevé au navigateur le 2026-09-21 contre `dsfr-data@0.33.0` (courbe « Total enregistré » à 0 en 2018 sur `/demo/delinquance-sans-total`, `q-stups` rendant 28 lignes au lieu de 30), puis **reproduit à l'API hors de toute page** : les quatre pages de `?annee__sort=asc&page_size=50&page=N&annee__groupby&indicateur__groupby&nombre__sum` rendent 180 lignes / 177 couples distincts, avec (2018, 'Usage de stupéfiants'), (2018, 'Usage de stupéfiants (AFD)') et (2018, "Vols d'accessoires sur véhicules") manquants et trois autres couples de 2018 en double ; les mêmes quatre pages **sans** `annee__sort` rendent 180 lignes / 180 distinctes. Contre-épreuve sans `group-by` : `?indicateur__exact=Homicides&annee__exact=2025&nombre__sort=desc` sur trois pages rend 101 lignes / 99 départements distincts (56 et 49 en double) ; sans tri, 101 / 101.
+Relevé au navigateur le 2026-09-21 contre `dsfr-data@0.42.0` (courbe « Total enregistré » à 0 en 2018 sur `/demo/delinquance-sans-total`, `q-stups` rendant 28 lignes au lieu de 30), puis **reproduit à l'API hors de toute page** : les quatre pages de `?annee__sort=asc&page_size=50&page=N&annee__groupby&indicateur__groupby&nombre__sum` rendent 180 lignes / 177 couples distincts, avec (2018, 'Usage de stupéfiants'), (2018, 'Usage de stupéfiants (AFD)') et (2018, "Vols d'accessoires sur véhicules") manquants et trois autres couples de 2018 en double ; les mêmes quatre pages **sans** `annee__sort` rendent 180 lignes / 180 distinctes. Contre-épreuve sans `group-by` : `?indicateur__exact=Homicides&annee__exact=2025&nombre__sort=desc` sur trois pages rend 101 lignes / 99 départements distincts (56 et 49 en double) ; sans tri, 101 / 101.
 
 ### Contournement actuel
 
@@ -143,6 +144,48 @@ Sur l'adaptateur Tabular, ne pas déléguer `order-by` quand le chargement est p
 - [ ] Un chargement Tabular paginé avec `order-by` rend le même ensemble de lignes qu'un chargement sans `order-by` (test sur un jeu de plus de 100 lignes, tri sur un champ non unique).
 - [ ] À défaut de correctif : un avertissement console nommant le champ de tri et le nombre de pages, émis une fois.
 - [ ] Aucune régression sur un chargement d'une seule page, où le tri serveur reste utile et sûr.
+
+---
+
+## BUG-026 — Une source groupée perd son `group_by` quand un `dsfr-data-normalize` s'intercale devant une `dsfr-data-query group-by` seule lectrice
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-query`, `dsfr-data-normalize`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : decp-augmente
+
+### Constat
+
+Chaîne : source `select="procedure, count(*) as n" group-by="procedure"`, puis `normalize replace-fields`, puis `query group-by="procedure" aggregate="n:sum:n"`, seule lectrice. La requête part **sans `group_by`**, avec `select=procedure, count(*) as n` et `order_by=n DESC&limit=101`. Le KPI en aval affiche 96 667 200 au lieu de 966 672 (5 groupes au lieu de 19), avec un simple avertissement en console. Sans le `normalize`, la même chaîne envoie bien `group_by=procedure`. Le chiffre faux est plausible et rien ne le signale. Même famille que BUG-009 et BUG-025 : la délégation dépend de la topologie de la chaîne, et ici elle traverse un transformateur qu'elle ne devrait pas traverser.
+
+### Impact de l'erreur ou du manque
+
+Un compte faux de deux ordres de grandeur, sans erreur, dès qu'on nettoie des libellés (`replace-fields`) entre une source agrégée et une query : c'est le geste qu'appellent les doublons d'écriture du champ `procedure` (LIM-003).
+
+### Objectif métier de la correction
+
+Qu'insérer un `normalize` dans une chaîne ne change pas le résultat d'un agrégat.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : le nettoyage de libellés avant agrégation est un motif courant sur les jeux publics.
+
+### Comment ça a été vérifié
+
+Page minimale, dsfr-data 0.42.0, 2026-09-26 (agent de recréation DECP). Requête relevée au réseau : `exports/json?select=procedure, count(*) as n&where=…&order_by=n DESC&limit=101`, sans `group_by`. KPI 96 667 200. Sans `normalize` : `group_by=procedure`, KPI 966 672. Le contournement est appliqué sur /viz/decp-augmente.
+
+### Contournement actuel
+
+Donner un second lecteur au `normalize`. La query cesse alors de déléguer et calcule côté client.
+
+### Demande
+
+Ne pas déléguer `group-by` à travers un transformateur (`normalize`, `pivot`…) ; à défaut, ne jamais retirer le `group_by` que la source porte déjà.
+
+### Critères d'acceptation
+
+- [ ] La chaîne source groupée → `normalize replace-fields` → `query group-by` seule lectrice envoie `group_by=procedure` ou calcule côté client, et le KPI rend 966 672.
+- [ ] La même chaîne sans `normalize` garde son comportement.
+- [ ] Un test couvre la délégation à travers un transformateur.
 
 ---
 

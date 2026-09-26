@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Label Tourisme &amp; Handicap — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz Tourisme et Handicap de data.economie.gouv.fr.">
+  <meta name="description" content="Le label Tourisme &amp; Handicap suit ses relais locaux plus que la carte du tourisme : la Charente-Maritime compte à elle seule près d'un établissement labellisé sur dix, les Alpes-Maritimes dix-huit. Recréation avec dsfr-data de la page de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,122 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       Recréation du 2026-09-26. UNE requête /exports/json (3 708 lignes, 18
+       colonnes : le jeu en compte 50, dont des coordonnées personnelles de
+       référents qu'on ne rapatrie pas). Tout le récit se dérive côté client.
+
+       Deux chaînes partent de la même source :
+       - le récit (th-n → …) porte sur le jeu ENTIER, il ne bouge pas avec les
+         filtres : ce sont des constats nationaux ;
+       - l'exploration (th → th-q → th-f) suit la recherche et les facettes.
+       ========================================================================== -->
+
+  <!-- max-records : le plafond par défaut (1 000) tronquerait EN SILENCE ce jeu
+       de 3 708 lignes (piège déjà payé sur cette page, lot 13). -->
+  <dsfr-data-source id="th" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="etablissements-labellises-tourisme-et-handicap"
+    fetch-mode="export" api-key-ref="ods-mef"
+    max-records="5000"
+    select="nom_du_professionnel, activite, filiere, ville, code_postal_du_professionnel, adresse, site_web, telephone, email_de_l_etablissement, region, departement, handicaps_attribues, handicap_auditif, handicap_mental, handicap_moteur, handicap_visuel, coordonnees_geographiques">
+  </dsfr-data-source>
+
+  <!-- Drapeaux par ligne. Les quatre colonnes handicap_* valent « Oui », « Non »
+       ou null ; elles sont null ENSEMBLE, sur les mêmes 354 lignes, qui sont
+       aussi celles sans avis de commission (vérifié à l'API le 2026-09-26) :
+       `renseigne` est donc le bon dénominateur des parts par handicap.
+       `tout` est une constante : elle sert de clé de regroupement pour obtenir
+       une ligne de synthèse, et de clé de jointure plus bas. -->
+  <dsfr-data-normalize id="th-n" source="th"
+    compute="tout = 'France';
+      renseigne = when is_null(handicap_moteur) then 0 else 1;
+      loc = when is_null(departement) then 0 else 1;
+      h_me = when handicap_mental = 'Oui' then 1 else 0;
+      h_au = when handicap_auditif = 'Oui' then 1 else 0;
+      h_mo = when handicap_moteur = 'Oui' then 1 else 0;
+      h_vi = when handicap_visuel = 'Oui' then 1 else 0;
+      nbh = h_me + h_au + h_mo + h_vi;
+      n1 = when nbh = 1 then 1 else 0;
+      n2 = when nbh = 2 then 1 else 0;
+      n3 = when nbh = 3 then 1 else 0;
+      n4 = when nbh = 4 then 1 else 0">
+  </dsfr-data-normalize>
+
+  <!-- Synthèse nationale : une ligne. -->
+  <dsfr-data-query id="th-tot" source="th-n" group-by="tout"
+    aggregate="nom_du_professionnel:count:n, renseigne:sum, loc:sum, h_me:sum, h_au:sum, h_mo:sum, h_vi:sum, n1:sum, n2:sum, n3:sum, n4:sum">
+  </dsfr-data-query>
+  <!-- Parts = ratios de SOMMES, sur les établissements dont les handicaps sont
+       renseignés. Colonnes brutes pour les phrases (arrondies une fois, à
+       l'affichage) ; colonnes _1 pour le graphique. -->
+  <dsfr-data-normalize id="th-tot-p" source="th-tot"
+    compute="p_me = h_me__sum / renseigne__sum * 100;
+      p_au = h_au__sum / renseigne__sum * 100;
+      p_mo = h_mo__sum / renseigne__sum * 100;
+      p_vi = h_vi__sum / renseigne__sum * 100;
+      p4 = n4__sum / renseigne__sum * 100;
+      p3 = n3__sum / renseigne__sum * 100;
+      p2 = n2__sum / renseigne__sum * 100;
+      sans_loc = n - loc__sum;
+      sans_h = n - renseigne__sum;
+      p_me_1 = round(p_me, 1); p_au_1 = round(p_au, 1); p_mo_1 = round(p_mo, 1); p_vi_1 = round(p_vi, 1)">
+  </dsfr-data-normalize>
+  <!-- Une ligne par handicap, pour le graphique. -->
+  <dsfr-data-unpivot id="th-h-long" source="th-tot-p"
+    value-cols="p_me_1:Mental, p_au_1:Auditif, p_mo_1:Moteur, p_vi_1:Visuel"
+    var-name="handicap" value-name="part"></dsfr-data-unpivot>
+  <dsfr-data-query id="th-h" source="th-h-long" order-by="part:desc"></dsfr-data-query>
+
+  <!-- Départements. Les 108 lignes sans département (ni région, ni coordonnées)
+       sont écartées : elles ne sont localisables nulle part. -->
+  <dsfr-data-query id="th-dep" source="th-n" where="departement:isnotnull"
+    group-by="departement, tout" aggregate="nom_du_professionnel:count:nb" order-by="nb:desc">
+  </dsfr-data-query>
+  <!-- Part de chaque département dans les établissements LOCALISÉS. -->
+  <dsfr-data-query id="th-dep-p" source="th-dep" group-by="departement, tout"
+    aggregate="nb:sum, nb__sum:share_percent:part" order-by="nb__sum:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="th-dep-top" source="th-dep-p" limit="20"></dsfr-data-query>
+  <dsfr-data-query id="th-dep-1" source="th-dep-p" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="th-dep-10" source="th-dep-p" limit="10"></dsfr-data-query>
+  <dsfr-data-query id="th-dep-10-s" source="th-dep-10" group-by="tout" aggregate="part:sum"></dsfr-data-query>
+  <dsfr-data-query id="th-dep-5" source="th-dep" where="nb:lte:5" group-by="tout"
+    aggregate="departement:count:k"></dsfr-data-query>
+  <!-- Trois départements de grande fréquentation touristique, choisis par nous
+       comme points de comparaison (choix éditorial, dit en page). -->
+  <dsfr-data-query id="th-dep-cmp" source="th-dep"
+    where="departement:in:Alpes-Maritimes|Haute-Savoie|Isère" order-by="nb:asc"></dsfr-data-query>
+
+  <!-- Régions, et le premier département posé parmi elles. -->
+  <dsfr-data-query id="th-reg" source="th-n" where="region:isnotnull"
+    group-by="region, tout" aggregate="nom_du_professionnel:count:nb"></dsfr-data-query>
+  <dsfr-data-query id="th-dep-1b" source="th-dep" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="th-dep-1r" source="th-dep-1b" rename="departement:region"
+    compute="region = concat(region, ' (un seul département)')"></dsfr-data-normalize>
+  <dsfr-data-concat id="th-reg-dep" sources="th-reg, th-dep-1r" origin-field="niveau"
+    origin-labels="th-reg:Région | th-dep-1r:Département"></dsfr-data-concat>
+  <!-- Deux colonnes (région / département) : deux couleurs, sans color-map
+       (BUG-022) et sans deviner le rang du département dans le tri. -->
+  <dsfr-data-normalize id="th-reg-dep-n" source="th-reg-dep"
+    compute="v_reg = when niveau = 'Région' then nb else null;
+      v_dep = when niveau = 'Département' then nb else null"></dsfr-data-normalize>
+  <dsfr-data-query id="th-reg-dep-t" source="th-reg-dep-n" order-by="nb:desc"></dsfr-data-query>
+  <!-- Combien de régions comptent plus d'établissements que le premier
+       département : jointure sur la constante (côté droit : une ligne). -->
+  <dsfr-data-join id="th-reg-j" left="th-reg" right="th-dep-1b" on="tout" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="th-reg-jn" source="th-reg-j"
+    compute="plus = when nb > right_nb then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="th-reg-plus" source="th-reg-jn" group-by="tout"
+    aggregate="plus:sum, region:count:k"></dsfr-data-query>
+
+  <!-- Activités. -->
+  <dsfr-data-query id="th-act" source="th-n" group-by="activite"
+    aggregate="nom_du_professionnel:count:nb"></dsfr-data-query>
+  <dsfr-data-query id="th-act-p" source="th-act" group-by="activite"
+    aggregate="nb:sum, nb__sum:share_percent:part" order-by="nb__sum:desc"></dsfr-data-query>
+  <dsfr-data-query id="th-act-top" source="th-act-p" limit="10"></dsfr-data-query>
+  <dsfr-data-query id="th-act-1" source="th-act-p" limit="1"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,69 +148,190 @@
       </div>
     </nav>
 
-    <h1>Label Tourisme &amp; Handicap</h1>
+    <h1>Tourisme &amp; Handicap&nbsp;: le label suit ses relais locaux plus que la carte du tourisme</h1>
+
+    <dsfr-data-repeat source="th-tot-p">
+      <template>
+        <p class="fr-text--lead">Le jeu publié par la DGE (mis à jour le 2&nbsp;septembre 2026) recense
+          <strong>{{n:number}} établissements</strong> titulaires du label Tourisme &amp; Handicap. Ils ne
+          se répartissent pas comme les touristes&nbsp;: un seul département en compte plus que la plupart des régions,
+          d'autres, parmi les plus fréquentés, n'en comptent qu'une poignée. Là où il est attribué, en
+          revanche, le label est large&nbsp;: <strong>{{p4:number:0}}&nbsp;%</strong> des établissements
+          dont les handicaps sont renseignés le sont pour les quatre familles — moteur, visuel, auditif
+          et mental.</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="th-tot" value="n:sum" format="nombre"
+        heading="Établissements" label="titulaires du label" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="th-dep-1" value="part:sum" format="decimal" decimals="1" unit="%"
+        heading="Premier département" label="des établissements localisés" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="th-dep-5" value="k:sum" format="nombre"
+        heading="Désert du label" label="départements en comptent cinq ou moins" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="th-tot" value="n4__sum:sum / renseigne__sum:sum" format="pourcentage" decimals="0"
+        heading="Quatre handicaps" label="des établissements renseignés les couvrent tous" span="3"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.economie.gouv.fr/explore/dataset/etablissements-labellises-tourisme-et-handicap/"
            target="_blank" rel="noopener external"><code>etablissements-labellises-tourisme-et-handicap</code></a>
-        — 3&nbsp;708 établissements labellisés, produit par la DGE. Le label garantit l'accessibilité
-        d'un lieu de tourisme et de loisirs&nbsp;: il est attribué handicap par handicap, ce qui en
-        fait le seul jeu de ce lot où la donnée elle-même est multivaluée.
+        — une ligne par établissement dont le droit d'usage du label est actif, publié par la Direction
+        générale des entreprises. Le label est attribué handicap par handicap, après une visite
+        d'évaluation renouvelée tous les cinq ans&nbsp;; chaque dossier est instruit par un
+        <strong>relais local</strong> (agence départementale ou régionale du tourisme, association), dont le
+        nom figure dans le jeu.
+        <a href="https://www.atout-france.fr/fr/tourisme-et-handicap" target="_blank" rel="noopener external">En savoir plus sur le label</a>.
       </p>
     </details>
   </div>
 
-  <!-- ==========================================================================
-       Même motif que Qualité Tourisme : un chargement via /exports/json,
-       tout se dérive côté client. Seule différence : `handicaps_attribues`
-       arrive DÉJÀ en tableau depuis l'API, et les facettes le traitent
-       nativement comme un champ multi-valeurs — rien à déclarer.
-       ========================================================================== -->
+  <div class="fr-container fr-mb-8w">
 
-  <!-- Le mode adaptateur fait de nouveau s'appliquer `max-records`  dont le plafond
-       par défaut est 1 000 et qui tronque EN SILENCE : sans le `max-records` ci-dessous 
-       cette page afficherait 1 000 des 3 708 établissements  sans un mot.
-       C'est le piège maison  repayé une fois de plus pendant cette migration et
-       rattrapé par la recette de non-régression (scripts/recette-pages.mjs). -->
-  <dsfr-data-source id="th" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="etablissements-labellises-tourisme-et-handicap"
-    fetch-mode="export" api-key-ref="ods-mef"
-    max-records="5000"
-    select="nom_du_professionnel, activite, filiere, ville, code_postal_du_professionnel, adresse, site_web, telephone, email_de_l_etablissement, region, departement, handicaps_attribues, handicap_auditif, handicap_mental, handicap_moteur, handicap_visuel, coordonnees_geographiques">
-  </dsfr-data-source>
+    <!-- ============================ PREUVE 1 ============================ -->
+    <div class="odv-viz" data-code="Le premier département parmi les régions">
+      <h2 class="fr-h4">Un seul département compte plus d'établissements labellisés que presque toutes les régions</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Nombre d'établissements labellisés par
+        région, et celui du premier département posé parmi elles (en couleur distincte). Le département
+        est aussi compté dans sa région&nbsp;: ce graphique compare des ordres de grandeur, il ne se
+        somme pas.</p>
+      <dsfr-data-repeat source="th-dep-1">
+        <template>
+          <p class="odv-lecture">Le département de tête, <strong>{{departement}}</strong>, compte à lui seul
+            <strong>{{nb__sum:number}} établissements labellisés</strong>, {{part:number:1}}&nbsp;% de ceux
+            dont on connaît le département.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="th-reg-plus">
+        <template>
+          <p class="odv-lecture">Sur les {{k:number}} régions où le label est présent, seules
+            <strong>{{plus__sum:number}}</strong> en comptent davantage.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot odv-chart-slot--haut">
+        <dsfr-data-chart id="g-reg" source="th-reg-dep-t" type="bar" horizontal stacked
+          label-field="region" value-field="v_reg:Région"
+          value-fields="v_dep:Un seul département"
+          unit-tooltip=" établissements"
+          databox databox-title="Établissements labellisés par région, et le premier département"
+          databox-source="DGE — etablissements-labellises-tourisme-et-handicap, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-reg" source="th-reg-dep-t"
+          description="Barres horizontales triées : le nombre d'établissements labellisés Tourisme et Handicap dans chaque région, avec, en couleur distincte, celui du département qui en compte le plus. Ce seul département se place au niveau des premières régions, devant la plupart d'entre elles ; les régions d'outre-mer ferment la liste."></dsfr-data-a11y>
+      </div>
+    </div>
 
-  <!-- Sans `limit` pour le KPI : la requête limitée à 12 faisait afficher
-       « 12 activités » alors que le jeu en compte 22 (relevé du portail). -->
-  <dsfr-data-query id="th-activites-toutes" source="th-f" group-by="activite"
-    aggregate="nom_du_professionnel:count:nb">
-  </dsfr-data-query>
+    <!-- ============================ PREUVE 2 ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="Les vingt premiers départements">
+      <h2 class="fr-h4">Le label n'est pas là où sont les touristes, mais là où un relais le porte</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Les vingt départements qui comptent le
+        plus d'établissements labellisés, en nombre d'établissements. Le premier est mis en évidence.</p>
+      <dsfr-data-repeat source="th-dep-10-s">
+        <template>
+          <p class="odv-lecture">Les dix premiers départements rassemblent
+            <strong>{{part__sum:number:0}}&nbsp;%</strong> des établissements localisés.</p>
+        </template>
+      </dsfr-data-repeat>
+      <p class="odv-lecture">À l'inverse, des départements de très forte fréquentation touristique en
+        comptent peu&nbsp;:</p>
+      <ul class="fr-text--sm">
+        <dsfr-data-repeat source="th-dep-cmp">
+          <template>
+            <li><strong>{{departement}}</strong>&nbsp;: {{nb:number}} établissements</li>
+          </template>
+        </dsfr-data-repeat>
+      </ul>
+      <dsfr-data-repeat source="th-dep-5">
+        <template>
+          <p class="odv-lecture">Et <strong>{{k:number}} départements</strong> en comptent cinq ou moins.
+            Les premiers départements ont en commun un relais local très actif — une agence
+            départementale du tourisme qui instruit les dossiers (Charentes Tourisme, l'agence des
+            Pyrénées-Atlantiques, celle de Touraine…). C'est une concordance lue dans le champ
+            «&nbsp;relais local&nbsp;» du jeu, pas une causalité démontrée.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot odv-chart-slot--haut">
+        <dsfr-data-chart id="g-dep" source="th-dep-top" type="bar" horizontal
+          label-field="departement" value-field="nb__sum:Établissements labellisés"
+          unit-tooltip=" établissements" selected-palette="neutral" highlight-index="[0]"
+          databox databox-title="Les vingt départements qui comptent le plus d'établissements labellisés"
+          databox-source="DGE — etablissements-labellises-tourisme-et-handicap, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-dep" source="th-dep-top"
+          description="Barres horizontales triées : les vingt départements qui comptent le plus d'établissements labellisés. Le premier dépasse le deuxième de plus du double ; à partir du troisième, les effectifs se tassent entre une centaine et une soixantaine."></dsfr-data-a11y>
+      </div>
+    </div>
 
-  <!-- Le classement en aval, avec la part de chaque activité dans la SÉLECTION
-       (`share_percent`, 0.33.0) — même motif que Qualité Tourisme. -->
-  <dsfr-data-query id="th-activites-part" source="th-activites-toutes" group-by="activite"
-    aggregate="nb:sum, nb__sum:share_percent:part" order-by="nb__sum:desc" limit="12">
-  </dsfr-data-query>
-  <dsfr-data-normalize id="th-activites" source="th-activites-part"
-    compute="part_txt = concat(replace(concat(round(part, 1), ''), '.', ','), ' % de la sélection')"></dsfr-data-normalize>
+    <!-- ============================ NUANCE ============================ -->
+    <div class="fr-grid-row fr-grid-row--gutters fr-mt-6w">
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Part des établissements couvrant chaque handicap">
+          <h2 class="fr-h4">Le handicap visuel est le moins couvert, le handicap mental le plus</h2>
+          <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Part des établissements labellisés
+            pour chaque famille de handicap, parmi ceux dont les handicaps sont renseignés, en&nbsp;%. Un
+            établissement compte dans chaque handicap qu'il couvre&nbsp;: les parts ne se somment pas.</p>
+          <dsfr-data-repeat source="th-tot-p">
+            <template>
+              <p class="odv-lecture">{{p_me:number:0}}&nbsp;% des établissements renseignés couvrent le
+                handicap mental, {{p_au:number:0}}&nbsp;% l'auditif, {{p_mo:number:0}}&nbsp;% le moteur —
+                le fauteuil roulant, symbole de l'accessibilité, n'est pas le premier servi — et
+                <strong>{{p_vi:number:0}}&nbsp;% le visuel</strong>.</p>
+              <p class="odv-lecture">Aucun label ne porte sur un seul handicap ({{n1__sum:number}}
+                établissement)&nbsp;: {{n2__sum:number}} en couvrent deux, {{n3__sum:number}} trois,
+                <strong>{{n4__sum:number}} les quatre</strong>.</p>
+            </template>
+          </dsfr-data-repeat>
+          <div class="odv-chart-slot">
+            <dsfr-data-chart id="g-h" source="th-h" type="bar" horizontal
+              label-field="handicap" value-field="part:Part des établissements renseignés (%)"
+              unit-tooltip="%" y-min="0"
+              databox databox-title="Part des établissements labellisés pour chaque famille de handicap"
+              databox-source="DGE — etablissements-labellises-tourisme-et-handicap, via data.economie.gouv.fr"
+              databox-download>
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-h" source="th-h"
+              description="Quatre barres horizontales triées : la part des établissements labellisés, parmi ceux dont les handicaps sont renseignés, qui couvrent chaque famille de handicap. Le handicap mental vient en tête, presque universel ; suivent l'auditif, le moteur, puis le visuel, le moins couvert."></dsfr-data-a11y>
+          </div>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Les dix activités les plus représentées">
+          <h2 class="fr-h4">Un label d'hébergement autant que de visite</h2>
+          <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Les dix activités qui comptent le plus
+            d'établissements labellisés, en nombre d'établissements, sur l'ensemble du jeu.</p>
+          <dsfr-data-repeat source="th-act-1">
+            <template>
+              <p class="odv-lecture">En tête, <strong>{{activite}}</strong>&nbsp;:
+                {{nb__sum:number}} établissements, <strong>{{part:number:0}}&nbsp;%</strong> du total —
+                des gîtes et locations saisonnières, bien plus que des sites de visite.</p>
+            </template>
+          </dsfr-data-repeat>
+          <div class="odv-chart-slot">
+            <dsfr-data-chart id="g-act" source="th-act-top" type="bar" horizontal
+              label-field="activite" value-field="nb__sum:Établissements labellisés"
+              unit-tooltip=" établissements" selected-palette="neutral" highlight-index="[0]"
+              databox databox-title="Les dix activités les plus représentées parmi les établissements labellisés"
+              databox-source="DGE — etablissements-labellises-tourisme-et-handicap, via data.economie.gouv.fr"
+              databox-download>
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-act" source="th-act-top"
+              description="Barres horizontales triées : les dix activités qui comptent le plus d'établissements labellisés. Le meublé de tourisme vient nettement en tête, devant l'office de tourisme et le lieu de visite, puis l'hôtel."></dsfr-data-a11y>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  <!-- `where` : les lignes sans département formaient un groupe « null »
-       compté comme un département de plus. -->
-  <dsfr-data-query id="th-departements" source="th-f" group-by="departement"
-    where="departement:isnotnull" aggregate="nom_du_professionnel:count:nb">
-  </dsfr-data-query>
-
-  <dsfr-data-query id="th-regions" source="th-f" group-by="region"
-    aggregate="nom_du_professionnel:count:nb" order-by="nb:desc">
-  </dsfr-data-query>
-
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
+  <!-- ============================ EXPLORATION ============================ -->
+  <!-- La recherche en bandeau pleine largeur : elle dit « combien » avant que le
+       lecteur ne choisisse « lesquels ». -->
   <section class="odv-bandeau">
     <div class="fr-container">
+      <h2 class="fr-h4">Trouver un établissement accessible</h2>
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="th-q" source="th"
         fields="nom_du_professionnel, ville, code_postal_du_professionnel, adresse, activite"
@@ -106,28 +343,12 @@
   </section>
 
   <div class="fr-container fr-mb-8w">
-        <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Trois compteurs qui suivent les filtres">
-    <p class="odv-lecture">Trois compteurs qui se recalculent à chaque filtre — cocher un
-      handicap dans la facette compte <strong>chaque établissement une fois</strong>, même
-      labellisé sur les quatre.</p>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="th-f" value="count" format="nombre"
-        heading="Sélection courante" label="établissements labellisés" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="th-activites-toutes" value="count" format="nombre"
-        heading="Diversité" label="activités représentées" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="th-departements" value="count" format="nombre"
-        heading="Couverture" label="départements couverts" col="4"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    </div>
-
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Filtrer</h2>
+        <h3 class="fr-h6">Filtrer</h3>
 
         <div class="odv-viz" data-code="Recherche et facettes : le champ multivalué sans déclaration">
 
@@ -141,10 +362,10 @@
       </details>
       <div class="fr-col-12 fr-col-lg-9">
         <div class="odv-viz" data-code="Carte des établissements et fiche avec pictos par handicap">
-        <h2 class="fr-h4">Où sont les établissements labellisés</h2>
-        <p class="odv-lecture">Les labellisés sont d'abord en <strong>Nouvelle-Aquitaine</strong>,
-          loin devant l'Occitanie et Auvergne-Rhône-Alpes. La fiche de chaque point porte les
-          handicaps couverts en pictogrammes DSFR.</p>
+        <h3 class="fr-h5">Sur la carte</h3>
+        <p class="odv-lecture">Filtrer par handicap couvert, activité ou territoire&nbsp;; chaque point
+          ouvre une fiche avec les handicaps couverts en pictogrammes. Carte, liste et compteurs suivent la
+          recherche et les filtres — contrairement aux graphiques du haut de page, qui portent sur le jeu entier.</p>
         <dsfr-data-map tiles-style="muted" name="Carte des établissements labellisés Tourisme et Handicap"
           center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
           fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
@@ -173,38 +394,8 @@
       </div>
     </div>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w fr-mb-4w">
-      <div class="fr-col-12 fr-col-lg-7">
-        <div class="odv-viz" data-code="Les douze activités les plus représentées">
-          <h2 class="fr-h6">Les douze activités les plus représentées</h2>
-          <p class="odv-lecture">Le <strong>meublé de tourisme</strong> arrive en tête — un
-            label d'hébergements autant que de sites — devant les offices de tourisme et les
-            lieux de visite. Les parts sont celles de la sélection courante.</p>
-          <dsfr-data-podium source="th-activites" label-field="activite" value-field="nb__sum"
-            subtitle-field="part_txt" value-unit="établissements" max-items="12"
-            selected-palette="sequentialDescending"></dsfr-data-podium>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-5">
-        <div class="odv-viz" data-code="Répartition par région">
-          <h2 class="fr-h6">Répartition par région</h2>
-          <p class="odv-lecture">La <strong>Nouvelle-Aquitaine</strong> domine nettement&nbsp;;
-            la région suivante en compte moins de la moitié.</p>
-          <div class="odv-chart-slot">
-            <dsfr-data-chart id="g-regions" source="th-regions" type="bar" horizontal
-              label-field="region" value-field="nb" name='["Établissements"]'
-              databox databox-title="Répartition par région"
-              databox-source="DGE — etablissements-labellises-tourisme-et-handicap, via data.economie.gouv.fr"
-              databox-download>
-            </dsfr-data-chart>
-            <dsfr-data-a11y for="g-regions" source="th-regions" table download></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <div class="odv-viz" data-code="La grille des établissements avec un picto par handicap couvert">
-    <h2 class="fr-h4">Les établissements</h2>
+    <h3 class="fr-h5 fr-mt-4w">La liste</h3>
     <dsfr-data-display source="th-f" cols="3" pagination="12" uid-field="nom_du_professionnel"
       empty="Aucun établissement ne correspond à ces critères." url-sync count-label="établissement">
       <template>
@@ -214,7 +405,7 @@
               <div class="fr-card__start">
                 <p class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{activite|Activité non précisée}}</p>
               </div>
-              <h3 class="fr-card__title fr-text--sm">{{nom_du_professionnel}}</h3>
+              <h4 class="fr-card__title fr-text--sm">{{nom_du_professionnel}}</h4>
               <p class="fr-card__desc fr-text--xs">
                 {{adresse|}}<br>{{code_postal_du_professionnel}} {{ville}}
               </p>
@@ -232,162 +423,110 @@
       </template>
     </dsfr-data-display>
     </div>
+
+    <!-- ============================ CE QU'ON NE MONTRE PAS ============================ -->
+    <div class="fr-callout fr-mt-6w">
+      <h2 class="fr-callout__title fr-h5">Ce que cette page ne montre pas</h2>
+      <dsfr-data-repeat source="th-tot-p">
+        <template>
+          <ul class="fr-callout__text fr-text--sm">
+            <li><strong>{{sans_loc:number}} établissements sans localisation</strong> (ni département, ni
+              région, ni coordonnées)&nbsp;: comptés dans le total, absents de la carte, des classements
+              territoriaux et des parts par département.</li>
+            <li><strong>{{sans_h:number}} établissements sans handicaps renseignés</strong> — les mêmes
+              lignes n'ont pas d'avis de commission&nbsp;: écartés des parts par handicap, qui portent sur
+              les {{renseigne__sum:number}} autres. La liste les montre sans pictogramme.</li>
+            <li><strong>Pas de taux.</strong> Le jeu ne dit ni la capacité d'accueil ni la fréquentation des
+              départements&nbsp;: les volumes ne sont rapportés à rien, et les trois départements de
+              comparaison sont un choix de notre part, parmi les plus fréquentés, pas un calcul.</li>
+            <li><strong>Pas d'évolution dans le temps.</strong> La date de classement est vide sur plus de
+              neuf lignes sur dix, et des dates d'avis de commission sont postérieures à la mise à jour du
+              jeu&nbsp;: aucune série ne tiendrait. Le jeu est une photographie des labels actifs.</li>
+            <li><strong>Pas de note ni d'évaluateur</strong>&nbsp;: les notes moyennes sont vides, l'organisme
+              évaluateur presque toujours absent. Les coordonnées nominatives des référents, publiées dans
+              le jeu, ne sont pas chargées par cette page.</li>
+          </ul>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
   <div class="fr-container fr-mb-8w">
   <details class="odv-technique" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
+    <summary>Analyse technique — ce que la recréation a coûté</summary>
   <section class="odv-analyse fr-py-4w">
     <div>
-      <h2>Analyse de reproduction — Tourisme &amp; Handicap</h2>
-
-      <p class="fr-text--sm">
-        <strong>Refonte «&nbsp;convaincre&nbsp;» (2026-09-20).</strong> Le classement des activités
-        est passé en <code>dsfr-data-podium</code> avec la part de chaque activité dans la
-        sélection (<code>share_percent</code>, 0.33.0), comme sur Qualité Tourisme — la page
-        reste dérivée de la précédente. Vérifié au navigateur. Chaque bloc porte un bouton
-        «&nbsp;Voir le code&nbsp;».
-      </p>
+      <h2>Analyse — Tourisme &amp; Handicap, une page recréée</h2>
 
       <p class="fr-text--lead">
         Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/tourisme-et-handicap/"
-        target="_blank" rel="noopener external">tourisme-et-handicap</a> — 33&nbsp;400 caractères,
-        six <code>ods-map</code>, quatre <code>ods-select</code>, une grille paginée à 12. Structure
-        jumelle de <a href="/viz/qualite-tourisme">Qualité Tourisme</a>, à un détail près qui change
-        tout&nbsp;: le champ des handicaps couverts est multivalué.
+        target="_blank" rel="noopener external">tourisme-et-handicap</a>, un annuaire cartographié
+        (trois listes de filtres, une carte, une grille). Recréation du 2026-09-26&nbsp;: l'annuaire est
+        conservé en bas de page, mais la page répond d'abord à une question que l'original ne posait
+        pas — <em>où le label existe-t-il, et pour quels handicaps&nbsp;?</em>
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le motif se rejoue tel quel.</strong> Cette page a été écrite en reprenant
-              celle de Qualité Tourisme et en changeant les noms de champs. C'est en soi un résultat&nbsp;:
-              le motif «&nbsp;annuaire cartographié&nbsp;» est devenu du gabarit. Les deux pages
-              d'origine, elles, sont deux blocs de 33&nbsp;000 caractères entretenus en parallèle.</li>
-            <li><strong>Le champ multivalué&nbsp;: rien à faire.</strong> J'avais prévu un
-              <code>dsfr-data-normalize split</code> pour découper
-              <code>handicaps_attribues</code>. Inutile&nbsp;: l'API le renvoie déjà en tableau
-              (<code>["AUDITIF","MENTAL","MOTEUR","VISUEL"]</code>) et
-              <code>dsfr-data-facets</code> traite nativement un tableau comme un champ
-              multi-valeurs — une case à cocher par handicap, et un établissement labellisé sur
-              trois handicaps compte dans les trois. Zéro déclaration. Le portail obtient le même
-              résultat via une facette configurée dans son back-office&nbsp;; ici il n'y a
-              simplement rien à configurer.</li>
-            <li><strong>La recherche dans les facettes.</strong> <code>searchable</code> sur Activité
-              (28 valeurs), Département (99) et Région rend la colonne utilisable. L'original les
-              déverse dans des listes déroulantes.</li>
+            <li><strong>Une requête pour tout.</strong> Le jeu tient en un export de 3&nbsp;708 lignes&nbsp;;
+              le récit (drapeaux par <code>compute</code>, <code>group-by</code>, <code>share_percent</code>)
+              et l'exploration (recherche, facettes, carte, liste) en dérivent côté client.</li>
+            <li><strong>Des phrases calculées sans script.</strong> Une constante <code>tout</code> sert de
+              clé de regroupement (une ligne de synthèse) et de clé de jointure&nbsp;: «&nbsp;combien de
+              régions dépassent le premier département&nbsp;» est une <code>dsfr-data-join</code> sur cette
+              constante, puis un <code>when</code>.</li>
+            <li><strong>Département et régions sur un même axe</strong> par <code>dsfr-data-concat</code>
+              + <code>origin-field</code>, et deux couleurs par deux colonnes empilées, sans
+              <code>color-map</code> (BUG-022) ni rang deviné pour <code>highlight-index</code>.</li>
+            <li><strong>Le champ multivalué ne demande rien</strong>&nbsp;: <code>handicaps_attribues</code>
+              arrive en tableau, <code>dsfr-data-facets</code> le traite nativement (AV-011).</li>
           </ul>
         </div>
 
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Une facette pour cinq colonnes.</strong> Le jeu porte à la fois
-              <code>handicaps_attribues</code> (résumé) et quatre colonnes
-              <code>handicap_auditif</code>, <code>_mental</code>, <code>_moteur</code>,
-              <code>_visuel</code>. Filtrer sur «&nbsp;les établissements couvrant le handicap
-              moteur&nbsp;» à partir des quatre colonnes demanderait quatre facettes booléennes
-              là où le résumé en donne une. Aucun composant ne sait replier un jeu de colonnes
-              parallèles en une facette&nbsp;: <code>dsfr-data-unpivot</code> bascule des colonnes en
-              lignes, ce qui multiplierait les établissements. On s'appuie donc sur la colonne de
-              résumé — ce que fait aussi l'original.</li>
-            <li><strong>Les liens optionnels, encore — sauf qu'ici il n'y en a pas.</strong> La
-              première version de cette analyse reprenait le constat de Qualité Tourisme. Recompté sur
-              l'export&nbsp;: <code>site_web</code>, <code>email_de_l_etablissement</code> et
-              <code>telephone</code> sont renseignés sur <strong>3&nbsp;708 lignes sur 3&nbsp;708</strong>.
-              Le courriel et le site sont donc des liens, sans conditionnelle. Ce qui reste&nbsp;:
-              46 URL malformées (<code>https:www.carreartmusee.com</code>, celle-là même que le portail
-              affiche) — un problème de donnée, que l'original a aussi. AM-007 ne s'applique pas à cette
-              page.</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> Ajouté&nbsp;: les
-              <strong>pictos par handicap</strong> dans le panneau et sur chaque carte de la grille. Les
-              quatre colonnes <code>handicap_moteur</code>, <code>_visuel</code>, <code>_auditif</code>,
-              <code>_mental</code> valent «&nbsp;Oui&nbsp;», «&nbsp;Non&nbsp;» ou <code>null</code>
-              (354 lignes)&nbsp;: chaque picto porte la classe
-              <code>odv-picto--{{handicap_moteur|absent}}</code>, et une règle CSS masque
-              <code>--Non</code> et <code>--absent</code>. Pas de conditionnelle dans le template, mais
-              une valeur de donnée interpolée dans un nom de classe fait le même travail — vérifié&nbsp;:
-              la carte «&nbsp;Gîte rural Pa Lou Plans&nbsp;» (moteur = Non) n'affiche que trois pictos,
-              l'hôtel Ibis de Montbéliard (tout à <code>null</code>) aucun. Les icônes sont celles du
-              DSFR (<code>fr-icon-wheelchair-line</code>, <code>eye-line</code>,
-              <code>ear-off-line</code>, <code>mental-disabilities-line</code>), pas les JPEG du
-              portail. Ajouté aussi&nbsp;: le courriel en lien, le code postal dans la recherche.
-              Corrigé&nbsp;: le KPI «&nbsp;activités&nbsp;» affichait 12 (requête limitée) — 22 désormais,
-              le chiffre du portail&nbsp;; le KPI «&nbsp;départements&nbsp;» comptait le groupe
-              <code>null</code>. Vérifié&nbsp;: la facette Handicap donne MENTAL 3&nbsp;311 · AUDITIF
-              3&nbsp;174 · MOTEUR 2&nbsp;893 · VISUEL 2&nbsp;696, exactement les effectifs du portail&nbsp;;
-              les 22 activités aussi&nbsp;; les cinq encarts DROM s'affichent (Guadeloupe 1,
-              Martinique 2, La Réunion 3, Guyane et Mayotte vides — comme dans les données).
-              <strong>Manque encore</strong>&nbsp;: l'autocomplétion des deux champs texte, comme sur
-              Qualité Tourisme.</li>
-            <li><strong>Un jeu de données très large, mal projeté.</strong> 49 colonnes, dont les
-              coordonnées personnelles des référents et représentants légaux (noms, courriels,
-              fonctions). L'export complet les rapatrierait toutes dans le navigateur. Le
-              <code>select</code> ne garde que les seize colonnes utiles&nbsp;— une hygiène que le
-              mode adaptateur n'impose pas et que la page d'origine ne pratique pas.</li>
+            <li><strong>La page précédente affirmait une domination régionale</strong> («&nbsp;d'abord en
+              Nouvelle-Aquitaine&nbsp;») sans voir qu'elle tient pour un tiers à un seul département. Ce
+              n'est pas une limite de <code>dsfr-data</code>&nbsp;: c'est une lecture du jeu au mauvais
+              niveau.</li>
+            <li><strong>Pas de taux possible.</strong> Sans capacité d'accueil ni fréquentation dans le
+              jeu, la comparaison avec des départements touristiques reste un choix éditorial, dit en
+              page. Une jointure avec un jeu de capacité d'hébergement (INSEE) le lèverait.</li>
+            <li><strong>Les dates ne se lisent pas.</strong> Date de classement vide à 94&nbsp;%, avis de
+              commission datés après la mise à jour du jeu&nbsp;: pas d'évolution, et le millésime de la
+              page est la date de mise à jour du portail, écrite à la main.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
-            <p class="fr-text--sm">
-              11 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore ses contournements, qui ne sont simplement plus
-              nécessaires — à l'exception d'AM-011, dont le contournement a été retiré au lot 13&nbsp;:
-              la source est repassée en mode adaptateur avec <code>fetch-mode="export"</code>. Détail et vérification au <a href="/retours#AM-012">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>AM-032</strong> — <strong>0.21.1</strong> (#643)&nbsp;: largeur par défaut de 10 rem sur les encarts territoriaux, et attribut <code>width</code>&nbsp;: la règle de <code>site.css</code> n'est plus nécessaire.</li>
-              <li><strong>BUG-004</strong> — <strong>0.21.1</strong> (#642)&nbsp;: <code>fit-bounds</code> + <code>max-bounds</code> zoome sur une emprise réduite à un point, et <code>fit-zone</code> (#687, 0.22.0) cadre la métropole sans renoncer aux encarts.</li>
-              <li><strong>PG-012</strong> — <strong>0.21.1</strong> (#645)&nbsp;: <code>sort="count:desc"</code>&nbsp;: la grammaire <code>critère:sens</code> remplace le <code>-count</code> ambigu, qui est déprécié avec avertissement.</li>
-              <li><strong>PG-015</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code> nomme le groupe null au lieu de le laisser anonyme (l'écarter demande toujours un <code>where … is not null</code>).</li>
-              <li><strong>AM-007</strong> — <strong>0.22.0</strong> (#664)&nbsp;: blocs <code>{{#if}}</code> / <code>{{#unless}}</code> et pipe <code>{{lien:url}}</code> dans les templates&nbsp;: un lien optionnel s'enveloppe.</li>
-              <li><strong>AM-017</strong> — <strong>0.22.0</strong> (#686)&nbsp;: <code>tiles-style="muted|grey"</code> atténue le fond de carte&nbsp;: la classe <code>odv-fond-attenue</code> de <code>site.css</code> n'est plus nécessaire.</li>
-              <li><strong>AM-039</strong> — <strong>0.22.0</strong> (#664)&nbsp;: conditionnelle de template <code>{{#if}}</code> / <code>{{#unless}}</code>&nbsp;: le contournement par CSS d'attribut n'est plus nécessaire.</li>
-              <li><strong>PG-017</strong> — <strong>0.22.0</strong> (#659)&nbsp;: <code>meta.total</code> et avertissement du KPI <code>count</code> quand l'amont détient plus de lignes que la query limitée.</li>
-              <li><strong>AM-014</strong> — <strong>0.24.0</strong> (#677)&nbsp;: <code>fold="motif_*:cible"</code> replie des colonnes booléennes parallèles en un champ multi-valeurs facettable.</li>
-              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du portail, en une requête et <em>sans</em> quitter le mode adaptateur. Le contournement par source générique a été retiré de cette page.</li>
-            </ul>
-          </div>
         </div>
       </div>
 
-      <div class="fr-table fr-table--bordered">
+      <div class="fr-table fr-table--sm">
         <table>
-          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
-          <thead>
-            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
-          </thead>
+          <caption>Directive Opendatasoft → composant dsfr-data</caption>
+          <thead><tr><th scope="col">Besoin</th><th scope="col">Opendatasoft</th><th scope="col">dsfr-data</th></tr></thead>
           <tbody>
-            <tr><td>facette multivaluée déclarée au back-office</td><td><code>dsfr-data-facets</code> — les tableaux sont gérés nativement</td><td>Zéro configuration des deux côtés</td></tr>
-            <tr><td>6 × <code>ods-map</code></td><td>1 × <code>dsfr-data-map</code></td><td>Responsive par construction</td></tr>
-            <tr><td>4 × <code>ods-select</code> câblés à la main</td><td><code>dsfr-data-facets</code></td><td>Une balise</td></tr>
-            <tr><td>toutes les colonnes chargées</td><td><code>select</code> de 17 colonnes</td><td>Écarte au passage des données personnelles</td></tr>
-            <tr><td>rubrique «&nbsp;Handicap&nbsp;» conditionnelle, un JPEG par picto</td><td>4 badges DSFR, classe <code>odv-picto--{{champ|absent}}</code> + CSS</td><td>Équivalent sans conditionnelle — au prix d'une convention CSS</td></tr>
-            <tr><td>6 boutons «&nbsp;Centrer la carte sur&nbsp;»</td><td><code>insets="drom"</code></td><td>Les cinq DROM visibles en même temps</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code></td><td>Sans équivalent — et ici c'est un comble</td></tr>
+            <tr><td>Chargement du jeu</td><td><code>ods-dataset-context</code></td><td><code>dsfr-data-source fetch-mode="export"</code> + <code>select</code></td></tr>
+            <tr><td>Facette multivaluée</td><td>déclarée au back-office</td><td><code>dsfr-data-facets</code>, sans déclaration</td></tr>
+            <tr><td>Recherche nom / commune</td><td><code>ods-text-search</code></td><td><code>dsfr-data-search count</code></td></tr>
+            <tr><td>Carte à clusters, 6 recentrages</td><td>6 × <code>ods-map</code></td><td><code>dsfr-data-map</code> + <code>insets="drom"</code></td></tr>
+            <tr><td>Classements et parts</td><td>—</td><td><code>dsfr-data-query</code> <code>group-by</code>, <code>share_percent</code></td></tr>
+            <tr><td>Chiffre dans une phrase</td><td><code>{{ … }}</code> + <code>ods-aggregation</code></td><td><code>dsfr-data-repeat</code> sur une requête d'une ligne</td></tr>
+            <tr><td>Grille paginée avec pictos</td><td><code>ods-result-enumerator</code></td><td><code>dsfr-data-display pagination="12"</code></td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction immédiate&nbsp;: la page a été dérivée de la précédente en changeant
-          les noms de champs.</strong> C'est le meilleur argument de ce lot — deux annuaires
-          cartographiés que le portail entretient comme deux blocs de template distincts deviennent
-          ici le même gabarit. Le champ multivalué, seule vraie différence, arrive déjà en tableau
-          depuis l'API et ne demande rien. Aucune limite rencontrée&nbsp;; la relecture face au portail
-          a ajouté les pictos par handicap — sans conditionnelle, par une classe CSS calculée depuis la
-          donnée — et retiré un constat qui ne s'appliquait pas à cette page.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-007 (liens
-          optionnels), AM-013 (placement de l'UI des facettes), AM-014 (replier des colonnes
-          parallèles en une facette), AV-008 (carte responsive unique), AV-009 (le motif devient
-          un gabarit).
-        </p>
+        <p><strong>L'annuaire se reproduisait à l'identique&nbsp;; la donnée racontait autre chose.</strong>
+          Compté par département, le label dessine la carte de ses relais — un département au niveau d'une
+          grande région, des départements très touristiques presque vides — et, là où il existe, il couvre
+          presque toujours trois ou quatre handicaps, le visuel en dernier. Une source, des transformateurs,
+          aucune ligne de JavaScript.</p>
       </div>
     </div>
   </section>

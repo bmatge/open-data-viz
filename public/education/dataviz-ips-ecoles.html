@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>IPS des écoles — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz « IPS Ecoles » de data.education.gouv.fr : 32 625 écoles, chargement à la demande.">
+  <meta name="description" content="Recréation avec dsfr-data de la dataviz « IPS Écoles » de data.education.gouv.fr : d'une école à l'autre d'une même ville, l'écart social dépasse celui qui sépare les départements.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,185 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un localisateur muet (une carte vide au chargement, trois
+       facettes, aucun constat). La reproduction précédente l'avait rendu juste
+       et économe (`require-where`) ; elle restait un localisateur. Cette version
+       part de ce que le jeu des écoles montre mieux que tout autre : l'écart
+       social se joue à l'échelle du quartier. Entre écoles d'une même ville, il
+       dépasse celui qui sépare les départements les plus éloignés.
+
+       Sources, toutes lues SANS clé (le portail Éducation répond en anonyme) :
+         · `deps`  — une ligne par département (101 + 2 petites collectivités),
+                     moyenne, 1er et 9e déciles agrégés PAR LE SERVEUR : 0,2 s ;
+         · `com`   — une ligne par commune (16 097), même agrégat, en export ;
+         · `sect`  — les deux secteurs, même agrégat ;
+         · `serie` — neuf rentrées × deux secteurs (18 lignes) ;
+         · `paire` — deux rentrées de la même méthode, école par école, en
+                     `lazy` : 5,4 Mo qui ne partent que si l'on descend jusque-là ;
+         · `ecoles`— les écoles d'UN département, en `require-where` : rien
+                     n'est chargé tant qu'on n'en a pas choisi un.
+       ========================================================================== -->
+
+  <!-- ---------- 1. Les départements ----------
+       `percentile(ips, 10)` : le 1er décile, calculé par le portail. Les écoles
+       sans IPS (petites écoles, cf. notes) sont hors de `count(ips)` et des
+       déciles, mais dans `count(*)`. Le groupe sans département (156 écoles
+       sans référentiel d'adresse) est écarté par le `where` et le texte le dit. -->
+  <dsfr-data-source id="deps" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
+    select="rentree_scolaire, libelle_departement, code_departement, avg(ips) as m, percentile(ips, 10) as p10, percentile(ips, 90) as p90, count(ips) as n, count(*) as tot"
+    group-by="rentree_scolaire, libelle_departement, code_departement"
+    where="rentree_scolaire = '2024-2025' and libelle_departement is not null"
+    max-records="200">
+  </dsfr-data-source>
+
+  <!-- `d` : l'écart entre le 9e et le 1er décile, calculé AVANT tout arrondi.
+       `drom` : codes 971 à 978 du référentiel (texte « 001 » … « 02A » … « 976 »).
+       `k` : clé constante, pour replier les départements en une ligne. -->
+  <dsfr-data-normalize id="deps-n" source="deps"
+    compute="d = p90 - p10; drom = when code_departement >= '970' then 1 else 0; k = 'France'; sans = tot - n">
+  </dsfr-data-normalize>
+
+  <!-- Saint-Barthélemy et Saint-Martin (moins de 20 écoles avec un IPS) : pas de
+       déciles sur si peu d'écoles. -->
+  <dsfr-data-query id="deps-ok" source="deps-n" where="n:gte:20"></dsfr-data-query>
+  <dsfr-data-query id="met-l" source="deps-ok" where="drom:eq:0"></dsfr-data-query>
+
+  <!-- L'écart ENTRE départements de métropole : max − min des moyennes. -->
+  <dsfr-data-query id="met" source="met-l" group-by="k"
+    aggregate="m:min:mmin, m:max:mmax, libelle_departement:count:nb_met">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="met-g" source="met" compute="gap = mmax - mmin"></dsfr-data-normalize>
+
+  <!-- Le nom des deux départements extrêmes. -->
+  <dsfr-data-query id="bas1" source="met-l" order-by="m:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="bas" source="bas1" group-by="k, libelle_departement" aggregate="m:min:m_bas"></dsfr-data-query>
+  <dsfr-data-normalize id="bas-r" source="bas" rename="libelle_departement:dep_bas"></dsfr-data-normalize>
+  <dsfr-data-query id="haut1" source="met-l" order-by="m:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="haut" source="haut1" group-by="k, libelle_departement" aggregate="m:max:m_haut"></dsfr-data-query>
+  <dsfr-data-normalize id="haut-r" source="haut" rename="libelle_departement:dep_haut"></dsfr-data-normalize>
+
+  <!-- Chaque département reçoit l'écart entre départements, puis le compare. -->
+  <dsfr-data-join id="deps-j" left="deps-ok" right="met-g" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="deps-c" source="deps-j"
+    compute="depasse = when d > gap then 1 else 0; part_sans = sans / tot * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="deps-cnt" source="deps-c" group-by="k"
+    aggregate="depasse:sum:nb_dep_dep, libelle_departement:count:nb_dep">
+  </dsfr-data-query>
+  <dsfr-data-query id="deps-o" source="deps-c" order-by="d:desc"></dsfr-data-query>
+  <dsfr-data-query id="deps-top" source="deps-o" limit="30"></dsfr-data-query>
+  <dsfr-data-normalize id="deps-r" source="deps-top" round="p10:1, d:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="deps-tr" source="deps-o" round="p10:1, p90:1, d:1, m:1, part_sans:0"></dsfr-data-normalize>
+  <dsfr-data-normalize id="deps-t" source="deps-tr"
+    rename="libelle_departement:Département | m:IPS moyen des écoles | p10:1er décile | p90:9e décile | d:Écart entre déciles (points) | n:Écoles avec un IPS | sans:Écoles sans IPS | part_sans:Part sans IPS (%)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 2. Les communes ----------
+       Export agrégé : 16 097 communes en 1,2 s. Filtre client sur 40 écoles
+       avec un IPS au moins : en dessous, les déciles reposent sur trop peu
+       d'écoles. -->
+  <dsfr-data-source id="com" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
+    fetch-mode="export" max-records="20000"
+    select="code_commune, libelle_commune, libelle_departement, avg(ips) as m, percentile(ips, 10) as p10, percentile(ips, 90) as p90, count(ips) as n"
+    group-by="code_commune, libelle_commune, libelle_departement"
+    where="rentree_scolaire = '2024-2025' and ips is not null and libelle_commune is not null">
+  </dsfr-data-source>
+  <!-- Deux « Saint-Denis » (Seine-Saint-Denis, La Réunion) : le libellé porte
+       le département. Le référentiel écrit « Paris 18e  Arrondissement » avec
+       deux espaces. -->
+  <dsfr-data-normalize id="com-n" source="com"
+    compute="d = p90 - p10; k = 'France'; ville = replace(libelle_commune, '  ', ' ') + ' (' + libelle_departement + ')'">
+  </dsfr-data-normalize>
+  <!-- Le seuil APRÈS le normalize, jamais directement sur la source : une query
+       seule lectrice d'une source Opendatasoft délègue son `where` au portail
+       (#856), et `n >= 40` y porte sur un alias d'agrégat — HTTP 400, puis
+       repli sur /records. Payé ici le 2026-09-26. -->
+  <dsfr-data-query id="com-ok" source="com-n" where="n:gte:40"></dsfr-data-query>
+  <dsfr-data-join id="com-j" left="com-ok" right="met-g" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="com-c" source="com-j" compute="depasse = when d > gap then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="com-o" source="com-c" order-by="d:desc"></dsfr-data-query>
+  <dsfr-data-query id="com-cnt" source="com-c" group-by="k"
+    aggregate="depasse:sum:nb_com_dep, code_commune:count:nb_com">
+  </dsfr-data-query>
+  <dsfr-data-query id="com-top1" source="com-o" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="com-top" source="com-top1" group-by="k, ville"
+    aggregate="d:max:d_top, p10:max:p10_top, p90:max:p90_top, n:max:n_top">
+  </dsfr-data-query>
+  <dsfr-data-query id="com-bas1" source="com-o" order-by="d:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="com-bas" source="com-bas1" group-by="k, ville"
+    aggregate="d:max:d_min, p90:max:p90_min">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="com-bas-r" source="com-bas" rename="ville:ville_min"></dsfr-data-normalize>
+  <dsfr-data-normalize id="com-r" source="com-o" round="p10:1, d:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="com-tr" source="com-o" round="p10:1, p90:1, d:1, m:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="com-t" source="com-tr"
+    rename="ville:Commune | m:IPS moyen des écoles | p10:1er décile | p90:9e décile | d:Écart entre déciles (points) | n:Écoles avec un IPS">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Le résumé : une ligne, pour le chapô et l'accroche ---------- -->
+  <dsfr-data-join id="res1" left="met-g" right="bas-r" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-join id="res2" left="res1" right="haut-r" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-join id="res3" left="res2" right="deps-cnt" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-join id="res4" left="res3" right="com-cnt" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-join id="res5" left="res4" right="com-top" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-join id="resume" left="res5" right="com-bas-r" on="k" type="left"></dsfr-data-join>
+
+  <!-- ---------- 3. Les secteurs ---------- -->
+  <dsfr-data-source id="sect" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
+    select="rentree_scolaire, secteur, avg(ips) as m, percentile(ips, 10) as p10, percentile(ips, 90) as p90, count(ips) as n, count(*) as tot"
+    group-by="rentree_scolaire, secteur"
+    where="rentree_scolaire = '2024-2025'">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="sect-n" source="sect" compute="d = p90 - p10"></dsfr-data-normalize>
+  <dsfr-data-query id="sect-pub" source="sect-n" where="secteur:eq:public"></dsfr-data-query>
+  <dsfr-data-query id="rentree" source="sect-n" group-by="rentree_scolaire" aggregate="n:sum:n_ips, tot:sum:n_tot"></dsfr-data-query>
+
+  <dsfr-data-source id="serie" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
+    select="rentree_scolaire, secteur, avg(ips) as ips_moyen, count(ips) as nb"
+    group-by="rentree_scolaire, secteur"
+    order-by="rentree_scolaire:asc">
+  </dsfr-data-source>
+  <dsfr-data-pivot id="serie-w" source="serie"
+    row="rentree_scolaire" column="secteur" value="ips_moyen" aggregate="first"
+    labels="public:public | privé sous contrat:prive">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="serie-e" source="serie-w" compute="ecart = prive - public; k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-normalize id="serie-r" source="serie-e" round="ecart:1, prive:1, public:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="serie-t" source="serie-r"
+    rename="rentree_scolaire:Rentrée | public:IPS moyen public | prive:IPS moyen privé sous contrat | ecart:Écart (points)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="serie-der" source="serie-e" order-by="rentree_scolaire:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-pivot id="serie-bornes" source="serie-e"
+    row="k" column="rentree_scolaire" value="ecart" aggregate="first"
+    labels="2016-2017:e16 | 2021-2022:e21 | 2022-2023:e22 | 2024-2025:e24">
+  </dsfr-data-pivot>
+
+  <!-- À écoles constantes, deux rentrées de la MÊME méthode. `lazy` : 5,4 Mo,
+       2,9 s mesurés — ne partent que si l'on descend jusqu'au bloc. -->
+  <dsfr-data-source id="paire" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
+    fetch-mode="export" max-records="70000" lazy
+    select="uai, secteur, ips, rentree_scolaire"
+    where="rentree_scolaire in ('2022-2023', '2024-2025') and ips is not null">
+  </dsfr-data-source>
+  <dsfr-data-pivot id="paire-w" source="paire"
+    row="uai, secteur" column="rentree_scolaire" value="ips" aggregate="first"
+    labels="2022-2023:r22 | 2024-2025:r24">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="paire-d" source="paire-w"
+    compute="d = when is_null(r22) or is_null(r24) then null else r24 - r22">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="paire-s" source="paire-d" where="d:isnotnull"
+    group-by="secteur" aggregate="d:avg:d_moy, uai:count:nb" order-by="d_moy:desc">
+  </dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,211 +211,324 @@
       </div>
     </nav>
 
-    <h1>Indice de position sociale des écoles — rentrée 2023-2024</h1>
+    <h1>D'une école à l'autre de la même ville, l'écart social dépasse celui qui sépare les départements</h1>
 
-    <p class="fr-text--lead">
-      <strong>32 625 écoles</strong> pour la seule rentrée 2023-2024, sur un jeu qui en compte
-      279 318 toutes rentrées confondues. C'est le plus gros volume rencontré par ce banc
-      d'essai, et c'est ce qui rend cette page intéressante : <strong>on ne charge rien tant
-      que vous n'avez pas choisi un département.</strong>
-    </p>
+    <!-- Le chapô est CALCULÉ : il ne vieillit pas avec le jeu. -->
+    <dsfr-data-repeat source="resume">
+      <template>
+        <p class="fr-text--lead">
+          D'un département de métropole à l'autre, l'indice de position sociale (IPS) moyen des
+          écoles va de <strong>{{m_bas:number:1}}</strong> ({{dep_bas}}) à
+          <strong>{{m_haut:number:1}}</strong> ({{dep_haut}})&nbsp;: <strong>{{gap:number:1}}
+          points</strong>. À l'intérieur d'une grande ville, il peut être deux fois plus large&nbsp;:
+          à {{ville}}, <strong>{{d_top:number:1}} points</strong> séparent le premier dixième
+          des écoles du dernier. Dans <strong>{{nb_com_dep}} des {{nb_com}} communes</strong> qui
+          comptent au moins quarante écoles, et dans <strong>{{nb_dep_dep}} départements sur
+          {{nb_dep}}</strong>, les écoles sont plus éloignées entre elles que ne le sont les
+          départements extrêmes.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="rentree">
+      <template>
+        <p class="fr-text--sm">
+          Rentrée {{rentree_scolaire}}&nbsp;: {{n_ips:number}} écoles élémentaires et primaires sur
+          {{n_tot:number}} ont un IPS publié. L'IPS résume, à partir des professions des parents, les conditions sociales et
+          culturelles des élèves&nbsp;: plus il est élevé, plus elles sont favorables à la
+          réussite scolaire. Celui d'une école est la moyenne de ses anciens élèves de CM2 sur
+          cinq ans. Toutes les moyennes et tous les déciles de cette page comptent
+          <strong>chaque école pour une</strong>&nbsp;; la DEPP conseille de ne pas
+          sur-interpréter des écarts de 3&nbsp;points ou moins.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/donnees-ips-ecoles/"
            target="_blank" rel="noopener external"><code>donnees-ips-ecoles</code></a>
-        — 279 318 lignes sur 9 rentrées, produit par la DEPP, jeu technique
-        <em>hors catalogue</em>, lu sans clé. Contrairement au jeu des collèges, il porte les
-        <strong>IPS de référence</strong> — national, académique et départemental — ce qui
-        permet de situer chaque école, et qu'aucune des quatre pages IPS du portail ne fait.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>304 écoles sont écartées</strong> : elles n'ont ni position, ni commune, ni
-        département. La carte en montre donc <strong>32 321</strong> sur 32 625.
+        (DEPP) — une école par ligne et par rentrée, de 2016-2017 à 2024-2025. Jeu technique,
+        hors catalogue, lu sans clé. Il porte aussi les IPS de référence de la DEPP (national,
+        académique, départemental), pondérés par les élèves, que la section&nbsp;4 affiche. La
+        règle de diffusion (au moins 25 élèves de CM2 sur cinq ans, maternelles hors champ) est
+        écrite dans la description du jeu public
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-ips-ecoles-ap2022/"
+           target="_blank" rel="noopener external"><code>fr-en-ips-ecoles-ap2022</code></a>.
       </p>
     </details>
 
-    <details class="fr-callout fr-icon-timer-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Pourquoi cette page attend votre choix</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        Trois mesures, prises à l'API avant d'écrire la page :
-      </p>
-      <ul class="fr-text--sm">
-        <li>tout charger d'un coup — <code>/exports/json</code> sur la rentrée entière :
-          <strong>28,9 Mo en 5,2 s</strong> ;</li>
-        <li>en restreignant les colonnes par <code>select</code> :
-          <strong>12,0 Mo en 2,6 s</strong> — toujours trop pour une page ;</li>
-        <li>un seul département (le Nord, le plus fourni) :
-          <strong>1,1 Mo en 0,22 s</strong>.</li>
-      </ul>
-      <p class="fr-callout__text fr-text--sm">
-        Vingt-cinq fois plus léger. La page ne fait donc <strong>aucune requête au
-        chargement</strong> — vérifiable dans l'onglet réseau — hors la liste des
-        104 départements, qui coûte une requête agrégée de 93 ms.
-      </p>
-    </details>
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="resume" value="gap:first" format="decimal" decimals="1"
+        heading="points entre les départements extrêmes"
+        lines='[{"value":"m_haut:first","format":"decimal","decimals":1,"prefix":"moyenne la plus haute : "},{"value":"m_bas:first","format":"decimal","decimals":1,"prefix":"la plus basse : "}]'
+        label="IPS moyen des écoles, métropole, dernière rentrée publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="resume" value="d_top:first" format="decimal" decimals="1"
+        heading="points entre écoles d'une même ville"
+        lines='[{"value":"p90_top:first","format":"decimal","decimals":1,"prefix":"9e décile : "},{"value":"p10_top:first","format":"decimal","decimals":1,"prefix":"1er décile : "}]'
+        label="écart le plus large parmi les communes d'au moins 40 écoles"></dsfr-data-kpi>
+      <dsfr-data-kpi source="resume" value="nb_dep_dep:first" format="nombre"
+        heading="départements plus inégaux en leur sein qu'entre eux"
+        lines='[{"value":"nb_dep:first","format":"nombre","prefix":"sur "}]'
+        label="écart entre 1er et 9e décile des écoles supérieur à l'écart entre départements"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve : les villes ---------- -->
+    <h2 class="fr-h3">1. Dans presque toutes les grandes villes, les écoles débordent la carte des départements</h2>
+    <dsfr-data-repeat source="resume">
+      <template>
+        <p class="odv-lecture">Chaque barre va de l'IPS du premier décile des écoles de la ville
+          (10&nbsp;% des écoles sont en dessous) à celui du neuvième (10&nbsp;% au-dessus). La bande
+          entre les deux lignes pointillées contient les moyennes de <strong>tous</strong> les
+          départements de métropole, de {{m_bas:number:1}} ({{dep_bas}}) à {{m_haut:number:1}}
+          ({{dep_haut}}). Dans {{nb_com_dep}} communes sur {{nb_com}}, la barre est plus longue
+          que la bande&nbsp;; l'exception est {{ville_min}}, où les écoles se ressemblent parce
+          que neuf sur dix ont un IPS inférieur à {{p90_min:number:1}}.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Étendue de l'IPS des écoles (1er → 9e décile) dans les communes d'au moins 40 écoles">
+      <!-- Barres empilées : un segment gris de 0 au 1er décile, un segment bleu
+           du 1er au 9e — seule la partie bleue se lit. Axe à zéro (empilement),
+           ce qui écrase l'échelle mais ne la trompe pas.
+           Les deux lignes de référence sont des LITTÉRAUX (reference-lines
+           n'accepte pas d'expression) : moyennes extrêmes des départements de
+           métropole, rentrée 2024-2025, mesurées à l'API le 2026-09-26. Le chapô
+           et le KPI les recalculent, eux, depuis la donnée. -->
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-com" source="com-r" type="bar" horizontal stacked
+        label-field="ville"
+        value-field="p10:Jusqu'au 1er décile"
+        value-fields="d:Du 1er au 9e décile (écart)"
+        color-map="Jusqu'au 1er décile:#e5e5e5,Du 1er au 9e décile (écart):#000091"
+        unit-tooltip="points d'IPS"
+        reference-lines='[{"axis":"x","value":94.0,"label":"94,0","dash":true},{"axis":"x","value":125.1,"label":"125,1","dash":true}]'
+        databox databox-title="IPS des écoles du 1er au 9e décile, communes d'au moins 40 écoles, rentrée 2024-2025"
+        databox-source="DEPP — donnees-ips-ecoles, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-com" source="com-t" table download
+        filename="ips-ecoles-communes-deciles.csv"
+        label-field="Commune"
+        value-field="1er décile, 9e décile, Écart entre déciles (points), IPS moyen des écoles, Écoles avec un IPS"
+        description="Pour chaque commune d'au moins 40 écoles dotées d'un IPS, rentrée 2024-2025 : IPS du 1er et du 9e décile des écoles, écart entre les deux, IPS moyen, nombre d'écoles. Trié de l'écart le plus large au plus étroit. Les moyennes des départements de métropole vont de 94,0 à 125,1."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. Élargir : les départements ---------- -->
+    <h2 class="fr-h3">2. Un département sur deux est plus inégal en son sein qu'entre départements</h2>
+    <dsfr-data-repeat source="resume">
+      <template>
+        <p class="odv-lecture">Dans <strong>{{nb_dep_dep}} départements sur {{nb_dep}}</strong>,
+          l'écart entre le premier et le neuvième décile des écoles dépasse les {{gap:number:1}}
+          points qui séparent les moyennes de {{dep_bas}} et de {{dep_haut}}. Les plus inégaux sont
+          urbains&nbsp;; les plus homogènes sont ruraux — mais ce sont aussi ceux où le plus
+          d'écoles n'ont pas d'IPS publié (voir le tableau).</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Étendue de l'IPS des écoles (1er → 9e décile), 30 départements les plus inégaux">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-dep" source="deps-r" type="bar" horizontal stacked
+        label-field="libelle_departement"
+        value-field="p10:Jusqu'au 1er décile"
+        value-fields="d:Du 1er au 9e décile (écart)"
+        color-map="Jusqu'au 1er décile:#e5e5e5,Du 1er au 9e décile (écart):#000091"
+        unit-tooltip="points d'IPS"
+        reference-lines='[{"axis":"x","value":94.0,"label":"94,0","dash":true},{"axis":"x","value":125.1,"label":"125,1","dash":true}]'
+        databox databox-title="IPS des écoles du 1er au 9e décile, les 30 départements à l'écart le plus large, rentrée 2024-2025"
+        databox-source="DEPP — donnees-ips-ecoles, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <!-- Le tableau porte les 101 départements, pas seulement les 30 du graphique,
+           et la part d'écoles sans IPS publié. -->
+      <dsfr-data-a11y for="g-dep" source="deps-t" table download
+        filename="ips-ecoles-departements-deciles.csv"
+        label="Les 101 départements"
+        label-field="Département"
+        value-field="1er décile, 9e décile, Écart entre déciles (points), IPS moyen des écoles, Écoles avec un IPS, Écoles sans IPS, Part sans IPS (%)"
+        description="Pour chacun des 101 départements, rentrée 2024-2025 : IPS du 1er et du 9e décile des écoles, écart entre les deux, IPS moyen, écoles avec et sans IPS publié. Trié de l'écart le plus large au plus étroit ; le graphique n'en montre que les 30 premiers."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La nuance : le secteur ---------- -->
+    <h2 class="fr-h3">3. Le privé sous contrat n'explique qu'une part de l'écart — mais la sienne grandit</h2>
+    <dsfr-data-repeat source="serie-der">
+      <template>
+        <p class="odv-lecture">À la rentrée {{rentree_scolaire}}, l'IPS moyen des écoles privées
+          sous contrat est de <strong>{{prive:number:1}}</strong>, celui des écoles publiques de
+          <strong>{{public:number:1}}</strong>&nbsp;: {{ecart:number:1}} points.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="sect-pub">
+      <template>
+        <p class="odv-lecture">C'est moins que l'écart entre écoles publiques seules&nbsp;:
+          <strong>{{d:number:1}} points</strong> du premier au neuvième décile ({{p10:number:1}} à
+          {{p90:number:1}}, {{n:number}} écoles). La mosaïque sociale de l'école est d'abord celle
+          des quartiers, que suit le public.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="serie-bornes">
+      <template>
+        <p class="odv-lecture">L'écart entre privé et public a pourtant augmenté <strong>à chaque
+          rentrée</strong>, comme au collège. La DEPP a changé sa méthode en 2022&nbsp;: avec
+          l'ancienne, il passe de <strong>{{e16:number:1}}</strong> (2016-2017) à
+          <strong>{{e21:number:1}}</strong> points (2021-2022)&nbsp;; avec la nouvelle, de
+          <strong>{{e22:number:1}}</strong> (2022-2023) à <strong>{{e24:number:1}}</strong>
+          (2024-2025).</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-4w" data-code="Écart d'IPS moyen privé − public des écoles, par rentrée">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-ecart" source="serie-r" type="bar"
+        label-field="rentree_scolaire" value-field="ecart:Écart privé − public (points d'IPS)"
+        y-min="0" unit-tooltip="points"
+        reference-lines='[{"axis":"x","value":"2022-2023","label":"Nouvelle méthode de calcul","dash":true}]'
+        databox databox-title="L'écart social entre écoles privées et publiques grandit chaque année"
+        databox-source="DEPP — donnees-ips-ecoles, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-ecart" source="serie-t" table download
+        filename="ips-ecoles-ecart-par-rentree.csv"
+        label-field="Rentrée" value-field="IPS moyen public, IPS moyen privé sous contrat, Écart (points)"
+        description="Écart entre l'IPS moyen des écoles privées sous contrat et celui des écoles publiques, chaque école comptant pour une, de 2016-2017 à 2024-2025. Il augmente à chaque rentrée. Rupture de série à la rentrée 2022-2023 : la DEPP a changé sa table de calcul."></dsfr-data-a11y>
+    </div>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">À écoles constantes, c'est le privé qui monte</h3>
+        <p class="fr-text--sm">Les mêmes écoles, suivies de 2022-2023 à 2024-2025 (même méthode,
+          même secteur les deux années)&nbsp;: l'IPS moyen a évolué de</p>
+        <dsfr-data-repeat source="paire-s" key-field="secteur">
+          <template>
+            <p class="fr-text--sm fr-mb-1v"><strong>{{d_moy:number:1}} point(s)</strong> dans le
+              {{secteur}} ({{nb:number}} écoles suivies)</p>
+          </template>
+        </dsfr-data-repeat>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Une évolution lissée</h3>
+        <p class="fr-text--sm">L'IPS d'une école est une moyenne sur cinq cohortes de CM2&nbsp;:
+          deux rentrées successives en partagent quatre. Une hausse d'une année sur l'autre est
+          donc amortie, et une série qui monte à chaque rentrée l'est en partie mécaniquement.
+          C'est pourquoi on ne compare ici que des rentrées d'une même méthode.</p>
+      </div>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       L'architecture de cette page est son sujet.
-
-       L'original charge sa page, puis n'affiche rien : sa couche de carte est
-       conditionnée à un refine département OU commune, si bien qu'au chargement
-       la carte est vide — et qu'elle le reste si l'on choisit une académie.
-       Il fait donc le pire des deux mondes : il demande de la donnée et ne la
-       montre pas.
-
-       Ici, `require-where` (#690) tient la promesse que l'original suggère :
-       tant qu'aucun filtre n'est arrivé PAR COMMANDE, la source n'émet aucune
-       requête, publie `dsfr-data-idle`, et les afficheurs rendent leur message
-       d'attente au lieu d'un chiffre faux.
-
-       Ce qui compte comme « filtre par commande » (JSDoc) : facettes serveur,
-       recherche serveur, contexte, délégation d'une query. PAS une facette en
-       mode client, qui filtre l'aval sans rien commander. D'où le montage :
-
-         source-departements ──> facette ──(context)──> contexte ──> source ips
-              (1 requête               (104 valeurs)      commande       (export
-               agrégée, 93 ms)                            `where`         filtré)
-
-       Le `where` posé en ATTRIBUT sur la source (rentrée, position non nulle)
-       ne compte pas comme filtre : il n'arrive pas par commande. C'est ce qui
-       permet de cadrer le jeu sans déclencher le chargement.
-       ========================================================================== -->
-
-  <!-- La liste des 104 départements, en UNE requête agrégée (93 ms mesuré).
-       C'est le pendant de l'`ods-adv-analysis` de l'original, qui calcule
-       `count(*) as tot` et n'affiche jamais le compte. Ici le `count(*) as n`
-       EST affiché, depuis la 0.27.0 : voir `weight-field` sur la facette. -->
-  <dsfr-data-source id="ecoles-deps" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
-    group-by="libelle_departement"
-    select="libelle_departement, count(*) as n"
-    where="rentree_scolaire = '2023-2024' and libelle_departement is not null"
-    max-records="200">
-  </dsfr-data-source>
-
-  <!-- `require-where` : aucune requête tant que le contexte n'a rien commandé.
-       `select` : on écarte les doublons du schéma (`departement` et
-       `libelle_departement`, `academie` et `libelle_academie`, `region`,
-       `num_ligne`, les six IPS de référence public/privé) — 12,0 Mo au lieu de
-       28,9 sur la rentrée entière, et proportionnellement sur un département. -->
+  <!-- ---------- 4. Exploration : un département ----------
+       `require-where` : tant qu'aucun département n'est choisi PAR COMMANDE
+       (facette en mode contexte), la source n'émet aucune requête. Le `where`
+       posé en attribut ne compte pas comme filtre. -->
   <dsfr-data-source id="ecoles" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-ecoles"
-    fetch-mode="export" require-where max-records="40000"
-    where="rentree_scolaire = '2023-2024' and position is not null"
-    select="uai, appellation_officielle, ips, secteur, libelle_commune, libelle_departement, libelle_academie, position, ips_national, ips_departemental, ips_academique">
+    fetch-mode="export" require-where max-records="5000"
+    where="rentree_scolaire = '2024-2025'"
+    select="uai, appellation_officielle, ips, secteur, libelle_commune, libelle_departement, libelle_academie, position, rentree_scolaire, ips_departemental, ips_departemental_public, ips_departemental_prive, ips_national">
   </dsfr-data-source>
-
   <dsfr-data-context id="ecoles-ctx" sources="ecoles" url-sync></dsfr-data-context>
-
-  <!-- L'écart à la référence départementale : la comparaison que le jeu rend
-       possible et qu'aucune des quatre pages IPS du portail n'affiche. -->
+  <!-- La branche `is_null` vient EN PREMIER : sans elle, une école sans IPS
+       tombe dans le `else` et se peint « 125 et plus » (payé sur la page
+       collèges ; ici 2 506 écoles sont concernées). -->
   <dsfr-data-normalize id="ecoles-n" source="ecoles"
-    compute="ecart_dep = round(ips - ips_departemental, 1); tranche_ips = when ips &lt; 90 then 'Moins de 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 125 then '110 à 125' else '125 et plus'">
+    compute="ecart_dep = when is_null(ips) then null else round(ips - ips_departemental, 1);
+             tranche_ips = when is_null(ips) then 'IPS non publié' when ips &lt; 90 then 'Moins de 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 125 then '110 à 125' else '125 et plus';
+             rang10 = when is_null(ips) then null when ips &lt; 70 then 1 when ips &lt; 80 then 2 when ips &lt; 90 then 3 when ips &lt; 100 then 4 when ips &lt; 110 then 5 when ips &lt; 120 then 6 when ips &lt; 130 then 7 when ips &lt; 140 then 8 else 9;
+             classe10 = when is_null(ips) then null when ips &lt; 70 then 'Moins de 70' when ips &lt; 80 then '70 à 80' when ips &lt; 90 then '80 à 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 120 then '110 à 120' when ips &lt; 130 then '120 à 130' when ips &lt; 140 then '130 à 140' else '140 et plus';
+             sans_ips = when is_null(ips) then 1 else 0">
   </dsfr-data-normalize>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
+  <div class="fr-container">
+    <h2 class="fr-h3">4. La mosaïque de votre département</h2>
+    <p class="fr-text--sm">Choisissez un département&nbsp;: ses écoles sont chargées à ce moment-là,
+      et pas avant. Chacune est placée sur la carte, colorée selon son IPS, et située par rapport
+      à la référence de la DEPP pour son département.</p>
+  </div>
 
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-            Choisir un département<span class="odv-filtres__compte"></span>
-          </summary>
-        <h2 class="fr-h6">Choisir un département</h2>
-        <!-- Cette facette-ci lit la source AGRÉGÉE (104 départements avec leur
-             compte) et s'enregistre dans le contexte : c'est elle qui commande
-             le chargement. `url-sync` et `url-params` sont ignorés en mode
-             contexte — c'est le contexte qui porte l'URL. -->
-        <!-- ✅ `weight-field="n"` — livré en 0.27.0 (#739), en réponse au constat
-             AM-067 écrit sur cette page même.
-             Cette facette est bâtie sur une source PRÉ-AGRÉGÉE : une ligne par
-             département, l'effectif dans la colonne `n`. Sans cet attribut, la
-             facette recomptait ses lignes et affichait « Nord 1 » là où il y a
-             1 268 écoles ; il fallait poser `hide-counts`, c'est-à-dire masquer
-             un chiffre qu'on possédait. Elle affiche désormais l'effectif réel,
-             et le tri `count` porte sur cette somme.
-             L'attribut est client uniquement : en `server-facets`, où la somme
-             n'existe pas dans la réponse `/facets`, le composant masque les
-             compteurs ET le dit, plutôt que d'afficher un nombre de lignes sous
-             un libellé de somme. -->
-        <dsfr-data-facets id="ecoles-dep" source="ecoles-deps"
+  <div class="fr-container fr-mb-8w">
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Choisir un département<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Département</h3>
+        <!-- La facette lit la source AGRÉGÉE `deps` (déjà chargée pour le récit) :
+             pas de requête de plus. `weight-field="tot"` affiche l'effectif
+             d'écoles au lieu de « 1 » (AM-067). En mode contexte, c'est elle qui
+             commande le chargement de `ecoles`. -->
+        <dsfr-data-facets id="ecoles-dep" source="deps"
           context="ecoles-ctx"
           fields="libelle_departement"
           labels="libelle_departement:Département"
-          display="libelle_departement:radio"
-          weight-field="n"
-          sort="alpha:asc" max-values="12">
-        </dsfr-data-facets>
-
-        <h2 class="fr-h6 fr-mt-4w">Affiner</h2>
-        <!-- Celles-ci sont des facettes CLIENT sur les données déjà chargées :
-             elles ne commandent rien, elles filtrent l'aval. -->
-        <dsfr-data-facets id="ecoles-f" source="ecoles-n"
-          fields="secteur, tranche_ips, libelle_commune"
-          labels="secteur:Secteur | tranche_ips:Tranche d'IPS | libelle_commune:Commune"
-          display="secteur:radio-inline | tranche_ips:checkbox | libelle_commune:radio"
+          display="libelle_departement:select"
+          weight-field="tot"
           sort="alpha:asc">
         </dsfr-data-facets>
-        </details>
-      </div>
 
-      <div class="fr-col-12 fr-col-md-9">
+        <h3 class="fr-h6 fr-mt-4w">Affiner</h3>
+        <!-- Facettes CLIENT sur les écoles chargées : elles ne commandent rien. -->
+        <dsfr-data-facets id="ecoles-f" source="ecoles-n"
+          fields="secteur, libelle_commune"
+          labels="secteur:Secteur | libelle_commune:Commune"
+          display="secteur:radio-inline | libelle_commune:select"
+          sort="alpha:asc">
+        </dsfr-data-facets>
+      </details>
 
-        <div class="odv-viz" data-code="Quatre compteurs qui attendent le choix d'un département">
-        <dsfr-data-kpi-group cols="4" gap="md">
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
           <dsfr-data-kpi source="ecoles-f" value="count" format="nombre"
-            heading="Écoles" label="dans la sélection"
-            idle-message="—"></dsfr-data-kpi>
+            heading="Écoles" label="dans la sélection" idle-message="—"></dsfr-data-kpi>
           <dsfr-data-kpi source="ecoles-f" value="ips:avg" format="decimal" decimals="1"
-            heading="IPS moyen" label="de la sélection"
-            idle-message="—"></dsfr-data-kpi>
+            heading="IPS moyen" label="chaque école comptant pour une" idle-message="—"></dsfr-data-kpi>
           <dsfr-data-kpi source="ecoles-f" value="ips_departemental:max" format="decimal" decimals="1"
-            heading="IPS départemental" label="référence du département"
-            idle-message="—"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ecoles-f" value="libelle_commune:distinct" format="nombre"
-            heading="Communes" label="concernées"
-            idle-message="—"></dsfr-data-kpi>
+            heading="IPS du département" label="référence DEPP, pondérée par les élèves" idle-message="—"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ecoles-f" value="sans_ips:sum" format="nombre"
+            heading="Écoles sans IPS publié" label="moins de 25 élèves de CM2 en cinq ans" idle-message="—"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
+
+        <dsfr-data-query id="ecoles-h" source="ecoles-f" where="rang10:isnotnull"
+          group-by="rang10, classe10" aggregate="uai:count:nb" order-by="rang10:asc">
+        </dsfr-data-query>
+        <dsfr-data-normalize id="ecoles-ht" source="ecoles-h" rename="classe10:IPS de l'école | nb:Écoles"></dsfr-data-normalize>
+        <div class="odv-viz fr-mb-4w" data-code="Répartition des écoles du département par classe d'IPS">
+          <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-hist" source="ecoles-h" type="bar"
+            label-field="classe10" value-field="nb:Écoles"
+            y-min="0" unit-tooltip="écoles"
+            databox databox-title="Les écoles de la sélection par classe de dix points d'IPS, rentrée 2024-2025"
+            databox-source="DEPP — donnees-ips-ecoles, via data.education.gouv.fr"
+            heading-level="3">
+          </dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-hist" source="ecoles-ht" table
+            label-field="IPS de l'école" value-field="Écoles"
+            description="Nombre d'écoles de la sélection dans chaque classe de dix points d'IPS, du moins favorisé au plus favorisé. Les écoles sans IPS publié sont exclues."></dsfr-data-a11y>
         </div>
 
-        <div class="odv-viz" data-code="Carte des écoles d'un département, chargée à la demande">
-        <p class="odv-lecture">Tant qu'aucun département n'est choisi, <strong>rien n'est
-          chargé</strong> — pas une ligne. Choisissez-en un&nbsp;: chaque école prend la couleur
-          de sa tranche d'IPS, et l'infobulle la situe par rapport à la référence de son
-          département, de son académie et du pays.</p>
+        <div class="odv-viz" data-code="Carte des écoles du département colorée par classe d'IPS">
         <dsfr-data-map id="carte-ecoles"
-          name="Écoles de France et leur indice de position sociale, rentrée 2023-2024"
+          name="Écoles du département choisi et leur indice de position sociale, rentrée 2024-2025"
           height="620px" tiles="ign-plan" tiles-style="muted"
-          insets="drom" fit-bounds fit-max-zoom="14">
-          <!-- `cluster` : sur un département fourni (le Nord en compte 1 268),
-               les écoles sont très denses en zone urbaine. Le regroupement garde
-               la carte lisible ET le DOM léger. -->
+          fit-bounds fit-max-zoom="14">
           <dsfr-data-map-layer id="couche-ecoles" source="ecoles-f" type="circle"
             geo-field="position" radius="5" fill-opacity="0.9"
             color-field="tranche_ips"
-            color-map="Moins de 90:#c9191e,90 à 100:#e4794a,100 à 110:#929292,110 à 125:#7ab1e8,125 et plus:#000091"
+            color-map="Moins de 90:#c9191e,90 à 100:#e4794a,100 à 110:#929292,110 à 125:#7ab1e8,125 et plus:#000091,IPS non publié:#e3e3fd"
             tooltip-field="appellation_officielle"
-            max-items="40000">
+            max-items="5000">
           </dsfr-data-map-layer>
           <dsfr-data-map-legend for="couche-ecoles" label="Indice de position sociale"></dsfr-data-map-legend>
-          <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="380px">
+          <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="360px">
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur|secteur non renseigné}}</p>
-              <p class="fr-display--xs fr-mb-1v">{{ips:number:1|—}}</p>
-              <p class="fr-text--sm fr-mb-3v">Indice de position sociale, rentrée 2023-2024</p>
-
-              <!-- Les trois références sont dans le jeu et ne sont affichées nulle
-                   part sur le portail. L'écart est calculé par `compute`. -->
+              <p class="fr-display--xs fr-mb-1v">{{ips:number:1|non publié}}</p>
+              <p class="fr-text--sm fr-mb-3v">Indice de position sociale, rentrée {{rentree_scolaire}}</p>
               <ul class="fr-text--sm fr-mb-3v">
-                <li>Écart au département : <strong>{{ecart_dep:number:1|—}}</strong></li>
-                <li>IPS départemental : {{ips_departemental:number:1|—}}</li>
-                <li>IPS académique : {{ips_academique:number:1|—}}</li>
-                <li>IPS national : {{ips_national:number:1|—}}</li>
+                <li>Écart à la référence du département : <strong>{{ecart_dep:number:1|—}}</strong></li>
+                <li>Référence du département : {{ips_departemental:number:1|—}}
+                  (public {{ips_departemental_public:number:1|—}}, privé {{ips_departemental_prive:number:1|—}})</li>
+                <li>Référence nationale : {{ips_national:number:1|—}}</li>
               </ul>
-
               <p class="fr-text--sm fr-mb-1v">
                 <strong>{{libelle_commune|commune non renseignée}}</strong><br>
                 {{libelle_departement|}} — académie de {{libelle_academie|}}
@@ -246,147 +538,114 @@
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="ecoles-f" for="carte-ecoles" table download
-          filename="ips-ecoles-2023-2024.csv"
+        <dsfr-data-normalize id="ecoles-tableau" source="ecoles-f"
+          rename="appellation_officielle:École | ips:IPS | ecart_dep:Écart au département | libelle_commune:Commune | secteur:Secteur"></dsfr-data-normalize>
+        <dsfr-data-a11y source="ecoles-tableau" for="carte-ecoles" table download
+          filename="ips-ecoles-departement-2024-2025.csv"
           label="Données de la carte"
-          description="Une école par ligne : appellation, IPS, écart au département, commune, secteur."
-          label-field="appellation_officielle"
-          value-field="ips, ecart_dep, libelle_commune, libelle_departement, secteur">
+          description="Une école par ligne pour la sélection courante : appellation, IPS, écart à la référence départementale de la DEPP, commune, secteur. Une école sans IPS publié a une cellule vide."
+          label-field="École"
+          value-field="IPS, Écart au département, Commune, Secteur">
         </dsfr-data-a11y>
         </div>
-
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="odv-viz" data-code="Les quinze communes au plus fort IPS moyen du département">
-    <h2 class="fr-h4">Les communes du département sélectionné</h2>
-    <p class="fr-text--sm fr-mb-3w">
-      Tiré du même chargement, sans requête supplémentaire. L'original n'a ni graphique, ni
-      tableau, ni total.
-    </p>
-    <p class="odv-lecture">Les quinze communes au plus fort IPS moyen de la sélection — à lire
-      <strong>avec l'effectif</strong> du tableau&nbsp;: une commune à une seule école peut
-      dominer un classement de moyennes.</p>
-    <dsfr-data-chart id="g-communes" source="ecoles-communes" type="bar" horizontal
-      label-field="libelle_commune" value-field="ips_moyen" name="IPS moyen"
-      unit-tooltip="points d'IPS"
-      databox databox-title="IPS moyen par commune (15 communes les mieux dotées de la sélection)"
-      databox-source="DEPP — donnees-ips-ecoles, via data.education.gouv.fr"
-      databox-download>
-    </dsfr-data-chart>
-    <!-- Le tableau équivalent porte l'EFFECTIF (`nb`) que le graphique ne montre
-         pas : c'est lui qui dit si la moyenne d'une commune repose sur une école
-         ou sur quarante. -->
-    <dsfr-data-a11y for="g-communes" source="ecoles-communes" table download
-      label-field="libelle_commune" value-field="ips_moyen, nb"
-      description="Les quinze communes de la sélection au plus fort IPS moyen, avec le nombre d'écoles sur lequel chaque moyenne est calculée."></dsfr-data-a11y>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">La carte de France de l'IPS par département montre un écart
+        réel, mais elle cache l'essentiel&nbsp;: dans les grandes villes et dans un département sur
+        deux, deux écoles peuvent être plus éloignées socialement que les départements extrêmes
+        ne le sont en moyenne. L'école primaire recrute près de chez elle&nbsp;; son IPS dessine
+        le quartier. Le privé sous contrat, plus favorisé et de plus en plus, n'en est qu'une
+        partie. Ce que ces données ne disent pas&nbsp;: l'effet de ces écarts sur les
+        apprentissages, ni la situation des petites écoles rurales, dont l'IPS n'est pas publié.</p>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Écoles sans IPS.</strong> La DEPP ne publie l'IPS que des écoles ayant eu au
+          moins 25 élèves de CM2 sur cinq ans&nbsp;: 2 506 écoles sur 32 509 en 2024-2025, surtout
+          rurales (la moitié des écoles de Lozère). Elles sont hors des moyennes et des déciles,
+          ce qui rend les départements ruraux <em>plus homogènes qu'ils ne le sont peut-être</em>.
+          Les maternelles, sans CM2, sont hors champ. Avant 2022, le jeu ne listait pas ces écoles.</li>
+        <li><strong>Écoles, pas élèves.</strong> Moyennes et déciles comptent chaque école pour une.
+          La référence départementale de la DEPP, affichée en section&nbsp;4, pondère par les élèves
+          et diffère donc un peu de la moyenne des écoles.</li>
+        <li><strong>Déciles plutôt qu'extrêmes.</strong> L'écart entre le 1er et le 9e décile
+          écarte les 10&nbsp;% d'écoles de chaque bout&nbsp;: une école atypique ne fait pas la barre.
+          Il se compare à un écart entre <em>moyennes</em> départementales — deux mesures en points
+          d'IPS, pas de même nature&nbsp;: la phrase dit « les écoles sont plus éloignées que les
+          départements », pas « la ville est plus inégale que la France ».</li>
+        <li><strong>Seuils.</strong> Communes d'au moins 40 écoles avec un IPS (en dessous, deux
+          déciles reposent sur quatre écoles)&nbsp;; Paris, Marseille et Lyon sont publiés par
+          arrondissement, et seuls trois arrondissements parisiens passent ce seuil&nbsp;; départements d'au moins 20 (Saint-Barthélemy et
+          Saint-Martin sont écartés)&nbsp;; outre-mer exclu du calcul de l'écart entre départements,
+          dont il élargirait l'échelle (Mayotte) sans rien dire de la métropole. 156 écoles sans
+          adresse de référence (ni commune, ni département, ni position) sont hors des sections
+          1, 2 et 4.</li>
+        <li><strong>Rupture de série en 2022</strong> (section&nbsp;3)&nbsp;: nouvelle table de
+          passage profession → IPS, et exclusion des élèves dont les deux professions sont
+          inconnues. Les évolutions ne se lisent qu'à l'intérieur d'une méthode.</li>
+        <li><strong>Angles écartés.</strong> La carte de l'IPS moyen par département (elle aurait
+          raconté l'inverse de cette page)&nbsp;; le classement des écoles « les plus
+          favorisées » (il désigne des établissements, pas un phénomène)&nbsp;; le classement des
+          communes par IPS moyen de la version précédente (une commune d'une seule école y
+          dominait).</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- Branché sur la facette, jamais sur la source : une query d'agrégat posée
-       directement sur une source Opendatasoft délègue au serveur et réécrit la
-       source pour tous ses consommateurs (BUG-009). -->
-  <dsfr-data-query id="ecoles-communes" source="ecoles-f" group-by="libelle_commune"
-    aggregate="ips:avg:ips_moyen, uai:count:nb" order-by="ips_moyen:desc" limit="15">
-  </dsfr-data-query>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
     <details class="odv-technique" id="analyse">
-      <summary>Analyse technique — ce que la reproduction a coûté</summary>
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
       <section class="fr-py-4w">
-      <h2>Analyse de reproduction — IPS Écoles</h2>
+      <h2>Analyse — IPS Écoles</h2>
 
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/dataviz-ips-ecoles/" target="_blank" rel="noopener external">/pages/dataviz-ips-ecoles/</a>.
-        Fiche d'audit : <code>docs/portail-education/dataviz-ips-ecoles.md</code>.
-        C'est le <strong>même fichier</strong> que la page
-        <a href="/education/dataviz-ips-colleges">IPS Collèges</a> — même contexte
-        <code>frenipslyceesdataviz</code>, même centrage sur la Suisse, même CSS de quatre
-        règles — appliqué à un jeu <strong>quatre fois et demie plus gros</strong>. C'est
-        précisément là que le gabarit unique cesse d'être tenable, et c'est le sujet de cette
-        analyse.
+        <a href="https://data.education.gouv.fr/pages/dataviz-ips-ecoles/" target="_blank" rel="noopener external">/pages/dataviz-ips-ecoles/</a>
+        — une carte vide au chargement, trois facettes, aucun constat, rentrée 2023-2024 figée.
+        Fiche d'audit : <code>docs/portail-education/dataviz-ips-ecoles.md</code>. Recréée le
+        2026-09-26 en page éditoriale sur la rentrée 2024-2025&nbsp;; l'original et la
+        reproduction précédente n'étaient que la section&nbsp;4.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le chargement à la demande, en un attribut booléen.</strong>
-              <code>require-where</code> (#690) : tant qu'aucun filtre n'est arrivé par
-              commande, la source ne fait aucune requête, publie <code>dsfr-data-idle</code>,
-              et chaque afficheur rend son <code>idle-message</code> au lieu d'un chiffre faux.
-              C'est exactement la promesse que l'original suggère sans la tenir — lui charge,
-              puis n'affiche rien.</li>
-            <li><strong>Le montage « une facette commande, les autres affinent ».</strong>
-              Une facette avec <code>context="…"</code> devient un filtre du contexte, qui
-              diffuse une clause <code>where</code> à ses sources cibles (#678). La liste des
-              104 départements vient d'une seconde source, agrégée côté serveur en une requête
-              de 93 ms ; les facettes d'affinage restent en mode client sur les données
-              chargées. Deux régimes de filtrage sur la même page, sans une ligne de
-              JavaScript.</li>
-            <li><strong>L'écart à la référence.</strong> Le jeu des écoles porte
-              <code>ips_national</code>, <code>ips_academique</code> et
-              <code>ips_departemental</code> — que le jeu des collèges n'a pas. Une expression
-              <code>compute</code> (<code>round(ips - ips_departemental, 1)</code>) donne
-              l'écart, et l'infobulle situe enfin chaque école. <strong>Aucune des quatre
-              pages IPS du portail ne le fait</strong>, alors que deux d'entre elles en ont
-              la donnée.</li>
-            <li><strong>Deux expressions dans un seul <code>compute</code>.</strong>
-              L'écart et la tranche, séparés par <code>;</code> — et la seconde peut relire
-              la première. Une balise, deux colonnes calculées.</li>
+            <li><strong>Les déciles, calculés par le portail.</strong>
+              <code>percentile(ips, 10)</code> dans le <code>select</code> d'une source groupée&nbsp;:
+              101 départements en 0,2&nbsp;s, 16 097 communes en un export de 1,2&nbsp;s. Rien à
+              calculer dans la page.</li>
+            <li><strong>Une étendue sans type de graphique dédié.</strong> Deux séries empilées
+              (<code>value-fields</code> + <code>stacked</code>), la première grisée par
+              <code>color-map</code>&nbsp;: la barre bleue va du 1er au 9e décile.</li>
+            <li><strong>Comparer chaque ligne à un agrégat.</strong> Clé constante
+              <code>k</code>, <code>dsfr-data-query group-by="k"</code> pour l'écart entre
+              départements, <code>dsfr-data-join</code> pour le reporter sur chaque ligne,
+              <code>compute</code> pour comparer. Le chapô et les trois KPI viennent d'une seule
+              ligne jointe.</li>
+            <li><strong>Le chargement à la demande reste en un attribut.</strong>
+              <code>require-where</code> + facette en mode contexte, bâtie sur la source agrégée
+              déjà chargée pour le récit&nbsp;: la liste des départements ne coûte plus de requête.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>« Filtre » ne veut pas dire la même chose selon le composant.</strong>
-              <code>require-where</code> ne compte que les clauses arrivées <em>par commande</em> :
-              facette serveur, recherche serveur, contexte, délégation d'une query. Une facette
-              en mode client n'en est pas une — elle filtre l'aval sans rien commander — et le
-              <code>where</code> posé en attribut sur la source n'en est pas une non plus.
-              Trois choses appelées « filtre » dans la même page, dont une seule déclenche le
-              chargement. Le JSDoc le dit, mais il faut l'avoir lu : monter la page avec une
-              facette client aurait donné une page qui n'affiche jamais rien, sans erreur.</li>
-            <li><strong>Le <code>select</code> est indispensable, et c'est un piège connu à
-              l'envers.</strong> Le schéma de ce jeu porte 29 champs, dont plusieurs doublons
-              (<code>departement</code> et <code>libelle_departement</code>,
-              <code>academie</code> et <code>libelle_academie</code>) et six IPS de référence
-              public/privé inutilisés ici. Sans <code>select</code>, la rentrée entière pèse
-              <strong>28,9 Mo</strong> ; avec, <strong>12,0 Mo</strong>. La règle maison dit
-              qu'un <code>select</code> sur un champ texte long est plus lent que l'export
-              complet — elle vaut toujours, mais elle ne dit pas quoi faire d'un jeu large
-              sans texte long, où le <code>select</code> divise le poids par deux.</li>
-            <li><strong>Le plafond de <code>max-items</code> et celui de
-              <code>max-records</code> ne se lisent pas au même endroit.</strong> Le premier
-              (5 000, sur la couche) tronque avec un bandeau « zoomez » qui ne charge rien ;
-              le second (1 000, sur la source) tronque sans un mot. Deux plafonds, deux
-              composants, deux comportements en cas de dépassement — et sur un jeu de cet
-              ordre il faut penser aux deux avant d'écrire la première balise.</li>
-            <li><strong>Une facette ne savait pas lire un effectif pré-agrégé
-              — corrigé depuis.</strong> La liste des départements vient d'une requête
-              agrégée : une ligne par département, l'effectif dans une colonne. La facette
-              recomptait ses lignes et affichait « Nord <strong>1</strong> » au lieu de
-              « Nord 1 268 » ; aucun attribut ne permettait de lui désigner la colonne de
-              poids, et il a fallu poser <code>hide-counts</code>, c'est-à-dire masquer un
-              chiffre qu'on possédait. <strong>Le constat AM-067, écrit sur cette page, a été
-              livré le jour même en 0.27.0</strong> sous la forme de
-              <code>weight-field</code> (#739). La page le porte désormais, et affiche les
-              vrais effectifs. Le constat reste écrit tel qu'il a été rencontré : c'est la
-              trace du banc.</li>
-            <li><strong>Ce que la page ne peut pas faire, et l'original non plus.</strong>
-              Une vue nationale des 32 321 écoles n'est pas raisonnable — 28,9 Mo, et
-              32 000 cercles. La bonne réponse serait une agrégation cartographique côté
-              serveur (une valeur par commune ou par département, puis une choroplèthe), que
-              le portail sait produire en une requête de 93 ms. Rien dans la bibliothèque ne
-              relie ces deux moitiés : il faut écrire une seconde source et une seconde carte.
-              Ce n'est pas un manque criant, c'est une <em>marche</em> — le passage du
-              « quelques milliers de points » au « quelques centaines de milliers » se
-              franchit à la main.</li>
+            <li><strong>Une ligne de référence ne se calcule pas.</strong> Les deux bornes de la
+              bande (94,0 et 125,1) sont écrites en dur dans <code>reference-lines</code>, datées&nbsp;;
+              le chapô et les KPI les recalculent depuis la donnée.</li>
+            <li><strong>Nommer un extrême coûte trois balises.</strong> Pour écrire « Seine-Saint-Denis »
+              à côté du minimum, il faut trier, limiter à un, regrouper pour ne garder que deux
+              colonnes, renommer, puis joindre. Aucun agrégat ne rend « la ligne du minimum ».</li>
+            <li><strong>Une tranche sans branche nulle peint faux.</strong> La reproduction
+              précédente classait les 2 506 écoles sans IPS en « 125 et plus » (dernier
+              <code>else</code>)&nbsp;: la branche <code>is_null</code> doit venir en premier.</li>
           </ul>
         </div>
       </div>
@@ -398,29 +657,23 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>couche conditionnée par <code>show-if</code> (carte vide au chargement)</td><td><code>require-where</code> sur la source</td><td>Meilleur : l'original ne charge pas <em>rien</em>, il charge puis n'affiche rien</td></tr>
-            <tr><td>liste maison <code>ods-adv-analysis</code> des départements, sans compte</td><td>source agrégée + <code>dsfr-data-facets context="…"</code> + <code>weight-field="n"</code></td><td>Meilleur depuis 0.27.0 : l'effectif que l'original calcule sans l'afficher est affiché</td></tr>
-            <tr><td><code>ods-facet</code> académie / commune</td><td><code>dsfr-data-facets</code> client, en aval</td><td>Équivalent</td></tr>
-            <tr><td><code>ods-map location="5,47.35371,8.98682"</code></td><td><code>dsfr-data-map insets="drom" fit-bounds</code></td><td>Meilleur : l'original s'ouvre sur la Suisse</td></tr>
-            <tr><td>épingles rouges uniformes</td><td><code>color-field</code> + <code>color-map</code>, tranche par <code>compute</code></td><td>Meilleur : l'IPS est représenté</td></tr>
-            <tr><td>infobulle à 5 champs, sans référence</td><td><code>dsfr-data-map-popup</code> + écart calculé</td><td>Meilleur : le jeu porte les références, l'original ne les montre pas</td></tr>
+            <tr><td><code>ods-dataset-context</code> + <code>ng-init refine.rentree_scolaire</code></td><td><code>dsfr-data-source</code> + <code>where</code> + <code>fetch-mode="export"</code></td><td>Équivalent</td></tr>
+            <tr><td>couche conditionnée par <code>show-if</code></td><td><code>require-where</code> + facette <code>context</code></td><td>Meilleur : rien n'est chargé avant le choix</td></tr>
+            <tr><td>liste maison <code>ods-adv-analysis</code> des départements</td><td><code>dsfr-data-facets weight-field</code> sur la source agrégée du récit</td><td>Meilleur : effectifs affichés, aucune requête de plus</td></tr>
+            <tr><td>épingles uniformes, infobulle à 5 champs</td><td><code>color-field</code> / <code>color-map</code>, popup avec les références DEPP</td><td>Meilleur : l'IPS est représenté et situé</td></tr>
             <tr><td><code>getDownloadURL('csv')</code></td><td><code>dsfr-data-a11y table download</code></td><td>Meilleur : tableau accessible en plus</td></tr>
-            <tr><td>—</td><td>agrégation cartographique nationale</td><td><strong>Marche non franchie</strong> : à écrire à la main, en seconde source</td></tr>
+            <tr><td>—</td><td><code>percentile</code> ODSQL, <code>stacked</code>, <code>dsfr-data-join</code>, <code>dsfr-data-pivot</code>, <code>dsfr-data-repeat</code>, <code>lazy</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, et c'est la page qui justifie le mieux le
-          jalon 0.25.0 : <code>require-where</code> et <code>fetch-mode="export"</code> ont été
-          demandés par ce banc d'essai à cause de ce jeu précis, et ils règlent le problème
-          qu'ils visaient. Le mur des 10 000 offsets, qui rendait le chargement complet
-          impossible par l'adaptateur au moment de l'audit, <strong>n'existe plus</strong>.
-          Ce qui reste est d'un autre ordre : <strong>trois choses s'appellent « filtre » dans
-          cette page et une seule déclenche le chargement</strong>. Ce n'est pas un défaut de
-          capacité, c'est un défaut de vocabulaire — et sur ce banc, les défauts de vocabulaire
-          se paient en échecs muets.</p>
+        <p>La bibliothèque n'a opposé aucune résistance au récit&nbsp;: chaque chiffre du texte est
+          calculé dans la page, et le portail fait le gros du calcul (déciles, agrégats).
+          <strong>Le travail a été la lecture du jeu</strong>&nbsp;: comprendre que l'IPS d'une
+          école est une moyenne glissante de ses CM2, que 2 506 écoles n'en ont pas, et que
+          l'écart à regarder n'est pas entre départements mais entre voisines.</p>
       </div>
       </section>
     </details>
@@ -433,6 +686,8 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+
+<!-- dsfr-data : bundle complet (cartographie) -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>

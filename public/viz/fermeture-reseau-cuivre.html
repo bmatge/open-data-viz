@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fermeture du réseau cuivre — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de « La fermeture du réseau cuivre dans votre commune » (economie.gouv.fr), sur les données de data.economie.gouv.fr.">
+  <meta name="description" content="Fermeture du réseau cuivre : l'arrêt technique tombe surtout en 2028-2029, mais la commercialisation du cuivre a pris fin au 31 janvier 2026 dans trois communes sur quatre — y compris dans deux sur trois de celles où l'arrêt n'est « pas encore prévu ». Recréation avec dsfr-data.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -12,8 +12,6 @@
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
-  <!-- DSFR Chart, retiré le 2026-09-19 (aucun graphique), revient le 2026-09-20 avec le
-       graphique des années : sans DSFRChart.css, l'infobulle rend sans style. -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
   <script src="/assets/cles.js"></script>
@@ -22,6 +20,112 @@
 <div id="site-header"></div>
 
 <main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       Recréation du 2026-09-26. Le récit tient sur UNE requête agrégée par le
+       portail : région × année de fin de commercialisation × année d'arrêt
+       technique (162 lignes au lieu de 35 305). Tout le reste en dérive côté
+       client. Deux petites sources à côté : l'état tel que le jeu le dit
+       (`output_usager`, 12 lignes) et, pour l'exploration, la source paginée
+       par le serveur de la page précédente.
+
+       Unité : le jeu publie une ligne par couple commune × code postal (35 305
+       lignes, 34 423 codes INSEE). Tous les chiffres sont des lignes et le
+       disent ; les deux proportions du titre ont été recalculées en communes
+       distinctes le 2026-09-26 (77,5 % et 64,2 %) : elles tiennent dans les
+       deux unités.
+       ========================================================================== -->
+
+  <dsfr-data-source id="cu" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="fermeture-reseau-cuivre"
+    api-key-ref="ods-mef" fetch-mode="export" max-records="5000"
+    select="count(*) as n"
+    group-by="region, year(fermeture_commerciale) as ac, year(fermeture_technique) as at">
+  </dsfr-data-source>
+
+  <!-- Drapeaux par ligne agrégée. Toutes les dates de fin de commercialisation
+       de 2026 sont le 31/01/2026 (vérifié à l'API) : `ac <= 2026` = « close au
+       31 janvier 2026 au plus tard ». Une comparaison sur null ne matche jamais :
+       les lignes sans date retombent dans le `else 0`. Ce normalize coupe aussi
+       la délégation des query en aval (un `where` sur un alias de group-by
+       serveur partirait au portail → HTTP 400, constat de la page précédente). -->
+  <dsfr-data-normalize id="cu-n" source="cu"
+    compute="com_passe = when ac <= 2026 then n else 0;
+      sans_date = when is_null(at) then n else 0;
+      datee = n - sans_date;
+      t2829 = when at >= 2028 then n else 0;
+      sd_com = when is_null(at) and ac <= 2026 then n else 0;
+      ecart2 = when at - ac >= 2 then n else 0;
+      sans_geo = when is_null(region) then n else 0">
+  </dsfr-data-normalize>
+
+  <!-- Une ligne : les totaux nationaux, puis les parts (ratios de sommes). -->
+  <dsfr-data-query id="cu-tot" source="cu-n"
+    aggregate="n:sum, com_passe:sum, sans_date:sum, datee:sum, t2829:sum, sd_com:sum, ecart2:sum, sans_geo:sum"></dsfr-data-query>
+  <dsfr-data-normalize id="cu-tot-p" source="cu-tot"
+    compute="pct_com = com_passe__sum / n__sum * 100;
+      pct_sd = sans_date__sum / n__sum * 100;
+      pct_2829 = t2829__sum / datee__sum * 100;
+      pct_sd_com = sd_com__sum / sans_date__sum * 100;
+      pct_ecart2 = ecart2__sum / datee__sum * 100;
+      pct_geo = sans_geo__sum / n__sum * 100">
+  </dsfr-data-normalize>
+
+  <!-- Le calendrier : les deux années de chaque ligne dépliées en deux lignes
+       (étape, année), puis repliées en une ligne par année, une colonne par
+       étape. Une étape sans ligne cette année-là donne null (pas de barre),
+       jamais 0. L'année passe en texte pour l'axe (sinon « 2 026 »). -->
+  <dsfr-data-unpivot id="cu-long" source="cu-n" id-cols="n"
+    value-cols="ac, at" var-name="etape" value-name="annee"></dsfr-data-unpivot>
+  <dsfr-data-pivot id="cu-cal-w" source="cu-long"
+    row="annee" column="etape" value="n" aggregate="sum"></dsfr-data-pivot>
+  <dsfr-data-normalize id="cu-cal-n" source="cu-cal-w"
+    compute="an_txt = when is_null(annee) then 'Pas de date' else concat(annee, '');
+      ordre = coalesce(annee, 9999)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cu-cal" source="cu-cal-n" order-by="ordre:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="cu-cal-txt" source="cu-cal"
+    rename="an_txt:Année | ac:Fin de la commercialisation (lignes) | at:Arrêt technique (lignes)"></dsfr-data-normalize>
+  <!-- Les pics de chaque étape, pour la phrase de lecture (années datées seulement). -->
+  <dsfr-data-query id="cu-pic-com" source="cu-cal-n" where="annee:isnotnull" order-by="ac:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="cu-pic-tech" source="cu-cal-n" where="annee:isnotnull" order-by="at:desc" limit="1"></dsfr-data-query>
+
+  <!-- Les lignes sans date d'arrêt technique, par année de fin de commercialisation. -->
+  <dsfr-data-query id="cu-sd" source="cu-n" where="at:isnull, ac:isnotnull" group-by="ac"
+    aggregate="n:sum" order-by="ac:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="cu-sd-n" source="cu-sd"
+    compute="ac_txt = concat(ac, '')"></dsfr-data-normalize>
+  <dsfr-data-normalize id="cu-sd-txt" source="cu-sd-n"
+    rename="ac_txt:Fin de la commercialisation | n__sum:Lignes sans date d'arrêt technique"></dsfr-data-normalize>
+
+  <!-- Par région : lignes géolocalisées seulement (la région est vide exactement
+       sur les lignes sans coordonnées ni département — même ensemble, vérifié à
+       l'API). Régions d'au moins 100 lignes : les outre-mer en comptent de 1 à 37,
+       une part y bascule d'une commune à l'autre. -->
+  <dsfr-data-query id="cu-reg" source="cu-n" where="region:isnotnull" group-by="region"
+    aggregate="n:sum, com_passe:sum, sans_date:sum, sd_com:sum"></dsfr-data-query>
+  <dsfr-data-normalize id="cu-reg-p" source="cu-reg"
+    compute="pct_com = com_passe__sum / n__sum * 100;
+      pct_com_1 = round(pct_com, 1);
+      pct_sd = sans_date__sum / n__sum * 100;
+      pct_sd_1 = round(pct_sd, 1);
+      pct_sd_com_1 = round(sd_com__sum / sans_date__sum * 100, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cu-reg-m" source="cu-reg-p" where="n__sum:gte:100" order-by="pct_com:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="cu-reg-txt" source="cu-reg-m"
+    rename="region:Région | n__sum:Lignes | pct_com_1:Commercialisation close (%) | pct_sd_1:Sans date d'arrêt technique (%) | pct_sd_com_1:Dont commercialisation close (% des sans date)"></dsfr-data-normalize>
+  <dsfr-data-query id="cu-reg-bas" source="cu-reg-m" order-by="pct_com:asc" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="cu-reg-haut" source="cu-reg-m" order-by="pct_com:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="cu-reg-ecartes" source="cu-reg-p" where="n__sum:lt:100" aggregate="n:count, n__sum:sum"></dsfr-data-query>
+
+  <!-- L'état tel que LE JEU le dit : `output_usager` porte la phrase servie à
+       l'usager (« déjà fermé », « au plus tard le … », « pas encore prévu »). -->
+  <dsfr-data-source id="cu-etat" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="fermeture-reseau-cuivre"
+    api-key-ref="ods-mef" fetch-mode="export"
+    select="count(*) as nb" group-by="output_usager">
+  </dsfr-data-source>
+  <dsfr-data-query id="cu-etat-ferme" source="cu-etat" where="output_usager:contains:déjà fermé"></dsfr-data-query>
 
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
@@ -34,102 +138,187 @@
       </div>
     </nav>
 
-    <h1>La fermeture du réseau cuivre dans votre commune</h1>
+    <h1>Le réseau cuivre s'éteindra surtout en 2028 et 2029, mais on ne peut déjà plus s'y abonner dans trois communes sur quatre</h1>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-8">
-        <div class="fr-callout fr-icon-database-line">
-          <h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2>
-          <p class="fr-callout__text fr-text--sm">
-            <a href="https://data.economie.gouv.fr/explore/dataset/fermeture-reseau-cuivre/"
-               target="_blank" rel="noopener external"><code>fermeture-reseau-cuivre</code></a>
-            — 35&nbsp;305 lignes, <strong>une par commune et par code postal</strong> (34&nbsp;423 communes&nbsp;:
-            Toulouse y tient six lignes), avec leur lot, leur date de fermeture commerciale et, pour 20&nbsp;617
-            d'entre elles, la date de fermeture technique du réseau cuivre d'Orange (DGE, octobre 2025).
-            La page d'origine est
-            <a href="https://www.economie.gouv.fr/treshautdebit/la-fermeture-du-reseau-cuivre-dans-votre-commune"
-               target="_blank" rel="noopener external">sur economie.gouv.fr</a>, hors du portail Opendatasoft,
-            mais elle lit ce jeu&nbsp;: un moteur de recherche par commune, deux filtres, une carte colorée par
-            année de fermeture, et rien avant la première recherche.
-          </p>
+    <dsfr-data-repeat source="cu-tot-p">
+      <template>
+        <p class="fr-text--lead">Selon le calendrier d'Orange publié par la DGE (jeu mis à jour le
+          20&nbsp;octobre 2025), la fermeture se fait en deux temps. D'abord la <strong>fin de la
+          commercialisation</strong>&nbsp;: plus de nouvel abonnement sur le cuivre. Elle est intervenue
+          au plus tard le 31&nbsp;janvier 2026 pour <strong>{{pct_com:number:0}}&nbsp;% des communes</strong>.
+          Ensuite l'<strong>arrêt technique</strong> de la ligne&nbsp;: {{pct_2829:number:0}}&nbsp;% des dates
+          fixées tombent en 2028 ou 2029, et <strong>{{pct_sd:number:0}}&nbsp;% des communes n'en ont pas
+          encore</strong> — dont {{pct_sd_com:number:0}}&nbsp;% où la commercialisation est pourtant déjà close.</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="cu-n" value="com_passe:sum / n:sum" format="pourcentage" decimals="0"
+        heading="Commercialisation close" label="des communes au 31 janvier 2026 (par code postal)" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cu-n" value="t2829:sum / datee:sum" format="pourcentage" decimals="0"
+        heading="Arrêt en 2028 ou 2029" label="des dates d'arrêt technique déjà fixées" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cu-n" value="sans_date:sum / n:sum" format="pourcentage" decimals="0"
+        heading="Arrêt pas encore daté" label="des communes (par code postal)" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cu-etat" value="nb:sum{output_usager:contains:déjà fermé} / nb:sum" format="pourcentage" decimals="1"
+        heading="Réseau déjà fermé" label="des communes selon le jeu, en octobre 2025" span="3"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
+      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.economie.gouv.fr/explore/dataset/fermeture-reseau-cuivre/"
+           target="_blank" rel="noopener external"><code>fermeture-reseau-cuivre</code></a>
+        — tiré du «&nbsp;fichier trajectoire&nbsp;» d'Orange, publié par la DGE et mis à jour le
+        20&nbsp;octobre 2025. <strong>Une ligne par commune et par code postal</strong>&nbsp;: 35&nbsp;305
+        lignes pour 34&nbsp;423 communes (Toulouse en tient six). Chaque ligne porte son lot, sa date de
+        fin de commercialisation, sa date d'arrêt technique quand elle est fixée, et la phrase que
+        l'usager lit en cherchant sa commune (<code>output_usager</code>). La page d'origine est
+        <a href="https://www.economie.gouv.fr/treshautdebit/la-fermeture-du-reseau-cuivre-dans-votre-commune"
+           target="_blank" rel="noopener external">sur economie.gouv.fr</a>, hors du portail&nbsp;: un moteur
+        de recherche par commune et une carte par année d'arrêt, rien avant la première recherche.
+        Les définitions des deux étapes viennent du plan de fermeture encadré par l'Arcep, pas du jeu.
+      </p>
+    </details>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+
+    <!-- ============================ PREUVE ============================ -->
+    <div class="odv-viz" data-code="Deux calendriers : fin de la commercialisation et arrêt technique, par année">
+      <h2 class="fr-h4">Deux calendriers décalés&nbsp;: l'abonnement s'arrête en 2026, la ligne en 2028-2029</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Nombre de communes (une ligne par
+        code postal) selon l'année de chacune des deux étapes. Chaque commune compte une fois dans
+        chaque série. La dernière barre regroupe les communes dont l'arrêt technique n'a pas encore
+        de date.</p>
+      <dsfr-data-repeat source="cu-pic-com">
+        <template>
+          <p class="odv-lecture">La fin de la commercialisation culmine en <strong>{{an_txt}}</strong>&nbsp;:
+            {{ac:number}} communes d'un coup.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="cu-pic-tech">
+        <template>
+          <p class="odv-lecture">L'arrêt technique culmine en <strong>{{an_txt}}</strong>
+            ({{at:number}} communes)&nbsp;: la ligne continue de fonctionner, sans nouveaux abonnés,
+            pendant plusieurs années.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="cu-tot-p">
+        <template>
+          <p class="odv-lecture">Pour <strong>{{pct_ecart2:number:0}}&nbsp;%</strong> des communes dont
+            l'arrêt est daté, deux ou trois années civiles séparent les deux étapes.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <dsfr-data-chart id="g-cal" source="cu-cal" type="bar"
+          label-field="an_txt" value-field="ac:Fin de la commercialisation"
+          value-fields="at:Arrêt technique"
+          unit-tooltip=" communes"
+          databox databox-title="Communes par année de fin de commercialisation et d'arrêt technique du réseau cuivre (une ligne par code postal)"
+          databox-source="DGE, fichier trajectoire d'Orange — fermeture-reseau-cuivre, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-cal" source="cu-cal-txt" table download
+          label-field="Année" value-field="Fin de la commercialisation (lignes), Arrêt technique (lignes)"
+          description="Barres groupées par année, de 2020 à 2029, puis un groupe « Pas de date ». Première série : la fin de la commercialisation, presque toute concentrée en 2026, avec une queue en 2027 et 2028. Seconde série : l'arrêt technique, qui monte d'année en année jusqu'à 2029, et un groupe sans date presque aussi haut que le pic de 2026."></dsfr-data-a11y>
+      </div>
+    </div>
+
+    <!-- ============================ NUANCE 1 : LE PARADOXE ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="« Pas encore prévu » : où en est la commercialisation">
+      <h2 class="fr-h4">«&nbsp;Pas encore prévu&nbsp;»&nbsp;: dans deux cas sur trois, l'abonnement cuivre est pourtant déjà fermé</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Communes (une ligne par code postal)
+        sans date d'arrêt technique, selon l'année de fin de la commercialisation. Toutes appartiennent
+        aux présélections des lots 6 et 7.</p>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-6">
+          <blockquote class="fr-quote fr-quote--column fr-mt-0">
+            <p>L'arrêt des services du réseau cuivre n'est pas encore prévu dans votre commune. Nous vous
+              invitons tout de même à anticiper.</p>
+            <figcaption>
+              <p class="fr-quote__author">La phrase servie à l'usager</p>
+              <p class="fr-quote__source">Champ «&nbsp;output_usager&nbsp;» du jeu, 14&nbsp;688 lignes au 20&nbsp;octobre 2025</p>
+            </figcaption>
+          </blockquote>
+          <dsfr-data-repeat source="cu-tot-p">
+            <template>
+              <p class="odv-lecture">{{sans_date__sum:number}} communes reçoivent cette phrase. Dans
+                <strong>{{sd_com__sum:number}}</strong> d'entre elles ({{pct_sd_com:number:0}}&nbsp;%),
+                la commercialisation du cuivre a pris fin au plus tard le 31&nbsp;janvier 2026&nbsp;: un
+                ménage qui déménage ou change d'offre n'y trouvera plus d'abonnement cuivre. La phrase
+                parle de la ligne, pas de l'offre.</p>
+            </template>
+          </dsfr-data-repeat>
+        </div>
+        <div class="fr-col-12 fr-col-lg-6">
+          <div class="odv-chart-slot">
+            <dsfr-data-chart id="g-sd" source="cu-sd-n" type="bar" horizontal
+              label-field="ac_txt" value-field="n__sum:Communes sans date d'arrêt technique"
+              selected-palette="neutral" highlight-index="[0]" unit-tooltip=" communes"
+              databox databox-title="Communes sans date d'arrêt technique, par année de fin de la commercialisation"
+              databox-source="DGE — fermeture-reseau-cuivre, via data.economie.gouv.fr">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-sd" source="cu-sd-txt" table
+              label-field="Fin de la commercialisation" value-field="Lignes sans date d'arrêt technique"
+              description="Trois barres horizontales : parmi les communes sans date d'arrêt technique, celles dont la commercialisation a pris fin en 2026 (la plus longue, mise en évidence), en 2027 et en 2028."></dsfr-data-a11y>
+          </div>
         </div>
       </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <div class="fr-callout fr-icon-arrow-right-line fr-callout--brown-caramel">
-          <p class="fr-callout__text fr-text--sm">
-            Ici, tout est délégué au serveur&nbsp;: recherche, facettes, pagination. Aucun chargement
-            complet — l'export des 35&nbsp;305 lignes coûterait 4 à 7&nbsp;s, pour une page où l'on ne cherche
-            qu'une commune.
-          </p>
-        </div>
+    </div>
+
+    <!-- ============================ NUANCE 2 : LES RÉGIONS ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="Part des communes où la commercialisation est close, par région">
+      <h2 class="fr-h4">Dans la plupart des régions, la commercialisation est close pour plus des trois quarts des communes&nbsp;; la Bretagne et Auvergne-Rhône-Alpes restent sous la moitié</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Part des communes (une ligne par code
+        postal) dont la commercialisation du cuivre a pris fin au plus tard le 31&nbsp;janvier 2026, par
+        région, en&nbsp;%. Régions d'au moins 100 lignes, triées de la plus en retard à la plus avancée.</p>
+      <dsfr-data-repeat source="cu-reg-bas">
+        <template>
+          <p class="odv-lecture"><strong>{{region}}</strong>&nbsp;: {{pct_com:number:0}}&nbsp;% des communes
+            ont vu la commercialisation close, et {{pct_sd:number:0}}&nbsp;% n'ont pas encore de date d'arrêt.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="cu-reg-haut">
+        <template>
+          <p class="odv-lecture">À l'autre bout, <strong>{{region}}</strong>&nbsp;: {{pct_com:number:0}}&nbsp;% —
+            ce qui n'empêche pas {{pct_sd:number:0}}&nbsp;% de ses communes d'attendre encore leur date d'arrêt. Être en avance
+            sur la première étape ne dit rien de la seconde. Le jeu ne donne pas la raison de ces écarts.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <dsfr-data-chart id="g-reg" source="cu-reg-m" type="bar" horizontal
+          label-field="region" value-field="pct_com_1:Commercialisation close (%)"
+          selected-palette="neutral" highlight-index="[0, 1]" unit-tooltip="%" x-min="0" x-max="100"
+          databox databox-title="Part des communes où la commercialisation du cuivre est close au 31 janvier 2026, par région"
+          databox-source="DGE — fermeture-reseau-cuivre, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-reg" source="cu-reg-txt" table download
+          label-field="Région" value-field="Lignes, Commercialisation close (%), Sans date d'arrêt technique (%), Dont commercialisation close (% des sans date)"
+          description="Barres horizontales, une par région d'au moins 100 lignes, triées par part croissante des communes où la commercialisation est close. Les deux premières, mises en évidence, sont nettement sous la moitié ; les régions du nord et de l'est dépassent 90 %. Le tableau ajoute la part sans date d'arrêt technique, et, parmi elles, la part où la commercialisation est déjà close."></dsfr-data-a11y>
       </div>
     </div>
   </div>
 
-  <!-- ==========================================================================
+  <!-- ============================ EXPLORATION ============================
        Pipeline entièrement serveur : la source Opendatasoft est paginée
        (server-side, 20 lignes), la recherche envoie search("…") au serveur,
-       les facettes viennent de l'endpoint /facets, et la carte ne dessine que la
-       page courante. L'année de fermeture technique n'est pas une facette
-       déclarée au back-office : elle passe par un contexte et un <select>.
-       ========================================================================== -->
-
+       les facettes viennent de l'endpoint /facets, la carte ne dessine que la
+       page courante. L'année d'arrêt n'est pas une facette déclarée au
+       back-office : elle passe par un contexte et un <select>. -->
   <dsfr-data-source id="cuivre" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="fermeture-reseau-cuivre"
     api-key-ref="ods-mef" server-side page-size="20"
     order-by="nom_commune:asc">
   </dsfr-data-source>
-
-  <!-- Trois sources agrégées PAR LE PORTAIL, nationales, une requête de quelques
-       lignes chacune. Elles ne suivent ni la recherche ni les filtres : ce sont les
-       repères de toute la France, et la page le dit à côté de chaque chiffre. -->
-
-  <!-- Le nombre de lignes par année de fermeture technique, groupe null COMPRIS :
-       14 688 lignes n'ont pas de date, et un calendrier qui les tairait montrerait
-       58 % du jeu comme s'il était entier. L'année sort en TEXTE (`date_format`,
-       la virgule de l'expression passe l'adaptateur) : en nombre, le tableau
-       équivalent l'écrirait « 2 021 ». -->
-  <dsfr-data-source id="cuivre-annees" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fermeture-reseau-cuivre"
-    api-key-ref="ods-mef" select="count(*) as nb"
-    group-by="date_format(annee_fermeture_technique, 'yyyy') as annee" order-by="annee">
-  </dsfr-data-source>
-  <!-- L'année la plus chargée, et sa part PARMI LES LIGNES DATÉES, sur une source
-       à elle : le groupe null est écarté en ODSQL, pas par un `where` de query.
-       Vérifié le 2026-09-20 : une query SEULE sur la source ci-dessus délègue
-       `where="annee:isnotnull"` au portail, qui ne connaît pas l'alias → HTTP 400 ;
-       elle ne marchait que parce qu'un voisin (le normalize) coupait la délégation.
-       `share_percent` divise par la somme des lignes de sortie avant `limit`. -->
-  <dsfr-data-source id="cuivre-annees-datees" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fermeture-reseau-cuivre"
-    api-key-ref="ods-mef" select="count(*) as nb" where="annee_fermeture_technique is not null"
-    group-by="date_format(annee_fermeture_technique, 'yyyy') as annee" order-by="annee">
-  </dsfr-data-source>
-  <dsfr-data-query id="cuivre-annee-1" source="cuivre-annees-datees"
-    aggregate="nb:share_percent:part" order-by="nb:desc" limit="1"></dsfr-data-query>
-  <!-- Les colonnes nommées du tableau équivalent (rename : `champ:Libellé | …`). -->
-  <dsfr-data-normalize id="cuivre-annees-txt" source="cuivre-annees"
-    rename="annee:Année de fermeture technique | nb:Communes (une ligne par code postal)"></dsfr-data-normalize>
-
-  <!-- L'état de la fermeture tel que LE JEU le dit : `output_usager` porte trois
-       phrases (« déjà fermé », « au plus tard le … », « pas encore prévu »). C'est
-       la seule colonne fiable pour « déjà fermées » : 67 lignes de 2027 et 2028 y
-       sont déjà fermées, en avance sur leur date. -->
-  <dsfr-data-source id="cuivre-etat" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fermeture-reseau-cuivre"
-    api-key-ref="ods-mef" select="count(*) as nb" group-by="output_usager">
-  </dsfr-data-source>
-
   <dsfr-data-context id="ctx-cuivre" sources="cuivre">
     <dsfr-data-context-filter field="annee_fermeture_technique" operator="year-of" ui="filtre-annee"
-      label="Année de fermeture technique"></dsfr-data-context-filter>
+      label="Année d'arrêt technique"></dsfr-data-context-filter>
   </dsfr-data-context>
 
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle mérite la première ligne. Le compteur
-       nomme l'unité du jeu : une ligne par code postal, « Toulouse » en rend six. -->
   <section class="odv-bandeau">
     <div class="fr-container">
+      <h2 class="fr-h4">Et dans votre commune&nbsp;?</h2>
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="cuivre-q" source="cuivre" server-search count
           count-label="commune (une par code postal)|communes (une par code postal)"
@@ -140,28 +329,6 @@
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. Ils sont
-         nationaux et le disent — la recherche, elle, a son propre compteur. -->
-    <div class="odv-viz" data-code="Trois compteurs nationaux, lus dans le jeu">
-    <dsfr-data-repeat source="cuivre-annee-1">
-      <template>
-        <p class="odv-lecture">Sur toute la France, <strong>{{annee}}</strong> est l'année la plus chargée&nbsp;:
-          <strong>{{nb:number}}</strong> communes, soit <strong>{{part:number:0}}&nbsp;%</strong> de celles dont
-          la date de fermeture technique est fixée. Les trois compteurs comptent comme le jeu&nbsp;: une ligne
-          par commune et par code postal.</p>
-      </template>
-    </dsfr-data-repeat>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="cuivre-etat" value="nb:sum{output_usager:contains:déjà fermé}" format="nombre"
-        heading="Réseau déjà fermé" label="communes (une ligne par code postal)" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cuivre-etat" value="nb:sum{output_usager:contains:au plus tard}" format="nombre"
-        heading="Fermeture prévue, date fixée" label="communes (une ligne par code postal)" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cuivre-etat" value="nb:sum{output_usager:contains:pas encore prévu}" format="nombre"
-        heading="Pas encore prévue — d'ici 2030" label="communes (une ligne par code postal)" col="4"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    </div>
-
-    <!-- Les filtres sont alignés sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
@@ -170,7 +337,7 @@
         <h2 class="fr-h6">Filtrer</h2>
 
         <div class="fr-select-group fr-mt-2w">
-          <label class="fr-label" for="filtre-annee">Année de fermeture technique</label>
+          <label class="fr-label" for="filtre-annee">Année d'arrêt technique</label>
           <select class="fr-select" id="filtre-annee">
             <option value="">Toutes les années</option>
             <option>2021</option><option>2023</option><option>2025</option><option>2026</option>
@@ -179,268 +346,196 @@
         </div>
 
         <dsfr-data-facets id="cuivre-f" source="cuivre-q" server-facets
-          fields="departement, region, lot, fermeture_commerciale"
-          labels="departement:Département | region:Région | lot:Lot | fermeture_commerciale:Fermeture commerciale"
+          fields="region, departement, fermeture_commerciale"
+          labels="region:Région | departement:Département | fermeture_commerciale:Fin de la commercialisation"
           searchable="departement" max-values="6"
-          display="departement:multiselect | region:multiselect | lot:multiselect | fermeture_commerciale:multiselect">
+          display="region:multiselect | departement:multiselect | fermeture_commerciale:multiselect">
         </dsfr-data-facets>
         <dsfr-data-context-tags for="ctx-cuivre"></dsfr-data-context-tags>
       </details>
       <div class="fr-col-12 fr-col-lg-9">
-        <div class="odv-viz" data-code="La carte de la page courante, colorée par année de fermeture technique">
-        <h2 class="fr-h4">Où en est la fermeture</h2>
-        <p class="odv-lecture">La carte ne montre que les <strong>20 communes de la page courante</strong>,
-          colorées par année de fermeture technique — en gris, celles dont la date n'est pas encore fixée.
-          Elle ne montre jamais les <strong>3&nbsp;167 lignes sans coordonnées</strong> dans le jeu (9&nbsp;%),
-          dont 3&nbsp;121 n'ont ni code postal ni département&nbsp;: elles restent dans la liste et répondent
-          à la recherche par nom, mais échappent aux filtres Département et Région.</p>
-        <dsfr-data-map name="Carte des communes de la page courante, colorées par année de fermeture technique"
-          center="46.55,2.5" zoom="5" height="480px" tiles="ign-plan" tiles-style="muted"
-          fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
-          <dsfr-data-map-layer id="cuivre-couche" source="cuivre-f" type="circle" radius="7"
-            geo-field="point_geo" color="#929292"
-            color-field="annee_fermeture_technique"
-            color-map="2021:#000000,2023:#000000,2025:#c9191e,2026:#ff9940,2027:#e4794a,2028:#00a95f,2029:#000091"
-            tooltip-field="nom_commune">
-          </dsfr-data-map-layer>
-          <dsfr-data-map-popup mode="panel-right" title-field="nom_commune" width="340px">
+        <div class="odv-viz" data-code="La carte de la page courante, colorée par année d'arrêt technique">
+          <h3 class="fr-h5">Les communes de la recherche, par année d'arrêt technique</h3>
+          <dsfr-data-repeat source="cu-tot-p">
             <template>
-              <p class="fr-text--sm fr-mb-2v"><strong>{{#if code_postal}}{{code_postal}} {{/if}}{{nom_commune}}</strong> — {{nom_departement|département non renseigné}}{{#if region}}, {{region}}{{/if}}</p>
-              <p class="fr-text--sm fr-mb-2v">{{output_usager|Le jeu ne dit rien de plus sur cette commune.}}</p>
-              <p class="fr-text--sm fr-mb-1v">Fermeture commerciale&nbsp;: <strong>{{fermeture_commerciale:date|non définie}}</strong></p>
-              <p class="fr-text--sm fr-mb-1v">Fermeture technique&nbsp;: <strong>{{fermeture_technique:date|pas encore fixée}}</strong></p>
-              <p class="fr-text--xs">Lot&nbsp;: {{lot|—}}</p>
+              <p class="odv-lecture">La carte montre les <strong>20 communes de la page courante</strong>,
+                colorées par année d'arrêt technique, en gris quand elle n'est pas fixée. Elle ne montre
+                jamais les <strong>{{sans_geo__sum:number}} lignes sans coordonnées</strong>
+                ({{pct_geo:number:0}}&nbsp;% du jeu)&nbsp;: elles n'ont pas non plus de région ni de
+                département, et échappent donc à ces deux filtres — la recherche par nom les trouve.</p>
             </template>
-          </dsfr-data-map-popup>
-          <!-- Légende dérivée du rendu de la couche (LIM-009, 0.22.0) : elle remplace
-               sept tags écrits à la main qui recopiaient color-map. Le repli `color`
-               (communes sans date technique) y apparaît comme « Autres valeurs ».
-               La légende dit l'ANNÉE, pas l'état : le jeu marque « déjà fermé » 1 003
-               lignes, de 2021 à 2026 plus 67 en avance sur 2027-2028 — c'est la fiche
-               de chaque commune (output_usager) qui le dit, pas la couleur. -->
-          <dsfr-data-map-legend for="cuivre-couche" label="Année de fermeture technique — en gris, date pas encore fixée"></dsfr-data-map-legend>
-        </dsfr-data-map>
+          </dsfr-data-repeat>
+          <dsfr-data-map name="Carte des communes de la page courante, colorées par année d'arrêt technique"
+            center="46.55,2.5" zoom="5" height="480px" tiles="ign-plan" tiles-style="muted"
+            fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
+            <dsfr-data-map-layer id="cuivre-couche" source="cuivre-f" type="circle" radius="7"
+              geo-field="point_geo" color="#929292"
+              color-field="annee_fermeture_technique"
+              color-map="2021:#000000,2023:#000000,2025:#c9191e,2026:#ff9940,2027:#e4794a,2028:#00a95f,2029:#000091"
+              tooltip-field="nom_commune">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-popup mode="panel-right" title-field="nom_commune" width="340px">
+              <template>
+                <p class="fr-text--sm fr-mb-2v"><strong>{{#if code_postal}}{{code_postal}} {{/if}}{{nom_commune}}</strong> — {{nom_departement|département non renseigné}}{{#if region}}, {{region}}{{/if}}</p>
+                <p class="fr-text--sm fr-mb-2v">{{output_usager|Le jeu ne dit rien de plus sur cette commune.}}</p>
+                <p class="fr-text--sm fr-mb-1v">Fin de la commercialisation&nbsp;: <strong>{{fermeture_commerciale:date|non définie}}</strong></p>
+                <p class="fr-text--sm fr-mb-1v">Arrêt technique&nbsp;: <strong>{{fermeture_technique:date|pas encore fixé}}</strong></p>
+                <p class="fr-text--xs">Lot&nbsp;: {{lot|—}}</p>
+              </template>
+            </dsfr-data-map-popup>
+            <dsfr-data-map-legend for="cuivre-couche" label="Année d'arrêt technique — en gris, pas encore fixée"></dsfr-data-map-legend>
+          </dsfr-data-map>
+        </div>
+
+        <div class="odv-viz fr-mt-4w" data-code="Les communes, paginées par le serveur">
+          <h3 class="fr-h5">Les deux dates de chaque commune</h3>
+          <dsfr-data-display source="cuivre-f" cols="2" uid-field="code_insee"
+            empty="Aucune commune ne correspond à cette recherche."
+            count-label="commune (une par code postal)|communes (une par code postal)">
+            <template>
+              <div class="fr-card fr-card--sm fr-card--horizontal">
+                <div class="fr-card__body">
+                  <div class="fr-card__content">
+                    <h4 class="fr-card__title">{{nom_commune}}{{#if code_postal}} <span class="fr-text--regular">({{code_postal}})</span>{{/if}}</h4>
+                    <p class="fr-card__desc fr-text--sm">{{nom_departement|département non renseigné}}{{#if region}}, {{region}}{{/if}}</p>
+                    <div class="fr-card__end">
+                      <p class="fr-text--sm fr-mb-1v">Fin de la commercialisation&nbsp;: <strong>{{fermeture_commerciale:date|non définie}}</strong></p>
+                      <p class="fr-text--sm fr-mb-1v">Arrêt technique&nbsp;: <strong>{{fermeture_technique:date|pas encore fixé}}</strong></p>
+                      <p class="fr-text--xs fr-mb-1v">{{output_usager|}}</p>
+                      <p class="fr-text--xs fr-mb-0">Lot {{lot|—}}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </dsfr-data-display>
         </div>
       </div>
     </div>
 
-    <!-- Le calendrier national, pleine largeur sous la carte : c'est ce que les
-         comptes du <select> d'origine disaient, en barres. -->
-    <div class="odv-viz" data-code="Le calendrier : combien de communes par année de fermeture technique">
-    <h2 class="fr-h4">Quand le cuivre ferme, année par année</h2>
-    <p class="odv-lecture">Le calendrier monte en charge&nbsp;: <strong>2028 et 2029</strong> concentrent
-      17&nbsp;526 des 20&nbsp;617 lignes datées (85&nbsp;%). Les fermetures de 2021 et 2023 sont
-      des expérimentations (7 lignes), invisibles à cette échelle mais présentes dans le tableau.
-      La première barre, «&nbsp;Pas encore fixée&nbsp;», est la plus haute&nbsp;: 14&nbsp;688 lignes
-      (42&nbsp;%), toutes en présélection des lots 6 et 7, fermeture annoncée «&nbsp;d'ici à 2030&nbsp;».</p>
-    <dsfr-data-chart id="g-annees" source="cuivre-annees" type="bar"
-      label-field="annee" value-field="nb:Communes (une ligne par code postal)" empty-label="Pas encore fixée"
-      databox databox-title="Communes par année de fermeture technique du réseau cuivre (une ligne par code postal)"
-      databox-source="DGE — fermeture-reseau-cuivre, via data.economie.gouv.fr" databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-annees" source="cuivre-annees-txt" table download
-      empty-label="Pas encore fixée"
-      description="Une barre par année de fermeture technique, de 2021 à 2029, précédée du groupe sans date. 2029 porte 10 702 lignes, 2028 en porte 6 824 ; 14 688 lignes n'ont pas encore de date."></dsfr-data-a11y>
+    <!-- ============================ CE QU'ON NE MONTRE PAS ============================ -->
+    <div class="fr-callout fr-mt-6w">
+      <h2 class="fr-callout__title fr-h5">Ce que cette page ne montre pas</h2>
+      <ul class="fr-callout__text fr-text--sm">
+        <li><strong>Un calendrier, pas un constat.</strong> Le jeu date d'octobre 2025&nbsp;; les dates
+          sont des échéances «&nbsp;au plus tard&nbsp;», sous réserve des critères de fermeture fixés
+          par l'Arcep. Une date passée dit ce qui était prévu, pas ce qui a eu lieu.</li>
+        <li><strong>Des lignes, pas des communes.</strong> Une commune à plusieurs codes postaux compte
+          plusieurs fois. Les parts du titre ont été recalculées en communes distinctes à l'API le
+          2026-09-26&nbsp;: 78&nbsp;% et 64&nbsp;%, un à deux points d'écart — «&nbsp;trois sur quatre&nbsp;» et «&nbsp;deux sur trois&nbsp;» tiennent dans les deux unités.</li>
+        <dsfr-data-repeat source="cu-etat-ferme">
+          <template>
+            <li><strong>«&nbsp;Déjà fermé&nbsp;» vient du jeu, pas de la date.</strong> {{nb:number}} lignes
+              portent la phrase «&nbsp;Le réseau cuivre est déjà fermé dans votre commune&nbsp;», dont
+              quelques-unes datées de 2027 ou 2028, fermées en avance. La carte colore l'année d'arrêt&nbsp;;
+              l'état, c'est la fiche de chaque commune qui le dit.</li>
+          </template>
+        </dsfr-data-repeat>
+        <dsfr-data-repeat source="cu-reg-ecartes">
+          <template>
+            <li><strong>Pas d'outre-mer dans le graphique des régions</strong>&nbsp;: {{n__count}} territoires
+              de moins de 100 lignes ({{n__sum__sum:number}} lignes en tout), où une commune fait bouger la part
+              de plusieurs points. Ils restent dans les totaux, la carte et la recherche.</li>
+          </template>
+        </dsfr-data-repeat>
+        <li><strong>Pas de lot en filtre.</strong> Le lot est un identifiant technique
+          (<code>4_1</code>, <code>PreselectionLot6</code>…) qui ne dit rien de plus que les deux
+          dates&nbsp;; il reste dans chaque fiche.</li>
+      </ul>
     </div>
 
-    <div class="odv-viz" data-code="Les communes, paginées par le serveur">
-    <h2 class="fr-h4 fr-mt-4w">Les communes</h2>
-    <dsfr-data-display source="cuivre-f" cols="2" uid-field="code_insee"
-      empty="Aucune commune ne correspond à cette recherche."
-      count-label="commune (une par code postal)|communes (une par code postal)">
-      <template>
-        <div class="fr-card fr-card--sm fr-card--horizontal">
-          <div class="fr-card__body">
-            <div class="fr-card__content">
-              <h3 class="fr-card__title">{{nom_commune}}{{#if code_postal}} <span class="fr-text--regular">({{code_postal}})</span>{{/if}}</h3>
-              <p class="fr-card__desc fr-text--sm">{{nom_departement|département non renseigné}}{{#if region}}, {{region}}{{/if}}</p>
-              <div class="fr-card__end">
-                <p class="fr-text--sm fr-mb-1v">Fermeture commerciale&nbsp;: <strong>{{fermeture_commerciale:date|non définie}}</strong></p>
-                <p class="fr-text--sm fr-mb-1v">Fermeture technique&nbsp;: <strong>{{fermeture_technique:date|pas encore fixée}}</strong></p>
-                <p class="fr-text--xs fr-mb-1v">{{output_usager|}}</p>
-                <p class="fr-text--xs fr-mb-0">Lot {{lot|—}}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-    </dsfr-data-display>
-    </div>
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Les choix éditoriaux, écrits pour pouvoir être discutés</h2>
+      <ol class="fr-text--sm">
+        <li class="fr-mb-2w"><strong>L'angle&nbsp;: les deux dates, pas l'année d'arrêt seule.</strong> La
+          page d'origine et sa première reproduction coloraient les communes par année d'arrêt technique.
+          Pour l'usager, la date qui change quelque chose d'abord est la fin de la commercialisation&nbsp;;
+          elle était dans le jeu, en facette, et nulle part dans le récit.</li>
+        <li class="fr-mb-2w"><strong>Angle écarté&nbsp;: la carte nationale.</strong> 35&nbsp;305 points
+          redessineraient la carte des communes&nbsp;; les parts régionales disent la même chose en treize
+          barres, et la carte reste pour chercher <em>sa</em> commune.</li>
+        <li class="fr-mb-2w"><strong>Angle écarté&nbsp;: l'avancement «&nbsp;déjà fermé&nbsp;».</strong>
+          Moins de 3&nbsp;% des lignes l'étaient en octobre 2025&nbsp;; en faire le titre dirait que rien ne
+          se passe, alors que l'offre a déjà disparu de trois communes sur quatre.</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- ====================== HYPOTHÈSES ÉDITORIALES ====================== -->
-  <section class="fr-container fr-mb-6w" id="hypotheses">
-    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
-    <p class="fr-text--sm fr-hint-text">
-      Ces données se présentent de plusieurs façons. Voici les choix faits ici, et pourquoi.
-      Ils sont discutables&nbsp;: ils sont écrits pour pouvoir l'être.
-    </p>
-    <ol class="fr-text--sm">
-      <li class="fr-mb-2w"><strong>L'unité est la ligne du jeu, pas la commune.</strong> Le jeu publie
-        35&nbsp;305 lignes pour 34&nbsp;423 codes INSEE distincts&nbsp;: une ligne par couple commune × code
-        postal (Toulouse en a six, Le Havre et Marseille cinq). Tous les compteurs de la page comptent des
-        lignes et le disent. <strong>L'alternative écartée&nbsp;:</strong> compter des communes distinctes
-        par année (<code>count(distinct code_insee)</code>) — juste barre par barre, mais les barres
-        sommeraient à 21&nbsp;042 pour 20&nbsp;484 communes datées, parce que 558 communes ont des codes
-        postaux dans des années différentes.</li>
-      <li class="fr-mb-2w"><strong>« Déjà fermé » vient du jeu, pas de la date.</strong> La légende
-        d'origine disait «&nbsp;en noir, déjà fermées&nbsp;» pour 2021 et 2023 seulement. Le jeu, lui,
-        marque «&nbsp;Le réseau cuivre est déjà fermé dans votre commune&nbsp;» sur 1&nbsp;003 lignes&nbsp;:
-        2021 (1), 2023 (6), 2025 (163), 2026 (766), et 61 lignes de 2027 et 6 de 2028 fermées en avance.
-        Une couleur par année ne peut donc pas dire l'état&nbsp;; la carte colore l'année, et la phrase
-        <code>output_usager</code> — celle que le lecteur vient chercher — est dans chaque fiche.</li>
-      <li class="fr-mb-2w"><strong>Le groupe sans date est nommé, jamais écarté.</strong> 14&nbsp;688 lignes
-        (42&nbsp;%) n'ont pas de date de fermeture technique&nbsp;: toutes sont en présélection des lots
-        6 et 7 (plus une ligne sans lot), et le jeu annonce «&nbsp;d'ici à 2030&nbsp;». Elles forment la
-        première barre du calendrier (<code>empty-label</code>), le troisième compteur, et le gris de la
-        carte. La part de l'année la plus chargée, elle, se lit parmi les lignes datées — sinon 2029
-        pèserait 30&nbsp;% au lieu de 52&nbsp;%, et les deux chiffres seraient vrais.</li>
-      <li class="fr-mb-2w"><strong>Ce que la carte ne montre pas est écrit à côté d'elle.</strong>
-        3&nbsp;167 lignes n'ont pas de coordonnées (Abbécourt, Abrest, Brécy…)&nbsp;; 3&nbsp;121 d'entre elles
-        n'ont ni code postal, ni <code>departement</code>, ni <code>region</code> — seul
-        <code>nom_departement</code> est rempli. Elles n'apparaissent jamais sur la carte et ne répondent
-        pas aux facettes Département et Région&nbsp;; elles répondent à la recherche par nom. La
-        bibliothèque le signale en console («&nbsp;1 ligne sur 20 sans coordonnées exploitables&nbsp;»),
-        pas au lecteur&nbsp;: c'est la phrase de lecture qui s'en charge.</li>
-      <li class="fr-mb-2w"><strong>Les compteurs sont nationaux et fixes.</strong> Ils viennent de trois
-        requêtes agrégées par le portail et ne suivent ni la recherche ni les filtres — le compteur de
-        la recherche, lui, les suit. Les faire suivre supposerait de rejouer chaque facette sur deux
-        sources de plus&nbsp;: pour une page où l'on cherche <em>sa</em> commune, les repères nationaux
-        suffisent.</li>
-    </ol>
-  </section>
-
   <!-- ====================== Analyse de reproduction ====================== -->
-  <details class="odv-technique fr-container" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-  <section class="odv-analyse fr-py-8w">
-    <div class="fr-container">
-      <h2>Analyse de reproduction — Fermeture du réseau cuivre</h2>
-      <p>
-        Cible d'origine&nbsp;: une page du site institutionnel economie.gouv.fr (Drupal, derrière un
-        pare-feu Cloudflare qui refuse les lectures automatisées&nbsp;: la page a été lue au navigateur).
-        Elle affiche un champ «&nbsp;nom de commune suivi de son code postal&nbsp;», deux listes déroulantes
-        (département, année de fermeture technique, avec les comptes), une carte à légende par année, et
-        l'avertissement «&nbsp;Merci de lancer votre recherche&nbsp;» tant que rien n'est saisi. Un lien
-        «&nbsp;Voir les données sur data.economie.gouv.fr&nbsp;» confirme la source.
+  <div class="fr-container fr-mb-8w">
+  <details class="odv-technique" id="analyse">
+    <summary>Analyse technique — ce que la recréation a coûté</summary>
+  <section class="odv-analyse fr-py-4w">
+    <div>
+      <h2>Analyse — Fermeture du réseau cuivre, une page recréée</h2>
+
+      <p class="fr-text--lead">
+        Recréation du 2026-09-26. La page précédente reproduisait l'outil d'origine (chercher sa commune,
+        la colorer par année d'arrêt) et y ajoutait des compteurs. Celle-ci part du jeu&nbsp;: il porte
+        deux dates par commune, et c'est leur décalage qui fait l'histoire.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le bon modèle s'est imposé par le chronomètre.</strong> Le gabarit
-              «&nbsp;annuaire&nbsp;» charge tout&nbsp;; ici l'export des 35&nbsp;305 communes coûte 4 à 7&nbsp;s
-              quelle que soit la projection (le serveur domine, pas le poids). Pour une page où l'on cherche
-              <em>une</em> commune, la voie serveur est la bonne&nbsp;: <code>server-side</code> sur la
-              source, <code>server-search</code> sur la recherche, <code>server-facets</code> sur les
-              facettes. Trois attributs, et la première requête ne rapatrie que 20 lignes.</li>
-            <li><strong>La carte colorée par année est un attribut.</strong> <code>color-field</code> +
-              <code>color-map</code> remplacent la légende codée à la main de l'original.</li>
-            <li><strong>Les facettes viennent du back-office.</strong> Département, région, lot et
-              fermeture commerciale sont déclarées comme facettes sur le portail&nbsp;: l'endpoint
-              <code>/facets</code> les renvoie avec leurs compteurs — les mêmes chiffres que les listes
-              déroulantes de la page d'origine (Pas-de-Calais 888, Somme 773…).</li>
-            <li><strong>Une page hors portail se reproduit comme une page du portail.</strong> C'est le
-              point que ce lot démontre&nbsp;: la cible est externe, mais la donnée est sur la plateforme, et
-              c'est la donnée qui fait la dataviz.</li>
+            <li><strong>Une requête pour tout le récit.</strong> Un <code>group-by</code> serveur
+              région × année de commercialisation × année d'arrêt (162 lignes), un <code>compute</code> de
+              drapeaux, puis des <code>dsfr-data-query</code> côté client&nbsp;: totaux, régions, lignes
+              sans date. Les parts sont des ratios de sommes, dans les KPI comme dans les phrases.</li>
+            <li><strong>Deux séries depuis deux colonnes de date</strong>&nbsp;:
+              <code>dsfr-data-unpivot</code> déplie <code>ac</code> et <code>at</code> en
+              (étape, année), <code>dsfr-data-pivot</code> replie par année — une étape absente une année
+              donne <code>null</code>, pas une barre à zéro.</li>
+            <li><strong>Phrases calculées</strong> par <code>dsfr-data-repeat</code>, y compris les
+              régions extrêmes (<code>order-by</code> + <code>limit</code>) et ce qu'on écarte.</li>
+            <li><strong>L'exploration est celle de la page précédente</strong>, inchangée sur le fond&nbsp;:
+              recherche, facettes et pagination serveur.</li>
           </ul>
         </div>
 
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>L'année de fermeture technique n'est pas une facette.</strong> Elle n'est pas
-              déclarée au back-office, donc <code>server-facets</code> ne peut pas la proposer. Elle passe
-              par un <code>&lt;select&gt;</code> écrit à la main et un <code>dsfr-data-context-filter
-              operator="year-of"</code>. La page d'origine, elle, calcule ses comptes par année depuis le jeu.</li>
-            <li><strong>La carte ne montre que la page courante.</strong> En mode serveur, la couche ne
-              reçoit que les 20 communes affichées. C'est fidèle à l'original (qui ne dessine que les
-              résultats), mais une vue nationale des 35&nbsp;305 communes demanderait soit le chargement
-              complet, soit <code>bbox</code> — ni l'un ni l'autre ne convient à «&nbsp;votre commune&nbsp;».</li>
-            <li><strong>Le compteur total était sous mes yeux</strong> (relecture du lot 11, AM-034 requalifié).
-              J'avais écrit qu'aucun composant n'affichait le total d'une recherche serveur, parce que
-              <code>dsfr-data-kpi value="count"</code> compte la page (20). C'est l'attribut <code>count</code> de
-              <code>dsfr-data-search</code> qui lit le <code>total_count</code> de la réponse&nbsp;:
-              «&nbsp;35305 resultats&nbsp;» au chargement, «&nbsp;1 resultat&nbsp;» après «&nbsp;Siévoz&nbsp;».
-              <strong>Le rendu brut a été corrigé depuis, en trois fois</strong>&nbsp;: l'accent en 0.21.1,
-              le séparateur de milliers en 0.26.0, et le nom compté en 0.29.0 — <code>count-label="commune"</code>
-              (<a href="https://github.com/bmatge/dsfr-data/pull/802" target="_blank" rel="noopener external">#802</a>,
-              constat AM-044). Le compteur affiche aujourd'hui «&nbsp;35&nbsp;305 communes&nbsp;», et
-              «&nbsp;1 commune&nbsp;» au singulier — et, depuis la relecture du 2026-09-20,
-              «&nbsp;35&nbsp;305 communes (une par code postal)&nbsp;», parce que «&nbsp;35&nbsp;305 communes&nbsp;»
-              était faux&nbsp;: 34&nbsp;423 codes INSEE, «&nbsp;Toulouse&nbsp;» rend six lignes.
-              Un KPI lit aussi cette méta depuis 0.22.0 (<code>value="meta:total"</code>, AM-034 corrigé).</li>
-            <li><strong>Le cadrage sur une commune unique</strong> retombait sur BUG-004&nbsp;:
-              <code>max-bounds</code> est nécessaire (Guadeloupe, Guyane, Réunion, Mayotte, Saint-Martin sont
-              dans le jeu), et une recherche qui ne renvoyait qu'une commune ne zoomait pas dessus.
-              Rejoué en 0.33.0 le 2026-09-20&nbsp;: «&nbsp;Siévoz&nbsp;» → 1 commune, la carte zoome sur le point.</li>
-            <li><strong>Ce que la relecture éditoriale a trouvé, et que la reproduction n'avait pas vu</strong>
-              (2026-09-20)&nbsp;: le compteur disait «&nbsp;communes&nbsp;» pour des lignes commune × code
-              postal&nbsp;; la légende disait «&nbsp;déjà fermées&nbsp;» sur la foi de l'année alors que le jeu
-              porte l'état dans <code>output_usager</code> (1&nbsp;003 lignes fermées, jusqu'en 2028)&nbsp;;
-              3&nbsp;167 lignes sans coordonnées disparaissaient de la carte sans un mot&nbsp;; 3&nbsp;493 lignes
-              sans code postal rendaient «&nbsp;Abbécourt ()&nbsp;»&nbsp;; et les 14&nbsp;688 lignes sans date
-              n'étaient nulle part sinon en «&nbsp;non définie&nbsp;». Rien de tout cela n'est un manque de
-              la bibliothèque&nbsp;: <code>{{#if}}</code>, <code>empty-label</code>, <code>:date</code>,
-              <code>share_percent</code> et le filtre entre accolades du KPI existaient. Détail dans les
-              notes éditoriales ci-dessus.</li>
-            <li><strong>Un piège trouvé en chemin&nbsp;: le <code>where</code> d'une query sur un alias de
-              <code>group-by</code> serveur.</strong> Page minimale, 0.33.0&nbsp;: une
-              <code>dsfr-data-query where="annee:isnotnull"</code>, seule consommatrice d'une source ODS
-              agrégée (<code>group-by="year(…) as annee"</code>), délègue son filtre au portail —
-              <code>where=annee is not null</code> — qui ne connaît pas l'alias&nbsp;: HTTP 400, source en
-              erreur. Le même montage avec un second consommateur (un <code>normalize</code>) coupe la
-              délégation et rend 52&nbsp;%&nbsp;: la page marchait par accident. Correctif&nbsp;: le filtre
-              en ODSQL sur une source dédiée (<code>where="annee_fermeture_technique is not null"</code>).</li>
+            <li><strong>Rien côté bibliothèque sur le récit.</strong> Le coût a été de lire le jeu&nbsp;: la
+              facette «&nbsp;fermeture commerciale&nbsp;» existait dans la page précédente, sans que rien ne
+              dise qu'elle était passée pour trois communes sur quatre.</li>
+            <li><strong>Les définitions ne sont pas dans le jeu.</strong> «&nbsp;Fermeture commerciale&nbsp;»
+              et «&nbsp;technique&nbsp;» ne sont décrites ni dans les métadonnées ni dans les champs&nbsp;;
+              la page les emprunte au plan de fermeture encadré par l'Arcep, et le dit.</li>
+            <li><strong>Le jeu n'est pas daté dans la donnée</strong>&nbsp;: la date de mise à jour
+              (20&nbsp;octobre 2025) est dans les métadonnées du catalogue, pas dans une colonne&nbsp;;
+              elle est écrite en dur dans le texte.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.22.0</h4>
-            <p class="fr-text--sm">
-              4 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#BUG-004">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>BUG-004</strong> — <strong>0.21.1</strong> (#642)&nbsp;: <code>fit-bounds</code> + <code>max-bounds</code> zoome sur une emprise réduite à un point, et <code>fit-zone</code> (#687, 0.22.0) cadre la métropole sans renoncer aux encarts.</li>
-              <li><strong>AM-034</strong> — <strong>0.22.0</strong> (#659)&nbsp;: <code>value="meta:total"</code> sur le KPI&nbsp;: le total serveur tient dans une tuile chiffrée.</li>
-              <li><strong>AM-036</strong> — <strong>0.22.0</strong> (#662)&nbsp;: pipes <code>{{champ:date}}</code> et <code>{{champ:datetime}}</code> dans les templates.</li>
-              <li><strong>LIM-009</strong> — <strong>0.22.0</strong> (#685)&nbsp;: composant <code>dsfr-data-map-legend</code>, dérivé du rendu réel de la couche — ce n'était donc pas une limite dure.</li>
-            </ul>
-          </div>
         </div>
       </div>
 
-      <div class="fr-table fr-table--bordered">
+      <div class="fr-table fr-table--sm">
         <table>
-          <caption>Correspondance page d'origine → composant dsfr-data</caption>
-          <thead>
-            <tr><th scope="col">Page d'origine (Drupal)</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
-          </thead>
+          <caption>Page d'origine (Drupal, pas Opendatasoft) → composant dsfr-data</caption>
+          <thead><tr><th scope="col">Besoin</th><th scope="col">Page d'origine</th><th scope="col">dsfr-data</th></tr></thead>
           <tbody>
-            <tr><td>champ commune + code postal</td><td><code>dsfr-data-search server-search</code></td><td>Équivalent, recherche plein texte serveur</td></tr>
-            <tr><td>liste département avec comptes</td><td><code>dsfr-data-facets server-facets</code></td><td>Équivalent, comptes identiques</td></tr>
-            <tr><td>liste année de fermeture avec comptes</td><td><code>&lt;select&gt;</code> + <code>context-filter year-of</code> ; les comptes sont dans le graphique des années (source agrégée par le portail, <code>group-by="year(…)"</code>)</td><td>Équivalent, comptes déplacés dans un graphique</td></tr>
-            <tr><td>carte + légende par année</td><td><code>dsfr-data-map-layer color-field color-map</code> + <code>dsfr-data-map-legend</code> (tags écrits à la main jusqu'à la refonte de démonstration)</td><td>Équivalent, détail au clic en plus</td></tr>
-            <tr><td>liste de résultats</td><td><code>dsfr-data-display</code> paginé serveur, avec la phrase <code>output_usager</code> du jeu</td><td>Équivalent</td></tr>
-            <tr><td>(absent)</td><td>3 KPI d'état lus dans <code>output_usager</code>, 1 graphique des années avec son tableau, 3 phrases de lecture, notes éditoriales</td><td>Ajout de la relecture dataviz-metier (2026-09-20)</td></tr>
+            <tr><td>Agrégat serveur</td><td>—</td><td><code>dsfr-data-source fetch-mode="export" group-by</code></td></tr>
+            <tr><td>Deux dates → deux séries</td><td>—</td><td><code>dsfr-data-unpivot</code> + <code>dsfr-data-pivot</code></td></tr>
+            <tr><td>Chiffre dans une phrase</td><td>—</td><td><code>dsfr-data-repeat</code> sur une requête d'une ligne</td></tr>
+            <tr><td>Champ commune + code postal</td><td>moteur de recherche</td><td><code>dsfr-data-search server-search count</code></td></tr>
+            <tr><td>Liste département avec comptes</td><td>liste déroulante</td><td><code>dsfr-data-facets server-facets</code></td></tr>
+            <tr><td>Carte + légende par année</td><td>carte codée à la main</td><td><code>dsfr-data-map-layer color-field color-map</code> + <code>dsfr-data-map-legend</code></td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile, et la première entièrement en mode serveur.</strong> Le catalogue
-          classait cette page hors périmètre parce que son lien sort du portail&nbsp;; la donnée, elle, y est,
-          et suffit. Le seul manque tient à une facette non déclarée au back-office — ce qui se règle côté
-          portail, pas côté bibliothèque.</p>
-        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AM-034 (réduit au KPI après le lot 11&nbsp;: <code>search count</code> affiche le total), AM-044 (rendu du compteur), BUG-004 confirmé.</p>
+        <p><strong>L'outil répondait «&nbsp;quand ma ligne s'arrête-t-elle&nbsp;»&nbsp;; le jeu dit aussi
+          «&nbsp;depuis quand ne peut-on plus s'abonner&nbsp;»</strong> — et la réponse, pour trois communes
+          sur quatre, est déjà passée. Tout est déclaratif&nbsp;: trois sources, aucune ligne de
+          JavaScript.</p>
       </div>
     </div>
   </section>
   </details>
+  </div>
 
 </main>
 

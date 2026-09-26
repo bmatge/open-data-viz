@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Capytale — analyse des usages — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la page Capytale de data.education.gouv.fr, dont six sections sur sept étaient du HTML statique : 11,4 millions de visites académiques, recalculées.">
+  <meta name="description" content="Recréation avec dsfr-data de la page Capytale de data.education.gouv.fr : un quart de visites en plus en un an, et un usage qui, rapporté aux élèves, varie de un à onze selon l'académie.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,158 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un tableau de bord dont six sections sur sept sont du HTML
+       écrit à la main ; la reproduction précédente les avait rendues vivantes et
+       justes, mais restait un tableau de bord de VOLUMES : Orléans-Tours devant
+       Versailles, sans dénominateur. Cette version ajoute le dénominateur qui
+       manquait — les élèves du second degré, publiés sur le même portail — et
+       l'histoire change : l'usage va de un à onze d'une académie à l'autre.
+
+       Quatre jeux, tous lus SANS clé :
+         · `cap-raw`  — usages par académie et par mois (36 mois glissants),
+                        un export de quatre colonnes (le jeu brut pèse 31 Mo
+                        à cause d'un geo_shape répété sur chaque ligne) ;
+         · `eff-raw`  — élèves du second degré par académie, rentrée 2025,
+                        AGRÉGÉS PAR LE SERVEUR (35 lignes) ;
+         · `site-raw` — visites mensuelles du site (36 lignes) ;
+         · `prof-raw` — visites connectées par profil (72 lignes).
+
+       Fenêtre glissante : le jeu d'usages perd un mois chaque mois. Les
+       comparaisons portent sur deux années scolaires COMPLÈTES, 2024-2025 et
+       2025-2026, qui le resteront jusqu'en août 2027.
+       ========================================================================== -->
+
+  <!-- ---------- 1. Les usages par académie, joints aux élèves ---------- -->
+  <dsfr-data-source id="cap-raw" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-capytale-usages-academiques-douzederniersmois"
+    select="date, academie, data_nb_visits"
+    fetch-mode="export" max-records="2000">
+  </dsfr-data-source>
+
+  <!-- Dénominateur : élèves inscrits dans une formation du second degré (collège
+       et lycée, public et privé sous contrat), rentrée 2025. Même casse que le
+       jeu Capytale (capitales sans accents) : la jointure se fait sur le nom
+       brut. Une seule académie s'écrit autrement : « POLYNESIE FRANCAISE ».
+       Clé unique côté droit par construction (group-by serveur). -->
+  <dsfr-data-source id="eff-raw" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-mode-hebergement-eleves-etablissements-2d"
+    select="academie, sum(nombre_d_eleves_dans_une_formation_du_second_degre) as eleves"
+    group-by="academie" where="rentree = 2025" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="eff" source="eff-raw"
+    replace-fields="academie:POLYNESIE FRANCAISE:POLYNESIE">
+  </dsfr-data-normalize>
+  <dsfr-data-join id="cap-j" left="cap-raw" right="eff" on="academie" type="left"></dsfr-data-join>
+
+  <!-- Les accents, APRÈS la jointure ; puis l'année scolaire et le mois de
+       l'année scolaire (septembre = 1), dérivés de la date. `k` : clé constante
+       pour replier une série en une ligne (phrases calculées). -->
+  <dsfr-data-normalize id="cap" source="cap-j"
+    replace-fields="academie:AIX-MARSEILLE:Aix-Marseille | academie:AMIENS:Amiens | academie:BESANCON:Besançon | academie:BORDEAUX:Bordeaux | academie:CLERMONT-FERRAND:Clermont-Ferrand | academie:CORSE:Corse | academie:CRETEIL:Créteil | academie:DIJON:Dijon | academie:GRENOBLE:Grenoble | academie:GUADELOUPE:Guadeloupe | academie:GUYANE:Guyane | academie:LA REUNION:La Réunion | academie:LILLE:Lille | academie:LIMOGES:Limoges | academie:LYON:Lyon | academie:MARTINIQUE:Martinique | academie:MAYOTTE:Mayotte | academie:MONTPELLIER:Montpellier | academie:NANCY-METZ:Nancy-Metz | academie:NANTES:Nantes | academie:NICE:Nice | academie:NORMANDIE:Normandie | academie:ORLEANS-TOURS:Orléans-Tours | academie:PARIS:Paris | academie:POITIERS:Poitiers | academie:POLYNESIE:Polynésie française | academie:REIMS:Reims | academie:RENNES:Rennes | academie:STRASBOURG:Strasbourg | academie:TOULOUSE:Toulouse | academie:VERSAILLES:Versailles"
+    compute="annee_debut = when month(date) >= 9 then year(date) else year(date) - 1;
+             annee_scolaire = when month(date) >= 9 then concat(year(date), '-', year(date) + 1) else concat(year(date) - 1, '-', year(date));
+             mois_rang = when month(date) >= 9 then month(date) - 8 else month(date) + 4;
+             mois_lib = when month(date) = 9 then 'sept.' when month(date) = 10 then 'oct.' when month(date) = 11 then 'nov.' when month(date) = 12 then 'déc.' when month(date) = 1 then 'janv.' when month(date) = 2 then 'févr.' when month(date) = 3 then 'mars' when month(date) = 4 then 'avr.' when month(date) = 5 then 'mai' when month(date) = 6 then 'juin' when month(date) = 7 then 'juil.' else 'août';
+             k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 2. Par année scolaire ---------- -->
+  <dsfr-data-query id="ans" source="cap"
+    group-by="annee_debut, annee_scolaire, k" aggregate="data_nb_visits:sum:visites"
+    order-by="annee_debut:asc">
+  </dsfr-data-query>
+  <dsfr-data-pivot id="ans-p" source="ans"
+    row="k" column="annee_debut" value="visites" column-format="v{value}">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="ans-n" source="ans-p"
+    compute="evol = round(100 * (v2025 / v2024 - 1))">
+  </dsfr-data-normalize>
+
+  <!-- Le mois de l'année scolaire en ligne, une colonne par année. Deux années
+       COMPLÈTES seulement : 2023-2024 n'a pas de septembre (sorti de la fenêtre
+       glissante), et la courbe le dessinait à ZÉRO — relevé au navigateur le
+       2026-09-26 ; 2026-2027 n'a qu'un mois, incomplet. -->
+  <dsfr-data-query id="mois-l" source="cap" where="annee_debut:in:2024|2025"
+    group-by="mois_rang, mois_lib, annee_debut" aggregate="data_nb_visits:sum:visites">
+  </dsfr-data-query>
+  <dsfr-data-pivot id="mois-w" source="mois-l"
+    row="mois_rang, mois_lib" column="annee_debut" value="visites" column-format="a{value}">
+  </dsfr-data-pivot>
+  <dsfr-data-query id="mois" source="mois-w" order-by="mois_rang:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="mois-t" source="mois"
+    rename="mois_lib:Mois | a2024:2024-2025 | a2025:2025-2026">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 3. Par académie, 2025-2026, rapporté aux élèves ---------- -->
+  <dsfr-data-query id="aca25" source="cap" where="annee_debut:eq:2025"
+    group-by="academie, k" aggregate="data_nb_visits:sum:visites, eleves:max:eleves">
+  </dsfr-data-query>
+  <dsfr-data-query id="aca24" source="cap" where="annee_debut:eq:2024"
+    group-by="academie" aggregate="data_nb_visits:sum:visites_prec">
+  </dsfr-data-query>
+  <dsfr-data-join id="aca-j" left="aca25" right="aca24" on="academie" type="left"></dsfr-data-join>
+  <!-- L'AEFE (réseau à l'étranger) n'a pas de dénominateur : elle sort ici, et
+       le texte le dit. ⚠️ `gt:0` et non `isnotnull` : `eleves:max` sur un groupe
+       où le champ est ABSENT de toutes les lignes (jointure gauche sans
+       correspondance) rend 0, pas null — relevé au navigateur le 2026-09-26.
+       Avec `isnotnull`, l'AEFE restait, dernière du classement avec un taux vide,
+       et ses visites entraient au numérateur de la moyenne nationale. -->
+  <dsfr-data-query id="aca-e" source="aca-j" where="eleves:gt:0"></dsfr-data-query>
+  <!-- `taux` brut pour les calculs et le résumé de carte, `taux_aff` arrondi
+       pour l'affichage (PG-031 : un arrondi amont fausse une pondération). -->
+  <dsfr-data-normalize id="aca" source="aca-e"
+    compute="taux = 100 * visites / eleves; taux_aff = round(100 * visites / eleves); visites100 = 100 * visites; evol = round(100 * (visites / visites_prec - 1))">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="aca-tri" source="aca" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-t" source="aca-tri"
+    rename="academie:Académie | taux_aff:Visites pour 100 élèves | visites:Visites 2025-2026 | eleves:Élèves du second degré (rentrée 2025) | visites_prec:Visites 2024-2025 | evol:Évolution (%)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="recul" source="aca" where="evol:lt:0" order-by="evol:asc"></dsfr-data-query>
+
+  <!-- Le résumé en une ligne : l'année, l'académie en tête, la dernière. -->
+  <dsfr-data-query id="haut" source="aca" order-by="taux:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="bas" source="aca" order-by="taux:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="res1" left="ans-n" right="haut" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="res2" left="res1" right="bas" on="k" type="inner" prefix-right="bas_"></dsfr-data-join>
+  <dsfr-data-normalize id="res" source="res2" compute="ecart = round(taux / bas_taux)"></dsfr-data-normalize>
+
+  <!-- ---------- 4. Le site entier, et qui s'y connecte ---------- -->
+  <dsfr-data-source id="site-raw" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-capytale-nombre-de-visite"
+    select="mois_, nombre_de_visite_" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="site" source="site-raw"
+    compute="annee_debut = when month(mois_) >= 9 then year(mois_) else year(mois_) - 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="site-an" source="site"
+    group-by="annee_debut" aggregate="nombre_de_visite_:sum:site">
+  </dsfr-data-query>
+  <dsfr-data-join id="part-j" left="ans" right="site-an" on="annee_debut" type="inner"></dsfr-data-join>
+  <dsfr-data-query id="part-q" source="part-j" where="annee_debut:lte:2025" order-by="annee_debut:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="part" source="part-q"
+    compute="sans = site - visites; part = round(100 * visites / site)">
+  </dsfr-data-normalize>
+  <dsfr-data-pivot id="part-p" source="part"
+    row="k" column="annee_debut" value="part" column-format="p{value}">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="part-t" source="part"
+    rename="annee_scolaire:Année scolaire | visites:Rattachées à une académie | sans:Sans académie | site:Toutes les visites du site | part:Part rattachée (%)">
+  </dsfr-data-normalize>
+
+  <dsfr-data-source id="prof-raw" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-capytale-repartition-des-visites-sur-dataeducation"
+    select="key, data_label, data_nb_visits" max-records="200">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="prof" source="prof-raw"
+    compute="annee_debut = when month(key) >= 9 then year(key) else year(key) - 1">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,373 +184,330 @@
       </div>
     </nav>
 
-    <h1>Capytale : l'analyse des usages, recalculée</h1>
+    <h1>Capytale en 2025-2026&nbsp;: un quart de visites en plus, et un usage qui varie de un à onze selon l'académie</h1>
 
-    <p class="fr-text--lead">
-      Capytale est la plateforme d'activités numériques du ministère de l'Éducation nationale.
-      Les trois jeux publiés sur le portail couvrent <strong>36 mois</strong>, d'octobre 2023 à
-      septembre 2026 : <strong>11 393 906 visites académiques</strong> réparties sur
-      <strong>32 académies</strong>, <strong>18 621 144 visites</strong> du site, et une
-      répartition <strong>90,9 % élèves / 9,1 % enseignants</strong>. Tous les chiffres de cette
-      page sont calculés à l'affichage&nbsp;; sur le portail, six sections sur sept sont du HTML
-      écrit à la main.
+    <!-- Le chapô est CALCULÉ : une ligne de résumé (année, tête, queue). -->
+    <dsfr-data-repeat source="res">
+      <template>
+        <p class="fr-text--lead">
+          De septembre 2025 à août 2026, la plateforme d'activités scientifiques Capytale a
+          enregistré <strong>{{v2025:number}} visites</strong> d'utilisateurs rattachés à une
+          académie, <strong>{{evol}}&nbsp;% de plus</strong> que l'année scolaire précédente.
+          Mais rapportées au nombre d'élèves du second degré, ces visites vont de
+          <strong>{{bas_taux_aff}} pour 100 élèves</strong> ({{bas_academie}}) à
+          <strong>{{taux_aff}} pour 100 élèves</strong> ({{academie}})&nbsp;: un écart de
+          <strong>un à {{ecart}}</strong>, que le seul décompte des visites cachait.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Capytale, commun numérique du ministère, sert des activités de sciences, technologie,
+      ingénierie, arts et mathématiques «&nbsp;du cycle&nbsp;3 aux CPGE&nbsp;». Les chiffres
+      publiés sont des mesures d'audience (Matomo)&nbsp;: des <strong>visites</strong>, pas des
+      élèves ni des activités. Tous sont calculés à l'affichage.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-capytale-usages-academiques-douzederniersmois/" target="_blank" rel="noopener external"><code>fr-en-capytale-usages-academiques-douzederniersmois</code></a>
-        — 1 128 lignes (32 académies × 36 mois, moins 24 combinaisons absentes), rafraîchi
-        quotidiennement. S'y ajoutent
+        (DNE) — visites par académie et par mois. Malgré son nom, la fenêtre est de
+        <strong>36 mois glissants</strong>, rafraîchie chaque jour. S'y ajoutent
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-capytale-nombre-de-visite/" target="_blank" rel="noopener external"><code>…nombre-de-visite</code></a>
-        (36 lignes) et
+        (toutes les visites du site) et
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-capytale-repartition-des-visites-sur-dataeducation/" target="_blank" rel="noopener external"><code>…repartition-des-visites-sur-dataeducation</code></a>
-        (72 lignes), que la page d'origine cite en pied de page sans jamais les interroger.
+        (visites connectées, élèves / enseignants), que la page d'origine cite sans les lire.
       </p>
       <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Le nom du jeu ment.</strong> <code>douzederniersmois</code> pour une fenêtre
-        glissante de <strong>36 mois</strong>, vérifiée à l'API : 36 valeurs distinctes de
-        <code>date</code>, de <code>2023-10</code> à <code>2026-09</code>.
-        <strong>Et il pèse 31 Mo pour 23 Ko utiles</strong> : chaque ligne embarque le
-        <code>geo_shape</code> complet de son académie — répété 36 fois — plus deux blobs JSON
-        Matomo bruts. Un <code>select</code> sur les quatre colonnes utiles ramène le transfert
-        à 23 Ko.
+        Le dénominateur vient d'un quatrième jeu du même portail,
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-mode-hebergement-eleves-etablissements-2d/" target="_blank" rel="noopener external"><code>fr-en-mode-hebergement-eleves-etablissements-2d</code></a>
+        (DEPP)&nbsp;: les élèves inscrits dans une formation du second degré, collèges et lycées,
+        publics et privés sous contrat, à la <strong>rentrée 2025</strong>, sommés par académie
+        par le serveur. Lecture sans clé.
       </p>
     </details>
+
+    <!-- ---------- Accroche : quatre repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:2 lg:4" gap="md" class="fr-mb-6w" aria-label="Les chiffres à retenir">
+      <dsfr-data-kpi source="ans-n" value="v2025:first" format="compact"
+        heading="Visites rattachées à une académie"
+        lines='[{"value":"evol:first","sign":true,"suffix":" par rapport à 2024-2025"}]'
+        label="année scolaire 2025-2026"></dsfr-data-kpi>
+      <dsfr-data-kpi source="aca" value="visites100:sum / eleves:sum" format="decimal" decimals="0"
+        heading="Visites pour 100 élèves"
+        label="du second degré, en moyenne nationale, 2025-2026"></dsfr-data-kpi>
+      <dsfr-data-kpi source="aca" value="taux:max / taux:min" format="decimal" decimals="0"
+        heading="fois plus de visites par élève"
+        label="dans l'académie la plus utilisatrice que dans la moins utilisatrice, 2025-2026"></dsfr-data-kpi>
+      <dsfr-data-kpi source="part" where="annee_debut:eq:2025" value="visites:sum / site:sum" format="pourcentage" decimals="0"
+        heading="des visites du site seulement"
+        label="sont rattachées à une académie, 2025-2026"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve : la croissance ---------- -->
+    <h2 class="fr-h3">1. Chaque année scolaire au-dessus de la précédente, mois par mois</h2>
+    <dsfr-data-repeat source="ans-n">
+      <template>
+        <p class="odv-lecture">{{v2024:number}} visites en 2024-2025, <strong>{{v2025:number}}</strong>
+          en 2025-2026&nbsp;: <strong>+{{evol}}&nbsp;%</strong>. La courbe de l'année la plus
+          récente passe au-dessus de la précédente chaque mois, de septembre à août. La forme, elle, ne change
+          pas&nbsp;: c'est un usage <strong>de classe</strong>, qui culmine en novembre, janvier
+          et mars, fléchit à chaque période de vacances et tombe à presque rien en juillet et
+          en août.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Visites mensuelles, une courbe par année scolaire">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-mois" source="mois" type="line"
+        label-field="mois_lib" value-fields="a2024, a2025" name='["2024-2025","2025-2026"]'
+        y-min="0" unit-tooltip="visites"
+        databox databox-title="Visites Capytale rattachées à une académie, par mois de l'année scolaire"
+        databox-source="DNE — fr-en-capytale-usages-academiques-douzederniersmois, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-mois" source="mois-t" table download
+        filename="capytale-visites-par-mois-scolaire.csv"
+        label-field="Mois" value-field="2024-2025, 2025-2026"
+        description="Visites Capytale rattachées à une académie, de septembre à août, pour les années scolaires 2024-2025 et 2025-2026. L'année 2025-2026 est au-dessus de 2024-2025 chaque mois ; la saisonnalité scolaire est la même."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. Le cœur : rapporté aux élèves ---------- -->
+    <h2 class="fr-h3">2. Rapporté aux élèves, l'usage va de un à onze selon l'académie</h2>
+    <dsfr-data-repeat source="res">
+      <template>
+        <p class="odv-lecture">En 2025-2026, l'académie d'{{academie}} compte
+          <strong>{{taux_aff}} visites pour 100 élèves</strong> du second degré&nbsp;;
+          {{bas_academie}}, <strong>{{bas_taux_aff}}</strong>. Le classement en volume, que
+          publiait le portail, mettait Versailles en deuxième position&nbsp;: rapportée à ses
+          élèves, la plus grande académie de France passe sous la moyenne nationale.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-4w" data-code="Visites pour 100 élèves du second degré, par académie, trié">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-taux" source="aca-tri" type="bar" horizontal
+        label-field="academie" value-field="taux_aff:Visites pour 100 élèves du second degré"
+        y-min="0" unit-tooltip="visites pour 100 élèves"
+        databox databox-title="Visites Capytale pour 100 élèves du second degré, par académie, 2025-2026"
+        databox-source="DNE (usages Capytale) et DEPP (élèves, rentrée 2025), via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-taux" source="aca-t" table download
+        filename="capytale-visites-pour-100-eleves.csv"
+        label-field="Académie"
+        value-field="Visites pour 100 élèves, Visites 2025-2026, Élèves du second degré (rentrée 2025), Visites 2024-2025, Évolution (%)"
+        description="Visites Capytale de l'année scolaire 2025-2026 rapportées aux élèves du second degré de la rentrée 2025, par académie, de la plus utilisatrice à la moins utilisatrice. L'AEFE, sans effectif publié, est absente."></dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5">Sur la carte, un creux net&nbsp;: les trois académies d'Auvergne-Rhône-Alpes</h3>
+    <p class="fr-text--sm">Lyon, Grenoble et Clermont-Ferrand figurent toutes trois parmi les
+      cinq dernières académies en 2025-2026, quand Aix-Marseille, leur voisine, est au-dessus de
+      la moyenne nationale. Le jeu ne dit pas pourquoi&nbsp;: il ne documente pas comment une
+      visite est rattachée à une académie, et un mode d'accès différent (portail académique,
+      identifiants) suffirait à produire cet écart sans que les élèves s'en servent moins. Le
+      chiffre sous le titre de la carte est la moyenne nationale <strong>pondérée par les
+      élèves</strong>, pas la moyenne des académies.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Carte des académies, visites pour 100 élèves">
+      <dsfr-data-chart id="c-taux" source="aca" type="map-aca"
+        code-field="academie" value-field="taux_aff" name="Visites pour 100 élèves"
+        unit-tooltip="visites pour 100 élèves" selected-palette="sequentialAscending"
+        map-summary="weighted" map-summary-weight="eleves" map-summary-field="taux"
+        databox databox-title="Visites Capytale pour 100 élèves du second degré, 2025-2026"
+        databox-source="DNE et DEPP, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <p class="fr-hint-text fr-mt-1w">La Polynésie française n'a pas de contour dans le
+        découpage académique de DSFR Chart&nbsp;: elle figure dans le graphique trié et le
+        tableau, pas sur la carte.</p>
+      <dsfr-data-a11y for="c-taux" source="aca-t" table download
+        filename="capytale-carte-visites-pour-100-eleves.csv"
+        label-field="Académie" value-field="Visites pour 100 élèves, Visites 2025-2026, Élèves du second degré (rentrée 2025)"
+        description="Carte des académies colorées selon les visites Capytale pour 100 élèves du second degré, 2025-2026. Les trois académies d'Auvergne-Rhône-Alpes sont dans le bas du classement."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La nuance ---------- -->
+    <h2 class="fr-h3">3. Mais ce classement ne voit qu'une part décroissante des visites</h2>
+    <dsfr-data-repeat source="part-p">
+      <template>
+        <p class="odv-lecture">Une visite n'est rattachée à une académie que si l'utilisateur est
+          connecté. Cette part recule chaque année&nbsp;: <strong>{{p2023}}&nbsp;%</strong> des
+          visites du site en 2023-2024, <strong>{{p2024}}&nbsp;%</strong> en 2024-2025,
+          <strong>{{p2025}}&nbsp;%</strong> en 2025-2026. Le site grandit plus vite que ce que
+          les académies en mesurent&nbsp;; les taux de la section&nbsp;2 portent sur les
+          visites connectées, et sous-estiment l'usage réel partout.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-4w" data-code="Visites du site, rattachées ou non à une académie, par année scolaire">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-part" source="part" type="bar" stacked
+        label-field="annee_scolaire" value-fields="visites, sans" name='["Rattachées à une académie","Sans académie rattachée"]'
+        unit-tooltip="visites"
+        databox databox-title="Toutes les visites du site Capytale, rattachées ou non à une académie"
+        databox-source="DNE — fr-en-capytale-nombre-de-visite et …usages-academiques, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-part" source="part-t" table download
+        filename="capytale-visites-rattachees.csv"
+        label-field="Année scolaire" value-field="Rattachées à une académie, Sans académie, Toutes les visites du site, Part rattachée (%)"
+        description="Visites du site Capytale par année scolaire, séparées entre visites rattachées à une académie et visites sans académie. La part rattachée baisse chaque année. 2023-2024 commence en octobre (fenêtre glissante du jeu)."></dsfr-data-a11y>
+    </div>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Neuf visites connectées sur dix sont des visites d'élèves</h3>
+        <dsfr-data-kpi-group per-row="1" gap="md">
+        <dsfr-data-kpi source="prof" where="annee_debut:eq:2025"
+          value="data_nb_visits:sum{data_label:eq:Elève} / data_nb_visits:sum" format="pourcentage" decimals="0"
+          heading="des visites connectées sont des visites d'élèves"
+          label="2025-2026, le reste étant des enseignants"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+        <p class="fr-text--xs fr-mt-1w">Le jeu par profil et le jeu par académie comptent,
+          à moins de 1&nbsp;% près, les mêmes visites&nbsp;: ce sont bien les visites
+          connectées. Les enseignants comptent dans le numérateur des taux&nbsp;; pas dans le
+          dénominateur.</p>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Et la croissance n'est pas générale</h3>
+        <p class="fr-text--sm">De 2024-2025 à 2025-2026, les visites ont reculé dans&nbsp;:</p>
+        <dsfr-data-repeat source="recul" key-field="academie" empty="aucune académie.">
+          <template>
+            <p class="fr-text--sm fr-mb-1v"><strong>{{academie}}</strong>&nbsp;: {{evol}}&nbsp;%
+              ({{visites_prec:number}} → {{visites:number}} visites)</p>
+          </template>
+        </dsfr-data-repeat>
+        <p class="fr-text--xs fr-mt-1w">Toutes les autres progressent&nbsp;; la colonne
+          «&nbsp;Évolution&nbsp;» du tableau de la section&nbsp;4 les classe.</p>
+      </div>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       Une seule source, en mode adaptateur, avec un `select` sur les quatre
-       colonnes utiles : c'est la première branche du piège du dépôt (« soit on
-       écarte les textes longs par select, soit on ne met PAS de select du
-       tout »). Ici les colonnes écartées pèsent 99,9 % du jeu.
-       `max-records="2000"` : 1 128 lignes, et le plafond par défaut de 1 000
-       tronquerait 128 lignes.
-
-       Un seul `dsfr-data-normalize`, et pas deux : depuis la 0.26.0 (#754),
-       `toAcademyKey` désaccentue la clé ET lui retire l'article, donc
-       « La Réunion » et « Orléans-Tours » sont appariés tels quels. La colonne
-       dérivée `code_aca` que cette page portait — et l'affirmation « map-aca
-       exige des majuscules non accentuées » qui la justifiait — étaient
-       périmées depuis trois versions mineures (BUG-008, FP-014).
-       ========================================================================== -->
-
-  <dsfr-data-source id="cap-raw" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-capytale-usages-academiques-douzederniersmois"
-    select="date, academie, data_nb_visits, data_nb_actions"
-    fetch-mode="export" max-records="2000">
-  </dsfr-data-source>
-
-  <dsfr-data-normalize id="cap" source="cap-raw"
-    replace-fields="academie:AIX-MARSEILLE:Aix-Marseille | academie:AMIENS:Amiens | academie:BESANCON:Besançon | academie:BORDEAUX:Bordeaux | academie:CLERMONT-FERRAND:Clermont-Ferrand | academie:CORSE:Corse | academie:CRETEIL:Créteil | academie:DIJON:Dijon | academie:GRENOBLE:Grenoble | academie:GUADELOUPE:Guadeloupe | academie:GUYANE:Guyane | academie:LA REUNION:La Réunion | academie:LILLE:Lille | academie:LIMOGES:Limoges | academie:LYON:Lyon | academie:MARTINIQUE:Martinique | academie:MAYOTTE:Mayotte | academie:MONTPELLIER:Montpellier | academie:NANCY-METZ:Nancy-Metz | academie:NANTES:Nantes | academie:NICE:Nice | academie:NORMANDIE:Normandie | academie:ORLEANS-TOURS:Orléans-Tours | academie:PARIS:Paris | academie:POITIERS:Poitiers | academie:POLYNESIE:Polynésie française | academie:REIMS:Reims | academie:RENNES:Rennes | academie:STRASBOURG:Strasbourg | academie:TOULOUSE:Toulouse | academie:VERSAILLES:Versailles">
-  </dsfr-data-normalize>
-
-  <div class="fr-container fr-mb-6w">
+  <!-- ---------- 4. Exploration ---------- -->
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h3">4. Explorer une académie</h2>
+    <p class="fr-text--sm">Les 36 mois du jeu, pour l'académie choisie (toutes par défaut).
+      Le dernier mois est en cours&nbsp;: sa barre est incomplète.</p>
     <div class="fr-grid-row fr-grid-row--gutters">
       <div class="fr-col-12 fr-col-md-4">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-            Choisir une académie<span class="odv-filtres__compte"></span>
-          </summary>
-        <h2 class="fr-h6">Choisir une académie</h2>
-        <dsfr-data-facets id="cap-f" source="cap" fields="academie"
-          labels="academie:Académie" display="academie:multiselect" sort="alpha:asc"
+        <dsfr-data-facets id="exp-f" source="cap" fields="academie"
+          labels="academie:Académie" display="academie:select" sort="alpha:asc"
           max-values="40" url-sync url-params>
         </dsfr-data-facets>
-        <p class="fr-hint-text">
-          Sur le portail, ce même sélecteur ne pilote que trois indicateurs et un graphique ;
-          le classement, la carte et l'intensité restent en vue nationale. Ici,
-          <strong>toute la page se recalcule</strong>.
-        </p>
-        </details>
       </div>
       <div class="fr-col-12 fr-col-md-8">
-        <div class="odv-viz" data-code="Quatre compteurs calculés à l'affichage">
-        <dsfr-data-kpi-group cols="2" gap="md">
-          <dsfr-data-kpi source="cap-f" value="data_nb_visits:sum" format="compact"
-            heading="Sélection courante" label="visites académiques"></dsfr-data-kpi>
-          <dsfr-data-kpi source="cap-mois" value="visites:max" format="compact"
-            heading="Pic mensuel" label="visites sur un mois"></dsfr-data-kpi>
-          <dsfr-data-kpi source="cap-aca" value="count" format="nombre"
-            heading="Couverture" label="académies actives"></dsfr-data-kpi>
-          <dsfr-data-kpi source="cap-mois" value="count" format="nombre"
-            heading="Profondeur" label="mois observés"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        </div>
-        <p class="fr-text--xs fr-mt-2w">
-          Le portail annonce <strong>31</strong> académies actives et
-          <strong>1 128 « périodes observées »</strong>. Il y a <strong>32</strong> académies —
-          AEFE, présente sur 13 mois seulement, est oubliée — et 1 128 est un nombre de
-          <em>lignes</em> : il y a <strong>36</strong> périodes.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Transformateur d'isolement (BUG-009) avant les regroupements. -->
-  <dsfr-data-normalize id="cap-fn" source="cap-f"></dsfr-data-normalize>
-
-  <dsfr-data-query id="cap-mois" source="cap-fn" group-by="date"
-    aggregate="data_nb_visits:sum:visites" order-by="date:asc"></dsfr-data-query>
-
-  <dsfr-data-query id="cap-aca-brut" source="cap-fn" group-by="academie"
-    aggregate="data_nb_visits:sum:visites, data_nb_actions:sum:actions"
-    order-by="visites:desc"></dsfr-data-query>
-
-  <dsfr-data-normalize id="cap-aca" source="cap-aca-brut"
-    compute="actions_par_visite = round(actions / visites, 2)">
-  </dsfr-data-normalize>
-
-  <div class="fr-container fr-mb-8w">
-    <div class="odv-viz" data-code="L'évolution mensuelle sur trente-six mois">
-    <h2 class="fr-h5">L'évolution mensuelle</h2>
-    <p class="fr-text--sm">
-      Trente-six barres, calculées. Sur le portail, le même graphique existe deux fois : une
-      version vivante branchée sur le jeu, et juste en dessous une version en HTML statique de
-      36 <code>&lt;div&gt;</code> à hauteur écrite en dur — dont la dernière barre est fausse
-      (400 367 affichés pour 842 525 réels), parce que la copie a été prise sur un mois en cours.
-    </p>
-    <p class="odv-lecture">Un usage <strong>scolaire</strong>, qui respire au rythme de l'année&nbsp;:
-      creux chaque été, et des pics de plus en plus hauts d'une année sur l'autre.</p>
-    <dsfr-data-chart id="g-cap-mois" source="cap-mois" type="bar"
-      label-field="date" value-field="visites" name="Visites" unit-tooltip="visites"
-      databox databox-title="Visites mensuelles Capytale par académie"
-      databox-source="DNE — fr-en-capytale-usages-academiques-douzederniersmois, Licence Ouverte 2.0"
-      databox-download databox-screenshot>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-cap-mois" source="cap-mois" table download
-      label-field="date" value-field="visites"
-      description="Visites mensuelles sur trente-six mois : creux estivaux, pics croissants d'une année scolaire à l'autre."></dsfr-data-a11y>
-    </div>
-  </div>
-
-  <div class="fr-container fr-mb-8w">
-    <div class="odv-viz" data-code="Carte des académies, avec le total sous le titre">
-    <h2 class="fr-h5">Les usages par académie</h2>
-    <p class="fr-text--sm">
-      Le portail rend ici un <strong>GIF de la France métropolitaine</strong> surmonté de
-      18 pastilles positionnées à la main au centième de pourcent, toutes de la même couleur,
-      dont les infobulles sont désactivées par une règle CSS répétée quatre fois. Quatorze
-      académies sur trente-deux n'y figurent pas. Ici, une balise.
-    </p>
-    <p class="odv-lecture">Une carte de <strong>volumes</strong>&nbsp;: son résumé est une
-      somme, pas une moyenne — le total sous le titre est celui des académies dessinées, et il
-      suit le filtre.</p>
-    <!-- `map-summary="sum"` : la seule synthèse juste d'une carte de volumes. Sans
-         lui, DSFR Chart affichait la MOYENNE des académies « en France », un chiffre
-         qui ne mesure rien (AM-079). -->
-    <dsfr-data-chart id="c-cap-aca" source="cap-aca" type="map-aca"
-      code-field="academie" value-field="visites" name="Visites"
-      unit-tooltip="visites" selected-palette="sequentialAscending"
-      map-summary="sum"
-      databox databox-title="Visites Capytale par académie"
-      databox-source="DNE — fr-en-capytale-usages-academiques-douzederniersmois"
-      databox-download>
-    </dsfr-data-chart>
-    <p class="fr-hint-text">
-      <strong>Deux académies restent muettes sur cette carte</strong> : la
-      <strong>Polynésie française</strong> (57 430 visites) et l'<strong>AEFE</strong> (447), qui
-      ne font pas partie du découpage académique de DSFR Chart. La Réunion, elle, s'affiche
-      sans qu'on ait rien à écrire : depuis la 0.26.0, la mise en clé désaccentue et retire
-      l'article, donc le libellé affiché suffit à l'appariement.
-      <strong>Et l'avertissement existe</strong> : la console affiche
-      « 2 ligne(s) sur 32 ignorée(s) — code géographique absent, invalide ou hors référentiel
-      dans <code>academie</code> pour map-aca ». <em>Le portail, lui, en oublie quatorze
-      sans le dire.</em>
-    </p>
-    <dsfr-data-a11y for="c-cap-aca" source="cap-aca" table download
-      label-field="academie" value-field="visites, actions, actions_par_visite"></dsfr-data-a11y>
-    </div>
-
-    <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w">
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Podium des dix premières académies">
-        <h3 class="fr-h6">Les dix premières académies</h3>
-        <p class="odv-lecture">Orléans-Tours devant Versailles et la Normandie&nbsp;: le
-          classement <strong>ne suit pas la taille</strong> des académies. Il compte des visites,
-          pas des élèves — c'est le graphique suivant, rapporté à la visite, qui mesure
-          l'intensité.</p>
-        <dsfr-data-podium source="cap-aca" label-field="academie" value-field="visites"
-          value-unit="visites" max-items="10"></dsfr-data-podium>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Classement détaillé des académies">
-        <h3 class="fr-h6">Classement détaillé</h3>
-        <dsfr-data-list source="cap-aca" columns="academie, visites, actions, actions_par_visite"
-          caption="Visites, actions et intensité d'usage par académie"
-          sort pagination="10" count-label="académie"></dsfr-data-list>
+        <dsfr-data-query id="exp-mois" source="exp-f" group-by="date"
+          aggregate="data_nb_visits:sum:visites" order-by="date:asc"></dsfr-data-query>
+        <div class="odv-viz" data-code="Visites mensuelles de l'académie choisie">
+          <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-exp" source="exp-mois" type="bar"
+            label-field="date" value-field="visites:Visites" unit-tooltip="visites"
+            databox databox-title="Visites Capytale mensuelles, académie choisie"
+            databox-source="DNE — fr-en-capytale-usages-academiques-douzederniersmois"
+            databox-download heading-level="3">
+          </dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-exp" source="exp-mois" table download
+            filename="capytale-visites-mensuelles.csv"
+            label-field="date" value-field="visites"
+            description="Visites Capytale rattachées à l'académie choisie, mois par mois, sur les 36 mois de la fenêtre glissante du jeu."></dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="odv-viz" data-code="Actions par visite, sur un axe qui part de zéro">
-    <h2 class="fr-h5">Actions par visite</h2>
-    <p class="fr-text--sm">
-      Le portail rend ce même indicateur en dix-neuf colonnes CSS dont
-      <strong>l'échelle ne part pas de zéro</strong> : 9,0 y fait le double de 6,4 à l'œil, pour
-      un écart réel de 40 %. Ici l'axe commence à zéro, et l'écart réel se voit : de
-      <strong>7,96 pour l'AEFE</strong> à <strong>6,05 pour la Guyane</strong>, sur l'ensemble
-      des 36 mois.
-    </p>
-    <p class="odv-lecture">Rapporté à la visite, l'écart entre académies est <strong>faible</strong>&nbsp;:
-      les barres se ressemblent, et c'est la bonne nouvelle — l'intensité d'usage ne dépend pas
-      de la taille de l'académie.</p>
-    <dsfr-data-chart id="g-cap-int" source="cap-int" type="bar" horizontal y-min="0"
-      label-field="academie" value-field="actions_par_visite" name="Actions par visite"
-      unit-tooltip="actions par visite"
-      databox databox-title="Actions par visite, par académie"
-      databox-source="DNE — fr-en-capytale-usages-academiques-douzederniersmois"
-      databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-cap-int" source="cap-int" table download
-      label-field="academie" value-field="actions_par_visite"
-      description="Nombre moyen d'actions par visite, académie par académie, sur trente-six mois : un écart faible d'une académie à l'autre."></dsfr-data-a11y>
+    <div class="fr-mt-4w">
+      <dsfr-data-list source="aca-t"
+        columns="Académie, Visites pour 100 élèves, Visites 2025-2026, Élèves du second degré (rentrée 2025), Visites 2024-2025, Évolution (%)"
+        caption="Visites Capytale par académie, 2025-2026, rapportées aux élèves du second degré"
+        sort pagination="10" count-label="académie" export="csv"></dsfr-data-list>
     </div>
-  </div>
 
-  <dsfr-data-query id="cap-int" source="cap-aca"
-    order-by="actions_par_visite:desc"></dsfr-data-query>
-
-  <!-- ==========================================================================
-       Les deux jeux que la page d'origine cite en pied de page — sans lien,
-       sans licence — et n'interroge jamais. Trente-six et soixante-douze lignes.
-       ========================================================================== -->
-
-  <dsfr-data-source id="cap-site" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-capytale-nombre-de-visite"
-    select="mois_, nombre_de_visite_" order-by="mois_" max-records="100">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="cap-prof" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-capytale-repartition-des-visites-sur-dataeducation"
-    select="key, data_label, data_nb_visits" order-by="key" max-records="200">
-  </dsfr-data-source>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Les deux jeux que le portail cite sans les lire</h2>
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Visites du site Capytale, mois par mois">
-        <h3 class="fr-h6">Visites du site Capytale</h3>
-        <p class="odv-lecture">Le même rythme scolaire que les visites académiques, et un
-          <strong>plafond qui monte</strong> chaque hiver&nbsp;: janvier 2026 dépasse largement
-          janvier 2024.</p>
-        <dsfr-data-chart id="g-cap-site" source="cap-site" type="bar"
-          label-field="mois_" value-field="nombre_de_visite_" name="Visites du site" unit-tooltip="visites"
-          databox databox-title="Visites mensuelles du site Capytale"
-          databox-source="DNE — fr-en-capytale-nombre-de-visite" databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-cap-site" source="cap-site" table download
-          label-field="mois_" value-field="nombre_de_visite_"></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          Total <strong>18 621 144</strong> visites, pic à <strong>1 136 313 en janvier 2026</strong>,
-          soit <strong>2,29 fois</strong> janvier 2024 (496 226). C'est un total <em>différent</em>
-          des 11 393 906 visites académiques, et la page d'origine affiche un troisième chiffre
-          encore — « 14,1 M » — qui n'est ni l'un ni l'autre.
-        </p>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Élèves et enseignants, empilés en valeur absolue">
-        <h3 class="fr-h6">Élèves et enseignants</h3>
-        <p class="odv-lecture">Neuf visites sur dix sont <strong>des visites d'élèves</strong>. Les
-          hauteurs sont absolues, pas normalisées à 100&nbsp;%&nbsp;: on lit la part <em>et</em>
-          le volume sur la même barre.</p>
-        <dsfr-data-chart id="g-cap-prof" source="cap-prof" type="bar" stacked
-          label-field="key" series-field="data_label" value-field="data_nb_visits" unit-tooltip="visites"
-          databox databox-title="Répartition mensuelle des visites par profil"
-          databox-source="DNE — fr-en-capytale-repartition-des-visites-sur-dataeducation"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-cap-prof" source="cap-prof" table download
-          label-field="key" value-field="data_label, data_nb_visits"></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          <strong>10 433 657</strong> visites d'élèves contre <strong>1 047 883</strong>
-          d'enseignants, soit <strong>90,9 % / 9,1 %</strong>. Les libellés du jeu sont
-          <code>Elève</code> (sans accent) et <code>Enseignant</code>. Contrairement au bloc
-          empilé du portail, normalisé à 100 % en interne, les hauteurs sont ici absolues :
-          on lit à la fois la part et le volume.
-        </p>
-        </div>
-      </div>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Capytale grandit vite — un quart de visites connectées en plus
+        en un an — et son usage reste celui d'un outil de classe. Mais il n'est pas diffusé de
+        la même façon partout&nbsp;: d'une académie à l'autre, le nombre de visites par élève
+        varie de un à onze, et les trois académies d'Auvergne-Rhône-Alpes sont en bas du
+        classement. Ce que ces données ne disent pas&nbsp;: combien d'élèves différents
+        l'utilisent, dans quelles disciplines, et comment une visite est rattachée à une
+        académie.</p>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Le dénominateur est un choix.</strong> Les élèves du second degré (rentrée
+          2025), parce que Capytale sert surtout le collège et le lycée. Le cycle&nbsp;3 compte
+          aussi le CM1 et le CM2, et le public va jusqu'aux CPGE&nbsp;: ni l'un ni l'autre ne
+          sont au dénominateur. Les visites d'enseignants (environ une sur dix) sont au
+          numérateur. Le taux mesure une <strong>intensité relative</strong> entre académies,
+          pas une part d'élèves utilisateurs.</li>
+        <li><strong>Des visites, pas des élèves.</strong> Une visite est une session&nbsp;; un
+          élève actif en fait plusieurs. Aucun des jeux ne publie de visiteurs uniques par
+          académie.</li>
+        <li><strong>Deux académies hors du calcul.</strong> L'AEFE (réseau à l'étranger, 419
+          visites en 2025-2026) n'a pas d'effectif dans le jeu de la DEPP&nbsp;; la Polynésie
+          française en a un et figure au classement, mais pas sur la carte. La
+          Nouvelle-Calédonie, Wallis-et-Futuna et Saint-Pierre-et-Miquelon ont des élèves mais
+          aucune visite rattachée.</li>
+        <li><strong>La fenêtre glissante.</strong> Le jeu garde 36 mois et en perd un chaque
+          mois&nbsp;: 2023-2024 commence en octobre (elle n'est donc pas tracée en courbe, où
+          son septembre manquant se dessinerait à zéro), et l'année 2026-2027, commencée,
+          n'apparaît que dans l'exploration, où son dernier mois est incomplet. Les comparaisons
+          portent sur 2024-2025 et 2025-2026, deux années complètes.</li>
+        <li><strong>Une mesure écartée&nbsp;: les actions par visite.</strong> Elle saute de
+          6,5 à 7,5 en février 2026 dans 31 académies sur 32 à la fois, et y reste jusqu'en
+          juin&nbsp;: une rupture de mesure plus vraisemblablement qu'un changement de
+          pratique. La reproduction précédente en faisait un classement&nbsp;; on ne la montre
+          plus.</li>
+        <li><strong>Angles écartés.</strong> Le classement en volume (il mesure la taille des
+          académies)&nbsp;; la répartition élèves / enseignants mois par mois (stable, autour de
+          neuf sur dix)&nbsp;; la durée des visites, qui n'éclaire pas la question posée ici.</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
     <details class="odv-technique" id="analyse">
-      <summary>Analyse technique — ce que la reproduction a coûté</summary>
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
       <section class="fr-py-4w">
-      <h2>Analyse de reproduction — Capytale</h2>
+      <h2>Analyse — Capytale, analyse des usages</h2>
 
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine : une <strong>page AngularJS</strong> servie sous l'URL
-        <a href="https://data.education.gouv.fr/explore/assets/test-capytale-2-copie-copie/view/" target="_blank" rel="noopener external">/explore/assets/<strong>test-capytale-2-copie-copie</strong>/view/</a>
-        — un slug de production qui dit « test », « 2 », « copie », « copie ». Fiche d'audit :
-        <code>docs/portail-education/capytale-usages.md</code>.
+        Page d'origine :
+        <a href="https://data.education.gouv.fr/explore/assets/test-capytale-2-copie-copie/view/" target="_blank" rel="noopener external">/explore/assets/test-capytale-2-copie-copie/</a>
+        — un tableau de bord dont six sections sur sept sont du HTML écrit à la main, déjà
+        faux par endroits. Fiche d'audit : <code>docs/portail-education/capytale-usages.md</code>.
+        Recréée le 2026-09-26 en page éditoriale, avec un dénominateur que ni l'original ni la
+        reproduction précédente n'avaient.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>La carte académique, en une balise.</strong>
-              <code>type="map-aca"</code> + <code>code-field</code> remplace le GIF, les
-              18 pastilles en <code>position:absolute</code>, les coordonnées en pourcentages, le
-              <code>&lt;div&gt;</code> en <code>border-radius</code> qui tenait lieu de La Réunion,
-              et la légende en dégradé qui n'encodait rien.</li>
-            <li><strong>Le podium et le classement.</strong> <code>dsfr-data-podium</code> pour
-              les dix lignes écrites à la main, <code>dsfr-data-list</code> pour le tableau de
-              quinze : deux balises pour vingt-cinq blocs de HTML figé.</li>
-            <li><strong>Le <code>select</code> qui divise le transfert par 1 350.</strong>
-              L'export complet fait 31 Mo — <code>geo_shape</code> est répété 36 fois par
-              académie, et deux colonnes portent des blobs JSON Matomo. En n'en gardant que
-              quatre, on tombe à 23 Ko. C'est exactement la première branche du piège du dépôt
-              sur les champs texte longs.</li>
-            <li><strong>Un seul filtre pilote toute la page.</strong> Les quatre KPI, les deux
-              graphiques, la carte, le podium et le classement lisent tous la même facette.</li>
+            <li><strong>Le dénominateur d'un autre jeu.</strong> Agrégé par le serveur
+              (35 lignes), joint sur le nom brut de l'académie, qui a la même casse dans les deux
+              jeux&nbsp;; une seule académie à renommer.</li>
+            <li><strong>L'année scolaire sans script.</strong> <code>compute</code> avec
+              <code>month()</code>, <code>year()</code> et <code>when</code> dérive l'année et le
+              rang du mois&nbsp;; un <code>dsfr-data-pivot</code> met une année par colonne.</li>
+            <li><strong>Des phrases qui suivent la donnée.</strong> Chapô, tête et queue du
+              classement, part rattachée, académies en recul&nbsp;: <code>dsfr-data-repeat</code>
+              sur des lignes calculées, deux jointures sur une clé constante.</li>
+            <li><strong>Un résumé de carte honnête.</strong> <code>map-summary="weighted"</code>
+              pondère par les élèves, sur la colonne brute (<code>map-summary-field</code>).</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Ce que cette page a longtemps écrit ici était faux — et c'est le
-              constat le plus utile qu'elle produit.</strong> On y lisait qu'il fallait
-              « deux <code>dsfr-data-normalize</code> en cascade pour une seule idée », parce que
-              <code>map-aca</code> « exige des majuscules non accentuées » et que renommer d'abord
-              aurait donné « une carte silencieusement à moitié grise ». Les trois affirmations
-              sont <strong>périmées depuis la 0.26.0</strong> (<code>dsfr-data#754</code>) :
-              <code>toAcademyKey</code> désaccentue la clé <em>et</em> lui retire l'article, donc
-              « Orléans-Tours » et « La Réunion » s'apparient tels quels. Elles ont survécu trois
-              versions mineures parce qu'une revue les avait reconduites <em>sans les rejouer</em>
-              — exactement la dette que décrit FP-014. Rejoué au navigateur le 2026-09-19 contre la
-              0.32.0, après suppression de la colonne dérivée et <code>code-field="academie"</code>
-              posé sur les libellés accentués : <strong>2 lignes ignorées sur 32</strong>, les
-              mêmes qu'avant, et les quatre KPI de la page rigoureusement inchangés. Un
-              <code>dsfr-data-normalize</code>, un <code>compute</code> et une colonne de
-              regroupement en moins (BUG-008).</li>
-            <li><strong>Deux académies n'ont aucun polygone à recevoir — et on le sait.</strong>
-              Le découpage académique de DSFR Chart 2.1.1 compte <strong>30 clés</strong> ; ni
-              <code>POLYNESIE</code>, ni <code>AEFE</code>, ni <code>NOUVELLE-CALEDONIE</code> n'en
-              font partie. Ce n'est pas silencieux : la console dit « <em>2 ligne(s) sur 32
-              ignorée(s) — code géographique absent, invalide ou hors référentiel dans
-              « academie » pour map-aca</em> ». Reste que l'avertissement n'apparaît qu'en
-              console : un lecteur de la page ne saurait pas que deux académies manquent si
-              l'auteur ne l'écrivait pas — ce qui est fait sous la carte. Le portail d'origine,
-              lui, en oublie quatorze sans le dire.</li>
-            <li><strong>Trente et une règles de <code>replace-fields</code> pour remettre des
-              accents.</strong> La grammaire est stricte et sans regex : une entrée par valeur,
-              séparées par des barres verticales. Sur 32 académies c'est tenable ; sur une
-              nomenclature de communes, ce ne le serait pas. Le vrai correctif est en amont —
-              le jeu voisin <code>fr-en-dnma-par-uai-profils</code>, <strong>du même portail et
-              du même producteur</strong>, stocke les mêmes académies en casse normale
-              accentuée.</li>
+            <li><strong>Les accents.</strong> Trente et une règles de
+              <code>replace-fields</code>, posées après la jointure pour ne pas casser la clé.</li>
+            <li><strong>Une fenêtre glissante et des années écrites en dur.</strong> Les colonnes
+              <code>v2024</code>/<code>v2025</code> du pivot sont nommées dans la page&nbsp;: la
+              comparaison est datée, et devra être déplacée d'un an en septembre 2027.</li>
           </ul>
         </div>
       </div>
@@ -407,34 +516,27 @@
         <table>
           <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">Directive AngularJS d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-dataset-context</code> ×2 imbriqués + interpolation à effet de bord</td><td>1 <code>dsfr-data-source</code> + <code>select</code></td><td>Équivalent, 23 Ko au lieu de 31 Mo</td></tr>
-            <tr><td><code>ods-select</code> + <code>ods-facet-results</code></td><td><code>dsfr-data-facets display="academie:select"</code></td><td>Meilleur : pilote la page entière, et l'URL suit</td></tr>
-            <tr><td>2 <code>ods-aggregation</code> (SUM, COUNT)</td><td><code>dsfr-data-kpi</code> ×4, dont deux sur des <code>group-by</code></td><td>Meilleur : 32 académies et 36 mois, pas 31 et 1 128</td></tr>
-            <tr><td><code>ods-chart</code> mensuel</td><td><code>dsfr-data-chart type="bar"</code></td><td>Équivalent</td></tr>
-            <tr><td>GIF + 18 pastilles CSS + légende trompeuse</td><td><code>type="map-aca"</code></td><td>Meilleur, sauf 2 académies hors découpage</td></tr>
-            <tr><td>10 lignes de classement en dur</td><td><code>dsfr-data-podium</code></td><td>Meilleur</td></tr>
-            <tr><td>19 colonnes d'intensité, échelle tronquée</td><td><code>type="bar" y-min="0"</code></td><td>Meilleur : l'écart visuel devient l'écart réel</td></tr>
-            <tr><td>2 jeux cités sans être lus</td><td>2 <code>dsfr-data-source</code> + 2 graphiques</td><td>Sans équivalent sur le portail</td></tr>
+            <tr><td><code>ods-dataset-context</code> ×2 (31 Mo)</td><td><code>dsfr-data-source</code> + <code>select</code> + <code>fetch-mode="export"</code></td><td>Équivalent, en quatre colonnes</td></tr>
+            <tr><td><code>ods-select</code> + <code>ods-facet-results</code></td><td><code>dsfr-data-facets display="academie:select"</code></td><td>Équivalent, et l'adresse suit</td></tr>
+            <tr><td><code>ods-aggregation</code> ×2 et KPI en dur</td><td><code>dsfr-data-kpi</code> ×5, ratios de sommes</td><td>Meilleur : calculés, datés</td></tr>
+            <tr><td><code>ods-chart</code> mensuel + copie statique</td><td>courbes par année scolaire (<code>pivot</code>)</td><td>Meilleur : la croissance se lit à mois égal</td></tr>
+            <tr><td>GIF + 18 pastilles, classements en dur</td><td><code>type="map-aca"</code> + barres triées, rapportés aux élèves</td><td>Meilleur : un taux, pas un volume</td></tr>
+            <tr><td>2 jeux cités sans être lus</td><td><code>dsfr-data-join</code> + barres empilées</td><td>Sans équivalent</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong> — et c'est le fait marquant. La page d'origine
-          compte plus de 3 000 lignes de HTML et 24 Ko de CSS pour <strong>trois directives
-          vivantes</strong> ; tout le reste — les quatre indicateurs d'en-tête, les deux
-          graphiques d'évolution, la carte, les deux classements, le bloc d'intensité — est
-          recopié à la main, sur un portail dont les jeux sont rafraîchis <em>quotidiennement</em>.
-          Et ces chiffres sont déjà faux : trois écarts mesurés, dont une barre à 400 367 pour
-          842 525 réels. La difficulté du portage n'a donc pas été de reproduire, mais de décider
-          quoi ne pas reproduire. La seule friction technique est instructive :
-          <strong>le champ qui sert d'étiquette et le champ qui sert de clé cartographique ne
-          peuvent pas être le même</strong> quand la donnée est en capitales et que la carte
-          l'exige — et si l'on se trompe d'ordre, la carte se vide en silence.</p>
+        <p>La bibliothèque n'a pas résisté&nbsp;: un jeu d'un autre producteur, joint en trois
+          balises, a suffi à changer l'histoire. <strong>Le travail a été la lecture des
+          jeux</strong>&nbsp;: comprendre que le classement en volume mesurait la taille des
+          académies, que les visites par académie ne sont que les visites connectées — dont la
+          part recule —, et qu'un indicateur affiché jusqu'ici (les actions par visite) portait
+          une rupture de mesure.</p>
       </div>
       </section>
     </details>
@@ -447,11 +549,8 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<!-- Bundle `core` (446 Ko) et non `esm` (551 Ko) : cette page n'a aucune
-     <dsfr-data-map> Leaflet. Verifie le 2026-09-19 sur les noms d'elements du
-     paquet publie 0.31.0 : `core` definit tout ce que la page emploie, les
-     cartes DSFR Chart (map-chart) comprises ; il ne lui manque que les enfants
-     de la carte Leaflet (map-layer, map-popup, map-legend, map-inset...). -->
+<!-- Bundle `core` : aucune carte Leaflet ici, les cartes sont des map-chart
+     de DSFR Chart. `core` porte pivot, join, repeat et facets. -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>

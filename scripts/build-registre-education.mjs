@@ -48,7 +48,7 @@ const STATUTS = {
   // --- Lot 14 (vague pilote) : six pages, choisies pour couvrir les quatre
   // familles de sources et les motifs que Bercy n'a pas montres.
   'IPS Collèges': ['reproduite', '/education/dataviz-ips-colleges',
-    'Maille académique : 6 980 collèges, choroplèthe par académie et distribution des IPS', 'angular'],
+    'Recréée en récit (2026-09-26) : l’écart public-privé se creuse à chaque rentrée, 20,0 points en 2024 ; mesuré dans chaque méthode DEPP (PG-043)', 'angular'],
   'IPS Ecoles': ['reproduite', '/education/dataviz-ips-ecoles',
     '279 318 points : require-where + fetch-mode=export, aucune requête tant qu’aucun filtre', 'angular'],
   'Etablissements labellisés Euroscol': ['reproduite', '/education/etablissements-euroscol',
@@ -96,7 +96,7 @@ const STATUTS = {
   'Suivi d\'impact de l\'Opération de Sensibilisation au risque de l\'hameçonnage "Cactus"': ['reproduite', '/education/cactus-hameconnage',
     '904 réponses ; fold suppose des booléens, un questionnaire produit des ternaires', 'studio'],
   'Quelles personnalités ont donné leur nom aux écoles ?': ['reproduite', '/education/patronymes-des-ecoles',
-    '809 225 lignes, zéro chargée ; 17,2 % de femmes, et trois dénominateurs possibles', 'asset'],
+    'Recréée en récit (2026-09-26) : 20,0 % de femmes au stock, 48,2 % des gains 2019-2024 ; rentrées 2009-2018 écartées, noms recopiés en arrière (FP-022)', 'asset'],
 
   // --- Lot 18 : les cinq assets et les huit cibles hors portail.
   'GAR - les données sur les ressources numériques éducatives accessibles via le GAR': ['reproduite', '/education/gar-ressources-numeriques',

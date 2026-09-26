@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>IPS des lycées — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz « IPS Lycées » de data.education.gouv.fr : deux voies, deux échelles, et une colonne de synthèse vide.">
+  <meta name="description" content="Recréation avec dsfr-data de la dataviz « IPS Lycées » de data.education.gouv.fr : la voie générale et la voie professionnelle n'accueillent pas les mêmes élèves, même dans un seul lycée.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,171 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un localisateur muet, figé sur 2023-2024. La reproduction
+       précédente affirmait que l'IPS de la voie générale et celui de la voie
+       professionnelle étaient « deux échelles qui ne se comparent pas », et en
+       tirait une carte qui refusait de colorer par l'IPS. C'était faux : la DEPP
+       définit l'IPS d'un établissement comme la MOYENNE DES IPS DE SES ÉLÈVES
+       (description de `fr-en-ips-lycees-ap2023`), et l'IPS d'une voie comme la
+       même moyenne sur les élèves de cette voie. Même indice, même table de
+       passage : l'écart entre les deux voies n'est pas un artefact d'échelle,
+       c'est LE fait social que porte le jeu. Cette page le raconte.
+
+       Sources, toutes lues SANS clé :
+         · `nat`   — neuf rentrées, toutes voies, agrégées par le serveur ;
+         · `poly`  — neuf rentrées, lycées portant LES DEUX voies, idem ;
+         · `sect`  — dernière rentrée, par secteur (2 lignes) ;
+         · `lyc`   — les 3 631 lycées de la dernière rentrée, en un export ;
+         · `refs`  — les références nationales pondérées par les élèves (DEPP),
+                     dans le jeu public `fr-en-ips-lycees-ap2023`.
+       ========================================================================== -->
+
+  <!-- ---------- 1. Les séries : toutes voies, et lycées polyvalents ---------- -->
+  <dsfr-data-source id="nat" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-lycees"
+    select="rentree_scolaire, avg(ips_voie_gt) as gt, avg(ips_voie_pro) as pro"
+    group-by="rentree_scolaire"
+    order-by="rentree_scolaire:asc">
+  </dsfr-data-source>
+  <!-- Les lycées « polyvalents » au sens du jeu : ceux qui portent un IPS dans
+       les deux voies. Même filtre que `ecart_voies` plus bas. -->
+  <dsfr-data-source id="poly" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-lycees"
+    select="rentree_scolaire, avg(ips_voie_gt) as gtp, avg(ips_voie_pro) as prop, count(*) as np"
+    where="ips_voie_gt is not null and ips_voie_pro is not null"
+    group-by="rentree_scolaire"
+    order-by="rentree_scolaire:asc">
+  </dsfr-data-source>
+  <!-- Noms distincts des deux côtés : pas de collision à la jointure. La clé
+       `rentree_scolaire` est unique des deux côtés (une ligne par rentrée). -->
+  <dsfr-data-join id="serie-j" left="nat" right="poly" on="rentree_scolaire" type="inner"></dsfr-data-join>
+  <!-- Écarts calculés AVANT tout arrondi (PG-031). `k` : clé constante pour
+       replier la série en une ligne (bornes de la phrase de lecture). -->
+  <dsfr-data-normalize id="serie-e" source="serie-j"
+    compute="e = gt - pro; ep = gtp - prop; k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="serie-r" source="serie-e" round="e:1, ep:1, gt:1, pro:1, gtp:1, prop:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="serie-t" source="serie-r"
+    rename="rentree_scolaire:Rentrée | gtp:IPS moyen voie générale (polyvalents) | prop:IPS moyen voie professionnelle (polyvalents) | ep:Écart dans le même lycée (points) | np:Lycées polyvalents">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="serie-der" source="serie-e" order-by="rentree_scolaire:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-pivot id="serie-bornes" source="serie-e"
+    row="k" column="rentree_scolaire" value="ep" aggregate="first"
+    labels="2016-2017:e16 | 2021-2022:e21 | 2022-2023:e22 | 2024-2025:e24">
+  </dsfr-data-pivot>
+
+  <!-- ---------- 2. Voie × secteur, dernière rentrée ---------- -->
+  <dsfr-data-source id="sect" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-lycees"
+    select="secteur, avg(ips_voie_gt) as gt, avg(ips_voie_pro) as pro"
+    where="rentree_scolaire = '2024-2025'"
+    group-by="secteur"
+    order-by="secteur:desc">
+  </dsfr-data-source>
+  <!-- Deux colonnes (voies) → deux lignes par secteur : les voies deviennent
+       l'axe, le secteur la série. -->
+  <dsfr-data-unpivot id="sect-l" source="sect" id-cols="secteur"
+    value-cols="gt:Voie générale et technologique, pro:Voie professionnelle"
+    var-name="voie" value-name="ips">
+  </dsfr-data-unpivot>
+  <dsfr-data-normalize id="sect-r" source="sect-l" round="ips:1"></dsfr-data-normalize>
+  <!-- Une ligne par voie, les secteurs en colonnes : l'écart de secteur. -->
+  <dsfr-data-pivot id="sect-w" source="sect-l"
+    row="voie" column="secteur" value="ips" aggregate="first"
+    labels="public:public | privé sous contrat:prive">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="sect-e" source="sect-w" compute="es = prive - public"></dsfr-data-normalize>
+  <dsfr-data-normalize id="sect-er" source="sect-e" round="es:1, prive:1, public:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="sect-t" source="sect-er"
+    rename="voie:Voie | public:IPS moyen public | prive:IPS moyen privé sous contrat | es:Écart privé − public (points)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 3. Références DEPP, pondérées par les élèves ---------- -->
+  <dsfr-data-source id="refs" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-ips-lycees-ap2023"
+    select="rentree_scolaire, ips_national_legt, ips_national_lpo, ips_national_lp"
+    where="rentree_scolaire = '2024-2025' and ips_national_legt is not null"
+    group-by="rentree_scolaire, ips_national_legt, ips_national_lpo, ips_national_lp">
+  </dsfr-data-source>
+
+  <!-- ---------- 4. La dernière rentrée, lycée par lycée ----------
+       `fetch-mode="export"` : une requête. `max-records` relevé : le plafond par
+       défaut de 1 000 tronquerait EN SILENCE 3 631 lycées (piège maison).
+       Aucun texte long dans le `select`. -->
+  <dsfr-data-source id="lyc" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-lycees"
+    fetch-mode="export" max-records="5000"
+    select="uai, appellation_officielle, secteur, ips_voie_gt, ips_voie_pro,
+            libelle_commune, libelle_departement, libelle_academie, position"
+    where="rentree_scolaire = '2024-2025'">
+  </dsfr-data-source>
+
+  <!-- Colonnes calculées, par ligne. La nullité s'écrit `is_null(champ)` (la
+       fonction de `compute`), pas `champ is null` (l'ODSQL de la source).
+       · `type_lycee` : quelles voies le lycée porte ;
+       · `ecart_voies` : GT − PRO, seulement quand les deux existent, NON arrondi ;
+       · `rang5` / `classe5` : classes de cinq points de cet écart ;
+       · `gt` / `pro` : copies des deux IPS, qui survivent au dépliage plus bas. -->
+  <dsfr-data-normalize id="lyc-n" source="lyc"
+    compute="type_lycee = when is_null(ips_voie_gt) and is_null(ips_voie_pro) then 'Aucune voie renseignée' when is_null(ips_voie_pro) then 'Voie générale seule' when is_null(ips_voie_gt) then 'Voie professionnelle seule' else 'Les deux voies';
+             ecart_voies = when is_null(ips_voie_gt) or is_null(ips_voie_pro) then null else ips_voie_gt - ips_voie_pro;
+             k = 'France';
+             pos1 = when is_null(ecart_voies) then null when ecart_voies &gt; 0 then 1 else 0;
+             p20 = when is_null(ecart_voies) then null when ecart_voies &gt;= 20 then 1 else 0;
+             rang5 = when is_null(ecart_voies) then null when ecart_voies &lt; 0 then 0 when ecart_voies &lt; 5 then 1 when ecart_voies &lt; 10 then 2 when ecart_voies &lt; 15 then 3 when ecart_voies &lt; 20 then 4 when ecart_voies &lt; 25 then 5 when ecart_voies &lt; 30 then 6 when ecart_voies &lt; 35 then 7 else 8;
+             classe5 = when is_null(ecart_voies) then null when ecart_voies &lt; 0 then 'Voie pro au-dessus' when ecart_voies &lt; 5 then '0 à 5' when ecart_voies &lt; 10 then '5 à 10' when ecart_voies &lt; 15 then '10 à 15' when ecart_voies &lt; 20 then '15 à 20' when ecart_voies &lt; 25 then '20 à 25' when ecart_voies &lt; 30 then '25 à 30' when ecart_voies &lt; 35 then '30 à 35' else '35 et plus';
+             gt = ips_voie_gt; pro = ips_voie_pro">
+  </dsfr-data-normalize>
+
+  <!-- Section 2 : la distribution de l'écart dans les lycées polyvalents. -->
+  <dsfr-data-query id="poly-k" source="lyc-n" where="ecart_voies:isnotnull"
+    group-by="k" aggregate="pos1:sum:npos, p20:sum:n20, uai:count:n">
+  </dsfr-data-query>
+  <dsfr-data-query id="hist" source="lyc-n" where="rang5:isnotnull"
+    group-by="rang5, classe5" aggregate="uai:count:nb" order-by="rang5:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="hist-t" source="hist"
+    rename="classe5:Écart voie générale − voie professionnelle (points) | nb:Lycées polyvalents">
+  </dsfr-data-normalize>
+
+  <!-- La composition : pourquoi l'écart national dépasse l'écart interne.
+       Une query PAR VOIE, chacune avec son `where … isnotnull` : un groupe dont
+       toutes les valeurs sont nulles sort de `aggregate` avec une moyenne de 0,
+       pas null (mesuré le 2026-09-26 en 0.42.0, page minimale) — « voie
+       professionnelle 0,0 » pour un lycée général. Le `where` écarte ces groupes. -->
+  <dsfr-data-query id="types-gt" source="lyc-n" where="ips_voie_gt:isnotnull"
+    group-by="type_lycee" aggregate="ips_voie_gt:avg:m, uai:count:nb" order-by="m:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="types-pro" source="lyc-n" where="ips_voie_pro:isnotnull"
+    group-by="type_lycee" aggregate="ips_voie_pro:avg:m, uai:count:nb" order-by="m:desc">
+  </dsfr-data-query>
+
+  <!-- Section 4 : académies. Un lycée polyvalent sans académie est écarté. -->
+  <dsfr-data-query id="acad" source="lyc-n" where="ecart_voies:isnotnull, libelle_academie:isnotnull"
+    group-by="libelle_academie" aggregate="ecart_voies:avg:m, uai:count:nb" order-by="m:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="acad-haut" source="acad" order-by="m:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="acad-bas" source="acad" order-by="m:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="acad-r" source="acad" round="m:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="acad-t" source="acad-r"
+    rename="libelle_academie:Académie | m:Écart moyen dans le même lycée (points) | nb:Lycées polyvalents">
+  </dsfr-data-normalize>
+
+  <!-- Exploration : une ligne par couple (lycée, voie). Un lycée polyvalent
+       donne deux lignes, un lycée sans IPS n'en donne aucune (`drop-empty`).
+       Une seule échelle de couleur pour les deux voies : c'est le même indice. -->
+  <dsfr-data-unpivot id="lyc-v" source="lyc-n"
+    id-cols="uai, appellation_officielle, secteur, libelle_commune, libelle_departement, libelle_academie, position, type_lycee, gt, pro, ecart_voies"
+    value-cols="ips_voie_gt:Voie générale et technologique, ips_voie_pro:Voie professionnelle"
+    var-name="voie" value-name="ips" drop-empty>
+  </dsfr-data-unpivot>
+  <dsfr-data-normalize id="lyc-vt" source="lyc-v"
+    compute="tranche_ips = when is_null(ips) then 'IPS non renseigné' when ips &lt; 90 then 'Moins de 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 125 then '110 à 125' else '125 et plus'">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,322 +197,420 @@
       </div>
     </nav>
 
-    <h1>Indice de position sociale des lycées — rentrée 2023-2024</h1>
+    <h1>Voie générale, voie professionnelle&nbsp;: deux lycées sous le même toit</h1>
 
-    <p class="fr-text--lead">
-      Un lycée n'a pas <em>un</em> IPS mais <strong>jusqu'à deux</strong> : celui de sa voie
-      générale et technologique, et celui de sa voie professionnelle. Sur les
-      <strong>3 612 lycées</strong> de la rentrée 2023-2024, 2 473 ont un IPS de voie générale
-      (moyenne <strong>116,3</strong>), 2 068 un IPS de voie professionnelle (moyenne
-      <strong>91,6</strong>), et <strong>951 ont les deux</strong>. Les deux échelles ne se
-      comparent pas : <strong>24,8 points</strong> les séparent.
+    <!-- Chapô CALCULÉ sur la dernière rentrée du jeu. -->
+    <dsfr-data-repeat source="serie-der">
+      <template>
+        <p class="fr-text--lead">
+          À la rentrée {{rentree_scolaire}}, l'indice de position sociale (IPS) moyen de la voie
+          générale et technologique des lycées est de <strong>{{gt:number:1}}</strong>, celui de la
+          voie professionnelle de <strong>{{pro:number:1}}</strong>&nbsp;: <strong>{{e:number:1}}
+          points d'écart</strong>, davantage que ce qui sépare le privé sous contrat du public. Et
+          ce n'est pas qu'une affaire d'établissements différents&nbsp;: dans les
+          <strong>{{np:number}} lycées</strong> qui proposent les deux voies, l'écart entre leurs
+          propres élèves reste de <strong>{{ep:number:1}} points</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      L'IPS résume, à partir des professions des parents, les conditions sociales et culturelles
+      des élèves&nbsp;: plus il est élevé, plus elles sont favorables à la réussite scolaire.
+      L'IPS d'une voie est la moyenne des IPS des élèves de cette voie, calculée avec la même
+      table que celui de l'autre voie&nbsp;: <strong>les deux se comparent</strong>. Toutes les
+      moyennes de cette page sont des <strong>moyennes de lycées</strong> — chaque lycée compte
+      pour un —, car le jeu ne porte pas les effectifs. La DEPP conseille de ne pas
+      sur-interpréter des écarts de 3&nbsp;points ou moins entre établissements.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/donnees-ips-lycees/"
            target="_blank" rel="noopener external"><code>donnees-ips-lycees</code></a>
-        — 32 618 lignes sur 9 rentrées, produit par la DEPP, jeu technique
-        <em>hors catalogue</em> (titre interne « dataviz1 »), lu sans clé.
-        <strong>39 lycées sont écartés</strong> de cette page : 22 n'ont aucun IPS et 17 n'ont
-        pas de position. La carte en montre <strong>3 573</strong> sur 3 612.
+        (DEPP) — un lycée par ligne et par rentrée, de 2016-2017 à 2024-2025, avec un IPS par voie
+        (<code>ips_voie_gt</code>, <code>ips_voie_pro</code>). Jeu technique, hors catalogue, seul
+        à porter une position géographique. Les références nationales pondérées par les élèves
+        viennent du jeu public
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-ips-lycees-ap2023/"
+           target="_blank" rel="noopener external"><code>fr-en-ips-lycees-ap2023</code></a>,
+        qui publie déjà la rentrée 2025-2026, sans position. Lecture sans clé.
       </p>
     </details>
 
-    <details class="fr-callout fr-icon-alert-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">La colonne de synthèse est vide sur l'année affichée</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        Le jeu porte une troisième colonne, <code>ips_ensemble_gt_pro</code>, censée donner l'IPS
-        toutes voies confondues — la seule qui permettrait de comparer un lycée général à un lycée
-        professionnel. Elle est <strong>nulle sur les 3 612 lignes de 2023-2024</strong>.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        Ce n'est pas un accident isolé : mesuré rentrée par rentrée à l'API, la colonne est
-        <strong>renseignée sur les sept premières</strong> (2016-2017 à 2022-2023, soit 25 375
-        lignes) et <strong>vide sur les deux dernières</strong> (2023-2024 et 2024-2025). Elle a
-        cessé d'être alimentée — et la page d'origine est précisément figée sur la première année
-        où elle manque. L'original ne le signale pas&nbsp;: sa configuration d'infobulle masque
-        les lignes nulles, si bien que le champ est simplement absent de la bulle, sans distinction
-        entre « non applicable » et « non produit ».
-      </p>
-    </details>
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="serie-der" value="e:first" format="decimal" decimals="1"
+        heading="Points d'écart entre les deux voies"
+        lines='[{"value":"gt:first","format":"decimal","decimals":1,"prefix":"voie générale : "},{"value":"pro:first","format":"decimal","decimals":1,"prefix":"voie professionnelle : "}]'
+        label="IPS moyen, tous lycées, dernière rentrée publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="serie-der" value="ep:first" format="decimal" decimals="1"
+        heading="Points d'écart dans un même lycée"
+        lines='[{"value":"np:first","format":"nombre","suffix":" lycées portant les deux voies"}]'
+        label="moyenne des écarts internes, dernière rentrée publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="lyc-n"
+        value="count{ecart_voies:gt:0} / count{ecart_voies:isnotnull}" format="pourcentage"
+        heading="de ces lycées, la voie générale est la plus favorisée"
+        label="rentrée 2024-2025"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve : voie × secteur ---------- -->
+    <h2 class="fr-h3">1. La voie sépare les lycéens davantage que le secteur</h2>
+    <p class="odv-lecture">Le privé sous contrat accueille des élèves plus favorisés que le public,
+      dans les deux voies&nbsp;:</p>
+    <dsfr-data-repeat source="sect-er" key-field="voie">
+      <template>
+        <p class="odv-lecture fr-mb-1v">— {{voie}}&nbsp;: <strong>{{es:number:1}} points</strong>
+          d'écart (privé {{prive:number:1}}, public {{public:number:1}})&nbsp;;</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="odv-lecture">mais l'écart entre les voies est plus large encore&nbsp;: à la rentrée
+      2024-2025, la voie générale du <em>public</em> devance la voie professionnelle du
+      <em>privé</em>. Les deux barres de la voie générale dépassent les deux barres de la voie professionnelle.</p>
+    <div class="odv-viz fr-mb-6w" data-code="IPS moyen par voie et par secteur">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-sect" source="sect-r" type="bar"
+        label-field="voie" series-field="secteur" value-field="ips"
+        y-min="0" unit-tooltip="points d'IPS"
+        databox databox-title="IPS moyen des lycées, par voie et par secteur, rentrée 2024-2025"
+        databox-source="DEPP — donnees-ips-lycees, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-sect" source="sect-t" table download
+        filename="ips-lycees-voie-secteur-2024-2025.csv"
+        label-field="Voie" value-field="IPS moyen public, IPS moyen privé sous contrat, Écart privé − public (points)"
+        description="IPS moyen des lycées à la rentrée 2024-2025, par voie et par secteur, chaque lycée comptant pour un. Dans chaque voie le privé sous contrat dépasse le public ; mais la voie générale du public dépasse la voie professionnelle du privé."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. Sous le même toit ---------- -->
+    <h2 class="fr-h3">2. Sous le même toit, la voie générale est presque toujours la plus favorisée</h2>
+    <dsfr-data-repeat source="poly-k">
+      <template>
+        <p class="odv-lecture">Dans <strong>{{npos:number}} lycées polyvalents sur
+          {{n:number}}</strong>, les élèves de la voie générale et technologique ont un IPS moyen
+          plus élevé que ceux de la voie professionnelle du même établissement&nbsp;; dans
+          <strong>{{n20:number}}</strong>, l'écart atteint 20 points ou plus. Les quelques lycées où
+          la voie professionnelle passe devant forment la barre de gauche.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-4w" data-code="Distribution de l'écart interne des lycées polyvalents">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-hist" source="hist" type="bar"
+        label-field="classe5" value-field="nb:Lycées polyvalents"
+        y-min="0" unit-tooltip="lycées"
+        databox databox-title="Lycées polyvalents selon l'écart d'IPS entre leur voie générale et leur voie professionnelle, rentrée 2024-2025"
+        databox-source="DEPP — donnees-ips-lycees, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-hist" source="hist-t" table download
+        filename="ips-lycees-ecart-interne-2024-2025.csv"
+        label-field="Écart voie générale − voie professionnelle (points)" value-field="Lycées polyvalents"
+        description="Nombre de lycées portant les deux voies, par classe de cinq points d'écart entre l'IPS de leur voie générale et technologique et celui de leur voie professionnelle, rentrée 2024-2025. La classe la plus à gauche regroupe les lycées où la voie professionnelle a l'IPS le plus élevé."></dsfr-data-a11y>
+    </div>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Pourquoi l'écart national est plus large que l'écart interne</h3>
+        <p class="fr-text--sm">Parce que les lycées qui n'ont qu'une voie générale recrutent plus
+          haut que la voie générale des lycées polyvalents — alors que la voie professionnelle est
+          au même niveau partout. IPS moyen, rentrée 2024-2025&nbsp;:</p>
+        <p class="fr-text--sm fr-mb-1v"><strong>Voie générale et technologique</strong></p>
+        <dsfr-data-repeat source="types-gt" key-field="type_lycee">
+          <template>
+            <p class="fr-text--sm fr-mb-1v">— {{type_lycee}}&nbsp;: <strong>{{m:number:1}}</strong>
+              ({{nb:number}} lycées)</p>
+          </template>
+        </dsfr-data-repeat>
+        <p class="fr-text--sm fr-mt-2w fr-mb-1v"><strong>Voie professionnelle</strong></p>
+        <dsfr-data-repeat source="types-pro" key-field="type_lycee">
+          <template>
+            <p class="fr-text--sm fr-mb-1v">— {{type_lycee}}&nbsp;: <strong>{{m:number:1}}</strong>
+              ({{nb:number}} lycées)</p>
+          </template>
+        </dsfr-data-repeat>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Pondéré par les élèves, la hiérarchie est la même</h3>
+        <p class="fr-text--sm">Les références nationales de la DEPP, où un grand lycée pèse plus
+          qu'un petit, sont publiées par type de lycée et non par voie&nbsp;:</p>
+        <dsfr-data-repeat source="refs">
+          <template>
+            <p class="fr-text--sm fr-mb-1v">{{rentree_scolaire}}&nbsp;: lycées d'enseignement
+              général et technologique <strong>{{ips_national_legt:number:1}}</strong>, lycées
+              polyvalents <strong>{{ips_national_lpo:number:1}}</strong>, lycées professionnels
+              <strong>{{ips_national_lp:number:1}}</strong>.</p>
+          </template>
+        </dsfr-data-repeat>
+        <p class="fr-text--xs fr-mt-1w">Deux bases, deux découpages&nbsp;: ces chiffres ne se
+          mettent pas sur le même axe que les moyennes de lycées de cette page.</p>
+      </div>
+    </div>
+
+    <!-- ---------- 3. La durée ---------- -->
+    <h2 class="fr-h3">3. Un écart qui ne se résorbe pas</h2>
+    <dsfr-data-repeat source="serie-bornes">
+      <template>
+        <p class="odv-lecture">Dans les lycées qui portent les deux voies, l'écart moyen entre
+          elles ne bouge presque pas d'une rentrée à l'autre. La DEPP a changé sa méthode de calcul
+          en 2022, et les deux périodes ne se comparent pas directement&nbsp;: avec l'ancienne
+          méthode, <strong>{{e16:number:1}}</strong> points en 2016-2017 et
+          <strong>{{e21:number:1}}</strong> en 2021-2022&nbsp;; avec la nouvelle,
+          <strong>{{e22:number:1}}</strong> en 2022-2023 et <strong>{{e24:number:1}}</strong> en
+          2024-2025.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Écart interne moyen des lycées polyvalents, par rentrée">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-serie" source="serie-r" type="bar"
+        label-field="rentree_scolaire" value-field="ep:Écart voie générale − voie professionnelle (points d'IPS)"
+        y-min="0" unit-tooltip="points"
+        reference-lines='[{"axis":"x","value":"2022-2023","label":"Nouvelle méthode de calcul","dash":true}]'
+        databox databox-title="Écart moyen d'IPS entre la voie générale et la voie professionnelle d'un même lycée, par rentrée"
+        databox-source="DEPP — donnees-ips-lycees, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-serie" source="serie-t" table download
+        filename="ips-lycees-ecart-interne-par-rentree.csv"
+        label-field="Rentrée" value-field="IPS moyen voie générale (polyvalents), IPS moyen voie professionnelle (polyvalents), Écart dans le même lycée (points), Lycées polyvalents"
+        description="Écart moyen entre l'IPS de la voie générale et technologique et celui de la voie professionnelle, dans les lycées portant les deux voies, de 2016-2017 à 2024-2025. Stable à l'intérieur de chaque méthode. Rupture de série à la rentrée 2022-2023 : la DEPP a changé sa table de calcul."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 4. La généralité ---------- -->
+    <h2 class="fr-h3">4. Dans toutes les académies</h2>
+    <dsfr-data-repeat source="acad-haut">
+      <template>
+        <p class="odv-lecture">L'écart interne le plus large est dans l'académie de
+          <strong>{{libelle_academie}}</strong> (<strong>{{m:number:1}} points</strong> en moyenne,
+          sur {{nb}} lycées polyvalents)&nbsp;;</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="acad-bas">
+      <template>
+        <p class="odv-lecture">le plus étroit dans celle de <strong>{{libelle_academie}}</strong>
+          (<strong>{{m:number:1}} points</strong>, sur {{nb}} lycées). Nulle part la voie
+          professionnelle ne rejoint la voie générale.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">Quand une académie ne compte qu'une dizaine de lycées polyvalents, un
+      seul établissement déplace sa moyenne&nbsp;: le tableau donne l'effectif derrière chaque
+      barre.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Écart interne moyen par académie, trié">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-acad" source="acad-r" type="bar" horizontal
+        label-field="libelle_academie" value-field="m:Écart moyen dans le même lycée (points d'IPS)"
+        unit-tooltip="points"
+        databox databox-title="Écart moyen d'IPS entre voie générale et voie professionnelle d'un même lycée, par académie, rentrée 2024-2025"
+        databox-source="DEPP — donnees-ips-lycees, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-acad" source="acad-t" table download
+        filename="ips-lycees-ecart-interne-par-academie.csv"
+        label-field="Académie" value-field="Écart moyen dans le même lycée (points), Lycées polyvalents"
+        description="Écart moyen entre l'IPS de la voie générale et technologique et celui de la voie professionnelle, dans les lycées portant les deux voies, par académie, rentrée 2024-2025, trié du plus large au plus étroit, avec le nombre de lycées."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       Même gabarit que la page IPS Collèges — c'est le même fichier côté portail,
-       à trois attributs près. Une requête d'export (3 573 lignes, 1,7 Mo, 0,26 s
-       mesuré), tout se dérive côté client, `max-records` posé explicitement.
-
-       CE QUI CHANGE, et qui est tout le sujet de cette page : le jeu porte DEUX
-       colonnes d'IPS au lieu d'une, et elles ne sont pas comparables.
-
-       Conséquence de conception, assumée : la carte NE COLORE PAS par l'IPS.
-       Colorer 3 573 points sur une échelle unique reviendrait à peindre du 116
-       de voie générale et du 91 de voie professionnelle avec la même palette,
-       c'est-à-dire à faire croire qu'un lycée pro est « défavorisé » par rapport
-       à un lycée général alors qu'on lit deux indicateurs différents. C'est
-       exactement le reproche fait à l'original, qui laisse comparer deux bulles
-       portant sur deux grandeurs sans en avertir. La couleur porte donc le TYPE
-       de lycée ; les valeurs sont dans l'infobulle, les KPI et les graphiques,
-       chacun sur son échelle.
-       ========================================================================== -->
-
-  <dsfr-data-source id="lyc" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-lycees"
-    fetch-mode="export" max-records="5000"
-    where="rentree_scolaire = '2023-2024' and position is not null and (ips_voie_gt is not null or ips_voie_pro is not null)">
-  </dsfr-data-source>
-
-  <!-- `type_lycee` : la lecture que le jeu rend possible et que l'original ne
-       fait pas. 951 lycées polyvalents portent les deux voies ; l'original les
-       affiche l'une sous l'autre sans un mot d'explication.
-       `ecart_voies` n'a de sens QUE sur ces 951-là : ailleurs il est null.
-
-       ⚠️ La nullité s'écrit `is_null(champ)` — la FONCTION de `compute` — et non
-       `champ is null`, qui est la forme ODSQL du `where` de la source, quatre
-       lignes plus haut. Les deux dialectes cohabitent dans la même page, et le
-       premier jet les a mélangés dans une même expression. Bonne nouvelle : ici
-       l'échec est FRANC — erreur de configuration en console, attribut
-       `data-dsfr-config-error` posé, et les quatre KPI affichant « Erreur de
-       chargement » au lieu d'un chiffre. C'est le comportement qu'on voudrait
-       partout (cf. AM-066, où cinq attributs ignorés ne disent rien). -->
-  <dsfr-data-normalize id="lyc-n" source="lyc"
-    compute="type_lycee = when is_null(ips_voie_gt) then 'Voie professionnelle seule' when is_null(ips_voie_pro) then 'Voie générale et technologique seule' else 'Les deux voies (polyvalent)'; ecart_voies = when is_null(ips_voie_gt) then null when is_null(ips_voie_pro) then null else round(ips_voie_gt - ips_voie_pro, 1); tranche_gt = when is_null(ips_voie_gt) then 'Sans voie générale' when ips_voie_gt &lt; 100 then 'Moins de 100' when ips_voie_gt &lt; 115 then '100 à 115' when ips_voie_gt &lt; 130 then '115 à 130' else '130 et plus'">
-  </dsfr-data-normalize>
+  <!-- ---------- 5. Exploration : le localisateur ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">5. Trouver un lycée</h2>
+    <p class="fr-text--sm">Chaque lycée de la rentrée 2024-2025, coloré selon l'IPS de la voie
+      choisie — la même échelle pour les deux voies, puisque c'est le même indice. Passez d'une
+      voie à l'autre&nbsp;: la carte change de couleur. La recherche et les filtres pilotent les
+      compteurs, la carte et le tableau, pas les graphiques ci-dessus.</p>
+  </div>
+  <section class="odv-bandeau">
+    <div class="fr-container">
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="lyc-q" source="lyc-vt"
+          fields="appellation_officielle, libelle_commune, uai"
+          label="Rechercher un lycée" placeholder="Nom du lycée, commune, code UAI…"
+          operator="words" url-sync url-search-param="q">
+        </dsfr-data-search>
+      </div>
+    </div>
+  </section>
 
   <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
+    <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="lyc-f" value="count" format="nombre"
+        heading="Lycées" label="portant la voie choisie, dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="lyc-f" value="ips:avg" format="decimal" decimals="1"
+        heading="IPS moyen de la voie" label="chaque lycée comptant pour un"></dsfr-data-kpi>
+      <dsfr-data-kpi source="lyc-f" value="count{secteur:eq:privé sous contrat} / count" format="pourcentage"
+        heading="Part du privé sous contrat" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="lyc-f" value="ips:max" format="decimal" decimals="1"
+        heading="IPS le plus élevé"
+        lines='[{"value":"ips:min","format":"decimal","decimals":1,"prefix":"le plus bas : "}]'
+        label="de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
 
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-            Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <h2 class="fr-h6">Filtrer</h2>
-        <dsfr-data-facets id="lyc-f" source="lyc-n"
-          fields="type_lycee, secteur, tranche_gt, libelle_academie, libelle_departement, libelle_commune"
-          labels="type_lycee:Voies proposées | secteur:Secteur | tranche_gt:IPS de la voie générale | libelle_academie:Académie | libelle_departement:Département | libelle_commune:Commune"
-          display="type_lycee:checkbox | secteur:radio-inline | tranche_gt:checkbox | libelle_academie:radio | libelle_departement:radio | libelle_commune:radio"
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- `default` sur la voie : une voie à la fois, jamais les deux mêlées dans
+             une moyenne. `|` sépare les entrées (PG-022). -->
+        <dsfr-data-facets id="lyc-f" source="lyc-q"
+          fields="voie, secteur, tranche_ips, type_lycee, libelle_academie, libelle_departement, libelle_commune"
+          labels="voie:Voie | secteur:Secteur | tranche_ips:IPS de la voie | type_lycee:Voies du lycée | libelle_academie:Académie | libelle_departement:Département | libelle_commune:Commune"
+          display="voie:radio-inline | secteur:radio-inline | tranche_ips:checkbox | type_lycee:checkbox | libelle_academie:radio | libelle_departement:radio | libelle_commune:radio"
+          default="voie:Voie générale et technologique"
           sort="alpha:asc"
           url-sync url-params>
         </dsfr-data-facets>
-        </details>
-      </div>
+        <p class="fr-text--xs fr-mt-2w fr-mb-0">La recherche et les filtres se retrouvent dans
+          l'adresse de la page, qui se partage telle quelle.</p>
+      </details>
 
-      <div class="fr-col-12 fr-col-md-9">
-
-        <!-- Deux KPI par voie plutôt qu'un KPI global : la moyenne « toutes voies »
-             n'existe pas dans le jeu (colonne vide) et ne doit pas être fabriquée
-             en moyennant deux indicateurs différents. -->
-        <div class="odv-viz" data-code="Quatre compteurs, un par voie et jamais de moyenne globale">
-        <dsfr-data-kpi-group cols="4" gap="md">
-          <dsfr-data-kpi source="lyc-f" value="count" format="nombre"
-            heading="Lycées" label="dans la sélection"></dsfr-data-kpi>
-          <dsfr-data-kpi source="lyc-f" value="ips_voie_gt:avg" format="decimal" decimals="1"
-            heading="IPS voie générale" label="moyenne (national : 116,3)"></dsfr-data-kpi>
-          <dsfr-data-kpi source="lyc-f" value="ips_voie_pro:avg" format="decimal" decimals="1"
-            heading="IPS voie professionnelle" label="moyenne (national : 91,6)"></dsfr-data-kpi>
-          <dsfr-data-kpi source="lyc-f" value="count:type_lycee:Les deux voies (polyvalent)"
-            format="nombre"
-            heading="Lycées polyvalents" label="portant les deux indicateurs"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        </div>
-
-        <div class="odv-viz" data-code="Carte des lycées colorée par voies proposées">
-        <p class="odv-lecture">La couleur dit <strong>les voies</strong>, pas l'IPS&nbsp;: deux
-          indices qui ne se comparent pas ne se peignent pas sur une même échelle. Les lycées
-          polyvalents, en vert, maillent tout le territoire&nbsp;; l'IPS se lit dans l'infobulle,
-          chaque voie sur la sienne.</p>
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des lycées colorée par l'IPS de la voie choisie">
         <dsfr-data-map id="carte-lyc"
-          name="Lycées de France et voies qu'ils proposent, rentrée 2023-2024"
+          name="Lycées de France et IPS de la voie choisie, rentrée 2024-2025"
           height="620px" tiles="ign-plan" tiles-style="muted"
           insets="drom" fit-bounds fit-max-zoom="13">
           <dsfr-data-map-layer id="couche-lyc" source="lyc-f" type="circle"
             geo-field="position" radius="5" fill-opacity="0.9"
-            color-field="type_lycee"
-            color-map="Voie générale et technologique seule:#000091,Voie professionnelle seule:#e4794a,Les deux voies (polyvalent):#009081"
+            color-field="tranche_ips"
+            color-map="Moins de 90:#c9191e,90 à 100:#e4794a,100 à 110:#929292,110 à 125:#7ab1e8,125 et plus:#000091"
             tooltip-field="appellation_officielle"
             max-items="5000">
           </dsfr-data-map-layer>
-          <dsfr-data-map-legend for="couche-lyc" label="Voies proposées"></dsfr-data-map-legend>
+          <dsfr-data-map-legend for="couche-lyc" label="IPS de la voie"></dsfr-data-map-legend>
           <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="380px">
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur|secteur non renseigné}}</p>
               <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{type_lycee}}</p>
-
-              <!-- Chaque voie porte SON libellé complet. L'original affiche
-                   « IPS voie GT » et « IPS voie PRO » sans expliquer la
-                   distinction, et n'affiche que les lignes non nulles — de sorte
-                   qu'un lycée général et un lycée professionnel présentent une
-                   bulle identique en apparence, portant deux grandeurs
-                   différentes. Ici les deux lignes sont toujours écrites. -->
               <ul class="fr-text--sm fr-mb-3v">
                 <li>Voie générale et technologique&nbsp;:
-                  <strong>{{ips_voie_gt:number:1|non concerné}}</strong></li>
+                  <strong>{{gt:number:1|pas de voie générale}}</strong></li>
                 <li>Voie professionnelle&nbsp;:
-                  <strong>{{ips_voie_pro:number:1|non concerné}}</strong></li>
+                  <strong>{{pro:number:1|pas de voie professionnelle}}</strong></li>
                 {{#if ecart_voies}}<li>Écart entre les deux voies&nbsp;:
                   <strong>{{ecart_voies:number:1}}</strong> points</li>{{/if}}
               </ul>
-
               <p class="fr-text--sm fr-mb-1v">
                 <strong>{{libelle_commune|commune non renseignée}}</strong><br>
-                {{libelle_departement|}} — académie de {{libelle_academie|}}
+                {{libelle_departement|département non renseigné}} — académie de {{libelle_academie|non renseignée}}
               </p>
-              <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}} — IPS de la rentrée 2024-2025</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="lyc-f" for="carte-lyc" table download
-          filename="ips-lycees-2023-2024.csv"
+        <dsfr-data-normalize id="lyc-tableau" source="lyc-f"
+          rename="appellation_officielle:Lycée | voie:Voie | ips:IPS de la voie | type_lycee:Voies du lycée | libelle_commune:Commune | libelle_departement:Département | libelle_academie:Académie | secteur:Secteur"></dsfr-data-normalize>
+        <dsfr-data-a11y source="lyc-tableau" for="carte-lyc" table download
+          filename="ips-lycees-2024-2025.csv"
           label="Données de la carte"
-          description="Un lycée par ligne : appellation, voies proposées, IPS de chaque voie, commune, secteur."
-          label-field="appellation_officielle"
-          value-field="type_lycee, ips_voie_gt, ips_voie_pro, ecart_voies, libelle_commune, libelle_departement, secteur">
+          description="Un lycée par ligne pour la voie et la sélection courantes : appellation, voie, IPS de la voie, voies du lycée, commune, département, académie, secteur."
+          label-field="Lycée"
+          value-field="Voie, IPS de la voie, Voies du lycée, Commune, Département, Académie, Secteur">
         </dsfr-data-a11y>
         </div>
-
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">Les deux voies, côte à côte</h2>
-    <p class="fr-text--sm fr-mb-3w">
-      Ces deux graphiques sont sur des <strong>échelles distinctes</strong>, et c'est volontaire :
-      les superposer donnerait à croire qu'un point d'IPS de voie professionnelle vaut un point
-      d'IPS de voie générale. Pas de <code>series-field</code> ni de <code>bar-line</code> ici,
-      donc : ils n'ont de sens que quand les séries partagent leur échelle. Chaque graphique
-      porte en revanche <strong>sa</strong> moyenne nationale en ligne de référence.
-    </p>
-
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Voie générale et technologique, par académie, face à sa moyenne">
-        <h3 class="fr-h6">Voie générale et technologique, par académie</h3>
-        <p class="odv-lecture">Les douze académies au plus fort IPS de voie générale, toutes
-          <strong>au-dessus de la moyenne nationale</strong> de cette voie — la ligne pointillée.
-          Un classement de têtes de liste, pas un portrait de la France.</p>
-        <!-- `reference-lines` : la moyenne nationale publiée de CETTE voie (116,3,
-             c'est celle du libellé du KPI). Vertical, pour que le seuil de valeur
-             soit une ligne d'ordonnée. -->
-        <dsfr-data-chart id="g-lyc-gt" source="lyc-aca-gt" type="bar"
-          label-field="libelle_academie" value-field="m:IPS moyen, voie générale et technologique"
-          y-min="0" unit-tooltip="points d'IPS"
-          reference-lines='[{"axis":"y","value":116.3,"label":"Moyenne nationale : 116,3","dash":true}]'
-          databox databox-title="IPS moyen de la voie générale et technologique, par académie"
-          databox-source="DEPP — donnees-ips-lycees, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-lyc-gt" source="lyc-aca-gt" table download
-          description="Les douze académies au plus fort IPS moyen de voie générale et technologique ; la moyenne nationale de cette voie est de 116,3."></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Voie professionnelle, par académie, face à sa moyenne">
-        <h3 class="fr-h6">Voie professionnelle, par académie</h3>
-        <p class="odv-lecture">Même classement pour la voie professionnelle, <strong>sur son
-          échelle à elle</strong>&nbsp;: sa moyenne nationale est vingt-cinq points plus bas, et
-          les académies de tête ne sont pas les mêmes.</p>
-        <dsfr-data-chart id="g-lyc-pro" source="lyc-aca-pro" type="bar"
-          label-field="libelle_academie" value-field="m:IPS moyen, voie professionnelle"
-          y-min="0" unit-tooltip="points d'IPS"
-          reference-lines='[{"axis":"y","value":91.6,"label":"Moyenne nationale : 91,6","dash":true}]'
-          databox databox-title="IPS moyen de la voie professionnelle, par académie"
-          databox-source="DEPP — donnees-ips-lycees, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-lyc-pro" source="lyc-aca-pro" table download
-          description="Les douze académies au plus fort IPS moyen de voie professionnelle ; la moyenne nationale de cette voie est de 91,6."></dsfr-data-a11y>
-        </div>
-      </div>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Au lycée, la frontière sociale passe d'abord entre les voies&nbsp;:
+        les élèves de la voie professionnelle sont d'origine nettement moins favorisée que ceux de
+        la voie générale, davantage que ne le sont les élèves du public face à ceux du privé. Cette
+        frontière traverse les établissements eux-mêmes — presque tous les lycées polyvalents
+        l'abritent —, dans toutes les académies, et elle ne se referme pas d'une rentrée à
+        l'autre. Ce que ces données ne disent pas&nbsp;: pourquoi — ni l'orientation en fin de
+        troisième, ni les résultats, ni les spécialités ne sont dans le jeu.</p>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Deux voies, un seul indice.</strong> L'IPS d'une voie est la moyenne des IPS de
+          ses élèves, sur la même table de passage que l'autre voie (description DEPP du jeu
+          <code>fr-en-ips-lycees-ap2023</code>)&nbsp;: les comparer est légitime, et c'est le
+          sujet. La version précédente de cette page affirmait le contraire.</li>
+        <li><strong>Moyenne des lycées, pas des élèves.</strong> Le jeu ne porte pas les
+          effectifs&nbsp;: chaque lycée compte pour un. Les références pondérées de la DEPP sont
+          données à part, sans être mêlées aux autres chiffres.</li>
+        <li><strong>« Lycée polyvalent » veut dire ici&nbsp;: un lycée qui porte un IPS dans les
+          deux voies.</strong> Ce n'est pas exactement la catégorie administrative (LPO) de la
+          DEPP, qui n'est pas dans ce jeu.</li>
+        <li><strong>Rupture de série en 2022.</strong> La DEPP a mis à jour sa table de passage à
+          la rentrée 2022 et exclut depuis les élèves dont les professions des deux parents sont
+          inconnues. Les évolutions ne se lisent qu'à l'intérieur de chaque méthode.</li>
+        <li><strong>Le saut du privé en 2023.</strong> À la rentrée 2023, la seconde profession des
+          parents a commencé d'être remontée dans le privé sous contrat (de 15&nbsp;% à 75&nbsp;%
+          des élèves, selon la DEPP), ce qui a relevé ses IPS d'environ 3&nbsp;points. Mesuré à
+          l'API le 2026-09-26, à lycées constants&nbsp;: +3,4 points en un an pour la voie générale
+          du privé, +0,5 pour celle du public. C'est pourquoi cette page ne suit pas l'écart entre
+          secteurs dans le temps.</li>
+        <li><strong>Lycées écartés.</strong> À la rentrée 2024-2025, 41 lignes du jeu n'ont d'IPS
+          dans aucune voie (36 dans le privé, dont plusieurs établissements post-bac)&nbsp;: elles
+          sont hors de toutes les moyennes et hors de la carte. 35 lignes n'ont ni commune, ni
+          académie, ni position&nbsp;: elles comptent dans les moyennes nationales, pas dans les
+          académies ni sur la carte (comptes relevés à l'API le 2026-09-26).</li>
+        <li><strong>La colonne de synthèse.</strong> <code>ips_ensemble_gt_pro</code>, l'IPS toutes
+          voies, est vide dans ce jeu depuis 2023-2024. Le jeu public
+          <code>fr-en-ips-lycees-ap2023</code> la publie, sous le nom <code>ips_etab</code>&nbsp;:
+          elle n'a pas disparu, elle n'est plus recopiée ici. Cette page n'en a pas besoin — son
+          sujet est justement ce que la synthèse efface.</li>
+        <li><strong>Angles écartés.</strong> Le classement des lycées « les plus favorisés » (il
+          désigne des établissements, pas un phénomène)&nbsp;; l'écart public-privé suivi dans le
+          temps (faussé par le changement de remontée de 2023)&nbsp;; la voie post-bac, absente de
+          ce jeu.</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- Branchées sur la facette, jamais sur la source (BUG-009). Le `where` écarte
-       les lignes sans la voie concernée : sans lui, la moyenne d'académie serait
-       calculée sur un dénominateur incluant des lycées qui n'ont pas cette voie. -->
-  <dsfr-data-query id="lyc-aca-gt-brut" source="lyc-f" group-by="libelle_academie"
-    aggregate="ips_voie_gt:avg:m" where="ips_voie_gt:isnotnull, libelle_academie:isnotnull"
-    order-by="m:desc" limit="12"></dsfr-data-query>
-  <dsfr-data-query id="lyc-aca-pro-brut" source="lyc-f" group-by="libelle_academie"
-    aggregate="ips_voie_pro:avg:m" where="ips_voie_pro:isnotnull, libelle_academie:isnotnull"
-    order-by="m:desc" limit="12"></dsfr-data-query>
-  <!-- Un IPS se publie au dixième : l'infobulle et le tableau montraient 95,32. -->
-  <dsfr-data-normalize id="lyc-aca-gt" source="lyc-aca-gt-brut" round="m:1"></dsfr-data-normalize>
-  <dsfr-data-normalize id="lyc-aca-pro" source="lyc-aca-pro-brut" round="m:1"></dsfr-data-normalize>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
     <details class="odv-technique" id="analyse">
-      <summary>Analyse technique — ce que la reproduction a coûté</summary>
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
       <section class="fr-py-4w">
-      <h2>Analyse de reproduction — IPS Lycées</h2>
+      <h2>Analyse — IPS Lycées</h2>
 
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/dataviz-ips-lycees/" target="_blank" rel="noopener external">/pages/dataviz-ips-lycees/</a>.
-        Fiche d'audit : <code>docs/portail-education/dataviz-ips-lycees.md</code>.
-        C'est le <strong>même fichier</strong> que
-        <a href="/education/dataviz-ips-colleges">IPS Collèges</a> et
-        <a href="/education/dataviz-ips-ecoles">IPS Écoles</a> — jusqu'au nom du contexte,
-        <code>frenipslyceesdataviz</code>, qui est celui de <em>cette</em> page recopié sur les
-        trois autres. Les défauts de gabarit sont donc les mêmes, et déjà décrits là-bas ;
-        cette analyse porte sur <strong>ce qui n'appartient qu'aux lycées</strong>.
+        <a href="https://data.education.gouv.fr/pages/dataviz-ips-lycees/" target="_blank" rel="noopener external">/pages/dataviz-ips-lycees/</a>
+        — une carte vide au chargement, trois facettes, aucun constat. Fiche d'audit :
+        <code>docs/portail-education/dataviz-ips-lycees.md</code>. Recréée le 2026-09-26 en page
+        éditoriale, sur le même motif que
+        <a href="/education/dataviz-ips-colleges">IPS Collèges</a>.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le gabarit s'est recopié, et c'est le résultat.</strong> Troisième page
-              IPS du dépôt : source en <code>fetch-mode="export"</code>, facettes client,
-              <code>insets="drom"</code>, <code>compute</code> pour les tranches,
-              <code>color-field</code> + <code>color-map</code>, popup en panneau, a11y.
-              <strong>Rien de neuf n'a été appris sur la bibliothèque</strong> — tout le travail
-              a porté sur les données. C'est exactement ce qu'on attend d'un gabarit qui tient.</li>
-            <li><strong>Trois colonnes calculées en une expression.</strong> Le type de lycée,
-              l'écart entre voies et la tranche d'IPS se posent dans un seul
-              <code>compute</code>, séparés par <code>;</code>. Le type sert ensuite à trois
-              choses à la fois&nbsp;: la couleur de la carte, une facette, et un KPI
-              (<code>count:type_lycee:Les deux voies (polyvalent)</code>).</li>
-            <li><strong>Un <code>where</code> par graphique, sur la balise déjà présente.</strong>
-              Les moyennes académiques par voie doivent exclure les lycées qui n'ont pas la voie
-              concernée&nbsp;: <code>where="ips_voie_gt:isnotnull"</code> sur la query. Sans lui,
-              le dénominateur serait faux — c'est la règle PG-015, appliquée telle quelle.</li>
+            <li><strong>Les voies en série, sans script.</strong> Deux colonnes d'IPS deviennent
+              deux lignes par <code>dsfr-data-unpivot</code>, puis une série par secteur
+              (<code>series-field</code>)&nbsp;; <code>dsfr-data-pivot</code> fait le chemin
+              inverse pour l'écart de secteur.</li>
+            <li><strong>Une carte, deux voies, une échelle.</strong> Le même dépliage donne une
+              ligne par couple (lycée, voie)&nbsp;; une facette à valeur par défaut
+              (<code>default="voie:…"</code>) montre une voie à la fois, sans jamais les mêler dans
+              une moyenne.</li>
+            <li><strong>Les phrases qui ne vieillissent pas.</strong> Chapô, bornes de la série,
+              académies extrêmes, composition&nbsp;: <code>dsfr-data-repeat</code> sur des lignes
+              calculées, dont une jointure des deux séries serveur.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Rien, côté bibliothèque — et le vrai obstacle est éditorial.</strong>
-              Un lycée porte jusqu'à deux IPS, sur deux échelles séparées de <strong>24,8
-              points</strong>. La question « de quelle couleur peindre ce point&nbsp;? » n'a pas
-              de bonne réponse technique&nbsp;: <code>color-field="ips_voie_gt"</code> laisserait
-              1 139 lycées gris, et une colonne <code>coalesce(gt, pro)</code> ferait passer un
-              lycée professionnel à 91 pour « défavorisé » face à un lycée général à 116, alors
-              qu'on lirait deux indicateurs différents. <strong>La carte ne colore donc pas par
-              l'IPS mais par le type de lycée</strong>, et les valeurs vivent dans l'infobulle,
-              les KPI et deux graphiques à échelles distinctes. C'est un écart assumé avec la
-              consigne « équivalence fonctionnelle », et il va dans le sens de la lisibilité.</li>
-            <li><strong>La colonne qui aurait tranché est vide.</strong>
-              <code>ips_ensemble_gt_pro</code> existe précisément pour comparer les deux voies.
-              Elle est nulle sur les 3 612 lignes de 2023-2024 — et, mesuré rentrée par rentrée,
-              <strong>renseignée sur les sept premières et vide sur les deux dernières</strong>.
-              L'original est figé sur la première année où elle manque, et ne peut pas le dire&nbsp;:
-              sa configuration d'infobulle masque les lignes nulles, donc le champ est simplement
-              absent. <strong>Une valeur absente et une valeur non produite y ont exactement la
-              même apparence.</strong></li>
-            <li><strong>Un bug de gabarit propre aux lycées, non reproduit.</strong> Le
-              <code>ng-show</code> de l'invite « Sélectionnez un département ou une commune »
-              teste <code>refine.nom_de_la_commune</code> — un champ qui <em>n'existe pas</em>
-              dans ce jeu, dont la colonne s'appelle <code>libelle_commune</code> comme partout
-              ailleurs. Sur cette page, choisir une commune seule ne fait donc pas disparaître
-              l'invite. C'est la signature du copier-coller entre les quatre pages IPS&nbsp;:
-              un nom de champ d'un autre jeu, resté dans le template.</li>
+            <li><strong>Rien côté bibliothèque&nbsp;; tout côté lecture.</strong> La reproduction
+              précédente avait conclu à « deux échelles non comparables » et bâti la page sur ce
+              refus. La description du jeu public dit l'inverse&nbsp;: c'est la même moyenne
+              d'élèves. Sans cette lecture, l'histoire du jeu restait invisible.</li>
+            <li><strong>Deux ruptures, une seule annoncée.</strong> Le changement de méthode de 2022
+              est connu&nbsp;; le saut du privé en 2023 (remontée de la seconde profession) n'est
+              écrit que dans la description d'un jeu frère. Il interdit de suivre l'écart
+              public-privé dans le temps.</li>
           </ul>
         </div>
       </div>
@@ -359,25 +622,21 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>gabarit commun aux 4 pages IPS</td><td>même gabarit <code>dsfr-data</code>, 3ᵉ emploi</td><td>Équivalent — et recopié sans retouche</td></tr>
-            <tr><td>épingles rouges uniformes</td><td><code>color-field="type_lycee"</code> + légende</td><td>Meilleur : la carte dit enfin quelque chose, sans mélanger deux échelles</td></tr>
-            <tr><td>bulle affichant « IPS voie GT » / « IPS voie PRO », lignes nulles masquées</td><td><code>dsfr-data-map-popup</code>, les deux lignes toujours écrites</td><td>Meilleur : « non concerné » se distingue de « non produit »</td></tr>
-            <tr><td>—</td><td>écart entre voies sur les 951 polyvalents</td><td>Sans équivalent : le jeu le permet, aucune page ne le fait</td></tr>
-            <tr><td><code>ng-show</code> sur <code>refine.nom_de_la_commune</code> (champ inexistant)</td><td>—</td><td><strong>Bug non reproduit</strong> : signature du copier-coller entre les quatre pages</td></tr>
+            <tr><td><code>ods-dataset-context</code> + <code>ng-init refine.rentree_scolaire</code></td><td><code>dsfr-data-source</code> + <code>where</code> + <code>fetch-mode="export"</code></td><td>Équivalent</td></tr>
+            <tr><td><code>ods-facet</code> × 2 + liste maison <code>ods-adv-analysis</code></td><td><code>dsfr-data-facets</code> (client, données complètes)</td><td>Meilleur : toutes les communes, et une facette de voie</td></tr>
+            <tr><td><code>ods-map-layer show-if</code> (épingles uniformes)</td><td><code>dsfr-data-map-layer</code> + <code>color-field</code> / <code>color-map</code> sur l'IPS de la voie</td><td>Meilleur : l'IPS est enfin représenté</td></tr>
+            <tr><td>infobulle « IPS voie GT / PRO », lignes nulles masquées</td><td><code>dsfr-data-map-popup</code>, les deux voies toujours écrites</td><td>Meilleur : « pas de voie » se lit</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-unpivot</code>, <code>dsfr-data-pivot</code>, <code>dsfr-data-join</code>, <code>dsfr-data-repeat</code>, <code>reference-lines</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, et pour la première fois de ce banc
-          <strong>sans aucune friction technique</strong> : le gabarit écrit pour les collèges
-          s'est appliqué tel quel à un jeu différent. C'est le signe qu'un motif est acquis, et
-          la confirmation que la bibliothèque n'était pas l'obstacle. Tout le travail de cette
-          page a porté sur <strong>une question que la technique ne tranche pas</strong> :
-          deux indicateurs non comparables, dont la colonne de synthèse qui devait les réconcilier
-          a cessé d'être produite. On peut colorer une carte de mille façons&nbsp;; encore
-          faut-il savoir laquelle ne ment pas.</p>
+        <p>La bibliothèque n'a opposé aucune résistance&nbsp;: chaque chiffre du texte est calculé
+          dans la page. <strong>Le travail a été de relire le jeu</strong>&nbsp;: comprendre que
+          les deux IPS d'un lycée sont le même indice, ce qui fait de leur écart le sujet au lieu
+          d'un obstacle, et repérer la rupture du privé en 2023 avant d'en tirer une tendance.</p>
       </div>
       </section>
     </details>
@@ -390,6 +649,8 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+
+<!-- dsfr-data : bundle complet (cartographie) -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
