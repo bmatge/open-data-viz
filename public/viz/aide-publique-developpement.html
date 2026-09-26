@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aide publique au développement, chiffres clés — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data des chiffres clés de data.aide-developpement.gouv.fr, sur le jeu apd-france de data.economie.gouv.fr.">
+  <meta name="description" content="Aide publique au développement de la France, 2018-2020 : la hausse de 2020 vient des prêts, qui ne comptent que pour une fraction de ce qu'ils versent. Recréation avec dsfr-data du jeu apd-france de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,105 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION (2026-09-26) — la page ne reproduit plus les treize graphiques
+       de data.aide-developpement.gouv.fr, elle raconte le jeu.
+
+       LA MESURE. L'APD se mesure depuis 2018 en ÉQUIVALENT-DON (règle du CAD de
+       l'OCDE) : un don compte pour ce qu'il verse, un prêt pour la part de
+       libéralité qu'il contient. L'ancienne page mettait en tête « 44,9 Md€
+       versés » : une somme qui mêle des flux qui ne sont pas de l'APD
+       (type_de_flux = « AASP hors crédits-export », 2,6 Md€) et des prêts
+       comptés à leur valeur faciale. Toute la page porte donc sur
+       type_de_flux = 'APD', et le chiffre de tête est l'équivalent-don.
+
+       UN chargement. L'export agrégé côté serveur (année × pays × catégorie de
+       revenu × instrument) rend 896 lignes : tout le reste — chapô, preuve,
+       nuance, carte, tableau, filtres — se calcule dans le navigateur.
+       `max-records` posé au-dessus du volume réel : le plafond par défaut
+       (1 000) tronquerait en silence le jour où le jeu grossirait.
+
+       Les années 2019 et 2020 sont écrites dans le compute de la variation :
+       le jeu est figé depuis août 2022 et n'a que 2018-2020 (vérifié à l'API
+       le 2026-09-26). Si un millésime s'ajoutait, c'est la seule ligne à
+       déplacer.
+       ========================================================================== -->
+  <dsfr-data-source id="apd" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
+    fetch-mode="export" max-records="3000"
+    where="type_de_flux = 'APD'"
+    select="sum(equivalent_don_k_eur) as e, sum(montant_verse_k_eur) as v"
+    group-by="year(annee_de_declaration) as an, codes_iso, pays_beneficiaire, categorie_cad, type_de_financement">
+  </dsfr-data-source>
+
+  <!-- Les flux déclarés qui ne sont PAS de l'APD : une ligne, pour le dire. -->
+  <dsfr-data-source id="hors-apd" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
+    where="type_de_flux != 'APD'"
+    select="sum(montant_verse_k_eur)/1000000 as v_md, count(*) as n" limit="1">
+  </dsfr-data-source>
+
+  <!-- Instruments regroupés en quatre familles, montants en Md€ et M€ (le jeu est en k€),
+       indicateurs par ligne pour la synthèse. `ou` distingue l'aide affectée à un
+       pays (code ISO) de l'aide multilatérale et de l'aide régionale ou non ventilée
+       (codes_iso = « 0 »). -->
+  <dsfr-data-normalize id="apd-n" source="apd"
+    compute="instrument = when type_de_financement = 'Dons' then 'Dons'
+                          when type_de_financement = 'Prêt' then 'Prêts'
+                          when type_de_financement = 'Annulation/conversion de la dette' or type_de_financement = 'Rééchelonnement de la dette' then 'Allègements de dette'
+                          else 'Participations et autres';
+             ou = when codes_iso = 'Multilatéral' then 'Organisations multilatérales'
+                  when codes_iso = '0' then 'Régional ou non ventilé'
+                  else 'Un pays identifié';
+             revenu = when categorie_cad = 'PMA' then 'Pays les moins avancés'
+                      when categorie_cad = 'PFR' then 'Autres pays à faible revenu'
+                      when categorie_cad = 'PRITI' then 'Revenu intermédiaire, tranche inférieure'
+                      when categorie_cad = 'PRITS' then 'Revenu intermédiaire, tranche supérieure'
+                      when categorie_cad = 'Multilatéral' then 'Multilatéral'
+                      else 'Régional';
+             tout = 'APD';
+             e_md = e / 1000000;
+             e_m = e / 1000;
+             v_m = v / 1000;
+             e18 = when an = 2018 then e else 0;
+             e19 = when an = 2019 then e else 0;
+             e20 = when an = 2020 then e else 0;
+             var = when an = 2020 then e when an = 2019 then 0 - e else 0;
+             var_pret = when instrument = 'Prêts' then var else 0;
+             var_don = when instrument = 'Dons' then var else 0;
+             var_dette = when instrument = 'Allègements de dette' then var else 0;
+             e_pret = when instrument = 'Prêts' then e else 0;
+             v_pret = when instrument = 'Prêts' then v else 0;
+             e_multi = when ou = 'Organisations multilatérales' then e else 0;
+             e_zero = when ou = 'Régional ou non ventilé' then e else 0;
+             e_pays = when ou = 'Un pays identifié' then e else 0">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, tous les chiffres du chapô ---------- -->
+  <dsfr-data-query id="syn" source="apd-n" group-by="tout"
+    aggregate="e:sum:e_tot, v:sum:v_tot, e18:sum:e18, e19:sum:e19, e20:sum:e20, var:sum:var, var_pret:sum:var_pret, var_don:sum:var_don, var_dette:sum:var_dette, e_pret:sum:e_pret, v_pret:sum:v_pret, e_multi:sum:e_multi, e_zero:sum:e_zero, e_pays:sum:e_pays">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="apd18 = e18 / 1000000;
+             apd19 = e19 / 1000000;
+             apd20 = e20 / 1000000;
+             apd20_eur = e20 * 1000;
+             hausse = var / 1000000;
+             hausse_pct = var / e19 * 100;
+             evol_18_20 = (e20 / e18 - 1) * 100;
+             part_pret_hausse = var_pret / var * 100;
+             part_dette_hausse = var_dette / var * 100;
+             hausse_dons = var_don / 1000;
+             centimes = e_pret / v_pret * 100;
+             e_tot_md = e_tot / 1000000;
+             v_tot_md = v_tot / 1000000;
+             v_pret_md = v_pret / 1000000;
+             e_pret_md = e_pret / 1000000;
+             part_multi = e_multi / e_tot * 100;
+             part_zero = e_zero / e_tot * 100;
+             part_pays = e_pays / e_tot * 100">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,415 +131,396 @@
       </div>
     </nav>
 
-    <h1>L'aide publique au développement de la France&nbsp;: chiffres clés</h1>
+    <h1>Aide au développement&nbsp;: en 2020, la France a surtout prêté davantage</h1>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-8">
-        <details class="fr-callout fr-icon-database-line odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-            <a href="https://data.economie.gouv.fr/explore/dataset/apd-france/"
-               target="_blank" rel="noopener external"><code>apd-france</code></a>
-            — 41&nbsp;602 activités d'aide déclarées au CAD de l'OCDE pour 2018, 2019 et 2020, 93 champs
-            (agence, pays et région bénéficiaires, secteur, canal, type de financement, montants versés et
-            équivalents-don en k€ et k$). Copie sur le portail du MEF, figée en août 2022, du jeu qui alimente
-            <a href="https://data.aide-developpement.gouv.fr/pages/chiffres_cles/" target="_blank"
-               rel="noopener external">data.aide-developpement.gouv.fr</a>, lui-même un portail
-            Opendatasoft dont la page «&nbsp;chiffres clés&nbsp;» aligne treize graphiques sur ces axes.
-          </p>
-    </details>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <dsfr-data-kpi source="apd-total" value="n:max" format="nombre"
-          heading="Activités" label="dans le périmètre courant" icon="fr-icon-earth-line">
-        </dsfr-data-kpi>
-      </div>
-    </div>
-  </div>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          L'aide publique au développement de la France atteint {{apd20:number:1}}&nbsp;milliards d'euros
+          en 2020, en équivalent-don, contre {{apd19:number:1}}&nbsp;milliards en 2019&nbsp;: une hausse de
+          {{hausse:number:1}}&nbsp;milliard (+{{hausse_pct:number:0}}&nbsp;%). <strong>Les prêts en font
+          {{part_pret_hausse:number:0}}&nbsp;%.</strong> Les dons, eux, n'ont presque pas bougé&nbsp;: +{{hausse_dons:number:0}}&nbsp;millions
+          d'euros. Or un euro prêté ne compte que pour la part de cadeau qu'il contient —
+          {{centimes:number:0}}&nbsp;centimes en moyenne sur 2018-2020.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de l'Europe et des Affaires étrangères et DG Trésor, déclarations au Comité d'aide au
+      développement (CAD) de l'OCDE — jeu
+      <a href="https://data.economie.gouv.fr/explore/dataset/apd-france/" target="_blank" rel="noopener external"><code>apd-france</code></a>
+      de data.economie.gouv.fr, années 2018 à 2020. Au 26 septembre 2026, le jeu n'a pas été mis à jour
+      depuis le 3 août 2022&nbsp;: l'année 2021, annoncée «&nbsp;en cours de vérification&nbsp;», n'y est jamais entrée.
+    </p>
 
-  <!-- ==========================================================================
-       Neuf agrégations serveur (sum sur montant_verse_k_eur) : rien des 41 602
-       lignes × 93 champs ne descend. Un contexte diffuse année, agence et
-       région aux neuf sources — la page d'origine synchronise à la main sept
-       contextes Angular (apdall, secteursfixed, ctxtypes, dons, prets…).
-       ========================================================================== -->
-
-  <dsfr-data-source id="apd-total" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="sum(montant_verse_k_eur) as m, sum(equivalent_don_k_eur) as e, sum(montant_verse_k_eur)*1000 as m_eur, sum(equivalent_don_k_eur)*1000 as e_eur, count(*) as n" limit="1">
-  </dsfr-data-source>
-  <!-- Source générique : l'adaptateur refuse year() dans group-by (PG-014), et
-       replace-fields ne sait pas récrire une valeur ISO qui contient des
-       deux-points (AM-038). Revers : une source générique ignore les commandes
-       du contexte — ce graphique ne suit pas les filtres (voir l'analyse).
-
-       ✅ CORRIGÉ DEPUIS — #641 (0.23.0) : l'adaptateur ne backquote plus un
-       élément de `group-by` contenant une parenthèse ; `year(annee_de_declaration)
-       as annee` passe tel quel. La source est revenue au mode adaptateur au
-       lot 18, et le REVERS a disparu avec elle : elle est désormais dans les
-       sources du contexte, donc le graphique des années suit les filtres
-       « agence » et « région » — ce qu'il ne faisait pas.
-
-       ⚠️ Sauf le filtre d'ANNÉE, et c'est délibéré : un `apply-to` l'exclut de
-       ce graphique. Sans cela, choisir « 2019 » réduirait la série chronologique
-       à une seule barre. C'est la lecture d'un `apply-to` : ce n'est pas « le
-       filtre ne marche pas », c'est « cette vue est l'axe du filtre ». -->
-  <dsfr-data-source id="apd-annee" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="sum(montant_verse_k_eur) as m" group-by="year(annee_de_declaration) as annee"
-    order-by="annee" limit="10">
-  </dsfr-data-source>
-  <dsfr-data-source id="apd-secteur" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="secteur_cad, sum(montant_verse_k_eur) as m" group-by="secteur_cad" order-by="m:desc" limit="12">
-  </dsfr-data-source>
-  <dsfr-data-source id="apd-financement" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="type_de_financement, sum(montant_verse_k_eur) as m" group-by="type_de_financement" order-by="m:desc" limit="20">
-  </dsfr-data-source>
-  <dsfr-data-source id="apd-canal" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="canal_agrege, sum(montant_verse_k_eur) as m" group-by="canal_agrege" order-by="m:desc" limit="20">
-  </dsfr-data-source>
-  <dsfr-data-source id="apd-bimulti" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="bi_multi0, sum(montant_verse_k_eur) as m" group-by="bi_multi0" order-by="m:desc" limit="20">
-  </dsfr-data-source>
-  <dsfr-data-source id="apd-sousregion" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="sous_region, sum(montant_verse_k_eur) as m" group-by="sous_region" order-by="m:desc" limit="12">
-  </dsfr-data-source>
-  <dsfr-data-source id="apd-pays" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="pays_beneficiaire, sum(montant_verse_k_eur) as m" group-by="pays_beneficiaire" order-by="m:desc" limit="15">
-  </dsfr-data-source>
-  <dsfr-data-source id="apd-monde" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="apd-france" api-key-ref="ods-mef"
-    select="codes_iso, sum(montant_verse_k_eur) as m" group-by="codes_iso" order-by="m:desc" limit="100">
-  </dsfr-data-source>
-
-  <dsfr-data-context id="ctx-apd" sources="apd-total apd-annee apd-secteur apd-financement apd-canal apd-bimulti apd-sousregion apd-pays apd-monde">
-    <dsfr-data-context-filter field="annee_de_declaration" operator="year-of" ui="filtre-annee" label="Année"
-      apply-to="apd-total apd-secteur apd-financement apd-canal apd-bimulti apd-sousregion apd-pays apd-monde"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="agence" operator="eq" ui="filtre-agence" label="Agence"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="region" operator="eq" ui="filtre-region" label="Région"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <div class="fr-container fr-mb-8w">
-    <form class="fr-mb-4w" role="search" aria-label="Filtrer les activités">
-      <div class="fr-grid-row fr-grid-row--gutters">
-        <div class="fr-col-12 fr-col-md-3">
-          <div class="fr-select-group">
-            <label class="fr-label" for="filtre-annee">Année de déclaration</label>
-            <select class="fr-select" id="filtre-annee">
-              <option value="">2018 à 2020</option>
-              <option>2018</option><option>2019</option><option>2020</option>
-            </select>
-          </div>
-        </div>
-        <div class="fr-col-12 fr-col-md-5">
-          <div class="fr-select-group">
-            <label class="fr-label" for="filtre-agence">Agence ou ministère déclarant</label>
-            <select class="fr-select" id="filtre-agence">
-              <option value="">Toutes les agences</option>
-              <option>Agence française de développement</option>
-              <option>Autres Ministère</option>
-              <option>Centre de coopération internationale en recherche agronomique pour le développement</option>
-              <option>Coopération décentralisée</option>
-              <option>Divers</option>
-              <option>Gouvernement</option>
-              <option>Institut de recherche pour le développement</option>
-              <option>Interministériel</option>
-              <option>MIN/EQUIPEMENT</option>
-              <option>MINEFI/BDF</option>
-              <option>MINEFI/NATEXIS</option>
-              <option>Ministère de l'agriculture</option>
-              <option>Ministère de l'économie, des finances et de l'industrie</option>
-              <option>Ministère de l'Education Nationale</option>
-              <option>Ministère de l'intérieur</option>
-              <option>Ministère de la défense</option>
-              <option>Ministère de la Santé</option>
-              <option>Ministère des affaires étrangères</option>
-              <option>Proparco</option>
-              <option>STOA</option>
-            </select>
-          </div>
-        </div>
-        <div class="fr-col-12 fr-col-md-4">
-          <div class="fr-select-group">
-            <label class="fr-label" for="filtre-region">Région bénéficiaire</label>
-            <select class="fr-select" id="filtre-region">
-              <option value="">Toutes les régions</option>
-              <option>Afrique du Nord</option>
-              <option>Afrique sub-saharienne</option>
-              <option>Afrique, régional</option>
-              <option>Amérique du Nord et centrale</option>
-              <option>Amériques</option>
-              <option>Amériques, régional</option>
-              <option>Asie du Sud et centrale</option>
-              <option>Asie, régional</option>
-              <option>Europe</option>
-              <option>Extrême-Orient</option>
-              <option>Moyen-Orient</option>
-              <option>Multilatéral</option>
-              <option>Océanie</option>
-              <option>Pays en développement, non spécifié</option>
-            </select>
-          </div>
-        </div>
-      </div>
-      <dsfr-data-context-tags for="ctx-apd"></dsfr-data-context-tags>
-    </form>
-
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <!-- Lot 11 : les montants du jeu sont en k€ ; remis en euros dans le select
-           (×1000), `format="compact"` rend « 44,9 Md ». L'unité reste dans `label`
-           (AM-031, réduit à « pas de suffixe ni de réglage des décimales »). -->
-      <dsfr-data-kpi source="apd-total" value="m_eur:max" format="compact" col="6"
-        heading="Montants versés" label="€, 2018-2020 ou périmètre filtré"></dsfr-data-kpi>
-      <dsfr-data-kpi source="apd-total" value="e_eur:max" format="compact" col="6"
-        heading="Équivalent-don" label="€"></dsfr-data-kpi>
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="apd20_eur:max" format="compact" unit="€" span="6"
+        heading="Aide publique au développement 2020" label="en équivalent-don, mesure officielle du CAD"
+        lines='[{"value":"evol_18_20:max","decimals":0,"sign":true,"suffix":"depuis 2018"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_pret_hausse:max" format="pourcentage" decimals="0" span="3"
+        heading="Part des prêts" label="dans la hausse de 2019 à 2020"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_pays:max" format="pourcentage" decimals="0" span="3"
+        heading="Aide affectée à un pays" label="le reste va aux organisations multilatérales ou n'est pas ventilé, 2018-2020"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
-
-    <h2 class="fr-h4">Répartition géographique</h2>
-    <div class="odv-chart-slot fr-mb-4w">
-      <div class="odv-viz" data-code="Montants versés par pays bénéficiaire, 2018-2020">
-      <dsfr-data-chart id="g-monde" source="apd-monde" type="map-monde"
-        code-field="codes_iso" value-field="m" name='["Montants versés (k€)"]' unit-tooltip="k€"
-        databox databox-title="Montants versés par pays bénéficiaire, 2018-2020"
-        databox-source="MEAE / DG Trésor — apd-france, via data.economie.gouv.fr" databox-download>
-      </dsfr-data-chart>
-      <dsfr-data-a11y for="g-monde" source="apd-monde" table download></dsfr-data-a11y>
-      </div>
-    </div>
-
-    <h2 class="fr-h4">Répartitions</h2>
-    <div class="fr-grid-row fr-grid-row--gutters">
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Montants versés par année de déclaration (suit les filtres Agence et Région ; l'axe des années est exclu du filtre Année)">
-              <dsfr-data-chart id="g-annee" source="apd-annee" type="bar" 
-                label-field="annee" value-field="m" name='["Montants versés (k€)"]' unit-tooltip="k€"
-                databox databox-title="Montants versés par année de déclaration (suit les filtres Agence et Région ; l'axe des années est exclu du filtre Année)"
-                databox-source="MEAE / DG Trésor — apd-france, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-annee" source="apd-annee" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Les douze premiers secteurs (CAD)">
-              <dsfr-data-chart id="g-secteur" source="apd-secteur" type="bar" horizontal
-                label-field="secteur_cad" value-field="m" name='["Montants versés (k€)"]' unit-tooltip="k€"
-                databox databox-title="Les douze premiers secteurs (CAD)"
-                databox-source="MEAE / DG Trésor — apd-france, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-secteur" source="apd-secteur" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Par type de financement">
-              <dsfr-data-chart id="g-financement" source="apd-financement" type="pie" 
-                label-field="type_de_financement" value-field="m" name='["Montants versés (k€)"]' unit-tooltip="k€"
-                databox databox-title="Par type de financement"
-                databox-source="MEAE / DG Trésor — apd-france, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-financement" source="apd-financement" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Par canal d'acheminement">
-              <dsfr-data-chart id="g-canal" source="apd-canal" type="pie" 
-                label-field="canal_agrege" value-field="m" name='["Montants versés (k€)"]' unit-tooltip="k€"
-                databox databox-title="Par canal d'acheminement"
-                databox-source="MEAE / DG Trésor — apd-france, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-canal" source="apd-canal" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Bilatéral / multilatéral">
-              <dsfr-data-chart id="g-bimulti" source="apd-bimulti" type="pie" 
-                label-field="bi_multi0" value-field="m" name='["Montants versés (k€)"]' unit-tooltip="k€"
-                databox databox-title="Bilatéral / multilatéral"
-                databox-source="MEAE / DG Trésor — apd-france, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-bimulti" source="apd-bimulti" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Par sous-région bénéficiaire">
-              <dsfr-data-chart id="g-sousregion" source="apd-sousregion" type="bar" horizontal
-                label-field="sous_region" value-field="m" name='["Montants versés (k€)"]' unit-tooltip="k€"
-                databox databox-title="Par sous-région bénéficiaire"
-                databox-source="MEAE / DG Trésor — apd-france, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-sousregion" source="apd-sousregion" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Les quinze premiers pays bénéficiaires">
-              <dsfr-data-chart id="g-pays" source="apd-pays" type="bar" horizontal
-                label-field="pays_beneficiaire" value-field="m" name='["Montants versés (k€)"]' unit-tooltip="k€"
-                databox databox-title="Les quinze premiers pays bénéficiaires"
-                databox-source="MEAE / DG Trésor — apd-france, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-pays" source="apd-pays" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-    </div>
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Aide publique au développement — ce que la reproduction a coûté</summary>
+  <!-- ======================= PREUVE — d'où vient la hausse ======================= -->
+  <!-- Une seule série : la variation 2019 → 2020 de chaque famille d'instruments.
+       Pas de `color-map` (graphique mono-série, mise en évidence par
+       `highlight-index` sur la palette neutre) : BUG-022 ne s'applique pas. -->
+  <dsfr-data-query id="hausse-inst" source="apd-n" group-by="instrument"
+    aggregate="var:sum:var" order-by="var:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="hausse-inst-t" source="hausse-inst"
+    compute="Variation = round(var / 1000, 0)"
+    rename="instrument:Instrument">
+  </dsfr-data-normalize>
 
-    <div class="fr-container">
-      <p>
-        Cible d'origine&nbsp;: la page «&nbsp;chiffres clés&nbsp;» de data.aide-developpement.gouv.fr, un
-        portail Opendatasoft dont le source se lit comme celui du MEF&nbsp;: 70&nbsp;000 caractères de
-        template, treize <code>ods-chart</code> (barres, camemberts, un treemap) répartis sur
-        <strong>sept contextes</strong> synchronisés à la main (<code>apdall</code>,
-        <code>secteursfixed</code>, <code>ctxtypes</code>, <code>dons</code>, <code>prets</code>,
-        <code>participation</code>, <code>paysfixed</code>), six sélecteurs (dates de début et de fin, agence,
-        catégorie de revenu, région, sous-région), douze <code>ods-pop-in</code> et une carte en page
-        d'accueil. Le jeu du MEF est une copie de 2022 avec des noms de champs différents
-        (<code>secteur_cad</code> pour <code>secteur</code>, <code>odd</code> pour <code>odd_agrege</code>,
-        pas de <code>priorite_cicid</code>).
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-hausse">
+    <h2 id="t-hausse" class="fr-h3">Quatre cinquièmes de la hausse de 2020 viennent des prêts</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          De 2019 à 2020, l'aide française gagne {{hausse:number:2}}&nbsp;milliards d'euros en
+          équivalent-don. <strong>Les prêts en apportent {{part_pret_hausse:number:0}}&nbsp;%</strong>,
+          les allègements de dette {{part_dette_hausse:number:0}}&nbsp;%&nbsp;; les dons presque rien.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Variation de l'APD entre 2019 et 2020, par instrument">
+      <dsfr-data-chart id="g-hausse" source="hausse-inst-t" type="bar" horizontal
+        label-field="Instrument" value-field="Variation" name="Variation 2019-2020 (M€)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="M€"
+        databox databox-title="Variation de l'aide publique au développement entre 2019 et 2020, par instrument (millions d'euros, équivalent-don)"
+        databox-source="MEAE / DG Trésor — apd-france, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-hausse" source="hausse-inst-t"
+        description="Barres horizontales triées : pour chaque famille d'instruments, l'écart entre l'aide 2020 et l'aide 2019, en millions d'euros d'équivalent-don. Les prêts, mis en évidence, portent l'essentiel de la hausse ; les dons varient à peine ; les participations reculent légèrement.">
+      </dsfr-data-a11y>
+    </div>
+
+    <!-- La série sur trois ans, par instrument : le contexte de la variation. Multisérie
+         SANS color-map (BUG-022 : l'infobulle garderait les couleurs par défaut). -->
+    <dsfr-data-query id="par-an" source="apd-n" group-by="an, instrument"
+      aggregate="e_md:sum:Montant" order-by="an:asc">
+    </dsfr-data-query>
+    <dsfr-data-normalize id="par-an-t" source="par-an" round="Montant:2"
+      rename="an:Année | instrument:Instrument"></dsfr-data-normalize>
+    <h3 class="fr-h5 fr-mt-6w">Les dons forment le socle, stable&nbsp;; les prêts font varier le total</h3>
+    <div class="odv-chart-slot odv-viz" data-code="APD par année et par instrument">
+      <dsfr-data-chart id="g-annees" source="par-an-t" type="bar" stacked
+        label-field="Année" value-field="Montant" series-field="Instrument" unit-tooltip="Md€"
+        databox databox-title="Aide publique au développement par année et par instrument (milliards d'euros, équivalent-don)"
+        databox-source="MEAE / DG Trésor — apd-france, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-annees" source="par-an-t" label-field="Année" value-field="Montant" series-field="Instrument"
+        description="Barres empilées, une par année de 2018 à 2020 : l'APD en équivalent-don, découpée par famille d'instruments. Les dons restent proches de 8 à 9 milliards ; les prêts baissent en 2019 puis remontent nettement en 2020.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LE MÉCANISME — ce que compte un euro ======================= -->
+  <dsfr-data-query id="ratio-inst" source="apd-n" group-by="instrument"
+    aggregate="e:sum:e, v:sum:v">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="ratio-inst-t" source="ratio-inst"
+    compute="Compte = round(e / v * 100, 0); Verse = round(v / 1000000, 1)"
+    rename="instrument:Instrument">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ratio-tri" source="ratio-inst-t" order-by="Compte:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-euro">
+    <h2 id="t-euro" class="fr-h3">Un euro prêté compte pour moins de la moitié d'un euro donné</h2>
+    <p class="fr-text--lg">
+      Depuis 2018, le CAD de l'OCDE ne compte plus un prêt à sa valeur faciale&nbsp;: il en retient
+      l'équivalent-don, c'est-à-dire l'avantage consenti à l'emprunteur par rapport à un prêt au prix
+      du marché. Plus le taux est bas et la durée longue, plus la part comptée est grande.
+    </p>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <div class="odv-avant-apres fr-mb-4w">
+          <div class="odv-avant-apres__carte">
+            <p class="fr-text--sm fr-mb-1w">Prêts versés, 2018-2020</p>
+            <span class="odv-avant-apres__chiffre">{{v_pret_md:number:1}}&nbsp;Md€</span>
+            <p class="fr-mb-0">montant <strong>versé</strong> aux emprunteurs</p>
+          </div>
+          <div class="odv-avant-apres__carte odv-avant-apres__carte--apres">
+            <p class="fr-text--sm fr-mb-1w">Ce qu'ils comptent dans l'APD</p>
+            <span class="odv-avant-apres__chiffre">{{e_pret_md:number:1}}&nbsp;Md€</span>
+            <p class="fr-mb-0">en <strong>équivalent-don</strong>, soit {{centimes:number:0}}&nbsp;centimes par euro</p>
+          </div>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part comptée en APD pour 100 euros versés, par instrument">
+      <dsfr-data-chart id="g-euro" source="ratio-tri" type="bar" horizontal
+        label-field="Instrument" value-field="Compte" name="Comptés en APD pour 100 € versés"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="€"
+        x-min="0" x-max="100"
+        databox databox-title="Pour 100 euros versés, combien sont comptés en aide publique au développement (2018-2020)"
+        databox-source="MEAE / DG Trésor — apd-france, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-euro" source="ratio-tri"
+        description="Barres horizontales de 0 à 100 : pour chaque famille d'instruments, l'équivalent-don rapporté au montant versé sur 2018-2020. Un don compte pour 100, un prêt pour moins de la moitié ; allègements de dette et participations entre les deux. Le tableau donne aussi les montants versés, en milliards d'euros.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — à qui vont les prêts ======================= -->
+  <!-- Sur la seule aide affectée à un pays, par catégorie de revenu (liste du CAD).
+       PFR (« autres pays à faible revenu ») écarté du graphique : 10,6 M€ sur trois ans,
+       un seul instrument ; dit dans « Ce que cette page ne montre pas ». -->
+  <dsfr-data-query id="rev" source="apd-n" where="ou:eq:Un pays identifié, categorie_cad:in:PMA|PRITI|PRITS"
+    group-by="revenu, categorie_cad" aggregate="e:sum:e, e_pret:sum:e_pret">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="rev-t" source="rev"
+    compute="Prets = round(e_pret / e * 100, 0);
+             Recu = round(e / 1000000, 1);
+             rang = when categorie_cad = 'PMA' then 1 when categorie_cad = 'PRITI' then 2 else 3;
+             Categorie = concat(revenu, ' (', replace(concat('', Recu), '.', ','), ' Md€)')">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="rev-tri" source="rev-t" order-by="rang:asc"></dsfr-data-query>
+  <dsfr-data-query id="rev-pma" source="rev-t" where="categorie_cad:eq:PMA"></dsfr-data-query>
+  <dsfr-data-query id="rev-priti" source="rev-t" where="categorie_cad:eq:PRITI"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-revenu">
+    <h2 id="t-revenu" class="fr-h3">Les pays les plus pauvres reçoivent des dons, les pays intermédiaires des prêts — et davantage d'aide</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="rev-priti">
+        <template>
+          Les pays à revenu intermédiaire de la tranche inférieure (Inde, Maroc, Sénégal, Côte d'Ivoire…)
+          reçoivent {{Recu:number:1}}&nbsp;milliards d'euros d'aide française affectée sur 2018-2020, dont
+          <strong>{{Prets:number:0}}&nbsp;% sous forme de prêts</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="rev-pma">
+        <template>
+          Les pays les moins avancés en reçoivent {{Recu:number:1}}&nbsp;milliards, dont
+          {{Prets:number:0}}&nbsp;% seulement en prêts.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des prêts dans l'APD affectée, par catégorie de revenu">
+      <dsfr-data-chart id="g-revenu" source="rev-tri" type="bar" horizontal
+        label-field="Categorie" value-field="Prets" name="Part des prêts (%)"
+        selected-palette="neutral" highlight-index="[1]" unit-tooltip="%"
+        x-min="0" x-max="100"
+        databox databox-title="Part des prêts dans l'aide affectée à un pays, selon le revenu du pays (en % de l'équivalent-don, 2018-2020)"
+        databox-source="MEAE / DG Trésor — apd-france, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-revenu" source="rev-tri"
+        description="Barres horizontales de 0 à 100, une par catégorie de revenu du CAD, rangées du plus pauvre au plus riche ; le libellé donne l'aide reçue en milliards d'euros. Les pays à revenu intermédiaire de la tranche inférieure reçoivent le plus et plus de la moitié en prêts ; les pays les moins avancés reçoivent moins et surtout des dons.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Catégories de revenu de la liste du CAD applicable à 2018-2020, telles que déclarées dans le jeu
+      (<code>categorie_cad</code>). Seule l'aide affectée à un pays est ici classable&nbsp;: l'aide
+      multilatérale et régionale n'a pas de catégorie.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE 2 — ce que la carte ne peut pas montrer ======================= -->
+  <dsfr-data-query id="ou" source="apd-n" group-by="ou" aggregate="e:sum:e"></dsfr-data-query>
+  <dsfr-data-normalize id="ou-t" source="ou"
+    compute="Montant = round(e / 1000000, 1);
+             rang = when Destination = 'Organisations multilatérales' then 1 when Destination = 'Régional ou non ventilé' then 2 else 3"
+    rename="ou:Destination"></dsfr-data-normalize>
+  <dsfr-data-query id="ou-tri" source="ou-t" order-by="rang:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ou">
+    <h2 id="t-ou" class="fr-h3">Six euros sur dix ne se rattachent à aucun pays</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Sur {{e_tot_md:number:1}}&nbsp;milliards d'euros d'APD de 2018 à 2020,
+          {{part_multi:number:0}}&nbsp;% passent par les organisations multilatérales (Union européenne,
+          Banque mondiale, fonds verticaux…) et {{part_zero:number:0}}&nbsp;% sont déclarés à l'échelle d'une
+          région ou «&nbsp;non spécifiés&nbsp;». <strong>Seuls {{part_pays:number:0}}&nbsp;% ont un pays
+          bénéficiaire</strong>&nbsp;: c'est tout ce qu'une carte peut montrer.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="APD selon qu'elle est affectée à un pays ou non">
+      <dsfr-data-chart id="g-ou" source="ou-tri" type="bar" horizontal
+        label-field="Destination" value-field="Montant" name="Équivalent-don (Md€)"
+        selected-palette="neutral" highlight-index="[2]" unit-tooltip="Md€"
+        databox databox-title="Aide publique au développement 2018-2020 selon sa destination déclarée (milliards d'euros, équivalent-don)"
+        databox-source="MEAE / DG Trésor — apd-france, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ou" source="ou-tri"
+        description="Trois barres horizontales : l'APD 2018-2020 versée aux organisations multilatérales, déclarée à l'échelle d'une région ou non ventilée, et affectée à un pays identifié, en milliards d'euros d'équivalent-don.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <!-- Facettes client sur l'export agrégé : elles filtrent la carte, le tableau et les
+       deux KPI, pas les blocs précédents (qui portent sur l'ensemble). Les compteurs
+       comptent des lignes agrégées (pays × année × instrument) : ils ne disent rien au
+       lecteur, d'où `hide-counts`. -->
+  <dsfr-data-query id="pays" source="apd-f" where="ou:eq:Un pays identifié"
+    group-by="codes_iso, pays_beneficiaire, revenu"
+    aggregate="e_m:sum:e_m, v_m:sum:v_m, e_pret:sum:e_pret, e:sum:e" order-by="e_m:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="pays-t" source="pays"
+    compute="part_pret = when e > 0 then round(e_pret / e * 100, 0) else null"
+    round="e_m:1, v_m:1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="sel" source="apd-f" group-by="tout"
+    aggregate="e:sum:e, e_pays:sum:e_pays"></dsfr-data-query>
+  <dsfr-data-normalize id="sel-t" source="sel" compute="e_eur = e * 1000; part_pays = e_pays / e * 100"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: quel pays reçoit quoi</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Les filtres agissent sur les deux chiffres, la carte et le tableau — pas sur les blocs précédents,
+      qui portent sur l'ensemble. La carte et le tableau ne montrent que l'aide affectée à un pays.
+    </p>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="apd-f" source="apd-n"
+            fields="an, instrument, revenu"
+            labels="an:Année | instrument:Instrument | revenu:Revenu du pays bénéficiaire"
+            display="an:radio-inline | instrument:multiselect | revenu:multiselect"
+            sort="an:alpha:asc" hide-counts>
+          </dsfr-data-facets>
+      </details>
+
+      <div>
+        <dsfr-data-kpi-group class="fr-mb-4w">
+          <dsfr-data-kpi source="sel-t" value="e_eur:max" format="compact" unit="€" span="6"
+            heading="APD de la sélection" label="en équivalent-don, toutes destinations"></dsfr-data-kpi>
+          <dsfr-data-kpi source="sel-t" value="part_pays:max" format="pourcentage" decimals="0" span="6"
+            heading="Dont affectée à un pays" label="la part que la carte et le tableau peuvent montrer"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <div class="odv-chart-slot odv-viz" data-code="Carte de l'APD par pays bénéficiaire, sélection courante">
+          <dsfr-data-chart id="g-monde" source="pays-t" type="map-monde"
+            code-field="codes_iso" value-field="e_m" name="Équivalent-don (M€)" unit-tooltip="M€"
+            map-summary="none"
+            databox databox-title="Aide publique au développement affectée à chaque pays, sélection courante (millions d'euros, équivalent-don)"
+            databox-source="MEAE / DG Trésor — apd-france, data.economie.gouv.fr" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-monde" source="pays-t"
+            description="Carte du monde : chaque pays est coloré selon l'APD française qu'il a reçue dans la sélection, en millions d'euros d'équivalent-don. Le tableau ci-dessous donne les mêmes valeurs, triables.">
+          </dsfr-data-a11y>
+        </div>
+        <p class="fr-text--xs fr-hint-text">
+          Dix-neuf pays et territoires, presque tous insulaires (Wallis-et-Futuna, Maurice, Comores, Cabo
+          Verde…) et le Kosovo, n'ont pas de forme sur le fond de carte&nbsp;: absents de la carte, ils sont
+          dans le tableau.
+        </p>
+
+        <h3 class="fr-h5 fr-mt-6w">Tous les pays bénéficiaires</h3>
+        <dsfr-data-list source="pays-t"
+          columns="pays_beneficiaire:Pays, revenu:Revenu (CAD), e_m:Équivalent-don (M€), v_m:Versé (M€), part_pret:Part des prêts (%)"
+          sort="e_m:desc" search pagination="15" count-label="pays|pays" export="csv"
+          caption="APD française par pays bénéficiaire, sélection courante">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="hors-apd">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>{{v_md:number:1}}&nbsp;milliards d'euros versés qui ne sont pas de l'APD</strong>
+            ({{n:number}}&nbsp;lignes du jeu, «&nbsp;autres apports du secteur public&nbsp;» et «&nbsp;non-apports&nbsp;»)&nbsp;:
+            ils sont déclarés au CAD mais n'entrent pas dans l'aide publique au développement. Ils sont
+            écartés partout.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Les montants versés comme mesure principale.</strong> Sur 2018-2020, l'APD versée
+            fait {{v_tot_md:number:1}}&nbsp;milliards d'euros, l'équivalent-don {{e_tot_md:number:1}}&nbsp;:
+            nous suivons la mesure officielle du CAD, et le montant versé reste lisible dans le tableau.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Les remboursements.</strong> Le jeu publie aussi les montants perçus (amortissements,
+        intérêts)&nbsp;; l'équivalent-don n'en a pas besoin et nous ne les soustrayons pas.</li>
+      <li><strong>Les autres pays à faible revenu</strong> (une dizaine de millions d'euros sur trois ans) ne
+        figurent pas dans le graphique par catégorie de revenu&nbsp;; ils restent sur la carte et dans le tableau.</li>
+      <li><strong>Les garanties</strong>&nbsp;: 404 lignes du jeu, toutes à zéro euro versé.</li>
+      <li><strong>Tout ce qui suit 2020</strong>&nbsp;: le jeu s'arrête là.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la recréation a coûté</summary>
+
+      <p class="fr-text--lead">
+        Page d'origine&nbsp;: les <a href="https://data.aide-developpement.gouv.fr/pages/chiffres_cles/"
+        target="_blank" rel="noopener external">chiffres clés</a> de data.aide-developpement.gouv.fr —
+        treize graphiques sur sept contextes, une répartition par axe du jeu. La reproduction précédente
+        les suivait et ouvrait sur «&nbsp;44,9&nbsp;Md€ versés&nbsp;»&nbsp;; la recréation part de la mesure
+        officielle, l'équivalent-don, et de ce qu'elle révèle&nbsp;: la hausse de 2020 est une hausse de prêts.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Sept contextes → un contexte.</strong> Comme pour Rappel Conso, la multiplication
-              des contextes de l'original ne sert qu'à appliquer des filtres différents à des vues
-              différentes. Ici, neuf sources agrégées et trois filtres diffusés à toutes suffisent&nbsp;; les
-              vues «&nbsp;dons seulement&nbsp;» ou «&nbsp;prêts seulement&nbsp;» de l'original sont un
-              <code>apply-to</code> de plus si on les veut.</li>
-            <li><strong>La carte du monde est un type de graphique.</strong> <code>type="map-monde"</code>
-              avec <code>code-field="codes_iso"</code> (codes alpha-3 du jeu) remplace l'<code>ods-map</code>
-              de la page d'accueil et son fond Jawg. Pas de Leaflet, pas de tuiles&nbsp;: un SVG DSFR Chart.</li>
-            <li><strong>Neuf agrégations, neuf requêtes de 3 à 100 lignes.</strong> 41&nbsp;602 lignes de
-              93 champs ne descendent jamais. Chaque changement de filtre relance les neuf en parallèle.</li>
-            <li><strong>Une page générée.</strong> Les neuf sources et sept graphiques ont la même forme&nbsp;:
-              cette page a été écrite par un script de vingt lignes qui les déroule. C'est le bénéfice d'un
-              modèle déclaratif homogène.</li>
+            <li><strong>Un chargement pour toute la page.</strong> <code>fetch-mode="export"</code> avec
+              un <code>group-by</code> à cinq clés, dont <code>year(…)</code>&nbsp;: 896 lignes agrégées
+              par le portail, au lieu de neuf requêtes.</li>
+            <li><strong>Le chapô vivant.</strong> Des indicateurs par ligne (<code>compute</code>), une requête
+              à un seul groupe, un <code>dsfr-data-repeat</code>&nbsp;: tous les chiffres du texte viennent de la donnée.</li>
+            <li><strong>La carte du monde</strong> reste un type de graphique (<code>map-monde</code>),
+              nourrie par le même export filtré par facettes.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Pas de treemap.</strong> L'original en a un (ODD). DSFR Chart ne propose pas ce
-              type&nbsp;: barres horizontales à la place (AM-037).</li>
-            <li><strong>Les valeurs «&nbsp;Multilatéral&nbsp;» et «&nbsp;0&nbsp;» dans le champ
-              <code>codes_iso</code></strong> (14 M et 6,5 M k€, soit 46&nbsp;% des montants) n'ont pas de pays&nbsp;:
-              la carte ne les montre pas, et rien ne le dit à sa place. La page d'origine a le même trou. C'est
-              le jeu, pas l'outil (LIM-003) — mais un texte sous la carte devrait le dire, et c'est à l'auteur
-              de l'écrire.</li>
-            <li><strong>«&nbsp;44,9&nbsp;Md€&nbsp;» n'était pas hors de portée</strong> (AM-031 réduit au
-              lot 11). J'avais écrit que sans format compact ni facteur d'échelle, les montants en milliers
-              d'euros restaient «&nbsp;44&nbsp;938&nbsp;227&nbsp;». <code>format="compact"</code> existe
-              depuis 0.20.0 (absent du JSDoc du KPI, c'est là que je l'ai raté) et l'échelle se règle dans
-              le <code>select</code> ODSQL (<code>sum(montant_verse_k_eur)*1000</code>)&nbsp;: les deux KPI
-              rendent «&nbsp;44,9&nbsp;Md&nbsp;» et «&nbsp;33,6&nbsp;Md&nbsp;». Ce qui reste vrai&nbsp;: le
-              symbole <code>€</code> va dans <code>label</code>, et les axes des graphiques restent en
-              milliers d'euros.</li>
-            <li><strong>Le graphique par année ne suit pas les filtres.</strong> Grouper par
-              <code>year(annee_de_declaration)</code> est refusé par l'adaptateur (PG-014)&nbsp;; grouper par
-              le champ date brut donne des libellés «&nbsp;2018-01-01T00:00:00+00:00&nbsp;» que
-              <code>dsfr-data-normalize</code> ne peut pas récrire, sa grammaire réservant les deux-points et
-              ne comparant qu'à l'exact (AM-038). Reste la source générique, qui a le bon libellé mais
-              n'écoute pas le contexte. Trois voies, aucune complète&nbsp;: c'est le trou le plus net de
-              cette page.
-              <br><strong>Suite (lot 18)&nbsp;:</strong> le trou est bouché. <strong>#641, 0.23.0</strong>&nbsp;:
-              l'adaptateur ne backquote plus un élément de <code>group-by</code> contenant une parenthèse, donc
-              <code>year(annee_de_declaration) as annee</code> passe tel quel — la première voie est ouverte, et
-              la source générique n'a plus de raison d'être. Elle est repassée en mode adaptateur et entrée dans
-              les sources du contexte, avec un <code>apply-to</code> qui exclut le seul filtre d'année (sans quoi
-              choisir «&nbsp;2019&nbsp;» réduirait la série à une barre). <strong>Vérifié au navigateur&nbsp;:</strong>
-              en choisissant «&nbsp;Agence française de développement&nbsp;», la série passe de
-              13,77 / 13,99 / 17,18&nbsp;Md&nbsp;k€ à 6,35 / 5,65 / 6,99, <em>en gardant ses trois années</em>, et
-              la requête part en
-              <code>where=agence = "…"&amp;group_by=year(annee_de_declaration) as annee</code>. Le constat
-              ci-dessus reste écrit tel qu'il a été rencontré.</li>
-            <li><strong>Ce que la carte tait, la bibliothèque le dit maintenant.</strong> Le deuxième constat
-              ci-dessus («&nbsp;rien ne le dit à sa place&nbsp;») visait les montants sans pays. Depuis
-              <strong>0.26.0</strong> (#727 et #729), la console et le volet Diagnostic annoncent
-              «&nbsp;<em>dsfr-data-chart[g-monde]&nbsp;: 6 ligne(s) sur 100 ignorée(s) — code géographique absent,
-              invalide ou hors référentiel dans "codes_iso" pour map-monde</em>&nbsp;» — relevé tel quel au
-              navigateur au lot 18. Ce qui <strong>reste vrai</strong>&nbsp;: c'est un message d'auteur, pas une
-              mention à l'écran&nbsp;; le lecteur de la page ne voit toujours rien, et la phrase sous la carte
-              reste à écrire à la main.</li>
-            <li><strong>Les listes déroulantes sont écrites en dur</strong> (20 agences, 14 régions),
-              toujours pour la même raison (AM-001).</li>
-            <li><strong>La plage de dates libre</strong> (début, fin) de l'original devient un choix
-              d'année&nbsp;: les données ne couvrent que trois années, un intervalle jour à jour n'aurait pas
-              de sens. <code>operator="between"</code> existe si on en veut un.</li>
+            <li><strong>Les séries du graphique empilé n'ont pas de couleur choisie.</strong> Mettre les
+              prêts en évidence demanderait <code>color-map</code>, qui fausse les pastilles de l'infobulle
+              (BUG-022)&nbsp;; la mise en évidence passe donc par des graphiques à une seule série.</li>
+            <li><strong>Pas de variation d'une année sur l'autre par groupe sans écrire les années.</strong>
+              La variation 2019-2020 est un indicateur par ligne qui nomme les deux années&nbsp;; sur un jeu
+              figé c'est sans risque, sur un jeu vivant il faudrait la déplacer à chaque millésime.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.22.0 à 0.26.0</h4>
-            <p class="fr-text--sm">
-              5 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#AM-031">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-031</strong> — <strong>0.22.0</strong> (#665)&nbsp;: <code>decimals</code> et <code>unit</code> sur <code>dsfr-data-kpi</code>&nbsp;; <code>compact</code> enfin documenté (#657, 0.21.1).</li>
-              <li><strong>AM-043</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="ctx"</code> peuple ses valeurs et diffuse dans le contexte&nbsp;: plus de <code>&lt;select&gt;</code> généré hors ligne.</li>
-              <li><strong>AM-038</strong> — <strong>0.24.0</strong> (#676)&nbsp;: échappement <code>%3A</code> dans <code>replace</code> et <code>replace-fields</code>&nbsp;: une valeur à deux-points est enfin ciblable (toujours pas de motif).</li>
-              <li><strong>PG-014</strong> — <strong>0.23.0</strong> (#641)&nbsp;: <code>group-by="year(champ) as annee"</code> n'est plus backquoté&nbsp;: <em>contournement par source générique retiré au lot 18</em>, et le graphique des années suit désormais les filtres du contexte.</li>
-              <li><strong>AM-048</strong> — <strong>0.26.0</strong> (#727, #729)&nbsp;: les lignes écartées d'une carte thématique sont comptées et nommées en console et au Diagnostic — 6 codes sur 100 ici. <em>Constaté au lot 18, rien à changer dans la page.</em></li>
-            </ul>
-          </div>
         </div>
       </div>
 
       <div class="fr-table fr-table--bordered">
         <table>
-          <caption>Correspondance page d'origine → composant dsfr-data</caption>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">data.aide-developpement.gouv.fr</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>7 contextes synchronisés à la main</td><td>1 <code>dsfr-data-context</code>, 9 sources</td><td>Nettement plus simple</td></tr>
-            <tr><td>13 <code>ods-chart</code> (bar, pie, treemap)</td><td>7 <code>dsfr-data-chart</code> + 1 carte</td><td>Équivalent, sans treemap</td></tr>
-            <tr><td><code>ods-map</code> + fond Jawg (accueil)</td><td><code>type="map-monde"</code></td><td>Plus simple, SVG sans tuiles</td></tr>
-            <tr><td>6 <code>ods-select</code> dont deux dates</td><td>3 <code>&lt;select&gt;</code> + <code>context-filter</code></td><td>Réduit, valeurs en dur</td></tr>
-            <tr><td>12 <code>ods-pop-in</code> d'explication</td><td>—</td><td>Non repris (éditorial)</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>databox-*</code>, tags de filtres</td><td>Ajout</td></tr>
+            <tr><td>7 <code>ods-dataset-context</code> synchronisés à la main</td><td>1 <code>dsfr-data-source fetch-mode="export"</code> agrégée</td><td>Une requête pour la page</td></tr>
+            <tr><td>13 <code>ods-chart</code>, un par axe du jeu</td><td>5 graphiques, un par message</td><td>Remplacé&nbsp;: la page raconte</td></tr>
+            <tr><td>Montants versés</td><td>Équivalent-don (<code>where="type_de_flux = 'APD'"</code>)</td><td>Mesure officielle, flux hors APD écartés</td></tr>
+            <tr><td><code>ods-map</code> (accueil)</td><td><code>type="map-monde"</code> + tableau triable</td><td>Équivalent, avec la part qu'elle ne montre pas</td></tr>
+            <tr><td>6 <code>ods-select</code></td><td><code>dsfr-data-facets</code> (client)</td><td>Valeurs lues dans la donnée</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile d'une page réputée lourde, et la première carte du monde du banc
-          d'essai.</strong> L'entrée était classée hors périmètre parce que la page vit sur un autre portail
-          Opendatasoft&nbsp;; la donnée est sur celui du MEF, à trois noms de champs près. Le vrai manque
-          est éditorial et structurel — le treemap, et 46&nbsp;% de montants sans pays que la carte tait — pas
-          technique.</p>
-        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AM-037 (treemap), AM-038 (récriture d'une valeur ISO), PG-014 (expression dans <code>group-by</code>), AV-021 (carte du monde en un attribut), AM-031 réduit (<code>format="compact"</code> + échelle dans le <code>select</code>), AM-001 et LIM-003 confirmés.</p>
+        <p><strong>Le jeu racontait une chose que ses treize graphiques ne disaient pas.</strong> En
+          équivalent-don, la hausse de 2020 est d'abord une hausse de prêts, orientés vers les pays à revenu
+          intermédiaire, et six euros sur dix ne se rattachent à aucun pays. <code>dsfr-data</code> l'établit
+          en une requête et sans script&nbsp;; ce qui a coûté, c'est de choisir la bonne mesure.</p>
       </div>
-    </div>
-  
-      </details></section>
+    </details>
+  </section>
 
 </main>
 
@@ -449,11 +529,8 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<!-- Bundle `core` (446 Ko) et non `esm` (551 Ko) : cette page n'a aucune
-     <dsfr-data-map> Leaflet. Verifie le 2026-09-19 sur les noms d'elements du
-     paquet publie 0.31.0 : `core` definit tout ce que la page emploie, les
-     cartes DSFR Chart (map-chart) comprises ; il ne lui manque que les enfants
-     de la carte Leaflet (map-layer, map-popup, map-legend, map-inset...). -->
+<!-- Bundle `core` : la page n'a aucune dsfr-data-map Leaflet ; map-monde est un
+     map-chart DSFR Chart, défini dans `core`. -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>

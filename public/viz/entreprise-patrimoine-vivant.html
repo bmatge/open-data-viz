@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Entreprises du patrimoine vivant — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz Entreprises du patrimoine vivant de data.economie.gouv.fr.">
+  <meta name="description" content="Label Entreprise du patrimoine vivant : un label de très petites entreprises, dont une fiche sur trois est vide. Recréation avec dsfr-data du jeu entreprises-du-patrimoine-vivant-epv de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -15,24 +15,95 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
   <script src="/assets/cles.js"></script>
-  <style>
-    /* Fiche : les templates dsfr-data n'ont pas de conditionnelle ; les blocs facultatifs
-       de l'original (ng-if) sont masqués en CSS d'après la valeur injectée en data-v. */
-    .odv-si-vide[data-v=""] { display: none; }
-    .odv-si-oui:not([data-v="oui"]) { display: none; }
-    .odv-si-Oui:not([data-v="Oui"]) { display: none; }
-    .odv-lien-ou-texte a:not([href^="http"]) { display: none; }
-    .odv-lien-ou-texte span[data-v^="http"], .odv-lien-ou-texte span[data-v=""] { display: none; }
-    .odv-lien-ou-texte:has(span[data-v=""]) { display: none; }
-    .odv-legende { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
-    .odv-legende li { display: flex; align-items: center; gap: .35rem; padding: 0; }
-    .odv-legende i { width: .8rem; height: .8rem; border-radius: 50%; display: inline-block; }
-  </style>
 </head>
 <body>
 <div id="site-header"></div>
 
 <main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       RECRÉATION (2026-09-26) — la page ne reproduit plus l'original, elle
+       raconte le jeu. L'original est une vitrine : « 34 % de PME », « 24 % à
+       moins de 200 € ». Ces parts sont calculées sur TOUTES les fiches, dont
+       une sur trois ne renseigne rien d'autre que le nom, l'adresse et le
+       métier. Rapportées aux fiches qui répondent, elles s'inversent : 96 %
+       de TPE ou PME, 42 % de prix sous 200 €.
+
+       UN chargement, tout le reste dans le navigateur.
+       - `fetch-mode="export"` : une requête pour les 1 267 lignes (AM-011) ;
+         `max-records="3000"` parce que le plafond par défaut (1 000) tronque
+         en silence.
+       - `gamme_de_prix` est un TABLEAU dans l'export JSON : `contains()` dans `compute`
+         regarde dans le tableau (#953).
+       ========================================================================== -->
+  <dsfr-data-source id="epv" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr"
+    dataset-id="entreprises-du-patrimoine-vivant-epv"
+    fetch-mode="export" max-records="3000"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Nettoyage et indicateurs par entreprise.
+       - Deux doublons de casse dans `univers` (10 et 1 lignes) : fusionnés.
+       - vide = 1 quand AUCUN des huit champs descriptifs n'est rempli (site,
+         taille, clientèle, description, secteur, produits, prix, visite).
+       - Indicateurs 0/1 : leur somme est un compte, leur rapport une part de
+         fiches (ratio de comptes, jamais une moyenne de taux).
+       - lab_num / fin_num : dates en AAAAMMJJ, pour comparer à un maximum. -->
+  <dsfr-data-normalize id="epv-n" source="epv"
+    replace-fields="univers:Ameublement et Décoration:Ameublement et décoration | univers:Loisirs et Transports:Loisirs et transports"
+    compute="k = 1;
+             tout = 'Ensemble';
+             annee = concat(year(date_de_labellisation));
+             lab_num = year(date_de_labellisation) * 10000 + month(date_de_labellisation) * 100 + day(date_de_labellisation);
+             fin_num = year(date_de_fin_de_labellisation) * 10000 + month(date_de_fin_de_labellisation) * 100 + day(date_de_fin_de_labellisation);
+             vide = when is_empty(site_internet) and is_empty(taille_d_entreprise) and is_empty(type_de_clientele) and is_empty(description_courte) and is_empty(secteur_d_activite) and is_empty(type_de_produits) and is_empty(gamme_de_prix) and is_empty(visite_autorisee) then 1 else 0;
+             fiche = when vide = 1 then 'Fiche vide' else 'Fiche renseignée';
+             taille = coalesce(taille_d_entreprise, 'Non renseignée');
+             t_connue = when is_empty(taille_d_entreprise) then 0 else 1;
+             petite = when taille_d_entreprise = 'TPE' or taille_d_entreprise = 'PME' then 1 else 0;
+             pme = when taille_d_entreprise = 'PME' then 1 else 0;
+             tpe = when taille_d_entreprise = 'TPE' then 1 else 0;
+             a_prix = when is_empty(gamme_de_prix) then 0 else 1;
+             m200 = when contains(gamme_de_prix, 'Moins de 50 €') or contains(gamme_de_prix, '50 € – 200 €') then 1 else 0;
+             p200 = m200 * 100;
+             devis = when contains(gamme_de_prix, 'Selon devis') then 1 else 0;
+             p_devis = devis * 100;
+             art = when entreprise_artisanale = 'oui' then 1 else 0;
+             art_connu = when is_empty(entreprise_artisanale) then 0 else 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, tous les chiffres du chapô ---------- -->
+  <dsfr-data-query id="syn" source="epv-n" group-by="tout"
+    aggregate="k:count:n, vide:sum:n_vide, t_connue:sum:n_taille, petite:sum:n_petite, pme:sum:n_pme, tpe:sum:n_tpe, a_prix:sum:n_prix, m200:sum:n_m200, devis:sum:n_devis, art:sum:n_art, art_connu:sum:n_art_connu">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="pct_vide = n_vide / n * 100;
+             n_grande = n_taille - n_petite;
+             n_sans_taille = n - n_taille;
+             n_sans_prix = n - n_prix;
+             pct_petite = n_petite / n_taille * 100;
+             pct_pme = n_pme / n_taille * 100;
+             pct_tpe = n_tpe / n_taille * 100;
+             pct_pme_tout = n_pme / n * 100;
+             pct_m200 = n_m200 / n_prix * 100;
+             pct_m200_tout = n_m200 / n * 100;
+             pct_sans_prix = n_sans_prix / n * 100;
+             pct_art = n_art / n_art_connu * 100;
+             pct_art_tout = n_art / n * 100">
+  </dsfr-data-normalize>
+  <!-- Le millésime lu dans la donnée : la labellisation la plus récente publiée. -->
+  <dsfr-data-query id="derniere" source="epv-n" order-by="date_de_labellisation:desc" limit="1"></dsfr-data-query>
+
+  <!-- Labels échus : date de fin antérieure à la labellisation la plus récente
+       du jeu (repère lu dans la donnée, pas la date du jour). Le maximum est
+       groupé sur la clé constante k, puis joint à chaque ligne. -->
+  <dsfr-data-query id="ref" source="epv-n" group-by="k" aggregate="lab_num:max:derniere_num"></dsfr-data-query>
+  <dsfr-data-join id="epv-ref" left="epv-n" right="ref" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="epv-echu" source="epv-ref"
+    compute="echu = when fin_num < derniere_num then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="echus" source="epv-echu" group-by="tout" aggregate="echu:sum:n_echu"></dsfr-data-query>
 
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
@@ -45,198 +116,259 @@
       </div>
     </nav>
 
-    <h1>Entreprises du patrimoine vivant</h1>
+    <h1>Patrimoine vivant&nbsp;: un label de très petites entreprises, dont une fiche sur trois est vide</h1>
 
-    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <a href="https://data.economie.gouv.fr/explore/dataset/entreprises-du-patrimoine-vivant-epv/"
-           target="_blank" rel="noopener external"><code>entreprises-du-patrimoine-vivant-epv</code></a>
-        — 1&nbsp;267 entreprises labellisées, produit par la DGE.
-      </p>
-    </details>
-    <p>Gage de qualité, d'innovation, d'ancrage local et durable, le label «&nbsp;Entreprise du
-      patrimoine vivant&nbsp;» est un label d'État créé en 2005 et décerné aux entreprises françaises
-      qui détiennent des savoir-faire artisanaux et industriels d'excellence.</p>
-    <p>Attribué par les préfets pour cinq ans, il met à l'honneur celles et ceux qui perpétuent des
-      gestes rares, des techniques précieuses et des métiers parfois méconnus, essentiels à notre
-      patrimoine. Les entreprises sont labellisées à l'issue d'une procédure d'instruction
-      rigoureuse, sur la base de critères fixés par décret.</p>
-    <p><strong>Un point commun&nbsp;? L'excellence&nbsp;! Retrouvez ici la liste de toutes les
-      entreprises labellisées et découvrez la diversité de leur savoir-faire. Cette cartographie est
-      mise à jour chaque mois.</strong></p>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          {{n:number}}&nbsp;entreprises portent le label «&nbsp;Entreprise du patrimoine vivant&nbsp;».
+          Parmi les {{n_taille:number}} qui déclarent leur taille, <strong>{{pct_petite:number:0}}&nbsp;% sont
+          des TPE ou des PME</strong>&nbsp;; les grandes entreprises et ETI sont {{n_grande:number}}. Mais
+          <strong>{{n_vide:number}}&nbsp;fiches ({{pct_vide:number:0}}&nbsp;%) ne disent rien</strong> d'autre
+          que le nom, l'adresse et le métier&nbsp;: ni taille, ni produits, ni prix. Toute part calculée
+          sur l'ensemble des fiches les compte comme des «&nbsp;non&nbsp;».
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="derniere">
+      <template>
+        <p class="fr-text--sm fr-hint-text fr-mb-4w">
+          Direction générale des Entreprises, jeu
+          <a href="https://data.economie.gouv.fr/explore/dataset/entreprises-du-patrimoine-vivant-epv/" target="_blank" rel="noopener external"><code>entreprises-du-patrimoine-vivant-epv</code></a>
+          — labels en cours publiés par le producteur&nbsp;; labellisation la plus récente du jeu le
+          {{date_de_labellisation:date}}. Une ligne est une entreprise. Le label est attribué par le
+          préfet de région pour cinq ans.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <!-- Le contraste : le même champ, deux dénominateurs. -->
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <div class="odv-avant-apres fr-mb-6w">
+          <div class="odv-avant-apres__carte">
+            <p class="fr-text--sm fr-mb-1w">Rapporté à toutes les fiches ({{n:number}}), comme sur le portail</p>
+            <span class="odv-avant-apres__chiffre">{{pct_pme_tout:number:0}}&nbsp;%</span>
+            <p class="fr-mb-0">de <strong>PME</strong> — les {{n_sans_taille:number}} tailles absentes comptent comme «&nbsp;pas PME&nbsp;»</p>
+          </div>
+          <div class="odv-avant-apres__carte odv-avant-apres__carte--apres">
+            <p class="fr-text--sm fr-mb-1w">Rapporté aux fiches qui déclarent une taille ({{n_taille:number}})</p>
+            <span class="odv-avant-apres__chiffre">{{pct_pme:number:0}}&nbsp;%</span>
+            <p class="fr-mb-0">de <strong>PME</strong>, et {{pct_tpe:number:0}}&nbsp;% de <strong>TPE</strong></p>
+          </div>
+        </div>
+      </template>
+    </dsfr-data-repeat>
   </div>
 
-  <!-- ==========================================================================
-       Même gabarit que Qualité Tourisme et Tourisme & Handicap : cette page
-       a été dérivée de la première en changeant les noms de champs (AV-009).
-       Mise à niveau du lot 9 (relecture face au relevé visuel du portail) :
-       les quatre KPI de l'original, les six filtres, la fiche à treize champs,
-       la carte colorée par univers, le carrousel « moins de 200 € » et les
-       textes / tuiles éditoriaux. Sans `select` : 0,25–1 s pour 370 Ko compressés.
-
-       Lot 13 — cette source était écrite en mode générique (`url=` vers
-       /exports/json, sans `params`), contournement d'AM-011 : c'était le seul
-       moyen d'obtenir la requête unique, et il coûtait le mode adaptateur lui-même
-       (plus de délégation serveur du where/order-by, plus de server-facets, plus
-       de meta.truncated, et une source qui n'annonçait plus quel jeu elle lit).
-       La mesure d'origine reste la justification : /records plafonne à 100 lignes
-       par requête, soit 13 allers-retours séquentiels pour ce jeu-ci.
-       `fetch-mode="export"` (#689, dsfr-data 0.25.0) rend la même requête unique
-       EN restant en mode adaptateur. Conséquence directe : `max-records`
-       s'applique de nouveau, et son plafond par défaut (1 000) tronquerait le jeu
-       en silence — le jeu compte 1 267 entreprises (relevé à l'API le 2026-09-10,
-       `metas.default.records_count`, et confirmé par le KPI « Sélection
-       courante »), d'où le max-records="3000".
-       ========================================================================== -->
-
-  <dsfr-data-source id="qt" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr"
-    dataset-id="entreprises-du-patrimoine-vivant-epv"
-    fetch-mode="export" max-records="3000"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <!-- 1. Deux doublons de casse dans `univers` (« Ameublement et Décoration » 10 lignes,
-        « Loisirs et Transports » 1 ligne) : fusionnés ici, et signalés dans l'analyse.
-
-        ✅ CORRIGÉ DEPUIS — #732, livré en 0.26.0. « Equipements Industriels,
-        Médicaux, Mécaniques » contient des virgules ; `color-map` découpait
-        dessus sans échappement, et il FALLAIT renommer la valeur avant (LIM-011).
-        `color-map` accepte désormais l'échappement percent, avec la convention
-        de `replace-fields` depuis #676 : la troisième règle de renommage, qui
-        n'existait que pour cela, a été retirée au lot 18 et la couleur est posée
-        sur la valeur SOURCE, `%2C` à la place de chaque virgule.
-        ⚠️ Les deux règles qui restent sont des corrections de données, pas un
-        contournement : elles restent.
-        `type_de_clientele` est une chaîne « Particuliers,Professionnels » : découpée.
-        `k = 1` : clé de jointure constante pour le ratio des KPI (voir plus bas).
-        `pme` / `art` : copies préfixées de la taille et du caractère artisanal, que
-        l'étape 2 transforme en 0 / 100 pour qu'une moyenne donne le pourcentage. -->
-  <dsfr-data-normalize id="qt-clean" source="qt"
-    replace-fields="univers:Ameublement et Décoration:Ameublement et décoration | univers:Loisirs et Transports:Loisirs et transports"
-    split="type_de_clientele"
-    compute="k = 1; pme = 'T' + taille_d_entreprise; art = 'A' + entreprise_artisanale">
-  </dsfr-data-normalize>
-
-  <!-- 2. `replace-fields` compare en égalité exacte : le préfixe garantit qu'une valeur
-        vide (564 tailles absentes) devient « T » puis 0, et compte au dénominateur,
-        comme dans la formule de l'original (count(PME) / total). -->
-  <dsfr-data-normalize id="qt-flags" source="qt-clean"
-    replace-fields="pme:TPME:100 | pme:TTPE:0 | pme:TETI / Grande entreprise:0 | pme:T:0 | art:Aoui:100 | art:Anon:0 | art:A:0">
-  </dsfr-data-normalize>
-
-  <!-- Ratio « part des entreprises proposant des produits à moins de 200 € » : un KPI ne
-       divise pas deux agrégats. Architecture native : deux agrégats globaux groupés sur la
-       clé constante k, une jointure, une colonne calculée. `contains "50 €"` ne matche que
-       « Moins de 50 € » et « 50 € – 200 € » (vérifié sur les 8 valeurs distinctes du champ). -->
-  <dsfr-data-query id="qt-total" source="qt-f" group-by="k" aggregate="raison_sociale:count:nb"></dsfr-data-query>
-  <dsfr-data-query id="qt-m200" source="qt-f" where="gamme_de_prix:contains:50 €"
-    group-by="k" aggregate="raison_sociale:count:nb"></dsfr-data-query>
-  <dsfr-data-query id="qt-m50" source="qt-f" where="gamme_de_prix:contains:Moins de 50 €"
-    group-by="k" aggregate="raison_sociale:count:nb"></dsfr-data-query>
-  <dsfr-data-join id="qt-j1" left="qt-total" right="qt-m200" on="k" type="left" prefix-right="m200_"></dsfr-data-join>
-  <dsfr-data-join id="qt-j2" left="qt-j1" right="qt-m50" on="k" type="left" prefix-right="m50_"></dsfr-data-join>
-  <dsfr-data-normalize id="qt-pct" source="qt-j2"
-    compute="pct200 = m200_nb / nb * 100; pct50 = m50_nb / nb * 100">
-  </dsfr-data-normalize>
-
-  <!-- Carrousel « Quelques exemples » : les entreprises à moins de 200 €, sur la sélection courante. -->
-  <dsfr-data-query id="qt-exemples" source="qt-f" where="gamme_de_prix:contains:50 €"
-    order-by="raison_sociale:asc"></dsfr-data-query>
-
-  <!-- Liste alphabétique : dsfr-data-display n'a pas de tri. -->
-  <dsfr-data-query id="qt-alpha" source="qt-f" order-by="raison_sociale:asc"></dsfr-data-query>
-
-  <!-- `share_percent` (#926) donne à chaque univers sa part du total, calculée sur
-       tous les groupes AVANT `limit` ; la première ligne (order-by desc) nourrit la
-       phrase de lecture, par une seconde query `limit="1"`. Idem par région. -->
-  <dsfr-data-query id="qt-activites" source="qt-f" group-by="univers"
-    aggregate="raison_sociale:count:nb, nb:share_percent:part" order-by="nb:desc" limit="12">
+  <!-- ======================= PREUVE 1 — les fiches vides ======================= -->
+  <!-- Une barre par année de (re)labellisation : fiches renseignées et fiches
+       vides, empilées en nombre. La hauteur dit le rythme des labellisations,
+       la part sombre dit le trou. Palette par défaut, sans color-map : l'infobulle
+       d'un graphique multisérie garde alors des pastilles justes (BUG-022). -->
+  <dsfr-data-query id="an" source="epv-n" group-by="annee"
+    aggregate="vide:sum:vides, k:count:n" order-by="annee:asc">
   </dsfr-data-query>
-  <dsfr-data-query id="qt-univers-1" source="qt-activites" limit="1"></dsfr-data-query>
-  <dsfr-data-query id="qt-regions" source="qt-f" group-by="region" where="region:isnotnull"
-    aggregate="raison_sociale:count:nb, nb:share_percent:part" order-by="nb:desc">
-  </dsfr-data-query>
-  <dsfr-data-query id="qt-region-1" source="qt-regions" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="an-t" source="an"
+    compute="pleines = n - vides; pct = vides / n * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="an-g" source="an-t"
+    rename="pleines:Fiche renseignée | vides:Fiche vide">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="an-min" source="an-t" order-by="pct:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-max" source="an-t" order-by="pct:desc" limit="1"></dsfr-data-query>
 
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
-  <section class="odv-bandeau">
-    <div class="fr-container">
-      <div class="odv-bandeau__recherche">
-        <dsfr-data-search id="qt-q" source="qt-flags"
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-vides">
+    <h2 id="t-vides" class="fr-h3">Les labels de 2025 ont presque tous une fiche remplie&nbsp;; les autres années, un tiers à la moitié restent vides</h2>
+    <dsfr-data-repeat source="an-min">
+      <template>
+        <p class="odv-lecture">
+          Parmi les entreprises labellisées en <strong>{{annee}}</strong>, {{vides:number}} sur
+          {{n:number}} seulement ont une fiche vide, soit <strong>{{pct:number:0}}&nbsp;%</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="an-max">
+      <template>
+        <p class="fr-text--md">
+          À l'autre bout, {{pct:number:0}}&nbsp;% des labels de {{annee}} ({{vides:number}} sur {{n:number}})
+          n'ont rien au-delà de l'identité. Toutes les autres années sont entre les deux.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Fiches renseignées et fiches vides, par année de labellisation">
+      <dsfr-data-chart id="g-annees" source="an-g" type="bar" stacked
+        label-field="annee" value-field="Fiche renseignée" value-fields="Fiche vide"
+        databox databox-title="Entreprises labellisées, par année de labellisation et état de la fiche (nombre)"
+        databox-source="DGE — entreprises-du-patrimoine-vivant-epv, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-annees" source="an-t" table
+        label-field="annee" value-field="n, pleines, vides, pct"
+        description="Barres verticales empilées, une par année de labellisation : le nombre d'entreprises dont la fiche est renseignée, et celles dont la fiche est vide (aucun des huit champs descriptifs rempli). Le tableau donne aussi la part de fiches vides par année.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Une fiche est dite vide quand aucun de ces huit champs n'est rempli&nbsp;: site internet, taille,
+      type de clientèle, description, secteur d'activité, type de produits, gamme de prix, visite.
+      L'année est celle de la dernière labellisation publiée&nbsp;: une entreprise renouvelée n'apparaît
+      qu'une fois, à sa date la plus récente. Le jeu ne dit pas pourquoi 2025 fait exception.
+    </p>
+  </section>
+
+  <!-- ======================= PREUVE 2 — le prix accessible ======================= -->
+  <!-- Seules les fiches qui publient une gamme de prix entrent au dénominateur.
+       p200 vaut 0 ou 100 par entreprise : sa moyenne par univers est une part
+       d'entreprises (ratio de comptes). Une entreprise publie souvent plusieurs
+       gammes : elle compte dès qu'une d'elles est sous 200 €. -->
+  <dsfr-data-query id="un" source="epv-n" where="a_prix:eq:1" group-by="univers"
+    aggregate="p200:avg:part, k:count:n, m200:sum:n200, p_devis:avg:part_devis" order-by="part:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="un-g" source="un" round="part:0"
+    compute="Univers = concat(univers, ' (', n, ')')">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="un-1" source="un" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="un-z" source="un" order-by="part:asc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-prix">
+    <h2 id="t-prix" class="fr-h3">Sous 200&nbsp;€, c'est d'abord la table&nbsp;; le patrimoine bâti se vend sur devis</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Le portail affiche que {{pct_m200_tout:number:0}}&nbsp;% des entreprises labellisées proposent
+          des produits à moins de 200&nbsp;€. Rapporté aux {{n_prix:number}} qui publient une gamme de prix,
+          c'est <strong>{{pct_m200:number:0}}&nbsp;%</strong>&nbsp;: {{n_sans_prix:number}} fiches
+          ({{pct_sans_prix:number:0}}&nbsp;%) n'en publient aucune.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="un-1">
+      <template>
+        <p class="fr-text--md">
+          L'écart entre métiers écrase cette moyenne&nbsp;: en <strong>{{univers}}</strong>,
+          {{part:number:0}}&nbsp;% des entreprises qui publient leurs prix vendent sous 200&nbsp;€
+          ({{n200:number}} sur {{n:number}}).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="un-z">
+      <template>
+        <p class="fr-text--md">En <strong>{{univers}}</strong>, {{part:number:0}}&nbsp;% ({{n200:number}} sur {{n:number}})&nbsp;; {{part_devis:number:0}}&nbsp;% y indiquent «&nbsp;Selon devis&nbsp;».</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Part des entreprises proposant des produits sous 200 €, par univers">
+      <dsfr-data-chart id="g-prix" source="un-g" type="bar" horizontal
+        label-field="Univers" value-field="part" name="Part des entreprises à moins de 200 €"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Part des entreprises proposant des produits à moins de 200 €, par univers (en % des entreprises qui publient une gamme de prix)"
+        databox-source="DGE — entreprises-du-patrimoine-vivant-epv, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-prix" source="un" table
+        label-field="univers" value-field="part, n200, n"
+        description="Barres horizontales triées par part décroissante : pour chaque univers de savoir-faire, la part des entreprises qui publient une gamme de prix et proposent au moins un produit à moins de 200 euros. Entre parenthèses, le nombre d'entreprises qui publient une gamme de prix. Le premier univers est mis en évidence.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Entre parenthèses, le nombre d'entreprises de l'univers qui publient une gamme de prix.
+          Une entreprise peut publier plusieurs gammes&nbsp;; {{n_devis:number}} mentionnent «&nbsp;Selon
+          devis&nbsp;». L'univers «&nbsp;Fournitures, Équipements et Matériaux&nbsp;» n'a aucune gamme publiée
+          et n'apparaît pas.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= NUANCE ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-nuance">
+    <h2 id="t-nuance" class="fr-h3">Ce qui complique la lecture</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul>
+          <li><strong>Une fiche vide n'est pas une entreprise vide.</strong> Rien ne dit que les
+            {{n_vide:number}} entreprises sans fiche diffèrent des autres&nbsp;: les parts «&nbsp;parmi les
+            fiches renseignées&nbsp;» supposent qu'elles leur ressemblent. C'est une hypothèse, pas une mesure.</li>
+          <li><strong>L'artisanat, lui, est presque toujours renseigné.</strong> {{pct_art:number:0}}&nbsp;% des
+            {{n_art_connu:number}} entreprises qui répondent sont artisanales&nbsp;; sur toutes les fiches,
+            {{pct_art_tout:number:0}}&nbsp;%. Ici le dénominateur change peu la lecture.</li>
+          <li><strong>«&nbsp;Moins de 200&nbsp;€&nbsp;» ne dit pas «&nbsp;bon marché&nbsp;».</strong> Une
+            entreprise compte dès qu'un de ses produits entre dans la gamme, quel que soit le reste de son
+            catalogue&nbsp;; et la gamme est déclarée par l'entreprise.</li>
+          <li><strong>Les tailles sont déclaratives et larges.</strong> «&nbsp;ETI / Grande entreprise&nbsp;»
+            forme une seule modalité&nbsp;; le jeu ne publie ni effectif ni chiffre d'affaires.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="echus">
+      <template>
+        <p class="fr-text--md">
+          <strong>{{n_echu:number}}&nbsp;entreprises ont une date de fin de label antérieure</strong> à la
+          labellisation la plus récente du jeu. Label échu non retiré ou renouvellement pas encore publié&nbsp;:
+          le jeu ne permet pas de trancher. Elles restent comptées partout sur cette page.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <!-- La recherche et les facettes agissent sur les compteurs, la carte, le
+       classement des régions et la liste — pas sur les graphiques précédents,
+       qui portent sur tout le jeu. -->
+  <dsfr-data-query id="epv-region" source="epv-f" group-by="region"
+    aggregate="k:count:Entreprises" order-by="Entreprises:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="epv-alpha" source="epv-f" order-by="raison_sociale:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Trouver une entreprise, un métier, un territoire</h2>
+    <p class="fr-text--sm fr-hint-text">
+      La recherche porte sur le nom, la description, les produits, le secteur, l'univers, le département
+      et l'activité NAF. Les filtres n'agissent pas sur les deux graphiques précédents, qui portent sur
+      l'ensemble du jeu.
+    </p>
+    <div class="fr-mb-4w">
+      <dsfr-data-search id="epv-q" source="epv-n"
         fields="raison_sociale, description_courte, type_de_produits, secteur_d_activite, univers, departement, region, libelle_naf"
         label="Rechercher" placeholder="Un mot, un produit, une entreprise…"
         operator="words" count count-label="entreprise">
-        </dsfr-data-search>
-      </div>
+      </dsfr-data-search>
     </div>
-  </section>
-
-  <div class="fr-container fr-mb-8w">
-        <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <h2 class="fr-h4">En France, le label EPV c'est&nbsp;:</h2>
-    <dsfr-data-kpi-group class="fr-mb-1w">
-      <dsfr-data-kpi source="qt-f" value="count" format="nombre"
-        heading="Sélection courante" label="entreprises labellisées" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="qt-f" value="pme:avg" format="pourcentage"
-        heading="dont" label="de PME" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="qt-f" value="art:avg" format="pourcentage"
-        heading="dont" label="d'entreprises artisanales" col="4"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    <p class="fr-text--sm fr-mb-1w">Sur toutes ces entreprises labellisées&nbsp;:</p>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="qt-pct" value="pct200" format="pourcentage"
-        heading="Accessibilité" label="proposent des produits à moins de 200 €" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="qt-pct" value="pct50" format="pourcentage"
-        heading="Accessibilité" label="proposent des produits à moins de 50 €" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="qt-m200" value="nb" format="nombre"
-        heading="Soit" label="entreprises à moins de 200 €" col="4"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
-    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Filtrer</h2>
-
-        <!-- L'original cherche en plein texte sur toute la fiche (« Berger » remonte
-             CECCALDI CREATIONS par sa description) : mêmes champs ici. -->
-
-        <!-- Les six filtres de l'original. `secteur_d_activite`, `type_de_produits` et
-             `gamme_de_prix` sont des tableaux dans l'export JSON : les facettes comptent
-             chaque valeur. Le tri des valeurs est global (count / alpha), pas par champ :
-             les gammes de prix ne suivent pas l'ordre des montants. -->
-        <dsfr-data-facets id="qt-f" source="qt-q"
-          fields="univers, secteur_d_activite, type_de_produits, region, gamme_de_prix, visite_autorisee"
-          labels="univers:Univers | secteur_d_activite:Secteur d'activité | type_de_produits:Type de produits | region:Région | gamme_de_prix:Gamme de prix | visite_autorisee:Visite autorisée"
-          sort="region:alpha:asc | type_de_produits:alpha:asc"
-          searchable="type_de_produits, region" max-values="8"
-          display="univers:multiselect | secteur_d_activite:multiselect | type_de_produits:multiselect | region:multiselect | gamme_de_prix:multiselect">
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="epv-f" source="epv-q"
+          fields="univers, region, taille, gamme_de_prix, visite_autorisee, fiche"
+          labels="univers:Univers | region:Région | taille:Taille d'entreprise | gamme_de_prix:Gamme de prix | visite_autorisee:Visite autorisée | fiche:État de la fiche"
+          sort="region:alpha:asc"
+          searchable="region" max-values="8"
+          display="univers:multiselect | region:multiselect | gamme_de_prix:multiselect">
         </dsfr-data-facets>
       </details>
-      <div class="fr-col-12 fr-col-lg-9">
-        <div class="odv-viz" data-code="La carte des entreprises, colorée par univers">
-        <h2 class="fr-h4">Où sont les entreprises labellisées</h2>
-        <dsfr-data-repeat source="qt-region-1">
-          <template>
-            <p class="odv-lecture"><strong>{{region}}</strong> concentre <strong>{{part:number:0}}&nbsp;%</strong>
-              des entreprises labellisées de la sélection ({{nb:number}}).</p>
-          </template>
-        </dsfr-data-repeat>
-        <!-- Couleurs de l'original par univers ; la 9ᵉ valeur (« Fournitures, Équipements et
-             Matériaux », 5 lignes) n'a pas de couleur chez lui non plus : elle prenait `color`.
-             Elle est désormais nommée dans color-map, même couleur, pour que la légende
-             dérivée la désigne autrement que par « Autres valeurs ». -->
+
+      <div>
+        <dsfr-data-kpi-group class="fr-mb-4w">
+          <dsfr-data-kpi source="epv-f" value="count" format="nombre"
+            heading="Sélection" label="entreprises labellisées" span="3"></dsfr-data-kpi>
+          <dsfr-data-kpi source="epv-f" value="count:petite:1 / count:t_connue:1" format="pourcentage"
+            heading="TPE ou PME" label="parmi les tailles déclarées" span="3"></dsfr-data-kpi>
+          <dsfr-data-kpi source="epv-f" value="count:m200:1 / count:a_prix:1" format="pourcentage"
+            heading="Sous 200 €" label="parmi les gammes de prix publiées" span="3"></dsfr-data-kpi>
+          <dsfr-data-kpi source="epv-f" value="count:vide:1 / count" format="pourcentage"
+            heading="Fiches vides" label="de la sélection" span="3"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <h3 class="fr-h5">Où sont les entreprises</h3>
+        <p class="fr-text--sm">
+          Un point par entreprise, coloré par univers. Cliquez un point pour ouvrir sa fiche.
+        </p>
+        <div class="odv-viz" data-code="Carte des entreprises labellisées, filtrée">
         <dsfr-data-map tiles-style="muted" name="Carte des entreprises labellisées Entreprise du patrimoine vivant"
           center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
           fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
-          <dsfr-data-map-layer id="qt-couche" source="qt-f" type="circle" radius="5"
+          <dsfr-data-map-layer id="epv-couche" source="epv-f" type="circle" radius="5"
             geo-field="geolocetablissement" color="#000091"
             color-field="univers"
             color-map="Mode et beauté:#E18B76, Ameublement et décoration:#6A6AF4, Architecture et Patrimoine Bâti:#A94645, Arts de la table:#4A9DF7, Culture et Communication:#EFCB3A, Equipements Industriels%2C Médicaux%2C Mécaniques:#639F6A, Gastronomie:#FA794A, Loisirs et transports:#745B47, Fournitures%2C Équipements et Matériaux:#000091"
@@ -244,291 +376,135 @@
           </dsfr-data-map-layer>
           <dsfr-data-map-popup mode="panel-right" title-field="raison_sociale" width="400px">
             <template>
-              <p class="fr-mb-2v">
-                <span class="fr-tag fr-tag--sm odv-si-vide" data-v="{{taille_d_entreprise|}}">{{taille_d_entreprise|}}</span>
-                <span class="fr-tag fr-tag--sm odv-si-oui" data-v="{{entreprise_artisanale|}}">Entreprise artisanale</span>
-              </p>
-              <p class="fr-text--sm fr-mb-1v"><strong>{{region}}</strong> — {{departement}}</p>
-              <p class="fr-text--sm odv-lien-ou-texte fr-mb-1v">
-                <a href="{{site_internet|}}" target="_blank" rel="noopener external">{{site_internet|}}</a><span data-v="{{site_internet|}}">{{site_internet|}}</span>
-              </p>
-              <p class="fr-text--sm fr-mb-1v">Date de labellisation&nbsp;: {{date_de_labellisation|non renseignée}}</p>
-              <p class="fr-text--sm fr-mb-1v">Code et libellé NAF&nbsp;: {{code_naf|}} — {{libelle_naf|non renseigné}}</p>
-              <p class="fr-text--sm fr-mb-1v odv-si-vide" data-v="{{type_de_clientele.0|}}">Type de clients&nbsp;:
-                <span class="fr-tag fr-tag--sm odv-si-vide" data-v="{{type_de_clientele.0|}}">{{type_de_clientele.0|}}</span>
-                <span class="fr-tag fr-tag--sm odv-si-vide" data-v="{{type_de_clientele.1|}}">{{type_de_clientele.1|}}</span>
-              </p>
-              <p class="fr-text--sm fr-mb-1v">Univers&nbsp;: <span class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{univers}}</span></p>
-              <p class="fr-text--sm fr-mb-1v odv-si-vide" data-v="{{secteur_d_activite.0|}}">Secteur d'activité de l'entreprise&nbsp;: {{secteur_d_activite|}}</p>
-              <p class="fr-text--sm fr-mb-1v odv-si-vide" data-v="{{description_courte|}}"><strong>En savoir plus sur l'activité de l'entreprise&nbsp;:</strong> {{description_courte|}}</p>
-              <p class="fr-text--sm fr-mb-1v odv-si-vide" data-v="{{type_de_produits.0|}}">Type de produits de l'entreprise&nbsp;: {{type_de_produits|}}</p>
-              <p class="fr-text--sm fr-mb-1v odv-si-vide" data-v="{{gamme_de_prix.0|}}">Gamme de prix proposée&nbsp;: {{gamme_de_prix|}}</p>
-              <p class="fr-text--sm fr-mb-1v odv-si-Oui" data-v="{{visite_autorisee|}}"><strong>Visites&nbsp;: Oui.</strong> {{informations_complementaires_concernant_la_visite|}}</p>
+              <p class="fr-badge fr-badge--sm fr-badge--blue-ecume fr-mb-2v">{{univers}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>{{departement}}</strong> — {{region}}</p>
+              <p class="fr-text--sm fr-mb-1v">Labellisée le {{date_de_labellisation:date}}, jusqu'au {{date_de_fin_de_labellisation:date}}</p>
+              <p class="fr-text--sm fr-mb-1v">Activité&nbsp;: {{libelle_naf|non renseignée}} ({{code_naf|}})</p>
+              {{#if taille_d_entreprise}}<p class="fr-text--sm fr-mb-1v">Taille&nbsp;: {{taille_d_entreprise}}</p>{{/if}}
+              {{#if entreprise_artisanale}}<p class="fr-text--sm fr-mb-1v">Entreprise artisanale&nbsp;: {{entreprise_artisanale}}</p>{{/if}}
+              {{#if site_internet}}<p class="fr-text--sm fr-mb-1v"><a class="fr-link" href="{{site_internet:url}}" target="_blank" rel="noopener external">Site internet</a></p>{{/if}}
+              {{#if type_de_clientele}}<p class="fr-text--sm fr-mb-1v">Clientèle&nbsp;: {{type_de_clientele}}</p>{{/if}}
+              {{#if type_de_produits}}<p class="fr-text--sm fr-mb-1v">Produits&nbsp;: {{type_de_produits:join:, }}</p>{{/if}}
+              {{#if gamme_de_prix}}<p class="fr-text--sm fr-mb-1v">Gamme de prix&nbsp;: {{gamme_de_prix:join:, }}</p>{{/if}}
+              {{#if visite_autorisee}}<p class="fr-text--sm fr-mb-1v">Visite autorisée&nbsp;: {{visite_autorisee}} {{informations_complementaires_concernant_la_visite|}}</p>{{/if}}
+              {{#if description_courte}}<p class="fr-text--sm">{{description_courte}}</p>{{/if}}
+              {{#unless taille_d_entreprise}}<p class="fr-text--xs fr-hint-text">Taille non déclarée.</p>{{/unless}}
             </template>
           </dsfr-data-map-popup>
-          <!-- Légende DÉRIVÉE du rendu de la couche (LIM-009, résolu en 0.22.0 par
-               #685) : une entrée par paire de color-map, plus « Autres valeurs »
-               pour le repli `color`. La liste HTML statique qui la précédait
-               (neuf pastilles recopiant color-map) n'a plus lieu d'être. -->
-          <dsfr-data-map-legend for="qt-couche" label="Univers de savoir-faire"></dsfr-data-map-legend>
         </dsfr-data-map>
         </div>
-      </div>
-    </div>
+        <dsfr-data-map-legend for="epv-couche" label="Univers de savoir-faire"></dsfr-data-map-legend>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12">
-        <div class="odv-viz" data-code="Répartition par univers de savoir-faire">
-          <h3 class="fr-h6">Quels savoir-faire</h3>
-          <dsfr-data-repeat source="qt-univers-1">
-            <template>
-              <p class="odv-lecture">Un univers domine, <strong>{{univers}}</strong>&nbsp;:
-                <strong>{{part:number:0}}&nbsp;%</strong> des entreprises labellisées de la sélection
-                ({{nb:number}}).</p>
-            </template>
-          </dsfr-data-repeat>
-          <dsfr-data-chart id="g-activites" source="qt-activites" type="bar" horizontal
-            label-field="univers" value-field="nb" name='["Entreprises"]'
-            databox databox-title="Répartition par univers de savoir-faire"
-            databox-source="DGE — entreprises-du-patrimoine-vivant-epv, via data.economie.gouv.fr"
-            databox-download>
+        <h3 class="fr-h5 fr-mt-6w">Combien d'entreprises par région</h3>
+        <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Entreprises labellisées par région, sélection courante">
+          <dsfr-data-chart id="g-region" source="epv-region" type="bar" horizontal
+            label-field="region" value-field="Entreprises" name="Entreprises labellisées"
+            databox databox-title="Entreprises labellisées par région, sélection courante (nombre)"
+            databox-source="DGE — entreprises-du-patrimoine-vivant-epv, data.economie.gouv.fr" databox-download>
           </dsfr-data-chart>
-          <dsfr-data-a11y for="g-activites" source="qt-activites" table download
-            label-field="univers" value-field="nb, part"></dsfr-data-a11y>
+          <dsfr-data-a11y for="g-region" source="epv-region"
+            description="Barres horizontales triées : nombre d'entreprises labellisées par région, pour la sélection courante de la recherche et des filtres.">
+          </dsfr-data-a11y>
         </div>
+        <p class="fr-text--xs fr-hint-text">
+          Des nombres, pas des taux&nbsp;: le jeu ne publie ni population ni nombre d'entreprises par région,
+          et l'Île-de-France doit une grande part de son rang à Paris.
+        </p>
       </div>
     </div>
 
+    <h3 class="fr-h5 fr-mt-6w">Les entreprises de la sélection, par ordre alphabétique</h3>
     <div class="odv-viz" data-code="Les fiches des entreprises, par ordre alphabétique">
-    <h2 class="fr-h4">Les entreprises, par ordre alphabétique</h2>
-    <dsfr-data-display source="qt-alpha" cols="3" pagination="12" uid-field="raison_sociale"
+    <dsfr-data-display source="epv-alpha" cols="3" pagination="12" uid-field="raison_sociale"
       empty="Aucune entreprise dans votre sélection." url-sync count-label="entreprise">
       <template>
         <div class="fr-card fr-card--sm">
           <div class="fr-card__body">
             <div class="fr-card__content">
               <div class="fr-card__start">
-                <p class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{univers|Univers non précisé}}</p>
-              </div>
-              <h3 class="fr-card__title fr-text--sm">{{raison_sociale}}</h3>
-              <p class="fr-card__desc fr-text--xs">{{description_courte|}}</p>
-              <div class="fr-card__end">
-                <p class="fr-text--xs fr-mb-0">{{departement}} · {{taille_d_entreprise|taille non renseignée}}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </template>
-    </dsfr-data-display>
-    </div>
-  </div>
-
-  <!-- ====================== Sections éditoriales de l'original ====================== -->
-  <section class="fr-container fr-mb-8w">
-    <h2 class="fr-h3">Les savoir-faire français pour tous</h2>
-    <p>Les EPV font vivre des métiers uniques et proposent des produits destinés aux particuliers
-      et/ou professionnels, à des niveaux de prix variés, dont une partie accessible au plus grand
-      nombre. Réparties sur l'ensemble du territoire, ces entreprises conjuguent transmission des
-      savoir-faire, qualité de production et engagement dans une démarche de responsabilité
-      sociétale.</p>
-    <p>Les savoir-faire EPV se découvrent également au plus près des territoires, à l'occasion de
-      visites d'ateliers, ou d'événements portes ouvertes.</p>
-    <ul class="fr-badges-group fr-mb-4w">
-      <li><p class="fr-badge fr-badge--success fr-badge--no-icon fr-icon-checkbox-circle-line fr-badge--icon-left">Ancrés dans tous les territoires</p></li>
-      <li><p class="fr-badge fr-badge--success fr-badge--no-icon fr-icon-checkbox-circle-line fr-badge--icon-left">Pour les particuliers comme pour les professionnels</p></li>
-      <li><p class="fr-badge fr-badge--success fr-badge--no-icon fr-icon-checkbox-circle-line fr-badge--icon-left">Des prix pour tous les budgets</p></li>
-      <li><p class="fr-badge fr-badge--success fr-badge--no-icon fr-icon-checkbox-circle-line fr-badge--icon-left">Des produits variés, responsables et durables</p></li>
-      <li><p class="fr-badge fr-badge--success fr-badge--no-icon fr-icon-checkbox-circle-line fr-badge--icon-left">Des savoir-faire d'exception à découvrir</p></li>
-    </ul>
-
-    <h3 class="fr-h4">Quelques exemples</h3>
-    <p class="fr-text--sm">Découvrez des exemples d'Entreprises du patrimoine vivant, s'adressant aux
-      particuliers et dans une gamme de prix inférieure à 200&nbsp;€ — sur la sélection courante.</p>
-    <!-- L'original charge ~120 cartes dans un carrousel indépendant des filtres ; ici une grille
-         paginée (4 par écran, comme lui), qui suit les filtres. -->
-    <div class="odv-viz" data-code="Quelques exemples à moins de 200 €">
-    <dsfr-data-display source="qt-exemples" cols="4" pagination="8" uid-field="raison_sociale"
-      empty="Aucune entreprise à moins de 200 € dans votre sélection." class="fr-mb-4w" count-label="entreprise">
-      <template>
-        <div class="fr-card fr-card--sm fr-card--grey">
-          <div class="fr-card__body">
-            <div class="fr-card__content">
-              <div class="fr-card__start">
                 <p class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{univers}}</p>
               </div>
               <h4 class="fr-card__title fr-text--sm">{{raison_sociale}}</h4>
-              <p class="fr-card__desc fr-text--xs">{{type_de_produits|}}</p>
+              {{#if description_courte}}<p class="fr-card__desc fr-text--xs">{{description_courte}}</p>{{/if}}
+              {{#unless description_courte}}<p class="fr-card__desc fr-text--xs fr-hint-text">{{libelle_naf}}</p>{{/unless}}
+              <div class="fr-card__end">
+                <p class="fr-text--xs fr-mb-0">{{departement}} · {{taille}} · labellisée le {{date_de_labellisation:date}}</p>
+              </div>
             </div>
           </div>
         </div>
       </template>
     </dsfr-data-display>
     </div>
-
-    <div class="fr-callout">
-      <h3 class="fr-callout__title">Accessible ne veut pas dire «&nbsp;bon marché&nbsp;»</h3>
-      <p class="fr-callout__text fr-text--sm">Un produit issu d'un savoir-faire d'excellence ne peut pas
-        être comparé à un produit standardisé à bas coût. Dans le cas des entreprises labellisées
-        Entreprises du patrimoine vivant, l'accessibilité ne se mesure pas uniquement au prix
-        d'achat, mais aussi à&nbsp;: la qualité des matériaux, son temps de conception et de
-        fabrication, sa durabilité, l'impact économique et social de sa fabrication.</p>
-      <p class="fr-callout__text fr-text--sm">Un objet fabriqué en France, conçu pour durer et être
-        transmis peut ainsi représenter un coût plus élevé à l'achat, tout en étant économiquement
-        pertinent sur la durée. L'accessibilité réside alors dans un prix juste, qui rémunère un
-        savoir-faire local d'excellence tout en offrant une valeur d'usage durable.</p>
-    </div>
-
-    <h3 class="fr-h4 fr-mt-4w">Aller plus loin</h3>
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-3"><div class="fr-tile fr-tile--sm fr-enlarge-link"><div class="fr-tile__body"><div class="fr-tile__content"><h4 class="fr-tile__title"><a href="https://www.entreprises.gouv.fr/espace-entreprises/s-informer-sur-la-reglementation/le-label-entreprise-du-patrimoine-vivant-epv" target="_blank" rel="noopener external">En savoir plus sur le label EPV</a></h4></div></div></div></div>
-      <div class="fr-col-12 fr-col-md-3"><div class="fr-tile fr-tile--sm fr-enlarge-link"><div class="fr-tile__body"><div class="fr-tile__content"><h4 class="fr-tile__title"><a href="https://www.sgs.com/fr-fr/showcases/label-epv-entreprise-du-patrimoine-vivant/la-candidature-au-label-epv" target="_blank" rel="noopener external">Candidater au label EPV</a></h4></div></div></div></div>
-      <div class="fr-col-12 fr-col-md-3"><div class="fr-tile fr-tile--sm fr-enlarge-link"><div class="fr-tile__body"><div class="fr-tile__content"><h4 class="fr-tile__title"><a href="https://www.entreprises.gouv.fr/espace-entreprises/faq/label-entreprise-du-patrimoine-vivant" target="_blank" rel="noopener external">Consulter la foire aux questions sur le label EPV</a></h4></div></div></div></div>
-      <div class="fr-col-12 fr-col-md-3"><div class="fr-tile fr-tile--sm fr-enlarge-link"><div class="fr-tile__body"><div class="fr-tile__content"><h4 class="fr-tile__title"><a href="https://www.reseauexcellence.fr/fr/" target="_blank" rel="noopener external">Découvrez le Réseau Excellence</a></h4></div></div></div></div>
-    </div>
-
-    <h3 class="fr-h4">Informations techniques</h3>
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-4"><div class="fr-tile fr-tile--sm fr-enlarge-link"><div class="fr-tile__body"><div class="fr-tile__content"><h4 class="fr-tile__title"><a href="https://data.economie.gouv.fr/explore/assets/entreprises-du-patrimoine-vivant-epv/" target="_blank" rel="noopener external">Voir la source des données</a></h4></div></div></div></div>
-      <div class="fr-col-12 fr-col-md-4"><div class="fr-tile fr-tile--sm fr-enlarge-link"><div class="fr-tile__body"><div class="fr-tile__content"><h4 class="fr-tile__title"><a href="https://www.legifrance.gouv.fr/loda/id/JORFTEXT000000607662/2024-12-18/" target="_blank" rel="noopener external">Consulter le décret</a></h4></div></div></div></div>
-      <div class="fr-col-12 fr-col-md-4"><div class="fr-tile fr-tile--sm fr-enlarge-link"><div class="fr-tile__body"><div class="fr-tile__content"><h4 class="fr-tile__title"><a href="mailto:label-epv.dge@finances.gouv.fr">Contactez-nous</a></h4></div></div></div></div>
-    </div>
   </section>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <details class="odv-technique fr-container" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-  <section class="odv-analyse fr-py-8w">
-    <div class="fr-container">
-      <h2>Analyse de reproduction — Entreprises du patrimoine vivant</h2>
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Les labels échus et retirés</strong>&nbsp;: le jeu ne publie que les entreprises en
+            cours (et quelques dates de fin dépassées, ci-dessus). Impossible d'en tirer un historique du
+            label depuis 2005.</li>
+          <li><strong>Les parts rapportées aux entreprises sans fiche</strong>&nbsp;: {{n_sans_taille:number}}
+            tailles et {{n_sans_prix:number}} gammes de prix manquent. Elles sont nommées (facette
+            «&nbsp;Taille&nbsp;: Non renseignée&nbsp;», «&nbsp;État de la fiche&nbsp;»), jamais comptées comme
+            une réponse.</li>
+          <li><strong>Des taux régionaux</strong>&nbsp;: sans population ni tissu d'entreprises dans le jeu, la
+            carte dit où sont les entreprises, pas où le label est le plus répandu.</li>
+          <li><strong>Deux corrections d'écriture</strong>&nbsp;: «&nbsp;Ameublement et Décoration&nbsp;» et
+            «&nbsp;Loisirs et Transports&nbsp;» sont fusionnés avec leur forme majoritaire.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Pour aller plus loin&nbsp;:
+      <a href="https://www.entreprises.gouv.fr/espace-entreprises/s-informer-sur-la-reglementation/le-label-entreprise-du-patrimoine-vivant-epv" target="_blank" rel="noopener external">le label EPV</a>,
+      <a href="https://www.entreprises.gouv.fr/espace-entreprises/faq/label-entreprise-du-patrimoine-vivant" target="_blank" rel="noopener external">la foire aux questions</a>,
+      <a href="https://www.sgs.com/fr-fr/showcases/label-epv-entreprise-du-patrimoine-vivant/la-candidature-au-label-epv" target="_blank" rel="noopener external">candidater</a>,
+      <a href="https://www.legifrance.gouv.fr/loda/id/JORFTEXT000000607662/2024-12-18/" target="_blank" rel="noopener external">le décret</a>.
+    </p>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la recréation a coûté</summary>
 
       <p class="fr-text--lead">
         Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/entreprise-patrimoine-vivant/"
-        target="_blank" rel="noopener external">entreprise-patrimoine-vivant</a> —
-        <strong>61&nbsp;600 caractères</strong>, le plus gros template du catalogue&nbsp;: vingt-quatre
-        <code>ods-map-layer</code>, vingt <code>ods-map-layer-group</code>, huit <code>ods-map</code>,
-        quatorze <code>ods-adv-analysis</code>, dix <code>ods-select</code>. Pour 1&nbsp;267
-        entreprises.
+        target="_blank" rel="noopener external">entreprise-patrimoine-vivant</a> — une vitrine du label
+        (61&nbsp;600 caractères de template, huit cartes, quatre KPI). Ses KPI divisent par toutes les
+        fiches&nbsp;; la recréation part de ce que ce dénominateur cache.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le gabarit a resservi une troisième fois.</strong> Cette page a été produite
-              à partir de celle de <a href="/viz/qualite-tourisme">Qualité Tourisme</a> par
-              substitution de noms de champs — comme
-              <a href="/viz/tourisme-et-handicap">Tourisme &amp; Handicap</a> avant elle. Trois
-              annuaires cartographiés, un seul motif. Le portail entretient au même moment trois
-              templates séparés de 33&nbsp;000, 33&nbsp;400 et 61&nbsp;600 caractères
-              (registre&nbsp;: AV-009).</li>
-            <li><strong>Le rapport de volume est le plus spectaculaire du banc d'essai.</strong>
-              61&nbsp;600 caractères de template contre une trentaine de lignes de pipeline. Les
-              vingt-quatre couches cartographiques de l'original sont des duplications&nbsp;: la même
-              carte redéclarée pour chaque point de rupture et chaque état d'affichage.</li>
-            <li><strong>Les facettes portent sur ce qui intéresse.</strong> Univers, secteur,
-              type de produits, région, gamme de prix, visite&nbsp;: les six filtres de l'original
-              exposés en une balise, là où il câble dix listes déroulantes et cinq contextes.
-              Les champs multivalués (tableaux dans l'export JSON) sont comptés valeur par valeur
-              sans rien déclarer.</li>
+            <li><strong>Un chargement, tout le reste dans le navigateur.</strong>
+              <code>fetch-mode="export"</code> charge les 1&nbsp;267 lignes en une requête&nbsp;; chapô, deux
+              graphiques, nuances, carte, facettes et liste en dérivent.</li>
+            <li><strong>La fiche vide en une expression.</strong> <code>compute</code> avec
+              <code>is_empty</code> sur huit champs, et <code>contains()</code> qui regarde dans le tableau
+              <code>gamme_de_prix</code>&nbsp;: aucun <code>split</code>, aucune jointure.</li>
+            <li><strong>Les ratios de l'original tombent à une balise.</strong>
+              <code>value="count:m200:1 / count:a_prix:1"</code> là où l'ancienne reproduction empilait trois
+              requêtes, deux jointures et un <code>compute</code>.</li>
+            <li><strong>La fiche sans CSS.</strong> <code>{{#if}}</code> remplace les six règles
+              <code>[data-v=""]</code> de la version précédente.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Rien de neuf au premier passage&nbsp;— et c'était l'information.</strong>
-              En gabarit «&nbsp;annuaire&nbsp;», cette page n'avait produit aucun constat inédit. Les seules frictions rencontrées sont celles déjà consignées&nbsp;:
-              les liens optionnels sans conditionnelle (AM-007, <code>site_internet</code> est vide
-              pour une partie des entreprises), le rendu de l'interface des facettes (AM-013), et
-              l'absence de fond de carte neutre (AM-017). Un motif éprouvé cesse de produire des
-              découvertes&nbsp;: c'est le signe qu'il est stabilisé.</li>
-            <li><strong>Une date de labellisation inexploitable telle quelle.</strong>
-              <code>date_de_labellisation</code> est une date pleine&nbsp;; en faire une facette
-              produirait autant de valeurs que de dates. Le portail déclare une facette
-              <code>date_de_labellisation</code> à sept valeurs — Opendatasoft sait agréger une date
-              par année dans ses facettes déclarées. J'avais écrit que côté <code>dsfr-data</code> il
-              faudrait un <code>compute</code> qui manipule des chaînes. La relecture du lot 11 a
-              pointé la voie non essayée&nbsp;: <code>server-facets</code> lit <code>/facets</code>, qui
-              renvoie précisément ces sept années. Essayé sur une page de test (source adaptateur en
-              <code>server-side</code>)&nbsp;: la facette affiche «&nbsp;2025 (368), 2022 (250)…&nbsp;»
-              sans une ligne de plus — l'affichage était un faux problème (FP-011). Mais cocher
-              «&nbsp;2022&nbsp;» émet <code>where=date_de_labellisation = "2022"</code> et l'API répond
-              <strong>400</strong> <code>IncompatibleTypesInComparisonFilter</code> (date contre
-              texte)&nbsp;; la liste reste sur la page précédente, seule la console le dit. ODSQL accepte
-              <code>date'2022'</code>, <code>year(champ) = 2022</code>, un intervalle, ou le paramètre
-              <code>refine=champ:2022</code> — vérifiés à l'API, 250 lignes chacun. C'est un bug de
-              l'adaptateur, pas un manque (BUG-005). Cette page reste en mode client, où la question ne
-              se pose pas de la même façon&nbsp;: la facette y compterait les dates, pas les
-              années.</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> La première version
-              était le gabarit «&nbsp;annuaire&nbsp;» posé sur un autre jeu&nbsp;; la fiche d'audit
-              (<code>docs/portail/</code>) montrait qu'il manquait l'essentiel du message
-              éditorial. Ajouté, et vérifié au navigateur contre l'API&nbsp;: <em>les quatre
-              KPI</em> et leurs formules — 1&nbsp;267&nbsp;; 34,3&nbsp;% de PME (434)&nbsp;;
-              55,6&nbsp;% d'artisanales (705)&nbsp;; 24,3&nbsp;% à moins de 200&nbsp;€ (308)&nbsp;;
-              15,9&nbsp;% à moins de 50&nbsp;€ (202), qui suivent les filtres (Arts de la
-              table&nbsp;: 65, 30,8&nbsp;%, 53,8&nbsp;%, 49,2&nbsp;%, 32,3&nbsp;%). Les deux premiers
-              pourcentages tiennent en deux <code>dsfr-data-normalize</code>&nbsp;: une copie
-              préfixée du champ (<code>compute="pme = 'T' + taille_d_entreprise"</code>), un
-              <code>replace-fields</code> exact vers 0 / 100, et une moyenne — le préfixe force
-              les 564 tailles vides au dénominateur. Les deux autres portent sur un champ
-              multivalué (<code>contains</code>), et un KPI ne divise pas deux agrégats&nbsp;: il
-              a fallu trois <code>dsfr-data-query</code> groupés sur une clé constante
-              <code>k&nbsp;=&nbsp;1</code>, deux <code>dsfr-data-join</code> et un
-              <code>compute</code> — six balises pour un ratio, c'est l'architecture native, mais
-              elle ne se devine pas. <em>Les six filtres</em> de l'original avec leurs valeurs
-              (les tableaux de l'export JSON sont comptés valeur par valeur)&nbsp;; les deux doublons
-              de casse d'<code>univers</code> («&nbsp;Ameublement et Décoration&nbsp;» 10 lignes,
-              «&nbsp;Loisirs et Transports&nbsp;» 1 ligne) sont fusionnés par
-              <code>replace-fields</code> — l'original les affiche tels quels dans son select.
-              <em>La fiche à treize champs</em>, dont les blocs conditionnels de l'original (tag
-              «&nbsp;Entreprise artisanale&nbsp;», «&nbsp;Visites&nbsp;: Oui&nbsp;», type de clients
-              en tags) rendus par sélecteurs CSS d'attribut sur la valeur injectée&nbsp;; vérifié sur
-              ACT 1892. <em>La carte colorée par univers</em> avec les couleurs de l'original et
-              une légende statique&nbsp;: <code>color-map</code> découpe sur la virgule sans
-              échappement, la valeur «&nbsp;Equipements Industriels, Médicaux, Mécaniques&nbsp;» a dû
-              être renommée en amont. <strong>Suite (lot 18)&nbsp;:</strong> <strong>0.26.0</strong>
-              (#732) donne à <code>color-map</code> l'échappement percent de <code>replace-fields</code>&nbsp;;
-              la règle de renommage qui n'existait que pour cela est retirée, et la couleur porte sur la
-              valeur source, <code>Equipements Industriels%2C Médicaux%2C Mécaniques:#639F6A</code>.
-              <strong>Vérifié au navigateur par A/B&nbsp;:</strong> avec l'échappement, 213 établissements
-              prennent le vert #639F6A&nbsp;; en remettant les virgules nues, ces mêmes points retombent
-              sur la couleur de repli #000091 (30 marqueurs de repli deviennent 218). Les deux autres
-              règles de <code>replace-fields</code> restent&nbsp;: ce sont des corrections de données,
-              pas un contournement. <em>Le carrousel «&nbsp;moins de 200&nbsp;€&nbsp;»</em>, en
-              grille paginée qui suit les filtres (l'original ne les suit pas), <em>les textes et
-              les sept tuiles</em> avec leurs liens d'origine. Restent&nbsp;: la date de
-              labellisation en ISO (les templates n'ont que le format <code>number</code>), les
-              tableaux affichés joints par une virgule sans espace (<code>String(array)</code>),
-              les gammes de prix triées par effectif et non par montant (le <code>sort</code> des
-              facettes est global, pas par champ), les selects contextuels et les tags
-              supprimables, l'autocomplétion en suggestions, les épingles à picto et la fiche ouverte
-              depuis la liste.</li>
+            <li><strong>Comparer chaque ligne à un maximum du jeu</strong> (labels échus) demande une
+              requête groupée sur une clé constante, une jointure et une date convertie en nombre&nbsp;:
+              <code>compute</code> ne voit pas les agrégats.</li>
+            <li><strong>Pas de date du jour dans <code>compute</code>.</strong> Le repère des labels échus
+              est donc la labellisation la plus récente du jeu, pas aujourd'hui.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.21.1 à 0.27.0</h4>
-            <p class="fr-text--sm">
-              11 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore ses contournements, qui ne sont simplement plus
-              nécessaires — à l'exception d'AM-011, dont le contournement a été retiré au lot 13&nbsp;: la source
-              est repassée en mode adaptateur avec <code>fetch-mode="export"</code>. Détail et vérification au <a href="/retours#AM-012">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>BUG-004</strong> — <strong>0.21.1</strong> (#642)&nbsp;: <code>fit-bounds</code> + <code>max-bounds</code> zoome sur une emprise réduite à un point, et <code>fit-zone</code> (#687, 0.22.0) cadre la métropole sans renoncer aux encarts.</li>
-              <li><strong>PG-012</strong> — <strong>0.21.1</strong> (#645)&nbsp;: <code>sort="count:desc"</code>&nbsp;: la grammaire <code>critère:sens</code> remplace le <code>-count</code> ambigu, qui est déprécié avec avertissement.</li>
-              <li><strong>AM-007</strong> — <strong>0.22.0</strong> (#664)&nbsp;: blocs <code>{{#if}}</code> / <code>{{#unless}}</code> et pipe <code>{{lien:url}}</code> dans les templates&nbsp;: un lien optionnel s'enveloppe.</li>
-              <li><strong>AM-017</strong> — <strong>0.22.0</strong> (#686)&nbsp;: <code>tiles-style="muted|grey"</code> atténue le fond de carte. <em>Contournement retiré au lot 18&nbsp;: la classe <code>odv-fond-attenue</code> a disparu des huit cartes qui la portaient, et la règle correspondante de <code>site.css</code> a été supprimée.</em></li>
-              <li><strong>AM-039</strong> — <strong>0.22.0</strong> (#664)&nbsp;: conditionnelle de template <code>{{#if}}</code> / <code>{{#unless}}</code>&nbsp;: le contournement par CSS d'attribut n'est plus nécessaire.</li>
-              <li><strong>AM-040</strong> — <strong>0.22.0</strong> (#663)&nbsp;: un champ multivalué est joint par «&nbsp;,&nbsp;» par défaut, et le pipe <code>{{champ:join: / }}</code> choisit le séparateur.</li>
-              <li><strong>AM-041</strong> — <strong>0.24.0</strong> (#673)&nbsp;: ratio de deux agrégats sur le KPI (<code>value="a / b"</code>) et comptage conditionnel <code>count:champ:valeur</code>&nbsp;: six balises tombent à une.</li>
-              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du portail, en une requête et <em>sans</em> quitter le mode adaptateur. Le contournement par source générique a été retiré de cette page (lot 13).</li>
-              <li><strong>LIM-011</strong> — <strong>0.26.0</strong> (#732)&nbsp;: <code>color-map</code> accepte l'échappement percent (<code>%2C</code>)&nbsp;: une modalité qui contient une virgule se colore. <em>Contournement par renommage retiré au lot 18, vérifié par A/B.</em></li>
-              <li><strong>PG-016</strong> — <strong>0.27.0</strong> (#741)&nbsp;: <code>sort</code> par champ&nbsp;: la région se range de A à Z pendant que les autres facettes restent par effectif. <em>Appliqué au lot 18.</em></li>
-            </ul>
-          </div>
         </div>
       </div>
 
@@ -539,37 +515,25 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>10 <code>ods-select</code> + 5 contextes <code>ctxfilter*</code></td><td>1 <code>dsfr-data-facets</code> à 6 champs</td><td>Équivalent, sans les selects contextuels</td></tr>
-            <tr><td>KPI <code>count(taille='PME') / total</code></td><td><code>compute</code> + <code>replace-fields</code> + <code>value="pme:avg"</code></td><td>Deux balises, à condition de connaître le tour</td></tr>
-            <tr><td>KPI <code>count(prix LIKE …) / total</code></td><td>3 <code>query</code> + 2 <code>join</code> + <code>compute</code></td><td><strong>Six balises pour un ratio</strong></td></tr>
-            <tr><td><code>color-categories</code> + <code>color-categories-other</code></td><td><code>color-map</code> + <code>color</code></td><td>Direct, sauf virgule dans une valeur</td></tr>
-            <tr><td>légende à pictos (<code>ng-repeat</code>)</td><td><code>dsfr-data-map-legend</code>, dérivée du rendu de la couche (0.22.0)&nbsp;; liste HTML statique jusqu'à la refonte de démonstration</td><td>Équivalent, sans les pictos</td></tr>
-            <tr><td>fiche <code>ng-if</code> par champ</td><td><code>&lt;template&gt;</code> + CSS <code>[data-v=""]</code></td><td>Sans conditionnelle, le CSS supplée</td></tr>
-            <tr><td>8 <code>ods-map</code> (paliers de zoom, 3 DROM)</td><td>1 <code>dsfr-data-map insets="drom"</code></td><td>Gain net</td></tr>
-            <tr><td>carrousel (<code>ods-results</code> + <code>ng-repeat</code>)</td><td><code>dsfr-data-display cols="4"</code></td><td>Grille paginée, suit les filtres</td></tr>
+            <tr><td><code>ods-dataset-context</code></td><td><code>dsfr-data-source fetch-mode="export"</code></td><td>Une requête pour tout le jeu</td></tr>
+            <tr><td>KPI <code>count(…)/total</code> sur toutes les fiches</td><td>KPI <code>count:x:1 / count:connu:1</code></td><td>Dénominateur corrigé, une balise</td></tr>
+            <tr><td>10 <code>ods-select</code> + 5 contextes</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code></td><td>Équivalent, avec l'état de la fiche en plus</td></tr>
+            <tr><td>8 <code>ods-map</code> (paliers, DROM)</td><td>1 <code>dsfr-data-map insets="drom"</code> + légende dérivée</td><td>Gain net</td></tr>
+            <tr><td>fiche <code>ng-if</code> par champ</td><td><code>{{#if}}</code> dans le gabarit</td><td>Équivalent</td></tr>
+            <tr><td>—</td><td>barres empilées par année, barres triées par univers</td><td>L'histoire, absente de l'original</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction immédiate en gabarit «&nbsp;annuaire&nbsp;», et le plus fort écart
-          de volume observé jusqu'ici&nbsp;: 61&nbsp;600 caractères contre une trentaine de
-          lignes.</strong> Le motif «&nbsp;annuaire cartographié&nbsp;» est stabilisé et la
-          troisième instance s'est écrite par substitution. La relecture face au relevé du portail a
-          ensuite montré que le gabarit ne suffisait pas au message éditorial&nbsp;: quatre KPI de
-          proportion, une fiche à treize champs conditionnels, une carte colorée par univers. Tout
-          a été rendu en déclaratif, mais deux points coûtent&nbsp;: un ratio de deux agrégats
-          demande six balises, et une valeur contenant une virgule casse <code>color-map</code>.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AV-009 (troisième
-          confirmation), AM-007, AM-013, AM-017 (dataviz ajoutée&nbsp;; réduit au lot 11, fond atténué par CSS de page), FP-011 (ex-AM-024&nbsp;: <code>server-facets</code> agrège bien
-          une date par année), BUG-005 (le refine d'une facette date est typé texte, 400).
-        </p>
+        <p><strong>Le chiffre vitrine était un artefact de dénominateur.</strong> « 34 % de PME » compte
+          les fiches vides comme des non-PME&nbsp;; sur les tailles déclarées, le label est à 96 % celui de
+          TPE et de PME. <code>dsfr-data</code> l'établit sans script, et la même expression de KPI suit
+          les filtres. Ce qui a coûté&nbsp;: comparer une ligne à un agrégat du jeu.</p>
       </div>
-    </div>
+    </details>
   </section>
-  </details>
 
 </main>
 
@@ -578,6 +542,7 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- bundle complet (ESM) : la cartographie charge Leaflet en import dynamique -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
