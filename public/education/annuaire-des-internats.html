@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Annuaire des internats — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la carte des internats de data.education.gouv.fr : 4 661 établissements, recherche par nom, taux d'occupation.">
+  <meta name="description" content="Recréation avec dsfr-data de l'annuaire des internats de data.education.gouv.fr : à la rentrée 2024, plus d'un lit d'internat public sur cinq est resté vide, pendant qu'un internat sur cinq était plein. Le jeu d'origine a disparu du portail ; la page repose sur l'annuaire de l'éducation et sur le jeu d'occupation des internats.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,123 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       Le jeu de la page d'origine, `fr-en-internats`, N'EXISTE PLUS : HTTP 404
+       sur /records, /exports et la page d'actif (relevé le 2026-09-26). C'était
+       la cause des 4 erreurs console de la recette (deux 404 réseau, l'erreur de
+       chargement de la source, puis le délai de navigation dépassé) : la page
+       était vide depuis la disparition du jeu. La page Studio du portail pointe
+       toujours dessus.
+
+       Deux jeux vivants le remplacent, lus SANS clé :
+         · `occ` — `fr-en-occupation-internats` : lits disponibles et occupés des
+                   internats publics du second degré, par année scolaire. On ne
+                   lit que 2024-2025 (voir les notes : les quatre millésimes
+                   antérieurs publient des lits occupés > lits disponibles pour
+                   84 % des internats).
+                   Le jeu a 18 lignes en double exact (même UAI, mêmes valeurs) :
+                   le `group-by` de la source, délégué au portail, EST le
+                   dédoublonnage (1 641 → 1 623 lignes, 2 637 lits comptés deux
+                   fois en moins). Un seul aller-retour, 0,2 s.
+         · `ann` — `fr-en-annuaire-education` filtré par le serveur sur
+                   `hebergement = 1` : les établissements publics et privés qui
+                   déclarent un internat (≈ 4 650 lignes, 4 620 UAI).
+       ========================================================================== -->
+
+  <!-- ---------- L'occupation, un internat par ligne ---------- -->
+  <dsfr-data-source id="occ" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-occupation-internats"
+    fetch-mode="export" max-records="3000"
+    select="uai, appellation_officielle, libelle_academie, nature_uai_libe, max(lits_disponibles_2024_2025) as dispo, max(lits_occupes_2024_2025) as occ"
+    group-by="uai, appellation_officielle, libelle_academie, nature_uai_libe">
+  </dsfr-data-source>
+
+  <!-- Taux ligne à ligne pour classer les internats ; les taux AGRÉGÉS sont
+       toujours des ratios de sommes (query sum/sum), jamais des moyennes de taux.
+       Une capacité nulle (11 internats) donne un taux nul, pas une division par 0. -->
+  <dsfr-data-normalize id="occ-n" source="occ"
+    compute="taux = occ * 100 / dispo;
+             vides = dispo - occ;
+             plein = when taux &gt;= 95 then 1 else 0;
+             mivide = when taux &lt; 60 then 1 else 0;
+             tranche = when is_null(taux) then null when taux &gt;= 95 then '95 % et plus' when taux &gt;= 80 then '80 à 95 %' when taux &gt;= 60 then '60 à 80 %' when taux &gt;= 40 then '40 à 60 %' else 'Moins de 40 %';
+             rang = when taux &gt;= 95 then 5 when taux &gt;= 80 then 4 when taux &gt;= 60 then 3 when taux &gt;= 40 then 2 else 1;
+             categorie = when nature_uai_libe = 'COLLEGE' then 'Collège' when nature_uai_libe = 'ETAB REGIONAL/LYCEE ENSEIGNEMENT ADAPTE' then 'EREA' when nature_uai_libe = 'LYCEE PROFESSIONNEL' then 'Lycée professionnel' when nature_uai_libe = 'LYCEE POLYVALENT' then 'Lycée polyvalent' when nature_uai_libe = 'LYCEE ENSEIGNT GENERAL ET TECHNOLOGIQUE' then 'Lycée général et technologique' when nature_uai_libe = 'LYCEE D ENSEIGNEMENT GENERAL' then 'Lycée général' when is_empty(nature_uai_libe) then 'Non renseigné' else 'Autre (climatique, technologique, section)';
+             k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- France entière -->
+  <dsfr-data-query id="nat" source="occ-n" group-by="k"
+    aggregate="dispo:sum:d, occ:sum:o, uai:count:n, plein:sum:pleins, mivide:sum:mivides"></dsfr-data-query>
+  <dsfr-data-normalize id="nat-t" source="nat"
+    compute="taux = o * 100 / d; vides = d - o; part_vides = (d - o) * 100 / d; extremes = (pleins + mivides) * 100 / n"></dsfr-data-normalize>
+
+  <!-- 1. Les internats par tranche d'occupation (ceux qui déclarent au moins un lit) -->
+  <dsfr-data-query id="tr" source="occ-n" where="tranche:isnotnull"
+    group-by="tranche, rang" aggregate="uai:count:n" order-by="rang:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="tr-tab" source="tr"
+    rename="tranche:Part des lits occupés | n:Internats"></dsfr-data-normalize>
+
+  <!-- 2. Par type d'établissement -->
+  <dsfr-data-query id="cat" source="occ-n" where="categorie:neq:Non renseigné"
+    group-by="categorie, k" aggregate="dispo:sum:d, occ:sum:o, uai:count:n"></dsfr-data-query>
+  <dsfr-data-normalize id="cat-t" source="cat"
+    compute="taux = o * 100 / d; part_vides = (d - o) * 100 / d; vides = d - o"></dsfr-data-normalize>
+  <dsfr-data-query id="cat-o" source="cat-t" order-by="taux:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="cat-r" source="cat-o" round="taux:1, part_vides:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="cat-tab" source="cat-r"
+    rename="categorie:Type d'établissement | taux:Lits occupés (%) | vides:Lits vides | d:Lits disponibles | n:Internats"></dsfr-data-normalize>
+  <dsfr-data-query id="cat-col" source="cat-t" where="categorie:eq:Collège"></dsfr-data-query>
+  <dsfr-data-normalize id="cat-col-r" source="cat-col"
+    rename="taux:col_taux | part_vides:col_vides | n:col_n | vides:col_lits_vides"></dsfr-data-normalize>
+  <dsfr-data-query id="cat-erea" source="cat-t" where="categorie:eq:EREA"></dsfr-data-query>
+  <dsfr-data-normalize id="cat-erea-r" source="cat-erea"
+    rename="taux:erea_taux | part_vides:erea_vides | n:erea_n"></dsfr-data-normalize>
+  <dsfr-data-query id="cat-lg" source="cat-t" where="categorie:eq:Lycée général"></dsfr-data-query>
+  <dsfr-data-normalize id="cat-lg-r" source="cat-lg"
+    rename="taux:lg_taux | part_vides:lg_vides | n:lg_n"></dsfr-data-normalize>
+  <dsfr-data-join id="cat-j1" left="cat-col-r" right="cat-erea-r" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="cat-phrase" left="cat-j1" right="cat-lg-r" on="k" type="inner"></dsfr-data-join>
+
+  <!-- 3. Par académie : ratio de sommes. Les 27 internats sans académie
+       (ni type, ni position) restent dans le total national, pas ici. -->
+  <dsfr-data-query id="aca" source="occ-n" where="libelle_academie:isnotnull"
+    group-by="libelle_academie, k" aggregate="dispo:sum:d, occ:sum:o, uai:count:n"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-t" source="aca" compute="taux = o * 100 / d; vides = d - o"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-o" source="aca-t" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-r" source="aca-o" round="taux:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="aca-tab" source="aca-r"
+    rename="libelle_academie:Académie | taux:Lits occupés (%) | vides:Lits vides | d:Lits disponibles | n:Internats"></dsfr-data-normalize>
+  <!-- La phrase de lecture ne compare que des académies d'au moins dix
+       internats : un taux sur un ou deux internats n'est pas un portrait. -->
+  <dsfr-data-query id="aca-haut" source="aca-t" where="n:gte:10" order-by="taux:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-haut-r" source="aca-haut"
+    rename="libelle_academie:haut_aca | taux:haut_taux | n:haut_n | vides:haut_vides | d:haut_d"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-bas" source="aca-t" where="n:gte:10" order-by="taux:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-bas-r" source="aca-bas"
+    rename="libelle_academie:bas_aca | taux:bas_taux | n:bas_n | vides:bas_vides | d:bas_d"></dsfr-data-normalize>
+  <dsfr-data-join id="aca-j" left="aca-haut-r" right="aca-bas-r" on="k" type="inner"></dsfr-data-join>
+
+  <!-- ---------- L'annuaire : tous les internats, publics et privés ---------- -->
+  <dsfr-data-source id="ann" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-annuaire-education"
+    fetch-mode="export" max-records="6000"
+    select="identifiant_de_l_etablissement, nom_etablissement, type_etablissement, statut_public_prive, ministere_tutelle, adresse_1, code_postal, nom_commune, libelle_departement, libelle_academie, telephone, web, fiche_onisep, position"
+    where="hebergement = 1">
+  </dsfr-data-source>
+
+  <!-- Jointure À GAUCHE sur l'annuaire : le côté droit (`occ-n`) a une ligne
+       par UAI, dédoublonné par la source — pas de relation 1-N. Un internat
+       privé ou agricole garde des champs d'occupation nuls. -->
+  <dsfr-data-join id="ann-j" left="ann" right="occ-n"
+    on="identifiant_de_l_etablissement=uai" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="ann-n" source="ann-j"
+    compute="occupation = when is_null(taux) then 'Non mesurée' when taux &gt;= 95 then 'Plein (95 % et plus)' when taux &lt; 60 then 'Moins de 60 % des lits occupés' else '60 à 95 % des lits occupés';
+             tutelle = when ministere_tutelle = 'AGRICULTURE' then 'Agriculture' when contains(ministere_tutelle, 'EDUCATION NATIONALE') then 'Éducation nationale' else 'Autre ministère'">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,404 +149,358 @@
       </div>
     </nav>
 
-    <h1>L'annuaire des internats</h1>
+    <h1>À la rentrée 2024, un lit d'internat public sur cinq est resté vide — et un internat sur cinq était plein</h1>
 
-    <p class="fr-text--lead">
-      <strong>4 661 établissements</strong> publics et privés déclarent un internat. Le maillage
-      couvre tout le territoire, DROM-COM compris — de Wallis-et-Futuna à la Guadeloupe. L'internat
-      est d'abord un fait <strong>lycéen</strong> (3 145 des 4 661) et majoritairement
-      <strong>public</strong> (2 766 contre 1 895).
+    <!-- Chapô CALCULÉ : aucune valeur n'est écrite en dur. -->
+    <dsfr-data-repeat source="nat-t">
+      <template>
+        <p class="fr-text--lead">
+          En 2024-2025, les <strong>{{n:number:0}} internats publics</strong> du second degré dont
+          l'occupation est publiée offraient {{d:number:0}} lits. {{o:number:0}} étaient occupés,
+          soit <strong>{{taux:number:1}}&nbsp;%</strong>&nbsp;: <strong>{{vides:number:0}} lits
+          restaient vides</strong>, {{part_vides:number:1}}&nbsp;% du parc. La moyenne cache
+          pourtant deux situations opposées&nbsp;: <strong>{{pleins}} internats remplis à
+          95&nbsp;% ou plus</strong>, et presque autant, {{mivides}}, occupés à moins de 60&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Un internat accueille des élèves qui habitent trop loin de leur établissement, suivent une
+      formation rare ou ont besoin d'un cadre de vie scolaire. La page mesure d'abord ce qu'on sait
+      de leur remplissage — les lits publiés par le ministère pour les internats publics —, puis
+      ouvre l'annuaire de tous les établissements, publics et privés, qui déclarent un internat.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-internats/"
-           target="_blank" rel="noopener external"><code>fr-en-internats</code></a>
-        — 4 661 lignes, 26 champs, produit par la DNE. Issu de la base RAMSESE (2025) et de
-        l'enquête Immobilier de la DEPP, qui recense les lits des internats <strong>publics</strong>
-        en 2022. Lu sans clé, 4,6 Mo en 0,37 s.
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-occupation-internats/"
+           target="_blank" rel="noopener external"><code>fr-en-occupation-internats</code></a>
+        — lits disponibles et occupés des internats publics du second degré de l'éducation
+        nationale, par année scolaire&nbsp;; seule l'année 2024-2025 est lue. Pour l'annuaire,
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-annuaire-education/"
+           target="_blank" rel="noopener external"><code>fr-en-annuaire-education</code></a>,
+        filtré sur les établissements qui déclarent un hébergement. Les deux jeux se joignent
+        par le code UAI. Lecture sans clé.
       </p>
       <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>34 établissements sont sans position</strong> (21 privés, 13 publics) : la carte
-        en montre 4 627 sur 4 661. L'original affiche 4 661 au compteur et 4 627 sur la carte,
-        sans signaler l'écart.
+        <strong>Le jeu de la page d'origine a disparu.</strong> <code>fr-en-internats</code>
+        (base RAMSESE 2025 et enquête Immobilier 2022) répond «&nbsp;n'existe pas&nbsp;» à l'API
+        depuis au moins le 26 septembre 2026, et la carte du portail qui s'en servait est vide.
       </p>
     </details>
 
-    <details class="fr-callout fr-icon-alert-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Pourquoi les chiffres de lits ne se lisent pas comme ceux d'internats</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        L'original pose « 4 661 Internats », « 196 335 Lits pré-bac » et « 34 256 Lits post-bac »
-        côte à côte, dans trois compteurs de même taille. Le rapprochement suggère une moyenne de
-        42 lits par internat. <strong>Elle est fausse.</strong> Les lits viennent d'une enquête qui
-        ne couvre que les internats publics : <strong>1 606 établissements sur 4 661</strong>
-        portent une valeur — et <strong>tous sont publics</strong> (vérifié à l'API : les 1 895
-        établissements privés n'ont aucune valeur de lits). La moyenne réelle, sur les
-        établissements renseignés, est de <strong>122 lits</strong>.
-      </p>
-      <p class="fr-callout__text fr-text--sm">
-        Les compteurs ci-dessous disent donc sur quoi ils portent. C'est le seul écart de fond
-        avec l'original, et il ne tient pas à la technique.
-      </p>
-    </details>
+    <!-- ---------- Accroche ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="occ-n" value="occ:sum / dispo:sum" format="pourcentage" decimals="1"
+        heading="des lits d'internat public occupés"
+        lines='[{"value":"vides:sum","format":"nombre","suffix":" lits vides"}]'
+        label="rentrée 2024-2025, internats publics du second degré"></dsfr-data-kpi>
+      <dsfr-data-kpi source="occ-n" value="plein:sum" format="nombre"
+        heading="internats pleins"
+        lines='[{"value":"mivide:sum","format":"nombre","suffix":" occupés à moins de 60 %"}]'
+        label="remplis à 95 % ou plus de leurs lits"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cat-col" value="part_vides:first" format="decimal" decimals="1" unit="%"
+        heading="des lits vides dans les internats de collège"
+        lines='[{"value":"n:first","format":"nombre","prefix":"sur ","suffix":" internats de collège"}]'
+        label="rentrée 2024-2025"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. Autant d'internats pleins que d'internats à moitié vides</h2>
+    <dsfr-data-repeat source="nat-t">
+      <template>
+        <p class="odv-lecture">Rapporté à chaque internat, le taux d'occupation se répartit aux
+          deux bouts&nbsp;: <strong>{{pleins}} internats</strong> ont rempli au moins 95&nbsp;% de
+          leurs lits, <strong>{{mivides}}</strong> en ont laissé plus de 40&nbsp;% vides. Ces deux
+          extrémités réunissent {{extremes:number:0}}&nbsp;% des internats&nbsp;: le taux national de
+          {{taux:number:1}}&nbsp;% ne dit pas que le parc est trop grand partout, mais qu'il est
+          inégalement rempli.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Internats publics selon la part de leurs lits occupés">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-tr" source="tr" type="bar"
+        label-field="tranche" value-field="n:Internats"
+        y-min="0" unit-tooltip="internats" selected-palette="neutral" highlight-index="[0, 1, 4]"
+        databox databox-title="Internats publics du second degré selon la part de leurs lits occupés, rentrée 2024-2025"
+        databox-source="Ministère de l'éducation nationale — fr-en-occupation-internats, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-tr" source="tr-tab" table download
+        filename="internats-tranches-occupation.csv"
+        label-field="Part des lits occupés" value-field="Internats"
+        description="Nombre d'internats publics du second degré par tranche de taux d'occupation à la rentrée 2024-2025, de moins de 40 % à 95 % et plus. Les deux extrémités sont mises en avant : les internats pleins et ceux occupés à moins de 60 %. Les internats sans lit déclaré sont exclus."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. La nuance : le type d'établissement ---------- -->
+    <h2 class="fr-h3">2. Au collège et en EREA, plus d'un lit sur trois est vide</h2>
+    <dsfr-data-repeat source="cat-phrase">
+      <template>
+        <p class="odv-lecture">Les internats de collège n'occupent que
+          <strong>{{col_taux:number:1}}&nbsp;%</strong> de leurs lits, ceux des EREA (établissements
+          régionaux d'enseignement adapté) <strong>{{erea_taux:number:1}}&nbsp;%</strong>. Les lycées font
+          nettement mieux, et les lycées d'enseignement général montent à
+          {{lg_taux:number:1}}&nbsp;%. Le vide se concentre donc là où l'internat est le moins
+          répandu&nbsp;: {{col_n}} internats de collège et {{erea_n}} d'EREA seulement.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Part des lits d'internat occupés, par type d'établissement">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-cat" source="cat-r" type="bar" horizontal
+        label-field="categorie" value-field="taux:Lits occupés (%)"
+        x-min="0" unit-tooltip="%" selected-palette="neutral" highlight-index="[0, 1]"
+        databox databox-title="Part des lits d'internat occupés, par type d'établissement public, rentrée 2024-2025"
+        databox-source="Ministère de l'éducation nationale — fr-en-occupation-internats, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-cat" source="cat-tab" table download
+        filename="internats-occupation-par-type.csv"
+        label-field="Type d'établissement"
+        value-field="Lits occupés (%), Lits vides, Lits disponibles, Internats"
+        description="Part des lits d'internat occupés à la rentrée 2024-2025 selon le type d'établissement public, du plus faible au plus élevé. Les EREA et les collèges sont nettement en dessous des lycées. Le taux est un rapport de sommes : lits occupés sur lits disponibles."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La géographie ---------- -->
+    <h2 class="fr-h3">3. D'une académie à l'autre, de deux tiers à la quasi-totalité des lits occupés</h2>
+    <dsfr-data-repeat source="aca-j">
+      <template>
+        <p class="odv-lecture">Parmi les académies qui comptent au moins dix internats publics,
+          celle de {{haut_aca}} occupe <strong>{{haut_taux:number:1}}&nbsp;%</strong> de ses lits
+          ({{haut_vides}} vides sur {{haut_d:number:0}}), celle de {{bas_aca}}
+          <strong>{{bas_taux:number:1}}&nbsp;%</strong> ({{bas_vides:number:0}} vides sur
+          {{bas_d:number:0}}).</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Part des lits d'internat public occupés, par académie">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-aca" source="aca-r" type="bar" horizontal
+        label-field="libelle_academie" value-field="taux:Lits occupés (%)"
+        x-min="0" unit-tooltip="%" selected-palette="neutral" highlight-index="[0]"
+        databox databox-title="Part des lits d'internat public occupés, par académie, rentrée 2024-2025"
+        databox-source="Ministère de l'éducation nationale — fr-en-occupation-internats, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-aca" source="aca-tab" table download
+        filename="internats-occupation-par-academie.csv"
+        label-field="Académie"
+        value-field="Lits occupés (%), Lits vides, Lits disponibles, Internats"
+        description="Part des lits d'internat public occupés à la rentrée 2024-2025, par académie, de la plus haute à la plus basse. Le nombre d'internats de chaque académie est donné : certaines académies d'outre-mer n'en comptent qu'un ou quelques-uns, et leur taux se lit avec prudence."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       Un chargement, tout se dérive côté client.
-
-       Mesure (fiche d'audit, recoupée ici) : `/exports/json` complet =
-       4,6 Mo en 0,37 s. Avec un `select` réduit à 12 champs, c'est plus léger
-       mais PLUS LENT (0,54 à 0,78 s) — le piège maison du `select` se vérifie
-       sur ce jeu, alors même qu'il ne porte aucun texte long. Donc pas de
-       `select` ici, contrairement à la page IPS Écoles où il divise le poids
-       par deux. L'arbitrage se mesure jeu par jeu, il ne se recopie pas.
-
-       `max-records="6000"` : 4 627 lignes dépassent le plafond par défaut de
-       1 000, qui tronque en silence.
-       ========================================================================== -->
-
-  <dsfr-data-source id="int" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-internats"
-    fetch-mode="export" max-records="6000"
-    where="position is not null">
-  </dsfr-data-source>
-
-  <!-- Trois corrections de données, toutes des défauts relevés à l'audit :
-
-       1. `"NA"` sert de valeur manquante dans `adresse` (chaîne littérale) et
-          dans `genre` (3 051 lignes). L'original l'affiche tel quel :
-          « Adresse : NA ». `replace-fields` compare la valeur ENTIÈRE, ce qui
-          convient exactement — et son séparateur d'entrées est le `|`.
-       2. Une valeur à 0 disparaît de l'infobulle d'origine comme si elle était
-          manquante : 828 établissements ont `nombre_de_lits_post_bac = 0`, et
-          le lecteur ne peut pas distinguer « pas d'internat post-bac » de « non
-          renseigné » — alors que le texte d'introduction l'avertit des valeurs
-          manquantes. `compute` sépare les deux cas.
-       3. Le taux d'occupation : `nombre_de_lits_*_occupes` est dans le jeu et
-          n'est affiché nulle part. Le `when … = 0 then null` évite la division
-          par zéro sur les 828 lignes à zéro lit.
-       -->
-  <dsfr-data-normalize id="int-n" source="int"
-    replace-fields="adresse:NA: | genre:NA:"
-    compute="lits_pre_txt = when is_null(nombre_de_lits_pre_bac) then 'non renseigné' else concat(nombre_de_lits_pre_bac, ' lits'); lits_post_txt = when is_null(nombre_de_lits_post_bac) then 'non renseigné' else concat(nombre_de_lits_post_bac, ' lits'); taux_pre = when is_null(nombre_de_lits_pre_bac) then null when nombre_de_lits_pre_bac = 0 then null else round(nombre_de_lits_pre_bac_occupes / nombre_de_lits_pre_bac * 100, 1); enquete_lits = when is_null(nombre_de_lits_pre_bac) then 'Lits non renseignés' else 'Lits renseignés (enquête 2022)'; occupation_seuil = when is_null(taux_pre) then 'occupation-non-mesuree' when taux_pre &gt;= 95 then 'occupation-saturee' when taux_pre &gt;= 70 then 'occupation-forte' else 'occupation-faible'">
-  </dsfr-data-normalize>
-
-  <!-- Le manque le plus lourd de l'original : pour un objet nommé « Annuaire »,
-       il n'y a AUCUNE recherche plein texte. Il faut connaître la commune. -->
-
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
+  <!-- ---------- 4. Exploration : l'annuaire ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Trouver un internat, public ou privé</h2>
+    <p class="fr-text--sm">Tous les établissements qui déclarent un internat dans l'annuaire de
+      l'éducation. La couleur dit le remplissage quand il est publié&nbsp;; les internats privés,
+      agricoles et ceux que le jeu d'occupation ne couvre pas sont en gris. La recherche et les
+      filtres pilotent les compteurs, la carte et la liste, pas les graphiques ci-dessus.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
-        <dsfr-data-search id="int-q" source="int-n"
-        fields="etablissement, commune, uai, adresse"
-        label="Rechercher un internat" placeholder="Nom d'établissement, commune, code UAI…"
-        operator="words" count count-label="internat" url-sync>
+        <dsfr-data-search id="ann-q" source="ann-n"
+          fields="nom_etablissement, nom_commune, identifiant_de_l_etablissement, code_postal"
+          label="Rechercher un internat" placeholder="Nom d'établissement, commune, code postal, code UAI…"
+          operator="words" count count-label="internat"
+          url-sync url-search-param="q">
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
-  <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Quatre compteurs, dont deux disent leur périmètre">
-    <dsfr-data-kpi-group cols="4" gap="md">
-      <dsfr-data-kpi source="int-f" value="count" format="nombre"
-        heading="Internats" label="dans la sélection"></dsfr-data-kpi>
-      <dsfr-data-kpi source="int-f" value="commune:distinct" format="nombre"
-        heading="Communes" label="équipées d'un internat"></dsfr-data-kpi>
-      <!-- Ces deux-là portent leur périmètre dans leur libellé, et le `where`
-           du KPI (#674) restreint le dénominateur aux lignes renseignées. -->
-      <dsfr-data-kpi source="int-f" value="nombre_de_lits_pre_bac:sum" format="nombre"
-        where="nombre_de_lits_pre_bac:isnotnull"
-        heading="Lits pré-bac" label="enquête 2022, internats publics seulement"></dsfr-data-kpi>
-      <dsfr-data-kpi source="int-f" value="nombre_de_lits_pre_bac:avg" format="nombre" decimals="0"
-        where="nombre_de_lits_pre_bac:isnotnull"
-        heading="Lits par internat" label="moyenne sur les établissements renseignés"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    </div>
+  <!-- Les compteurs de sélection portent sur des UAI uniques : l'annuaire décrit
+       28 établissements deux fois (une cité scolaire comme collège ET lycée, un
+       pôle supérieur à part), dont 8 internats mesurés dont les lits
+       compteraient double. -->
+  <dsfr-data-query id="ann-fu" source="ann-f" group-by="identifiant_de_l_etablissement"
+    aggregate="dispo:max:d, occ:max:o"></dsfr-data-query>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
+  <div class="fr-container fr-mb-8w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="ann-fu" value="count" format="nombre"
+        heading="Établissements avec internat" label="dans la sélection (code UAI distinct)"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ann-fu" value="d:sum" format="nombre"
+        heading="Lits d'internat publiés" label="internats publics mesurés de la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ann-fu" value="o:sum / d:sum" format="pourcentage" decimals="1"
+        heading="Lits occupés" label="même périmètre, rentrée 2024-2025"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-            Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-        <h2 class="fr-h6">Filtrer</h2>
-        <!-- Les facettes de l'original sont triées alphabétiquement et SANS
-             compteur : impossible de voir que Bordeaux pèse 378 et
-             Wallis-et-Futuna 1, alors que l'information est côté serveur.
-             Ici `count:desc` est le défaut — il n'y a rien à écrire (et surtout
-             pas `-count`, qui trie à l'envers : PG-012). -->
-        <dsfr-data-facets id="int-f" source="int-q"
-          fields="statut, type, genre, enquete_lits, academie, departement, commune"
-          labels="statut:Statut | type:Type d'établissement | genre:Mixité | enquete_lits:Données de lits | academie:Académie | departement:Département | commune:Commune"
-          display="statut:radio-inline | type:checkbox | genre:checkbox | enquete_lits:checkbox | academie:multiselect | departement:multiselect | commune:radio"
-          searchable="academie, departement, commune"
-          disjunctive="type, genre, academie, departement"
-          sort="academie:alpha:asc | departement:alpha:asc | commune:alpha:asc"
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="ann-f" source="ann-q"
+          fields="occupation, statut_public_prive, type_etablissement, tutelle, libelle_academie, libelle_departement"
+          labels="occupation:Remplissage 2024-2025 | statut_public_prive:Statut | type_etablissement:Type d'établissement | tutelle:Ministère de tutelle | libelle_academie:Académie | libelle_departement:Département"
+          display="occupation:checkbox | statut_public_prive:checkbox | type_etablissement:checkbox | tutelle:checkbox | libelle_academie:multiselect | libelle_departement:multiselect"
+          searchable="libelle_academie, libelle_departement"
+          disjunctive="occupation, type_etablissement, libelle_academie, libelle_departement"
+          sort="libelle_academie:alpha:asc | libelle_departement:alpha:asc"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
-        </details>
-      </div>
-      <div class="fr-col-12 fr-col-md-9">
-        <div class="odv-viz" data-code="Carte des internats, métropole et outre-mer">
-        <p class="odv-lecture">La carte s'ouvre sur la <strong>métropole</strong>, et les huit
-          territoires ultramarins ont chacun leur encart — de la Guadeloupe à Wallis-et-Futuna.
-          Vert, le public&nbsp;; bleu, le privé&nbsp;: les deux couleurs se mêlent partout, mais
-          le bleu domine dans l'Ouest et en Île-de-France.</p>
+      </details>
 
-        <!-- Le défaut n° 1 de l'original : sa carte s'ouvre sur le PLANISPHÈRE.
-             Elle fait un `fit-bounds` sans clip sur un jeu qui contient
-             Wallis-et-Futuna (1 internat, 176° O) et la Nouvelle-Calédonie
-             (27, 167° E) : la métropole occupe 3 % de la surface utile.
-
-             `insets` nomme ici les huit territoires du jeu — les cinq DROM plus
-             les trois du Pacifique. Poser un encart ultramarin clippe
-             automatiquement le fit sur la métropole (#687), ce qui règle le
-             planisphère ET le sur-zoom (deux points à Bastia → zoom 15 chez
-             l'original) sans écrire une coordonnée. -->
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des établissements avec internat, selon le remplissage">
         <dsfr-data-map id="carte-int"
-          name="Cartographie des internats de France"
+          name="Établissements avec internat, selon la part de leurs lits occupés"
           height="620px" tiles="ign-plan" tiles-style="muted"
-          tiles-switcher="ign-plan,ign-ortho,ign-cadastre"
-          insets="drom,nouvelle-caledonie,polynesie-francaise,wallis-et-futuna"
-          fit-bounds fit-max-zoom="13">
-          <!-- `cluster` : l'original n'en a pas, et le clic sur un amas ouvre une
-               popup à carrousel « ‹ 1 / 3 › » qui feuillette les enregistrements
-               confondus au pixel. Le regroupement dit combien il y en a. -->
-          <dsfr-data-map-layer id="couche-int" source="int-f" type="circle"
-            geo-field="position" radius="6" fill-opacity="0.9"
-            color-field="statut"
-            color-map="Public:#18753c,Privé:#000091"
-            tooltip-field="etablissement"
-            max-items="6000" cluster cluster-radius="50">
+          insets="drom,nouvelle-caledonie" fit-bounds fit-max-zoom="13">
+          <!-- Orange pour le vide, bleu France pour le plein, gris pour l'inconnu :
+               la carte montre où sont les deux extrémités du graphique 1. -->
+          <dsfr-data-map-layer id="couche-int" source="ann-f" type="circle"
+            geo-field="position" radius="5" fill-opacity="0.9"
+            color-field="occupation"
+            color-map="Moins de 60 % des lits occupés:#e4794a,60 à 95 % des lits occupés:#8585f6,Plein (95 % et plus):#000091,Non mesurée:#929292"
+            tooltip-field="nom_etablissement"
+            max-items="6000">
           </dsfr-data-map-layer>
-          <dsfr-data-map-legend for="couche-int" label="Statut de l'internat"></dsfr-data-map-legend>
-
-          <dsfr-data-map-popup mode="panel-right" title-field="etablissement" width="380px">
+          <dsfr-data-map-legend for="couche-int" label="Remplissage de l'internat, rentrée 2024-2025"></dsfr-data-map-legend>
+          <dsfr-data-map-popup mode="panel-right" title-field="nom_etablissement" width="380px">
             <template>
-              <!-- Le `statut` pilote la couleur et n'est PAS dans l'infobulle de
-                   l'original : l'information passe par la couleur seule, ce qui
-                   n'est pas conforme au RGAA 1.4. Il est ici en tête. -->
-              <p class="fr-badge fr-badge--sm fr-mb-2v">{{statut}}</p>
-              <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{type}}</p>
-
+              <p class="fr-badge fr-badge--sm fr-mb-2v">{{statut_public_prive}}</p>
+              <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{type_etablissement}}</p>
               <p class="fr-text--sm fr-mb-1v">
-                <strong>{{commune}}</strong> — {{departement}}<br>
-                académie de {{academie}}
+                <strong>{{nom_commune}}</strong> — {{libelle_departement}}<br>
+                académie de {{libelle_academie}}
               </p>
-              <p class="fr-text--sm fr-mb-3v">{{adresse|Adresse non renseignée}}</p>
-
-              <ul class="fr-text--sm fr-mb-3v">
-                <li>Lits pré-bac : <strong>{{lits_pre_txt}}</strong></li>
-                <li>Lits post-bac : <strong>{{lits_post_txt}}</strong></li>
-                {{#if taux_pre}}<li>Occupation pré-bac : <strong>{{taux_pre:number:1}} %</strong></li>{{/if}}
-                <li>Mixité : {{genre|non renseignée}}</li>
-              </ul>
-
-              <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
+              <p class="fr-text--sm fr-mb-3v">{{adresse_1|Adresse non renseignée}}, {{code_postal}}</p>
+              {{#if dispo}}<p class="fr-text--sm fr-mb-3v">Rentrée 2024-2025&nbsp;: <strong>{{occ}} lits
+                occupés sur {{dispo}}</strong>, soit {{taux:number:1}}&nbsp;%.</p>{{/if}}
+              {{#unless dispo}}<p class="fr-text--sm fr-mb-3v">Occupation non publiée pour cet internat.</p>{{/unless}}
+              {{#if telephone}}<p class="fr-text--sm fr-mb-1v">Téléphone&nbsp;: {{telephone}}</p>{{/if}}
+              {{#if web}}<p class="fr-text--sm fr-mb-1v">
+                <a href="{{web:url}}" target="_blank" rel="noopener external">Site de l'établissement</a></p>{{/if}}
+              {{#if fiche_onisep}}<p class="fr-text--sm fr-mb-3v">
+                <a href="{{fiche_onisep:url}}" target="_blank" rel="noopener external">Fiche Onisep</a></p>{{/if}}
+              <p class="fr-text--xs fr-mb-0">UAI {{identifiant_de_l_etablissement}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="int-f" for="carte-int" table download
+        <dsfr-data-normalize id="ann-tableau" source="ann-f"
+          rename="nom_etablissement:Établissement | statut_public_prive:Statut | type_etablissement:Type | nom_commune:Commune | libelle_departement:Département | libelle_academie:Académie | occupation:Remplissage | dispo:Lits disponibles | occ:Lits occupés | identifiant_de_l_etablissement:UAI"></dsfr-data-normalize>
+        <dsfr-data-a11y source="ann-tableau" for="carte-int" table download
           filename="annuaire-des-internats.csv"
           label="Données de la carte"
-          description="Un internat par ligne : établissement, statut, type, commune, académie, lits."
-          label-field="etablissement"
-          value-field="statut, type, commune, departement, academie, nombre_de_lits_pre_bac, nombre_de_lits_post_bac, genre">
+          description="Un établissement avec internat par ligne pour la sélection courante : statut, type, commune, département, académie, remplissage, lits disponibles et occupés à la rentrée 2024-2025 quand ils sont publiés, UAI."
+          label-field="Établissement"
+          value-field="Statut, Type, Commune, Département, Académie, Remplissage, Lits disponibles, Lits occupés, UAI">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-7">
-        <div class="odv-viz" data-code="Internats par académie, public et privé empilés">
-        <h2 class="fr-h5">Internats par académie</h2>
-        <p class="odv-lecture">Toutes les académies, <strong>le public et le privé empilés</strong>
-          sur une même barre&nbsp;: la longueur totale compare les académies, la seconde couleur
-          montre où le privé pèse — à Nantes, Rennes, Versailles et Paris, il
-          <strong>dépasse le public</strong>.</p>
-        <!-- `series-field` plutôt que deux graphiques : mêmes abscisses (les
-             académies), deux séries (le statut), une seule échelle. Pas de
-             `color-map` pour reprendre les couleurs de la carte : sur un
-             multisérie, il recolore les barres et la légende mais pas les
-             pastilles de l'infobulle (BUG-022) — l'infobulle mentirait. -->
-        <dsfr-data-chart id="g-int-aca" source="int-aca" type="bar" horizontal stacked
-          label-field="academie" value-field="nb" series-field="statut"
-          unit-tooltip="internats"
-          databox databox-title="Nombre d'internats par académie, selon le statut"
-          databox-source="DNE — fr-en-internats, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-int-aca" source="int-aca" table download
-          label-field="academie" value-field="nb" series-field="statut"
-          description="Nombre d'internats publics et privés dans chaque académie, classées par total décroissant."></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-5">
-        <div class="odv-viz" data-code="Répartition par type d'établissement">
-        <h2 class="fr-h5">Par type d'établissement</h2>
-        <p class="odv-lecture">L'internat est un fait <strong>lycéen</strong>&nbsp;: les lycées font
-          <strong>plus des deux tiers</strong> du disque, loin devant les collèges.</p>
-        <dsfr-data-chart id="g-int-type" source="int-type" type="pie"
-          label-field="type" value-field="nb" unit-tooltip="internats"
-          databox databox-title="Répartition des internats par type d'établissement"
-          databox-source="DNE — fr-en-internats, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-int-type" source="int-type" table download
-          description="Nombre d'internats par type d'établissement ; les lycées en portent la majorité."></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Branchées sur la facette, jamais sur la source (BUG-009).
-       `int-aca` groupe par académie ET statut : c'est le format long que
-       `series-field` consomme. Ordre alphabétique et pas de `limit` : l'ordre
-       des libellés d'un format long suit la première ligne rencontrée, donc un
-       tri par `nb` classerait par la plus grosse des deux parts, pas par le
-       total — un classement faux vaut moins qu'un ordre neutre. -->
-  <dsfr-data-query id="int-aca" source="int-f" group-by="academie, statut"
-    aggregate="uai:count:nb" order-by="academie:asc" where="academie:isnotnull"></dsfr-data-query>
-  <dsfr-data-query id="int-type" source="int-f" group-by="type"
-    aggregate="uai:count:nb" order-by="nb:desc" where="type:isnotnull"></dsfr-data-query>
-
-  <div class="fr-container fr-mb-8w">
-    <div class="odv-viz" data-code="La liste, avec le taux d'occupation coloré par seuil">
-    <h2 class="fr-h4">La liste</h2>
-    <!-- `cell-class` (#740, 0.27.0) : la colonne calculée `occupation_seuil` du
-         `dsfr-data-normalize` ci-dessus DEVIENT la classe CSS de la cellule de
-         taux. Jusqu'ici `threshold-*` n'existait que sur le KPI : un tableau ne
-         savait pas signaler un dépassement (AM-059). La colonne de classe n'est
-         pas affichée, donc sa valeur est restituée en `fr-sr-only` derrière le
-         taux — la couleur ne porte pas seule l'information (RGAA 1.4.1).
-         ⚠️ Conséquence de grammaire : la même chaîne doit être un identifiant
-         CSS ET la formulation lue par un lecteur d'écran. Pas d'espace admis,
-         d'où « occupation-saturee » là où on aurait écrit « occupation saturée ». -->
-    <dsfr-data-list source="int-f"
-      columns="etablissement, statut, type, commune, departement, academie, nombre_de_lits_pre_bac, nombre_de_lits_post_bac, taux_pre:Occupation pré-bac (%)"
-      cell-class="taux_pre:occupation_seuil"
+    <h3 class="fr-h5 fr-mt-6w">La liste</h3>
+    <dsfr-data-list source="ann-f"
+      columns="nom_etablissement:Établissement, statut_public_prive:Statut, type_etablissement:Type, nom_commune:Commune, libelle_academie:Académie, dispo:Lits, occ:Lits occupés, taux:Occupation (%)"
       search sort pagination="25" count-label="internat">
     </dsfr-data-list>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Les internats publics ne manquent pas de lits en moyenne&nbsp;:
+        plus d'un sur cinq est resté vide à la rentrée 2024. Mais cette moyenne réunit des
+        internats pleins et des internats à moitié vides, en nombre comparable. Le vide se
+        concentre dans les internats de collège et d'EREA, et varie fortement d'une académie à
+        l'autre. Ce que le jeu ne dit pas&nbsp;: si les internats pleins refusent des élèves,
+        pourquoi les autres ne se remplissent pas, ni ce qu'il en est dans le privé.</p>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <p class="fr-text--sm">Les chiffres de ces notes ont été relevés à l'API le 2026-09-26.</p>
+      <ol class="fr-text--sm">
+        <li><strong>Une seule année, 2024-2025.</strong> Le jeu publie aussi 2020-2021 à
+          2023-2024, mais ces quatre millésimes annoncent <strong>plus de lits occupés que de lits
+          disponibles</strong> pour 1&nbsp;339 internats sur 1&nbsp;595 en 2023-2024 (129&nbsp;%
+          au total), contre aucun en 2024-2025. Comparés à l'enquête Immobilier de la rentrée 2022
+          (<code>fr-en-lits-internats-publics-2d</code>), les chiffres 2022-2023 de 709 internats
+          sont ceux de l'enquête <em>inversés</em> — lits disponibles et occupés permutés —, contre
+          6 conformes (relevé à l'API le 2026-09-26). Une évolution tirée de ces colonnes serait
+          fausse&nbsp;: la page n'en montre pas.</li>
+        <li><strong>Aucun internat ne dépasse 100&nbsp;% en 2024-2025</strong>, et 225 sont
+          exactement à 100&nbsp;%. Le jeu ne dit pas si l'occupation est plafonnée à la capacité&nbsp;:
+          «&nbsp;plein&nbsp;» peut vouloir dire «&nbsp;au-delà&nbsp;».</li>
+        <li><strong>Des lignes en double retirées.</strong> 18 lignes du jeu répètent exactement un
+          internat déjà présent (même UAI, mêmes lits)&nbsp;: les additionner aurait compté 2&nbsp;637
+          lits de trop. La page en garde une par UAI.</li>
+        <li><strong>Le public seulement, et pas tout le public.</strong> Le jeu d'occupation ne
+          couvre que les internats publics du second degré de l'éducation nationale. Sur les
+          2&nbsp;778 lignes publiques de l'annuaire qui déclarent un internat, 1&nbsp;615 sont
+          mesurées&nbsp;; les autres sont surtout des lycées agricoles, des sections
+          d'enseignement professionnel ou adapté rattachées à un lycée, et des collèges. Le privé
+          (environ 1&nbsp;875 lignes) n'est jamais mesuré.</li>
+        <li><strong>27 internats sans académie ni type.</strong> Ils comptent dans le total
+          national et dans les tranches, pas dans les graphiques par type et par académie.
+          Onze internats ne déclarent aucun lit disponible&nbsp;: ils sont hors des tranches.</li>
+        <li><strong>Un taux est un rapport de sommes</strong> (lits occupés sur lits disponibles),
+          jamais une moyenne de taux d'internats. Certaines académies d'outre-mer ne comptent qu'un
+          à neuf internats publics&nbsp;: leur taux figure au graphique, mais la phrase de lecture
+          ne compare que les académies d'au moins dix internats.</li>
+        <li><strong>En marge de la carte</strong>&nbsp;: 54 lignes de l'annuaire sans position
+          (45 en Polynésie française, 7 en Nouvelle-Calédonie, Wallis-et-Futuna, une en Bretagne).
+          Elles restent dans la liste et dans l'export.</li>
+        <li><strong>Angles écartés.</strong> Le nombre d'internats par académie (il mesure la
+          taille des académies)&nbsp;; la répartition public / privé en camembert (elle ne dit rien
+          du remplissage)&nbsp;; le classement des internats les plus vides (un internat récent ou
+          en travaux peut l'être pour de bonnes raisons que le jeu ignore).</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
     <details class="odv-technique" id="analyse">
-      <summary>Analyse technique — ce que la reproduction a coûté</summary>
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
       <section class="fr-py-4w">
-      <h2>Analyse de reproduction — Annuaire des internats</h2>
+      <h2>Analyse — Annuaire des internats</h2>
 
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine :
+        Page d'origine&nbsp;:
         <a href="https://data.education.gouv.fr/explore/assets/carte-internats/view/" target="_blank" rel="noopener external">une page ODS Studio</a>
-        — la troisième génération du portail, rendue par le nouveau front-office React et configurée
-        à <code>/api/portal/v1.0/studio_pages/carte-internats</code>. Ni <code>$scope.blocks</code>,
-        ni « custom view » : la configuration JSON se lit comme une spécification.
-        Fiche d'audit : <code>docs/portail-education/annuaire-des-internats.md</code>, dix-sept défauts.
+        (carte, trois compteurs, deux graphiques). Fiche d'audit&nbsp;:
+        <code>docs/portail-education/annuaire-des-internats.md</code>. Recréée le 2026-09-26 en
+        page éditoriale, sur deux jeux vivants&nbsp;: celui de l'original a disparu du portail.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le planisphère réglé par un attribut.</strong> L'original s'ouvre sur le
-              monde entier : son <code>fit-bounds</code> englobe Wallis-et-Futuna (176° O) et la
-              Nouvelle-Calédonie (167° E), et la métropole tient dans 3 % du cadre. Ici,
-              <code>insets="drom,nouvelle-caledonie,polynesie-francaise,wallis-et-futuna"</code> —
-              les huit territoires du jeu sont des préréglages nommés — et le clip métropolitain
-              se pose <em>tout seul</em> dès qu'un encart ultramarin est présent. Le même attribut
-              règle le sur-zoom symétrique (deux points à Bastia → zoom 15 chez l'original), avec
-              <code>fit-max-zoom</code>.</li>
-            <li><strong>La recherche que l'« Annuaire » n'a pas.</strong> Une balise
-              <code>dsfr-data-search</code> sur quatre champs. C'est le manque le plus lourd de
-              l'original : pour trouver un internat, il faut déjà connaître sa commune.</li>
-            <li><strong>Les compteurs de facettes, gratuits.</strong> L'original trie ses six
-              filtres alphabétiquement et sans compteur, alors que <code>/facets</code> les renvoie.
-              En mode client, <code>count:desc</code> est le défaut : il n'y a rien à écrire.</li>
-            <li><strong>Distinguer 0 de « non renseigné ».</strong> Trois expressions
-              <code>compute</code>, et l'ambiguïté disparaît. Chez l'original, une valeur à 0 fait
-              disparaître la ligne de l'infobulle exactement comme une valeur nulle — sur
-              828 établissements.</li>
-            <li><strong>Le taux d'occupation.</strong> <code>nombre_de_lits_*_occupes</code> est
-              dans le jeu et n'est affiché nulle part sur le portail. Une division et un
-              <code>round</code>, avec un <code>when … = 0 then null</code> pour la division par
-              zéro.</li>
-            <li><strong>Trois capacités du jour, posées au lot 18.</strong>
-              <code>tiles-switcher="ign-plan,ign-ortho,ign-cadastre"</code> (#744, 0.27.0) rend un
-              sélecteur «&nbsp;Fond de carte&nbsp;» en haut à droite&nbsp;: le choix du fond, que
-              l'application d'origine expose et que rien ne permettait d'offrir ici (AM-061), tient en
-              un attribut — <strong>vérifié au navigateur</strong>, trois options «&nbsp;Plan IGN /
-              Vue aérienne IGN / Cadastre IGN&nbsp;», et les encarts ultramarins suivent le choix.
-              <code>sort="academie:alpha:asc | departement:alpha:asc | commune:alpha:asc"</code>
-              (#741, 0.27.0) range les trois facettes géographiques de A à Z — «&nbsp;Abbeville,
-              Abondance, Agde, Agen…&nbsp;» — pendant que statut, type et mixité restent au défaut
-              <code>count:desc</code>&nbsp;: c'était l'un ou l'autre auparavant (PG-016). Enfin
-              <code>cell-class="taux_pre:occupation_seuil"</code> (#740, 0.27.0) fait de la colonne
-              calculée le style de la cellule de taux&nbsp;: le tableau signale enfin ses internats
-              saturés, sans second jeu de seuils.</li>
+            <li><strong>Dédoublonner au portail.</strong> <code>select</code> avec
+              <code>max(…)</code> et <code>group-by="uai, …"</code> sur la source en
+              <code>fetch-mode="export"</code>&nbsp;: une requête, 1&nbsp;623 lignes uniques, et
+              le côté droit de la jointure est sûr.</li>
+            <li><strong>Rebrancher l'annuaire.</strong> <code>where="hebergement = 1"</code> sur
+              l'annuaire de l'éducation retrouve à quelques unités près le périmètre du jeu
+              disparu (4&nbsp;620 établissements contre 4&nbsp;661), avec en prime le téléphone,
+              le site et la fiche Onisep.</li>
+            <li><strong>Des phrases calculées.</strong> Ratio de sommes en query, trois lignes de
+              type réunies par jointure sur une clé constante, rendues par
+              <code>dsfr-data-repeat</code>.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le <code>select</code> se retourne d'un jeu à l'autre.</strong> Ici, réduire
-              à 12 champs donne un fichier plus léger (383 Ko contre 631 Ko gzip) et pourtant
-              <strong>deux fois plus lent</strong> (0,54–0,78 s contre 0,35 s). Sur la page IPS
-              Écoles, le même geste divise le poids par deux et fait gagner du temps. La règle
-              maison — « un <code>select</code> sur un champ texte long est plus lent que l'export
-              complet » — se vérifie ici <em>sans aucun texte long</em>, ce qui veut dire qu'elle
-              n'explique pas tout : le seul recours reste de mesurer, jeu par jeu, avant d'écrire
-              la balise.</li>
-            <li><strong>Le <code>replace-fields</code> ne peut pas viser les « NA » numériques.</strong>
-              La chaîne <code>"NA"</code> sert de valeur manquante dans <code>adresse</code> et
-              <code>genre</code>, deux champs texte : <code>replace-fields</code> les nettoie.
-              Mais il ne visite que les valeurs <code>string</code> — un « NA » arrivé dans une
-              colonne typée lui échapperait sans un mot. C'est le même angle mort que celui
-              rencontré sur Euroscol, et il ne se voit qu'en lisant le source.</li>
-            <li><strong><code>cluster</code> et <code>color-field</code> se neutralisent.</strong>
-              Le regroupement règle le vrai problème de l'original — ses amas non groupés
-              obligent à feuilleter une popup à carrousel « ‹ 1 / 3 › » pour séparer des points
-              confondus au pixel — mais un cluster porte sa propre couleur, pas celle de ses
-              membres : tant qu'on n'a pas zoomé, la distinction public / privé, qui est
-              pourtant l'objet de la légende, <strong>n'est pas visible</strong>. Les deux
-              attributs sont acceptés ensemble et il n'y a rien à redire techniquement ; c'est
-              un arbitrage qu'il faut avoir vu pour le faire, et rien ne le pose. Choisi ici en
-              faveur du cluster, parce que la couleur revient au zoom alors que le carrousel ne
-              disparaît jamais.</li>
-            <li><strong>Ce que l'audit n'avait pas pu voir.</strong> Le défaut de fond de cette
-              page n'est pas cartographique : ses trois compteurs sont <strong>mathématiquement
-              justes et éditorialement faux</strong>. « 4 661 Internats » et « 196 335 Lits »
-              posés côte à côte suggèrent 42 lits par internat ; la vraie moyenne est de 122, parce
-              que l'enquête ne couvre que <strong>1 606 établissements, tous publics</strong>.
-              Aucune bibliothèque n'empêche cela — le <code>where</code> du KPI (#674) permet de
-              restreindre le dénominateur, mais encore faut-il avoir vérifié que les 1 895
-              établissements privés n'ont aucune valeur. <strong>C'est du travail de lecture de
-              données, pas de composant.</strong></li>
-            <li><strong>Le seuil de cellule demande une chaîne qui soit à la fois un identifiant CSS
-              et une phrase.</strong> <code>cell-class</code> (#740) prend la valeur d'une colonne
-              calculée et la pose telle quelle en classe&nbsp;; quand cette colonne n'est pas affichée,
-              la même valeur est restituée en <code>fr-sr-only</code> derrière la cellule — c'est ce qui
-              satisfait le RGAA 1.4.1 par construction, et c'est bien vu. Mais seuls les identifiants CSS
-              sont retenus&nbsp;: pas d'espace, pas d'accent utile. <strong>Relevé au navigateur&nbsp;:</strong>
-              la cellule rend «&nbsp;100 <em>(occupation-saturee)</em>&nbsp;» — un lecteur d'écran énonce
-              donc un slug. Il manque de quoi séparer la classe du libellé accessible.</li>
+            <li><strong>Un jeu supprimé ne se voit qu'en console.</strong> La page précédente
+              est restée vide sur un HTTP 404, identique en 0.33.0 et en 0.42.0&nbsp;: la
+              recette relevait «&nbsp;4 erreurs&nbsp;» sans qu'on sache qu'il n'y avait plus de
+              donnée. Ce n'est pas la bibliothèque, c'est le portail.</li>
+            <li><strong>Des colonnes qui mentent.</strong> Quatre millésimes sur cinq publient
+              plus de lits occupés que disponibles&nbsp;; seul le rapprochement avec un autre
+              jeu du ministère montre qu'ils sont permutés. Aucun composant ne peut le détecter.</li>
+            <li><strong>Des doublons de part et d'autre.</strong> 18 lignes répétées dans le jeu
+              d'occupation, 28 UAI décrits deux fois dans l'annuaire&nbsp;: les compteurs de la
+              sélection repassent par un <code>group-by</code> sur l'UAI.</li>
           </ul>
         </div>
       </div>
@@ -438,30 +509,25 @@
         <table>
           <caption>Correspondance bloc Studio → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">Page Studio d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>data_provider</code> + section <code>filters</code> (6 filtres en modale)</td><td><code>dsfr-data-source</code> + <code>dsfr-data-facets</code></td><td>Meilleur : compteurs, tri par effectif, application à la volée (l'original exige « Valider »)</td></tr>
-            <tr><td>bloc <code>map</code> <code>mapType: poi</code>, <code>dividedByCategory</code></td><td><code>dsfr-data-map-layer</code> + <code>color-field</code> + <code>color-map</code></td><td>Équivalent</td></tr>
-            <tr><td>cadrage par <code>bbox(position)</code> → planisphère</td><td><code>insets="drom,nouvelle-caledonie,…"</code></td><td>Meilleur : le clip métropolitain se pose tout seul</td></tr>
-            <tr><td>popup + <strong>une requête par enregistrement</strong> au clic</td><td><code>dsfr-data-map-popup</code> + <code>&lt;template&gt;</code></td><td>Meilleur : les données sont déjà là, zéro requête au clic</td></tr>
-            <tr><td>amas non groupés, popup à carrousel « ‹ 1 / 3 › »</td><td><code>cluster</code></td><td>Meilleur : le nombre est annoncé au lieu d'être feuilleté</td></tr>
-            <tr><td>3 blocs <code>kpi</code></td><td><code>dsfr-data-kpi</code> + <code>where</code></td><td>Équivalent en technique, corrigé en énoncé</td></tr>
-            <tr><td>2 blocs graphiques (colonnes, camembert)</td><td><code>dsfr-data-chart</code> ×2</td><td>Équivalent</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-search</code>, <code>dsfr-data-list</code>, <code>dsfr-data-a11y</code>, <code>url-sync</code>, taux d'occupation</td><td>Sans équivalent côté Studio</td></tr>
+            <tr><td><code>data_provider</code> sur <code>fr-en-internats</code> (disparu)</td><td>deux <code>dsfr-data-source</code> + <code>dsfr-data-join</code> sur l'UAI</td><td>Remplacé : l'original est vide</td></tr>
+            <tr><td>3 blocs <code>kpi</code> (internats, lits pré- et post-bac)</td><td><code>dsfr-data-kpi</code> ratio <code>occ:sum / dispo:sum</code></td><td>Meilleur : un taux, pas des volumes sans base</td></tr>
+            <tr><td>colonnes par académie, camembert par type (volumes)</td><td><code>dsfr-data-query</code> + <code>compute</code> + <code>dsfr-data-chart</code> triés</td><td>Meilleur : taux d'occupation, contraste</td></tr>
+            <tr><td>carte colorée par statut, filtres en modale</td><td><code>dsfr-data-map-layer color-map</code> par remplissage + <code>dsfr-data-facets</code> + <code>dsfr-data-search</code></td><td>Meilleur : la carte montre où est le vide</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-repeat</code>, <code>dsfr-data-a11y</code>, <code>dsfr-data-list</code>, <code>url-sync</code></td><td>Sans équivalent</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, sur la troisième génération de pages du portail
-          — et c'est un résultat en soi : <strong>lire une configuration Studio comme une
-          spécification revient au même que lire un <code>$scope.blocks</code> AngularJS</strong>.
-          Le format change, la transposition ne change pas. Le seul apport véritablement coûteux
-          de cette page n'est pas technique : c'est d'avoir vérifié <em>à qui</em> se rapportent
-          les 196 335 lits. Trois compteurs justes peuvent composer une page fausse, et aucun
-          composant ne le dira.</p>
+        <p>La bibliothèque n'a opposé aucune résistance&nbsp;; <strong>le travail a été de
+          retrouver une donnée qui tienne</strong>. Le jeu de l'original a disparu, et son
+          remplaçant publie quatre années sur cinq avec des colonnes inversées. Lue sur la seule
+          année saine, la donnée raconte ce que les compteurs de volumes cachaient&nbsp;: des lits
+          vides en nombre, mais surtout mal répartis.</p>
       </div>
       </section>
     </details>

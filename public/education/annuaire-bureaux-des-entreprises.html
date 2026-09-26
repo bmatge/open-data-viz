@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>L'annuaire des bureaux des entreprises — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de l'annuaire des bureaux des entreprises des lycées professionnels : 1 942 établissements, 1 381 métiers préparés.">
+  <meta name="description" content="L'annuaire des bureaux des entreprises des lycées professionnels recense presque tous les lycées publics, mais moins d'un lycée privé sous contrat sur deux : un annuaire national assemblé académie par académie.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,116 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       La reproduction précédente affichait « Part du privé : 12 % » et une
+       carte où le privé paraissait « minoritaire partout, et absent de
+       départements entiers ». Rapporté à l'annuaire de l'éducation, ce n'est
+       pas le privé qui manque dans ces départements : c'est l'annuaire qui ne
+       le recense pas. Le public y est presque complet, le privé sous contrat
+       à moins d'un sur deux, et la couverture dépend de l'académie qui a
+       rempli sa part — comme le téléphone.
+
+       Deux sources, lues SANS clé :
+         · `bde` — les 1 942 bureaux des entreprises, en un export ;
+         · `ref` — le dénominateur : les lycées de l'éducation nationale qui
+                   proposent la voie professionnelle, tirés de l'annuaire de
+                   l'éducation (≈ 2 100 lignes, filtrées PAR LE SERVEUR).
+       ========================================================================== -->
+
+  <!-- ---------- Les bureaux des entreprises ----------
+       `romesv3` écarté (175 codes techniques, redondants avec les métiers en
+       clair). Les métiers restent : la recherche plein texte les lit.
+       AUCUN filtre sur `position` ici : les 10 bureaux sans coordonnées
+       comptent dans l'annuaire ; seule la carte les écarte, plus bas. -->
+  <dsfr-data-source id="bde" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-annuaire_bde_lycees_pro"
+    fetch-mode="export" max-records="3000"
+    select="numero_uai, appellation_officielle, adresse_uai, code_postal_uai, libelle_commune, libelle_departement, libelle_academie, libelle_region, mail_bde, telephone, web, secteur, metiers_prepares, diplomes_prepares, position">
+  </dsfr-data-source>
+
+  <!-- Indicateurs par bureau, calculés AVANT de vider les « #N/A » (le
+       `compute` d'un normalize voit les valeurs déjà remplacées). -->
+  <dsfr-data-normalize id="bde-i" source="bde"
+    compute="a_tel = when is_empty(telephone) then 0 else 100;
+             sans_offre = when is_empty(metiers_prepares) then 1 else 0;
+             sans_position = when is_null(position) then 1 else 0;
+             mail_faux = when mail_bde = '#N/A' then 1 else 0;
+             k = 'France';
+             offre = when is_empty(metiers_prepares) then 'Non renseignée' when len(metiers_prepares) &lt; 10 then 'Moins de 10 métiers' when len(metiers_prepares) &lt; 30 then '10 à 30 métiers' else '30 métiers et plus'">
+  </dsfr-data-normalize>
+  <!-- « #N/A » : la valeur d'erreur d'un tableur, restée dans `mail_bde`. -->
+  <dsfr-data-normalize id="bde-n" source="bde-i" replace-fields="mail_bde:#N/A:"></dsfr-data-normalize>
+
+  <!-- ---------- Le dénominateur : l'annuaire de l'éducation ----------
+       Lycées (toutes natures) qui déclarent la voie professionnelle, sous
+       tutelle de l'éducation nationale : le lycée agricole et le lycée
+       maritime ont leur propre réseau et ne relèvent pas de la réforme. -->
+  <dsfr-data-source id="ref" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-annuaire-education"
+    fetch-mode="export" max-records="5000"
+    select="identifiant_de_l_etablissement, libelle_academie, statut_public_prive"
+    where='voie_professionnelle = "1" and ministere_tutelle = "MINISTERE DE L&#39;EDUCATION NATIONALE"'>
+  </dsfr-data-source>
+  <!-- L'annuaire n'a pas une ligne par UAI : un lycée nantais y figure trois
+       fois (9 UAI en double, relevé le 2026-09-26). Le `group-by` EST le
+       dédoublonnage (PG-001). `count(distinct)` côté serveur est approché
+       sur ce portail (551 au lieu de 540) : on dédoublonne dans le navigateur. -->
+  <dsfr-data-query id="ref-u" source="ref"
+    group-by="identifiant_de_l_etablissement, libelle_academie, statut_public_prive"
+    aggregate="identifiant_de_l_etablissement:count:lignes"></dsfr-data-query>
+  <dsfr-data-query id="ref-ac" source="ref-u" group-by="libelle_academie, statut_public_prive"
+    aggregate="identifiant_de_l_etablissement:count:lycees"></dsfr-data-query>
+  <dsfr-data-normalize id="ref-r" source="ref-ac" rename="statut_public_prive:secteur"></dsfr-data-normalize>
+
+  <!-- Les bureaux, ramenés à la même maille (académie × secteur) : clé
+       unique du côté droit, pas de relation 1-N. -->
+  <dsfr-data-query id="bde-ac" source="bde-n" group-by="libelle_academie, secteur"
+    aggregate="numero_uai:count:bureaux"></dsfr-data-query>
+
+  <!-- Jointure À GAUCHE sur le référentiel : une académie sans aucun bureau
+       privé reste, avec `bureaux` nul — c'est précisément le cas à montrer. -->
+  <dsfr-data-join id="cov-j" left="ref-r" right="bde-ac" on="libelle_academie,secteur" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="cov" source="cov-j"
+    compute="bureaux0 = coalesce(bureaux, 0);
+             manquants = when lycees - bureaux0 &gt; 0 then lycees - bureaux0 else 0;
+             taux = round(bureaux0 * 100 / lycees, 0);
+             aucun = when bureaux0 = 0 then 1 else 0;
+             complet = when bureaux0 &gt;= lycees then 1 else 0;
+             k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- 1. La preuve : le privé, académie par académie, trié par manque. -->
+  <dsfr-data-query id="cov-priv" source="cov" where="secteur:eq:Privé" order-by="manquants:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="cov-priv-tab" source="cov-priv"
+    rename="libelle_academie:Académie | lycees:Lycées privés sous contrat à voie professionnelle | bureaux0:Bureaux privés recensés | taux:Rapport (%)"></dsfr-data-normalize>
+  <dsfr-data-query id="cov-top" source="cov-priv" limit="1"></dsfr-data-query>
+
+  <!-- Le chapô : totaux par secteur, puis une ligne par secteur. -->
+  <dsfr-data-query id="nat" source="cov" group-by="secteur, k"
+    aggregate="lycees:sum:lycees, bureaux0:sum:bureaux, manquants:sum:manquants, aucun:sum:aucun, complet:sum:complet, libelle_academie:count:academies"></dsfr-data-query>
+  <dsfr-data-normalize id="nat-t" source="nat" compute="taux = round(bureaux * 100 / lycees, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="nat-priv" source="nat-t" where="secteur:eq:Privé"></dsfr-data-query>
+  <dsfr-data-query id="nat-pub" source="nat-t" where="secteur:eq:Public"></dsfr-data-query>
+
+  <!-- 2. La nuance : le téléphone, lui aussi, se remplit par académie.
+       `a_tel` vaut 0 ou 100 par bureau : sa moyenne EST la part des bureaux
+       avec téléphone (ratio de sommes, pas moyenne de taux). -->
+  <dsfr-data-query id="tel-ac" source="bde-n" group-by="libelle_academie, k"
+    aggregate="a_tel:avg:part_tel, numero_uai:count:bureaux" order-by="part_tel:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="tel-r" source="tel-ac" round="part_tel:0"
+    compute="plein = when part_tel = 100 then 1 else 0; vide = when part_tel = 0 then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-normalize id="tel-tab" source="tel-r"
+    rename="libelle_academie:Académie | part_tel:Bureaux avec téléphone (%) | bureaux:Bureaux recensés"></dsfr-data-normalize>
+  <dsfr-data-query id="tel-nat" source="tel-r" group-by="k"
+    aggregate="plein:sum:plein, vide:sum:vide, libelle_academie:count:academies"></dsfr-data-query>
+
+  <!-- Ce qu'on ne montre pas : les manques du jeu, comptés. -->
+  <dsfr-data-query id="bde-nat" source="bde-i" group-by="k"
+    aggregate="numero_uai:count:bureaux, a_tel:avg:part_tel, sans_offre:sum:sans_offre, sans_position:sum:sans_position, mail_faux:sum:mail_faux"></dsfr-data-query>
+  <dsfr-data-normalize id="bde-nat-r" source="bde-nat" round="part_tel:0"></dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,68 +142,127 @@
       </div>
     </nav>
 
-    <h1>L'annuaire des bureaux des entreprises</h1>
+    <h1>L'annuaire des bureaux des entreprises oublie plus de la moitié des lycées privés</h1>
 
-    <p class="fr-text--lead">
-      Chaque lycée professionnel dispose d'un <strong>bureau des entreprises</strong>, chargé de
-      faire le lien avec le monde économique local : recherche de stages, d'alternance,
-      d'intervenants. <strong>1 942 établissements</strong> en sont dotés — 1 709 publics et
-      233 privés, dans 33 académies. Ensemble, ils préparent à
-      <strong>1 381 métiers différents</strong> et délivrent <strong>355 diplômes</strong>.
-    </p>
+    <dsfr-data-repeat source="nat-priv">
+      <template>
+        <p class="fr-text--lead">
+          Depuis septembre 2023, chaque lycée professionnel ou polyvalent, public ou privé sous
+          contrat, doit avoir un <strong>bureau des entreprises</strong> — le guichet des stages,
+          de l'alternance et des intervenants. L'annuaire publié en recense
+          <strong>{{bureaux:number}} dans le privé</strong>, pour
+          <strong>{{lycees:number}} lycées privés sous contrat</strong> qui proposent la voie
+          professionnelle d'après l'annuaire de l'éducation&nbsp;: un rapport de
+          <strong>{{taux}}&nbsp;%</strong>. Et le manque n'est pas réparti&nbsp;: dans
+          <strong>{{aucun}} académies sur {{academies}}</strong>, aucun bureau privé n'est recensé.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="nat-pub">
+      <template>
+        <p>
+          Côté public, l'annuaire est complet ou presque&nbsp;: {{bureaux:number}} bureaux pour
+          {{lycees:number}} lycées publics à voie professionnelle — il en compte même davantage,
+          parce que des sections d'enseignement professionnel et des EREA y ont leur propre ligne.
+          C'est donc un annuaire <strong>assemblé académie par académie</strong>, et ce que chaque
+          académie a transmis se voit dans la donnée.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-annuaire_bde_lycees_pro/"
            target="_blank" rel="noopener external"><code>fr-en-annuaire_bde_lycees_pro</code></a>
-        — 1 942 lignes, 19 champs, lu sans clé. Trois champs sont <strong>multivalués</strong> :
-        <code>metiers_prepares</code> (1 381 valeurs distinctes),
-        <code>diplomes_prepares</code> (355) et <code>romesv3</code> (175 codes ROME).
-        C'est ce qui rend l'export lourd — <strong>12,0 Mo pour 1 942 lignes</strong>, soit
-        6 Ko par établissement, presque entièrement des listes de métiers.
-        <strong>10 établissements sont sans position</strong>.
+        — une ligne par bureau des entreprises, données modifiées le 20 mars 2026, lu sans clé.
+        Dénominateur&nbsp;:
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-annuaire-education/"
+           target="_blank" rel="noopener external"><code>fr-en-annuaire-education</code></a>,
+        mis à jour chaque jour, restreint aux établissements de l'éducation nationale dont
+        <code>voie_professionnelle</code> vaut 1, dédoublonnés par UAI.
       </p>
       <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Cinq adresses de contact valent « #N/A »</strong> — la valeur d'erreur d'un
-        tableur, restée dans le champ <code>mail_bde</code>. Ce n'est pas une adresse manquante
-        (le champ serait vide) mais une adresse <em>fausse</em> : un lecteur qui la copie
-        n'obtient rien, et un traitement automatique qui teste « le champ est-il rempli ? »
-        conclut que oui. Elles sont écartées de l'affichage.
+        <strong>Une comparaison de comptes, pas un appariement.</strong> Un bureau peut être
+        déclaré sous l'UAI de la section professionnelle d'un lycée, que l'annuaire de
+        l'éducation compte autrement&nbsp;: rapprocher les deux jeux UAI par UAI laisse la
+        moitié des bureaux sans correspondant, et fausserait le chiffre dans l'autre sens.
+        À la maille de l'académie, ces écarts se compensent en grande partie — d'où des rapports
+        supérieurs à 100&nbsp;% dans quelques académies.
       </p>
     </details>
   </div>
 
-  <!-- ==========================================================================
-       Deuxième emploi d'`explode` (#736, 0.27.0), sur un jeu qui en a trois usages :
-       `metiers_prepares`, `diplomes_prepares` et `romesv3` sont tous des tableaux.
-       Sans lui, un « top des métiers » compterait les COMBINAISONS de métiers d'un
-       établissement — c'est-à-dire à peu près une par établissement, donc rien.
+  <!-- ====================== 1. La preuve ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <div class="odv-viz" data-code="Le privé, académie par académie">
+      <h2 class="fr-h4">Rennes, Grenoble, la Normandie et Toulouse n'ont transmis presque aucun lycée privé</h2>
+      <dsfr-data-repeat source="cov-top">
+        <template>
+          <p class="odv-lecture">En gris, les lycées privés sous contrat qui proposent la voie
+            professionnelle&nbsp;; en bleu, les bureaux privés que l'annuaire recense. Les académies
+            sont classées par nombre de lycées manquants. En tête, l'académie de
+            <strong>{{libelle_academie}}</strong>&nbsp;: {{bureaux0}} bureau recensé pour
+            {{lycees}} lycées privés. À l'autre bout, des académies où les deux barres se
+            rejoignent&nbsp;: l'absence n'est pas celle du privé, c'est celle de la saisie.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-chart id="g-priv" source="cov-priv" type="bar" horizontal
+        label-field="libelle_academie"
+        value-field="lycees:Lycées privés à voie professionnelle"
+        value-fields="bureaux0:Bureaux privés recensés"
+        color-map="Lycées privés à voie professionnelle:#929292,Bureaux privés recensés:#000091"
+        databox databox-title="Lycées privés sous contrat et bureaux recensés, par académie" heading-level="3"
+        databox-source="Ministère de l'éducation nationale — annuaire des bureaux des entreprises (20/03/2026) et annuaire de l'éducation"
+        databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-priv" source="cov-priv-tab" table download
+        filename="bureaux-entreprises-prive-par-academie.csv"
+        label-field="Académie"
+        value-field="Lycées privés sous contrat à voie professionnelle, Bureaux privés recensés, Rapport (%)"
+        description="Pour chaque académie, le nombre de lycées privés sous contrat proposant la voie professionnelle et le nombre de bureaux des entreprises privés recensés, classés par écart décroissant.">
+      </dsfr-data-a11y>
+    </div>
+  </div>
 
-       `select` : `romesv3` est écarté (175 codes techniques, redondants avec les
-       métiers en clair et coûteux à transporter). Le poids tombe de 12,0 Mo.
-       ========================================================================== -->
+  <!-- ====================== 2. La nuance ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <div class="odv-viz" data-code="Le téléphone, académie par académie">
+      <h2 class="fr-h4">Le téléphone non plus ne dépend pas du lycée, mais de l'académie</h2>
+      <dsfr-data-repeat source="tel-nat">
+        <template>
+          <p class="odv-lecture">Le numéro du bureau est renseigné pour
+            <strong>tous</strong> les bureaux dans <strong>{{plein}} académies</strong>, et pour
+            <strong>aucun</strong> dans <strong>{{vide}}</strong>. Un champ complet dans
+            une académie et vide dans la voisine ne mesure pas les lycées&nbsp;: il mesure ce que
+            chaque rectorat a transmis.
+            Le privé suit la même logique&nbsp;: la carte ci-dessous montre ce que chaque
+            académie a envoyé, pas ce qui existe.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-chart id="g-tel" source="tel-r" type="bar" horizontal
+        label-field="libelle_academie" value-field="part_tel:Bureaux avec téléphone (%)"
+        unit-tooltip="%" x-min="0" x-max="100"
+        databox databox-title="Part des bureaux des entreprises dont le téléphone est renseigné, par académie" heading-level="3"
+        databox-source="Ministère de l'éducation nationale — annuaire des bureaux des entreprises (20/03/2026)"
+        databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-tel" source="tel-tab" table download
+        filename="bureaux-entreprises-telephone-par-academie.csv"
+        label-field="Académie" value-field="Bureaux avec téléphone (%), Bureaux recensés"
+        description="Pour chaque académie, la part des bureaux des entreprises dont le numéro de téléphone est renseigné, de 100 % à 0 %.">
+      </dsfr-data-a11y>
+    </div>
+  </div>
 
-  <dsfr-data-source id="bde" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-annuaire_bde_lycees_pro"
-    fetch-mode="export" max-records="3000"
-    where="position is not null"
-    select="numero_uai, appellation_officielle, adresse_uai, code_postal_uai, libelle_commune, libelle_departement, libelle_academie, libelle_region, mail_bde, telephone, web, secteur, metiers_prepares, diplomes_prepares, position">
-  </dsfr-data-source>
+  <!-- ====================== 3. L'exploration ====================== -->
+  <div class="fr-container">
+    <h2 class="fr-h3">Trouver un bureau des entreprises</h2>
+    <p>L'annuaire reste l'outil de contact qu'il doit être&nbsp;: chercher un lycée, une commune
+      ou un métier préparé, filtrer, puis ouvrir la fiche pour le courriel du bureau. Les
+      compteurs suivent la sélection.</p>
+  </div>
 
-  <!-- `replace-fields` sur la valeur d'erreur de tableur. Depuis la 0.26.0 (#730)
-       il agit aussi sur les colonnes non-texte ; ici le champ est un tableau de
-       chaînes, et c'est la valeur entière « #N/A » qui est visée. -->
-  <dsfr-data-normalize id="bde-n" source="bde"
-    replace-fields="mail_bde:#N/A:"
-    compute="offre = when len(metiers_prepares) = 0 then 'Non renseignée' when len(metiers_prepares) &lt; 10 then 'Moins de 10 métiers' when len(metiers_prepares) &lt; 30 then '10 à 30 métiers' else '30 métiers et plus'">
-  </dsfr-data-normalize>
-
-
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
@@ -108,33 +277,25 @@
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
     <div class="odv-viz" data-code="Quatre compteurs qui suivent la sélection">
     <dsfr-data-kpi-group cols="4" gap="md">
       <dsfr-data-kpi source="bde-f" value="count" format="nombre"
         heading="Bureaux des entreprises" label="dans la sélection"></dsfr-data-kpi>
       <dsfr-data-kpi source="bde-f" value="libelle_commune:distinct" format="nombre"
         heading="Communes" label="équipées"></dsfr-data-kpi>
-      <dsfr-data-kpi source="bde-f" value="libelle_academie:distinct" format="nombre"
-        heading="Académies" label="représentées"></dsfr-data-kpi>
-      <!-- Une PART plutôt qu'un compte brut : « 233 privés » ne se lit pas sans
-           le total, « 12 % » se lit seul. Ratio de comptes (#673), rendu en
-           pourcentage ; les deux côtés suivent la sélection. -->
       <dsfr-data-kpi source="bde-f" value="count:secteur:Privé / count" format="pourcentage" decimals="1"
-        heading="Part du privé" label="dans la sélection"></dsfr-data-kpi>
+        heading="Part du privé" label="parmi les bureaux recensés, pas parmi les lycées"></dsfr-data-kpi>
+      <dsfr-data-kpi source="bde-f" value="a_tel:avg" format="nombre" decimals="0" unit="%"
+        heading="Avec téléphone" label="part des bureaux de la sélection"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
     </div>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <div class="fr-col-12 fr-col-md-3">
         <details class="odv-filtres odv-filtres--md" open>
           <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
             Filtrer<span class="odv-filtres__compte"></span>
           </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
         <h2 class="fr-h6">Filtrer</h2>
         <dsfr-data-facets id="bde-f" source="bde-q"
           fields="secteur, offre, diplomes_prepares, libelle_academie, libelle_region, libelle_departement"
@@ -148,14 +309,14 @@
       </div>
       <div class="fr-col-12 fr-col-md-9">
         <div class="odv-viz" data-code="Carte des bureaux des entreprises">
-        <p class="odv-lecture">Un bureau des entreprises par lycée professionnel, donc
-          <strong>un maillage qui suit la population</strong>, outre-mer compris. En orange, le
-          secteur privé&nbsp;: minoritaire partout, et absent de départements entiers.</p>
+        <p class="odv-lecture">En orange, les bureaux privés recensés. Là où la carte n'en montre
+          aucun ou presque — la Bretagne, la Normandie, l'Occitanie, les Alpes — ce n'est pas que le
+          privé est absent&nbsp;: c'est que l'académie ne l'a pas transmis (voir plus haut).</p>
         <dsfr-data-map id="carte-bde"
           name="Bureaux des entreprises des lycées professionnels"
           height="600px" tiles="ign-plan" tiles-style="muted"
           insets="drom,polynesie-francaise,nouvelle-caledonie" fit-bounds fit-max-zoom="13">
-          <dsfr-data-map-layer id="couche-bde" source="bde-f" type="circle"
+          <dsfr-data-map-layer id="couche-bde" source="bde-geo" type="circle"
             geo-field="position" radius="5" fill-opacity="0.9"
             color-field="secteur"
             color-map="Public:#000091,Privé:#e4794a"
@@ -173,15 +334,13 @@
                 académie de {{libelle_academie}}
               </p>
 
-              <!-- Le contact du bureau des entreprises : c'est l'objet même de
-                   l'annuaire. `mail_bde` est un TABLEAU (certains lycées en ont
-                   deux) : `{{#each}}` le rend en liste. -->
               <p class="fr-text--sm fr-mb-1v"><strong>Contacter le bureau</strong></p>
               <ul class="fr-text--sm fr-mb-1v odv-liste-vide">{{#each mail_bde}}<li><a href="mailto:{{.}}">{{.}}</a></li>{{/each}}</ul>
               {{#unless mail_bde}}<p class="fr-text--sm fr-mb-1v">Courriel non communiqué.</p>{{/unless}}
               {{#if telephone}}<p class="fr-text--sm fr-mb-1v">{{telephone}}</p>{{/if}}
+              {{#unless telephone}}<p class="fr-text--sm fr-mb-1v">Téléphone non communiqué par l'académie.</p>{{/unless}}
               {{#if web}}<p class="fr-text--sm fr-mb-3v">
-                <a href="{{web:url}}" target="_blank" rel="noopener external">Site de l'établissement</a></p>{{/if}}
+                <a href="{{web:url}}" target="_blank" rel="noopener external">Site déclaré pour l'établissement</a></p>{{/if}}
 
               <p class="fr-text--sm fr-mb-1v"><strong>Diplômes préparés</strong></p>
               <ul class="fr-text--sm fr-mb-3v odv-liste-vide">{{#each diplomes_prepares}}<li>{{.}}</li>{{/each}}</ul>
@@ -195,7 +354,7 @@
         <dsfr-data-a11y source="bde-f" for="carte-bde" table download
           filename="annuaire-bureaux-des-entreprises.csv"
           label="Données de la carte"
-          description="Un bureau des entreprises par ligne : établissement, secteur, commune, académie, contact, diplômes."
+          description="Un bureau des entreprises par ligne : établissement, secteur, commune, académie, contact."
           label-field="appellation_officielle"
           value-field="secteur, libelle_commune, libelle_departement, libelle_academie, mail_bde, telephone">
         </dsfr-data-a11y>
@@ -204,54 +363,8 @@
     </div>
   </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Podium des diplômes les plus préparés">
-        <h2 class="fr-h5">Les diplômes les plus préparés</h2>
-        <p class="odv-lecture">Les premières marches ne sont pas des diplômes mais des
-          <strong>classes de seconde</strong>&nbsp;: le champ mêle paliers d'orientation et
-          diplômes. Et la barre compte des <strong>lycées</strong>, pas des élèves — un CAP
-          préparé dans un petit établissement pèse autant qu'un bac pro dans un grand.</p>
-        <!-- Un top se lit mieux en podium qu'en barres horizontales : le rang est
-             écrit, la barre est relative au premier. `<ol>` sémantique, donc pas
-             de tableau a11y séparé à poser. -->
-        <dsfr-data-podium source="bde-dip" label-field="diplomes_prepares" value-field="n"
-          value-unit="lycées" max-items="10"></dsfr-data-podium>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Les métiers les plus préparés">
-        <h2 class="fr-h5">Les métiers les plus préparés</h2>
-        <p class="odv-lecture">Les premières barres sont <strong>à égalité parfaite</strong>&nbsp;:
-          ce sont les libellés d'une même fiche ROME, attachée en bloc. Le graphique est juste&nbsp;;
-          c'est la nomenclature qui compte plusieurs fois le même métier.</p>
-        <dsfr-data-chart id="g-bde-met" source="bde-met" type="bar" horizontal
-          label-field="metiers_prepares" value-field="n" name="Lycées"
-          unit-tooltip="lycées"
-          databox databox-title="Métiers les plus préparés"
-          databox-source="Ministère de l'éducation nationale — fr-en-annuaire_bde_lycees_pro"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-bde-met" source="bde-met" table download
-          description="Les quinze métiers les plus souvent préparés, en nombre de lycées ; les premiers rangs sont des libellés d'une même fiche ROME, à égalité."></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          Sur <strong>1 381 métiers</strong> déclarés. Ces deux classements n'auraient pas été
-          possibles avant la version publiée aujourd'hui : sans <code>explode</code>, un
-          regroupement compterait les <em>combinaisons</em> de métiers d'un établissement, donc
-          à peu près une par établissement.
-        </p>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <dsfr-data-query id="bde-dip" source="bde-f" explode="diplomes_prepares"
-    group-by="diplomes_prepares" aggregate="numero_uai:count:n"
-    order-by="n:desc" limit="15"></dsfr-data-query>
-  <dsfr-data-query id="bde-met" source="bde-f" explode="metiers_prepares"
-    group-by="metiers_prepares" aggregate="numero_uai:count:n"
-    order-by="n:desc" limit="15"></dsfr-data-query>
+  <!-- La carte seule écarte les bureaux sans coordonnées. -->
+  <dsfr-data-query id="bde-geo" source="bde-f" where="position:isnotnull"></dsfr-data-query>
 
   <div class="fr-container fr-mb-8w">
     <div class="odv-viz" data-code="L'annuaire en liste">
@@ -263,76 +376,78 @@
     </div>
   </div>
 
+  <!-- ====================== 4. Ce qu'on ne montre pas ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <h2 class="fr-h4">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="bde-nat-r">
+      <template>
+        <ul>
+          <li><strong>{{sans_position}} bureaux sans coordonnées</strong> ne sont pas sur la
+            carte&nbsp;; ils restent dans les compteurs, la liste et les graphiques.</li>
+          <li><strong>{{sans_offre}} bureaux sans aucun métier ni diplôme renseigné.</strong>
+            La facette « Étendue de l'offre » les isole sous « Non renseignée ».</li>
+          <li><strong>{{mail_faux}} adresses de contact valent « #N/A »</strong>, la valeur
+            d'erreur d'un tableur&nbsp;: un champ rempli, donc cru renseigné. Elles sont vidées
+            avant affichage.</li>
+          <li><strong>Pas de classement des métiers.</strong> Le jeu attache des fiches ROME
+            entières&nbsp;: « Matelot de la Marine nationale » paraît préparé dans des centaines de
+            lycées, avec tous ses synonymes à égalité. Un tel classement compterait la
+            nomenclature, pas l'offre. Les métiers restent cherchables dans la recherche.</li>
+          <li><strong>Les sites internet ne sont pas vérifiés</strong>&nbsp;: certains pointent
+            vers l'ENT d'un autre établissement, d'une autre région.</li>
+          <li><strong>Le dénominateur a ses limites</strong>&nbsp;: un lycée privé « sous contrat
+            pour une partie des classes » peut avoir sa voie professionnelle hors contrat, donc
+            hors du périmètre de la réforme. Ils ne sont que quelques dizaines&nbsp;: même en les
+            retirant, le privé reste recensé à moins d'un sur deux.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </div>
+
   <!-- ====================== Analyse de reproduction ====================== -->
   <div class="fr-container fr-mb-8w">
     <details class="odv-technique" id="analyse">
-      <summary>Analyse technique — ce que la reproduction a coûté</summary>
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
       <section class="fr-py-4w">
       <h2>Analyse de reproduction — bureaux des entreprises</h2>
 
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine : une <strong>vue de jeu héritée</strong>, slug <code>carte</code> — le
-        lien du catalogue fait un 302. Fiche d'audit :
-        <code>docs/portail-education/annuaire-bureaux-des-entreprises.md</code>.
+        Cible d'origine : une <strong>vue de jeu héritée</strong> (slug <code>carte</code>), une
+        carte à six filtres et sans un chiffre. Fiche d'audit :
+        <code>docs/portail-education/annuaire-bureaux-des-entreprises.md</code>. Recréée le
+        26 septembre 2026 en page éditoriale.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong><code>explode</code>, deuxième emploi, et sur un jeu qui en a trois
-              usages.</strong> <code>metiers_prepares</code>, <code>diplomes_prepares</code> et
-              <code>romesv3</code> sont tous des tableaux. Deux graphiques, deux
-              <code>explode</code>, et les 1 381 métiers deviennent classables. Sans lui, un
-              regroupement aurait compté les combinaisons — c'est-à-dire à peu près une par
-              établissement.</li>
-            <li><strong>Chercher un métier dans la recherche plein texte.</strong>
-              <code>dsfr-data-search</code> accepte un champ multivalué dans ses
-              <code>fields</code> : taper « chaudronnier » trouve les lycées qui y préparent,
-              sans facette dédiée. C'est le geste le plus naturel pour un annuaire d'orientation,
-              et il tient dans un attribut.</li>
-            <li><strong>Le contact en liste.</strong> <code>mail_bde</code> est un tableau —
-              certains lycées ont deux adresses. <code>{{#each}}</code> les rend en liste de
-              liens ; un <code>join</code> aurait produit une chaîne inutilisable en
-              <code>mailto:</code>. <strong>⚠️ Correction (lot 18)</strong>&nbsp;: cette page a
-              d'abord été publiée avec les deux <code>{{#each}}</code> <em>imbriqués dans un
-              <code>{{#if}}</code></em>, forme qui ne rend rien du tout — ni les items, ni le
-              repli, ni un message. L'infobulle affichait donc « Contacter le bureau » et
-              « Diplômes préparés » suivis du vide, sur les 1 932 établissements. Le défaut a
-              échappé à la vérification de la page parce que celle-ci portait sur les erreurs
-              console, les erreurs de configuration et les KPI — tous corrects — et non sur
-              <em>le contenu affiché dans l'infobulle</em>. C'est une leçon de méthode autant
-              qu'un constat sur la bibliothèque&nbsp;: <strong>l'absence d'erreur ne prouve pas
-              le rendu</strong>. Voir AM-072.</li>
+            <li><strong>Le dénominateur en une balise.</strong> L'annuaire de l'éducation, filtré
+              par le serveur (voie professionnelle, tutelle éducation nationale), puis
+              dédoublonné par un <code>group-by</code> et joint à la maille académie × secteur.
+              La jointure à gauche garde les académies sans aucun bureau privé — le cas à
+              montrer.</li>
+            <li><strong>Des phrases qui se calculent.</strong> Chapô, lectures et liste des
+              manques sont des <code>dsfr-data-repeat</code> sur une ligne agrégée&nbsp;: aucun
+              chiffre du texte n'est écrit à la main.</li>
+            <li><strong>Une part juste sans moyenne de taux.</strong> Un indicateur 0/100 par
+              bureau, moyenné par académie, donne la part des bureaux avec téléphone.</li>
           </ul>
         </div>
 
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Cinq adresses valent « #N/A ».</strong> C'est la valeur d'erreur d'un
-              tableur, restée dans le champ. Elle est pire qu'une adresse manquante : le champ
-              est <em>rempli</em>, donc tout traitement qui teste la présence conclut que le
-              contact existe, et tout lecteur qui la copie n'obtient rien.
-              <code>replace-fields</code> la vide — et depuis la 0.26.0 (#730) l'attribut agit
-              aussi sur les colonnes non-texte, ce qui n'était pas le cas quand ce banc l'a
-              rencontré pour la première fois sur Euroscol. <strong>Troisième jeu de ce portail
-              où une valeur de tableur a survécu à la publication</strong>, après les « NA » des
-              internats et le « 2024- 2025 » du label Égalité.</li>
-            <li><strong>12 Mo pour 1 942 lignes.</strong> Six kilo-octets par établissement,
-              presque entièrement des listes de métiers répétées. Le <code>select</code> écarte
-              <code>romesv3</code> — 175 codes techniques redondants avec les métiers en clair —
-              mais l'essentiel du poids reste. C'est le cas où le format multivalué, très
-              pratique à interroger, coûte cher à transporter : un jeu de 1 942 lignes pèse plus
-              lourd que les 6 971 collèges de la page IPS.</li>
-            <li><strong>Un top des métiers difficile à lire.</strong> Les trois premiers —
-              « Marin soldat », « Matelot de la Flotte », « Matelot de la Marine nationale » —
-              sont à 861 établissements chacun, ce qui ne veut pas dire que 861 lycées préparent
-              à la marine : ce sont des libellés d'une même fiche ROME, attachée en bloc à un
-              grand nombre d'établissements. Le graphique est juste ; ce qu'il compte ne
-              correspond pas à ce qu'un lecteur suppose. La bibliothèque n'y peut rien — c'est la
-              nomenclature source qui est ainsi faite — mais c'est le genre de chiffre qu'il ne
-              faut pas commenter sans avoir regardé.</li>
+            <li><strong><code>count(distinct …)</code> est approché côté portail.</strong> Il
+              rend 551 lycées privés là où le dédoublonnage exact en donne 540&nbsp;: on
+              rapatrie les lignes et on dédoublonne dans le navigateur.</li>
+            <li><strong>L'UAI ne suffit pas à apparier.</strong> Les bureaux sont souvent
+              déclarés sous l'UAI d'une section professionnelle&nbsp;; l'appariement UAI par UAI
+              sous-estimerait la couverture. La page compare des comptes par académie et le
+              dit.</li>
+            <li><strong>La reproduction précédente affirmait le contraire.</strong> « Le privé,
+              minoritaire partout, absent de départements entiers » lisait la carte comme la
+              réalité&nbsp;; rapportée au référentiel, elle montre un défaut de collecte.</li>
           </ul>
         </div>
       </div>
@@ -345,22 +460,20 @@
           </thead>
           <tbody>
             <tr><td>contexte de la vue personnalisée</td><td><code>dsfr-data-source</code> + <code>select</code></td><td>Équivalent</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-query explode</code> ×2</td><td><strong>Sans équivalent</strong> : 1 381 métiers classables</td></tr>
-            <tr><td>recherche par nom</td><td><code>dsfr-data-search</code> incluant les métiers</td><td>Meilleur : on cherche un métier, pas seulement un lycée</td></tr>
-            <tr><td>contact affiché tel quel</td><td><code>replace-fields</code> + <code>{{#each}}</code></td><td>Meilleur : les « #N/A » disparaissent, les adresses multiples sont cliquables</td></tr>
-            <tr><td><code>ods-map</code></td><td><code>dsfr-data-map-layer</code> + <code>cluster</code> + encarts</td><td>Équivalent, DROM et Pacifique compris</td></tr>
+            <tr><td>—</td><td>second <code>dsfr-data-source</code> + <code>query group-by</code> + <code>join</code></td><td><strong>Sans équivalent</strong> : la couverture de l'annuaire</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-repeat</code> sur des agrégats</td><td><strong>Sans équivalent</strong> : chapô et lectures calculés</td></tr>
+            <tr><td><code>ods-select</code> ×4, <code>ods-text-search</code> ×2</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code></td><td>Meilleur : combinables, comptés, dans l'URL</td></tr>
+            <tr><td><code>ods-map</code></td><td><code>dsfr-data-map-layer</code> + <code>cluster</code> + encarts</td><td>Équivalent, outre-mer compris</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>. Ce que la page ajoute est simple et concret :
-          on peut <strong>chercher un métier</strong> et trouver les lycées qui y préparent, ce
-          que l'annuaire d'origine ne permet pas. La friction est ailleurs, et elle revient pour
-          la troisième fois sur ce portail : <strong>une valeur d'erreur de tableur a survécu
-          jusqu'à la publication</strong>. Un champ vide se repère ; un champ rempli de
-          « #N/A » se croit renseigné.</p>
+        <p>L'original est un annuaire&nbsp;; la page le reste, mais elle dit d'abord ce que
+          l'annuaire vaut. Il suffisait d'une seconde source pour que « 12 % de privé » cesse
+          d'être un fait sur les lycées et devienne un fait sur la collecte. Aucune friction de
+          bibliothèque&nbsp;: le coût est dans la vérification des deux jeux, pas dans les balises.</p>
       </div>
       </section>
     </details>

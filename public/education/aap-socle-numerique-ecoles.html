@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>L'appel à projets Socle numérique dans les écoles — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz « Socle numérique dans les écoles élémentaires » : 6 870 collectivités, 196,5 M€ de dépenses, 12 670 écoles.">
+  <title>Socle numérique : plus la facture est grosse, moins l'État a payé — open-data-viz</title>
+  <meta name="description" content="Appel à projets Socle numérique dans les écoles élémentaires : l'État a couvert 52,5 % des 196,5 M€ engagés, mais 65 % ou plus pour près d'une collectivité sur deux. Ce sont les plus grosses conventions, couvertes à 39 %, qui tirent le taux d'ensemble vers le bas. Recréation avec dsfr-data.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,105 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est une vue héritée à deux onglets (régions / départements) qui
+       colore des MONTANTS absolus : elle redessine la carte de la population
+       scolaire. La reproduction précédente ajoutait le taux de couverture
+       (subvention / dépense, 52,5 % au national) et sa répartition en camembert.
+       Relu à l'API, le jeu raconte autre chose : ce 52,5 % ne ressemble à aucune
+       collectivité type. 45 % des signataires sont couverts à 65 % ou plus, et
+       une seule au-delà de 70 % ; c'est la poignée de très grosses conventions
+       (plus de 200 000 € de dépenses : 1,6 % des signataires, 22,6 % de la
+       dépense, couvertes à 39,3 %) qui tire la moyenne vers le bas.
+
+       Un seul jeu, 6 870 lignes, lu SANS clé et en entier (`fetch-mode="export"`,
+       `max-records` relevé au-dessus du plafond silencieux de 1 000). Tout le
+       reste est calculé côté client, une fois :
+         · `snee-n`     — taux par convention, tranches de dépense et de taux ;
+         · `snee-bilan` — une ligne, pour le chapô et les phrases de lecture ;
+         · `snee-dep`, `snee-dist`, `snee-dpt-bas` — les trois preuves (national,
+           jamais filtré) ;
+         · `snee-q` → `snee-f` — l'exploration (recherche + facettes).
+       ========================================================================== -->
+
+  <dsfr-data-source id="snee" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-aap-snee-collectivites"
+    fetch-mode="export" max-records="10000">
+  </dsfr-data-source>
+
+  <!-- `t` reste non arrondi : les tranches se calculent sur la vraie valeur,
+       l'arrondi à une décimale ne sert qu'à l'affichage. Les drapeaux (0/1) et les
+       montants conditionnels permettent des ratios de sommes par sous-ensemble
+       dans une seule query sans group-by. -->
+  <dsfr-data-normalize id="snee-n" source="snee"
+    compute="dep = depenses_realisees_par_la_collectivite; sub = montant_de_la_subvention; un = 1;
+             t = when dep = 0 then null else sub / dep * 100;
+             taux_couverture = round(t, 1);
+             subvention_par_ecole = when nombre_d_ecoles = 0 then null else round(sub / nombre_d_ecoles, 0);
+             ordre_dep = when dep &lt; 5000 then 1 when dep &lt; 10000 then 2 when dep &lt; 20000 then 3 when dep &lt; 50000 then 4 when dep &lt; 100000 then 5 when dep &lt; 200000 then 6 else 7;
+             tranche_dep = when ordre_dep = 1 then 'Moins de 5 000 €' when ordre_dep = 2 then '5 000 à 10 000 €' when ordre_dep = 3 then '10 000 à 20 000 €' when ordre_dep = 4 then '20 000 à 50 000 €' when ordre_dep = 5 then '50 000 à 100 000 €' when ordre_dep = 6 then '100 000 à 200 000 €' else '200 000 € et plus';
+             ordre_taux = when is_null(t) then 9 when t &lt; 40 then 1 when t &lt; 50 then 2 when t &lt; 60 then 3 when t &lt; 65 then 4 else 5;
+             tranche_taux = when ordre_taux = 1 then 'Moins de 40 %' when ordre_taux = 2 then '40 à 50 %' when ordre_taux = 3 then '50 à 60 %' when ordre_taux = 4 then '60 à 65 %' when ordre_taux = 5 then '65 % et plus' else 'Non calculable';
+             portee = when nombre_de_communes &gt; 1 then 'Plusieurs communes' else 'Une commune';
+             haut65 = when ordre_taux = 5 then 1 else 0; bas40 = when ordre_taux = 1 then 1 else 0;
+             sup70 = when is_null(t) then 0 when t &gt; 70.05 then 1 else 0;
+             gros = when ordre_dep = 7 then 1 else 0; sub_gros = when gros = 1 then sub else 0; dep_gros = when gros = 1 then dep else 0;
+             petit = when ordre_dep &lt;= 3 then 1 else 0; sub_petit = when petit = 1 then sub else 0; dep_petit = when petit = 1 then dep else 0">
+  </dsfr-data-normalize>
+
+  <!-- Le bilan national : une ligne, jamais filtrée. -->
+  <dsfr-data-query id="snee-bilan-s" source="snee-n"
+    aggregate="un:sum:n, sub:sum:s, dep:sum:d, haut65:sum:n65, sup70:sum:n70,
+               gros:sum:ng, sub_gros:sum:sg, dep_gros:sum:dg,
+               petit:sum:np, sub_petit:sum:sp, dep_petit:sum:dp,
+               nombre_d_ecoles:sum:ecoles, nombre_de_communes:sum:communes">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="snee-bilan" source="snee-bilan-s"
+    compute="taux = round(s / d * 100, 1); s_m = round(s / 1000000, 1); d_m = round(d / 1000000, 1);
+             part65 = round(n65 / n * 100, 0);
+             taux_gros = round(sg / dg * 100, 1); part_gros_n = round(ng / n * 100, 1); part_gros_d = round(dg / d * 100, 1);
+             taux_petit = round(sp / dp * 100, 1); part_petit_n = round(np / n * 100, 0);
+             moy_conv = round(d / n, 0)">
+  </dsfr-data-normalize>
+
+  <!-- Preuve 1 : taux de couverture par tranche de dépense (ratio de sommes). -->
+  <dsfr-data-query id="snee-dep-s" source="snee-n" group-by="ordre_dep, tranche_dep"
+    aggregate="sub:sum:s, dep:sum:d, un:sum:n" order-by="ordre_dep:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="snee-dep" source="snee-dep-s"
+    compute="taux = round(s / d * 100, 1); d_m = round(d / 1000000, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="snee-dep-t" source="snee-dep"
+    rename="tranche_dep:Dépense engagée par la convention | n:Conventions | d_m:Dépenses (M€) | taux:Taux de couverture (%)">
+  </dsfr-data-normalize>
+
+  <!-- Preuve 2 : combien de collectivités dans chaque tranche de taux. -->
+  <dsfr-data-query id="snee-dist" source="snee-n" group-by="ordre_taux, tranche_taux"
+    aggregate="un:sum:n, n:share_percent:part" order-by="ordre_taux:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="snee-dist-t" source="snee-dist" round="part:1"
+    rename="tranche_taux:Taux de couverture de la collectivité | n:Collectivités | part:Part des collectivités (%)">
+  </dsfr-data-normalize>
+
+  <!-- Nuance : les dix départements les moins couverts. Les 6 conventions sans
+       département (Polynésie, Saint-Barthélemy, Saint-Pierre-et-Miquelon) sont
+       écartées de CE classement seulement ; elles restent dans les totaux. -->
+  <dsfr-data-query id="snee-dpt" source="snee-n" group-by="departement"
+    where="departement:isnotnull"
+    aggregate="sub:sum:s, dep:sum:d, un:sum:n">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="snee-dpt-n" source="snee-dpt"
+    compute="taux = round(s / d * 100, 1); moy_conv = round(d / n, 0); d_m = round(d / 1000000, 2)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="snee-dpt-bas" source="snee-dpt-n" order-by="taux:asc" limit="10"></dsfr-data-query>
+  <dsfr-data-query id="snee-dpt-haut" source="snee-dpt-n" order-by="taux:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="snee-dpt-mos" source="snee-dpt-n" where="departement:eq:Moselle"></dsfr-data-query>
+  <dsfr-data-normalize id="snee-dpt-t" source="snee-dpt-bas"
+    rename="departement:Département | n:Conventions | d_m:Dépenses (M€) | moy_conv:Dépense moyenne par convention (€) | taux:Taux de couverture (%)">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,151 +131,252 @@
       </div>
     </nav>
 
-    <h1>L'appel à projets « Socle numérique dans les écoles élémentaires »</h1>
+    <h1>Socle numérique des écoles&nbsp;: plus la facture est grosse, moins l'État en a payé</h1>
 
-    <p class="fr-text--lead">
-      Volet éducatif du plan de relance, cet appel à projets a cofinancé l'équipement numérique
-      des écoles avec les communes et intercommunalités qui en sont propriétaires.
-      <strong>6 870 collectivités</strong> ont conventionné, couvrant
-      <strong>7 810 communes</strong> et <strong>12 670 écoles</strong>, pour
-      <strong>196,5 M€ de dépenses</strong> engagées et <strong>103,1 M€ de subvention</strong> —
-      soit un <strong>taux de couverture de 52,5 %</strong>.
+    <!-- Le chapô est CALCULÉ sur le jeu entier. -->
+    <dsfr-data-repeat source="snee-bilan">
+      <template>
+        <p class="fr-text--lead">
+          Pour équiper leurs écoles élémentaires, <strong>{{n:number}} collectivités</strong> ont
+          signé une convention de l'appel à projets «&nbsp;Socle numérique&nbsp;» du plan de
+          relance. L'État leur a accordé <strong>{{s_m:number:1}}&nbsp;M€</strong> pour
+          {{d_m:number:1}}&nbsp;M€ de dépenses&nbsp;: <strong>{{taux:number:1}}&nbsp;%</strong>
+          au total. Ce taux ne ressemble pourtant à presque aucune collectivité&nbsp;:
+          <strong>{{part65}}&nbsp;%</strong> d'entre elles ont été couvertes à 65&nbsp;% ou plus,
+          et seulement {{n70:number}} au-delà de 70&nbsp;%. Ce sont les
+          <strong>{{ng:number}} plus grosses conventions</strong> — plus de 200&nbsp;000&nbsp;€ de
+          dépenses, {{part_gros_n:number:1}}&nbsp;% des signataires mais
+          {{part_gros_d:number:1}}&nbsp;% de la dépense — qui tirent la moyenne vers le
+          bas&nbsp;: l'État n'en a couvert que <strong>{{taux_gros:number:1}}&nbsp;%</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Le <strong>taux de couverture</strong> est la subvention de l'État rapportée à la dépense
+      déclarée par la collectivité. Au niveau d'un groupe, c'est toujours la somme des
+      subventions divisée par la somme des dépenses — jamais la moyenne des taux, qui ferait
+      peser une commune à une école autant qu'une métropole.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-aap-snee-collectivites/"
            target="_blank" rel="noopener external"><code>fr-en-aap-snee-collectivites</code></a>
-        — 6 870 lignes, 15 champs, lu sans clé, 4,0 Mo en 0,38 s.
-        <strong>Aucune ligne sans position</strong> : les 6 870 conventions sont
-        cartographiables. C'est le jumeau du jeu de
-        <a href="/education/hybridation-enseignement-lycee">l'hybridation en lycée</a> — mêmes
-        champs de dépense et de subvention, même structure de convention — mais à l'échelle
-        communale plutôt que régionale, soit <strong>361 fois plus de lignes</strong>.
+        (ministère de l'éducation nationale, jeu modifié le 27/11/2024, relu le 2026-09-26) —
+        une ligne par convention signée&nbsp;: collectivité signataire, nombre de communes et
+        d'écoles couvertes, dépense réalisée, montant de la subvention. Lecture sans clé, en
+        une requête. Le règlement de l'appel à projets (taux, plafonds) n'est pas dans le
+        jeu&nbsp;; il est décrit sur
+        <a href="https://www.education.gouv.fr/plan-de-relance-continuite-pedagogique-appel-projets-pour-un-socle-numerique-dans-les-ecoles-308341"
+           target="_blank" rel="noopener external">education.gouv.fr</a>.
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois taux, trois poids ---------- -->
+    <dsfr-data-kpi-group per-row="3" gap="md" class="fr-mb-6w" aria-label="Les chiffres à retenir">
+      <dsfr-data-kpi source="snee-n" value="sub:sum / dep:sum" format="pourcentage" decimals="1"
+        heading="Taux de couverture d'ensemble"
+        label="subvention totale / dépense totale"></dsfr-data-kpi>
+      <dsfr-data-kpi source="snee-n" value="haut65:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Collectivités couvertes à 65 % ou plus"
+        label="part des conventions signées"></dsfr-data-kpi>
+      <dsfr-data-kpi source="snee-n" value="sub_gros:sum / dep_gros:sum" format="pourcentage" decimals="1"
+        heading="Taux des conventions de 200 000 € et plus"
+        label="subvention / dépense, pour ces seules conventions"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. Le taux de couverture baisse à chaque palier de dépense</h2>
+    <!-- Le graphique vit dans le répéteur du bilan : la ligne de référence « ensemble »
+         reçoit ainsi le taux calculé, pas un chiffre écrit à la main. -->
+    <dsfr-data-repeat source="snee-bilan">
+      <template>
+        <p class="odv-lecture">Les conventions de moins de 20&nbsp;000&nbsp;€ — {{part_petit_n}}&nbsp;%
+          des signataires — ont été couvertes à <strong>{{taux_petit:number:1}}&nbsp;%</strong>&nbsp;;
+          celles de 200&nbsp;000&nbsp;€ et plus, à <strong>{{taux_gros:number:1}}&nbsp;%</strong>.
+          Le trait horizontal marque le taux d'ensemble ({{taux:number:1}}&nbsp;%)&nbsp;: seules
+          les deux dernières tranches passent en dessous, mais elles pèsent assez lourd pour
+          y entraîner l'ensemble.</p>
+        <div class="odv-viz fr-mb-6w" data-code="Taux de couverture par tranche de dépense de la convention">
+          <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-dep" source="snee-dep" type="bar"
+            label-field="tranche_dep" value-field="taux:Taux de couverture (%)"
+            y-min="0" y-max="80" unit-tooltip="%"
+            selected-palette="neutral" highlight-index="[6]"
+            reference-lines='[{"axis":"y","value":{{taux}},"label":"Ensemble : {{taux:number:1}} %","color":"#000091","dash":true}]'
+            databox databox-title="Plus la convention est grosse, plus la part de sa dépense couverte par l'État est petite"
+            databox-source="Ministère de l'éducation nationale — fr-en-aap-snee-collectivites, via data.education.gouv.fr (jeu modifié le 27/11/2024)"
+            databox-download heading-level="3">
+          </dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-dep" source="snee-dep-t" table download
+            filename="socle-numerique-taux-par-tranche-de-depense.csv"
+            label-field="Dépense engagée par la convention"
+            value-field="Conventions, Dépenses (M€), Taux de couverture (%)"
+            description="Taux de couverture de la subvention (somme des subventions divisée par la somme des dépenses) pour sept tranches de dépense engagée par convention, de moins de 5 000 euros à 200 000 euros et plus. Le taux décroît à chaque tranche, d'environ 63 % à environ 39 %. La dernière tranche, mise en évidence, compte peu de conventions mais près d'un quart de la dépense totale."></dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+
+    <!-- ---------- 2. La forme de la distribution ---------- -->
+    <h2 class="fr-h3">2. Près d'une collectivité sur deux a été couverte entre 65 et 70&nbsp;%</h2>
+    <dsfr-data-repeat source="snee-bilan">
+      <template>
+        <p class="odv-lecture"><strong>{{n65:number}} collectivités sur {{n:number}}</strong>
+          ({{part65}}&nbsp;%) ont reçu 65&nbsp;% ou plus de leur dépense, et seulement {{n70:number}}
+          dépasse 70&nbsp;%&nbsp;: la distribution bute sur un plafond. Le taux d'ensemble
+          ({{taux:number:1}}&nbsp;%) décrit donc mal la collectivité type.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Collectivités par tranche de taux de couverture">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-dist" source="snee-dist" type="bar"
+        label-field="tranche_taux" value-field="n:Collectivités"
+        y-min="0" unit-tooltip="collectivités"
+        selected-palette="neutral" highlight-index="[4]"
+        databox databox-title="Les collectivités s'entassent juste sous 70 % de couverture ; très peu le dépassent"
+        databox-source="Ministère de l'éducation nationale — fr-en-aap-snee-collectivites, via data.education.gouv.fr (jeu modifié le 27/11/2024)"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-dist" source="snee-dist-t" table download
+        filename="socle-numerique-collectivites-par-taux.csv"
+        label-field="Taux de couverture de la collectivité"
+        value-field="Collectivités, Part des collectivités (%)"
+        description="Nombre de collectivités signataires dans chacune des cinq tranches de taux de couverture (subvention rapportée à leur propre dépense). La tranche 65 % et plus, mise en évidence, est de loin la plus peuplée ; un seul signataire dépasse 70 %."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La nuance ---------- -->
+    <h2 class="fr-h3">3. La taille n'explique pas tout&nbsp;: la couverture varie aussi d'un département à l'autre</h2>
+    <dsfr-data-repeat source="snee-dpt-mos">
+      <template>
+        <p class="odv-lecture">En Seine-Saint-Denis ou à La Réunion, le taux bas suit la règle
+          de la section 1&nbsp;: peu de conventions, mais très grosses. Ailleurs, elle ne joue
+          pas&nbsp;: en <strong>{{departement}}</strong>, les {{n:number}} conventions ont coûté
+          en moyenne {{moy_conv:number}}&nbsp;€ chacune — à peu près la moyenne nationale — et
+          n'ont été couvertes qu'à <strong>{{taux:number:1}}&nbsp;%</strong>. Le jeu ne dit pas
+          pourquoi&nbsp;: la nature des dépenses (équipement ou services) n'y figure pas.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="snee-bilan">
+      <template>
+        <p class="fr-text--sm">Pour comparaison, la dépense moyenne par convention est de
+          {{moy_conv:number}}&nbsp;€ sur l'ensemble du dispositif.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Les dix départements les moins couverts">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-dpt" source="snee-dpt-bas" type="bar" horizontal
+        label-field="departement" value-field="taux:Taux de couverture (%)"
+        unit-tooltip="%"
+        databox databox-title="Les dix départements où l'État a couvert la plus petite part de la dépense"
+        databox-source="Ministère de l'éducation nationale — fr-en-aap-snee-collectivites, via data.education.gouv.fr (jeu modifié le 27/11/2024)"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-dpt" source="snee-dpt-t" table download
+        filename="socle-numerique-departements-les-moins-couverts.csv"
+        label-field="Département"
+        value-field="Conventions, Dépenses (M€), Dépense moyenne par convention (€), Taux de couverture (%)"
+        description="Les dix départements au taux de couverture le plus bas (somme des subventions divisée par la somme des dépenses de leurs conventions), du plus bas au moins bas, avec le nombre de conventions et la dépense moyenne par convention. En tête, des départements aux conventions très grosses (La Réunion, Seine-Saint-Denis) côtoient des départements aux conventions de taille ordinaire (Moselle, Bas-Rhin, Pyrénées-Atlantiques)."></dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="snee-dpt-haut">
+      <template>
+        <p class="fr-text--sm">À l'autre bout, le département le mieux couvert&nbsp;:
+          {{departement}} ({{taux:number:1}}&nbsp;%, {{n:number}} conventions). Le classement
+          complet est dans le tableau de l'exploration ci-dessous, filtrable par département.</p>
+      </template>
+    </dsfr-data-repeat>
   </div>
 
-  <!-- ==========================================================================
-       Même famille que la page « hybridation en lycée », et le contraste est
-       instructif : là-bas 19 régions portant chacune leur `geo_shape`, donc une
-       choroplèthe ; ici 6 870 collectivités portant un `geo_point`, donc une
-       carte de points. Le MÊME indicateur — le taux de couverture — se colore
-       donc de deux façons différentes selon la maille :
-         · sur les polygones, `fill-field` + `breaks` (la bibliothèque discrétise) ;
-         · sur les points, il faut discrétiser à la main en `compute` puis
-           `color-field` + `color-map` (constat AM-066).
-       Les deux pages étant voisines dans ce dépôt, l'écart se voit à l'œil nu.
-       ========================================================================== -->
+  <!-- ---------- 4. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Retrouver une collectivité</h2>
+    <p class="fr-text--sm">Chaque point est une convention, colorée selon la part de sa dépense
+      que l'État a couverte. La recherche et les filtres pilotent les compteurs, la carte et le
+      tableau&nbsp;; ils ne touchent pas les graphiques ci-dessus, qui restent nationaux.</p>
+  </div>
 
-  <dsfr-data-source id="snee" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-aap-snee-collectivites"
-    fetch-mode="export" max-records="10000">
-  </dsfr-data-source>
-
-  <dsfr-data-normalize id="snee-n" source="snee"
-    compute="taux_couverture = when depenses_realisees_par_la_collectivite = 0 then null else round(montant_de_la_subvention / depenses_realisees_par_la_collectivite * 100, 1); subvention_par_ecole = when nombre_d_ecoles = 0 then null else round(montant_de_la_subvention / nombre_d_ecoles, 0); tranche_taux = when is_null(taux_couverture) then 'Non calculable' when taux_couverture &lt; 40 then 'Moins de 40 %' when taux_couverture &lt; 50 then '40 à 50 %' when taux_couverture &lt; 60 then '50 à 60 %' else '60 % et plus'; portee = when nombre_de_communes &gt; 1 then 'Intercommunalité' else 'Commune isolée'; couverture_haute = when is_null(taux_couverture) then 0 when taux_couverture &gt;= 60 then 1 else 0; couverture_basse = when is_null(taux_couverture) then 0 when taux_couverture &lt; 40 then 1 else 0">
-  </dsfr-data-normalize>
-
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="snee-q" source="snee-n"
-        fields="raison_sociale_du_signataire_de_la_convention, nom_officiel_commune_siege, departement"
-        label="Rechercher une collectivité" placeholder="Nom du signataire, commune, département…"
-        operator="words" count count-label="collectivité" url-sync>
+          fields="raison_sociale_du_signataire_de_la_convention, nom_officiel_commune_siege, departement"
+          label="Rechercher une collectivité" placeholder="Nom du signataire, commune, département…"
+          operator="words" count count-label="convention" url-sync>
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Quatre indicateurs, dont un ratio de deux sommes">
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+    <dsfr-data-kpi-group per-row="4" gap="md" class="fr-mb-3w" aria-label="La sélection en chiffres">
       <dsfr-data-kpi source="snee-f" value="count" format="nombre"
-        heading="Collectivités" label="ayant conventionné"></dsfr-data-kpi>
+        heading="Conventions" label="dans la sélection"></dsfr-data-kpi>
       <dsfr-data-kpi source="snee-f" value="nombre_d_ecoles:sum" format="nombre"
-        heading="Écoles équipées" label="dans la sélection"></dsfr-data-kpi>
-      <dsfr-data-kpi source="snee-f" value="montant_de_la_subvention:sum"
-        format="compact" unit="€"
-        heading="Subvention de l'État" label="au titre du plan de relance"></dsfr-data-kpi>
-      <!-- Ratio de deux sommes, et non moyenne des taux : la commune à deux
-           écoles ne doit pas peser autant que la métropole. -->
-      <dsfr-data-kpi source="snee-f"
-        value="montant_de_la_subvention:sum / depenses_realisees_par_la_collectivite:sum"
-        format="pourcentage" decimals="1"
-        heading="Taux de couverture" label="subvention rapportée aux dépenses"></dsfr-data-kpi>
+        heading="Écoles" label="déclarées par les signataires"></dsfr-data-kpi>
+      <dsfr-data-kpi source="snee-f" value="sub:sum" format="compact" unit="€"
+        heading="Subvention de l'État" label="accordée aux signataires"></dsfr-data-kpi>
+      <dsfr-data-kpi source="snee-f" value="sub:sum / dep:sum" format="pourcentage" decimals="1"
+        heading="Taux de couverture" label="subvention / dépense de la sélection"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
-    </div>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <div class="fr-col-12 fr-col-md-3">
         <details class="odv-filtres odv-filtres--md" open>
           <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
           </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-
-        <h2 class="fr-h6">Filtrer</h2>
+        <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="snee-f" source="snee-q"
-          fields="portee, tranche_taux, region_academique_ou_com, academie, departement"
-          labels="portee:Portée de la convention | tranche_taux:Taux de couverture | region_academique_ou_com:Région académique | academie:Académie | departement:Département"
-          display="portee:radio-inline | tranche_taux:checkbox | region_academique_ou_com:multiselect | academie:multiselect | departement:radio"
-          searchable="region_academique_ou_com, academie, departement"
-          disjunctive="region_academique_ou_com, academie"
+          fields="tranche_dep, tranche_taux, portee, region_academique_ou_com, departement"
+          labels="tranche_dep:Dépense engagée | tranche_taux:Taux de couverture | portee:Communes couvertes | region_academique_ou_com:Région académique | departement:Département"
+          display="tranche_dep:checkbox | tranche_taux:checkbox | portee:radio-inline | region_academique_ou_com:multiselect | departement:multiselect"
+          searchable="region_academique_ou_com, departement"
+          disjunctive="tranche_dep, tranche_taux, region_academique_ou_com, departement"
+          sort="region_academique_ou_com:alpha:asc | departement:alpha:asc"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
         </details>
       </div>
       <div class="fr-col-12 fr-col-md-9">
-        <div class="odv-viz" data-code="Carte des collectivités, colorée par taux de couverture">
-        <!-- La phrase de lecture est calculée, jamais écrite : un agrégat global
-             (query sans group-by, une ligne) suit les facettes comme la carte. -->
-        <dsfr-data-repeat source="snee-lect" empty="Aucune collectivité ne correspond à la sélection.">
+        <div class="odv-viz" data-code="Carte des conventions, colorées par taux de couverture">
+        <dsfr-data-repeat source="snee-lect" empty="Aucune convention ne correspond à la sélection.">
           <template>
-            <p class="odv-lecture">L'État couvre <strong>{{taux:number:1|—}} %</strong> des dépenses
-              des <strong>{{n:number}}</strong> collectivités de la sélection — mais ce taux tombe
-              sous 40 % pour <strong>{{n_bas:number}}</strong> d'entre elles et atteint 60 % ou plus
-              pour <strong>{{n_haut:number}}</strong> : c'est cet écart que la carte colore.</p>
+            <p class="odv-lecture">Dans la sélection, l'État couvre
+              <strong>{{taux:number:1|—}}&nbsp;%</strong> de la dépense de
+              <strong>{{n:number}}</strong> conventions&nbsp;; <strong>{{part65:number:0|—}}&nbsp;%</strong>
+              d'entre elles sont couvertes à 65&nbsp;% ou plus (en bleu foncé),
+              <strong>{{part40:number:0|—}}&nbsp;%</strong> à moins de 40&nbsp;% (en rouge).</p>
           </template>
         </dsfr-data-repeat>
 
         <dsfr-data-map id="carte-snee"
-          name="Collectivités signataires de l'appel à projets Socle numérique"
+          name="Conventions de l'appel à projets Socle numérique"
           height="600px" tiles="ign-plan" tiles-style="muted"
           insets="drom" fit-bounds fit-max-zoom="13">
           <dsfr-data-map-layer id="couche-snee" source="snee-f" type="circle"
             geo-field="position" radius="5" fill-opacity="0.9"
             color-field="tranche_taux"
-            color-map="Moins de 40 %:#c9191e,40 à 50 %:#e4794a,50 à 60 %:#7ab1e8,60 % et plus:#000091,Non calculable:#929292"
+            color-map="Moins de 40 %:#c9191e,40 à 50 %:#e4794a,50 à 60 %:#a1a1f8,60 à 65 %:#6a6af4,65 % et plus:#000091,Non calculable:#929292"
             tooltip-field="raison_sociale_du_signataire_de_la_convention"
             max-items="10000" cluster cluster-radius="45">
           </dsfr-data-map-layer>
-          <dsfr-data-map-legend for="couche-snee" label="Taux de couverture de la subvention"></dsfr-data-map-legend>
+          <dsfr-data-map-legend for="couche-snee" label="Taux de couverture de la convention"></dsfr-data-map-legend>
           <dsfr-data-map-popup mode="panel-right" title-field="raison_sociale_du_signataire_de_la_convention" width="380px">
             <template>
-              <p class="fr-badge fr-badge--sm fr-mb-2v">{{portee}}</p>
+              <p class="fr-badge fr-badge--sm fr-mb-2v">{{tranche_dep}}</p>
               <p class="fr-display--xs fr-mb-1v">{{taux_couverture:number:1|—}} %</p>
-              <p class="fr-text--sm fr-mb-3v">de couverture par la subvention</p>
-
+              <p class="fr-text--sm fr-mb-3v">de la dépense couverte par la subvention</p>
               <ul class="fr-text--sm fr-mb-3v">
-                <li>Subvention : <strong>{{montant_de_la_subvention:number:0}} €</strong></li>
-                <li>Dépenses engagées : <strong>{{depenses_realisees_par_la_collectivite:number:0}} €</strong></li>
-                <li>Écoles équipées : <strong>{{nombre_d_ecoles:number}}</strong></li>
-                <li>Communes couvertes : <strong>{{nombre_de_communes:number}}</strong></li>
+                <li>Subvention : <strong>{{sub:number:0}} €</strong></li>
+                <li>Dépense réalisée : <strong>{{dep:number:0}} €</strong></li>
+                <li>Écoles : <strong>{{nombre_d_ecoles:number}}</strong> · communes : <strong>{{nombre_de_communes:number}}</strong></li>
                 <li>Subvention par école : <strong>{{subvention_par_ecole:number:0|—}} €</strong></li>
               </ul>
-
               <p class="fr-text--sm fr-mb-0">
-                Siège : {{nom_officiel_commune_siege}} — {{departement}}<br>
+                Siège : {{nom_officiel_commune_siege}} — {{departement|département non renseigné}}<br>
                 académie de {{academie}} · {{region_academique_ou_com}}<br>
                 <span class="fr-text--xs">SIREN {{siren_signataire_de_la_convention}}</span>
               </p>
@@ -184,171 +384,147 @@
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="snee-f" for="carte-snee" table download
-          filename="socle-numerique-ecoles.csv"
+        <dsfr-data-a11y source="snee-f" for="carte-snee" download
+          filename="socle-numerique-conventions.csv"
           label="Données de la carte"
-          description="Une convention par ligne : signataire, subvention, dépenses, taux, écoles, communes, académie."
+          description="Une convention par ligne : signataire, subvention, dépense, taux de couverture, écoles, communes, département. Le tableau ci-dessous présente les mêmes lignes, triables."
           label-field="raison_sociale_du_signataire_de_la_convention"
-          value-field="montant_de_la_subvention, depenses_realisees_par_la_collectivite, taux_couverture, nombre_d_ecoles, nombre_de_communes, departement, academie">
+          value-field="sub, dep, taux_couverture, nombre_d_ecoles, nombre_de_communes, departement">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-7">
-        <div class="odv-viz" data-code="Écoles équipées par région académique, avec la part de chacune">
-        <h2 class="fr-h5">Écoles équipées par région académique</h2>
-        <!-- `share_percent` (#926) donne la part de chaque région dans la sélection,
-             et une query `limit="1"` sur le classement en extrait la première. -->
-        <dsfr-data-repeat source="snee-top">
-          <template>
-            <p class="odv-lecture"><strong>{{region_academique_ou_com}}</strong> arrive en tête avec
-              <strong>{{ecoles:number}}</strong> écoles équipées, soit
-              <strong>{{part:number:1}} %</strong> de la sélection.</p>
-          </template>
-        </dsfr-data-repeat>
-        <dsfr-data-chart id="g-snee-reg" source="snee-reg" type="bar" horizontal
-          label-field="region_academique_ou_com" value-field="ecoles" name="Écoles équipées"
-          databox databox-title="Écoles équipées par région académique"
-          databox-source="Ministère de l'éducation nationale — fr-en-aap-snee-collectivites"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-snee-reg" source="snee-reg" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-5">
-        <div class="odv-viz" data-code="Répartition des collectivités par tranche de taux, aux couleurs de la carte">
-        <h2 class="fr-h5">Répartition des taux</h2>
-        <dsfr-data-repeat source="snee-lect">
-          <template>
-            <p class="odv-lecture">Le taux moyen cache une dispersion large :
-              <strong>{{part_haut:number:0|—}} %</strong> des collectivités sont couvertes à 60 % ou
-              plus, <strong>{{part_bas:number:0|—}} %</strong> à moins de 40 %.</p>
-          </template>
-        </dsfr-data-repeat>
-        <dsfr-data-chart id="g-snee-taux" source="snee-taux" type="pie"
-          label-field="tranche_taux" value-field="n"
-          color-map="Moins de 40 %:#c9191e,40 à 50 %:#e4794a,50 à 60 %:#7ab1e8,60 % et plus:#000091,Non calculable:#929292"
-          databox databox-title="Collectivités par tranche de taux de couverture"
-          databox-source="Ministère de l'éducation nationale — fr-en-aap-snee-collectivites"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-snee-taux" source="snee-taux" table download></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          ✅ <code>color-map</code> sur un graphique — livré en 0.26.0 (#732). Les tranches
-          portent ici <strong>les mêmes couleurs que sur la carte</strong>, ce qui n'était pas
-          possible avant : sans lui, le camembert aurait pris les couleurs de la palette dans
-          l'ordre de sortie des séries, et le lecteur aurait dû faire la correspondance de tête.
-        </p>
-        </div>
-      </div>
+    <h3 class="fr-h5 fr-mt-4w">Les conventions de la sélection, des plus grosses aux plus petites</h3>
+    <dsfr-data-list source="snee-f"
+      columns="raison_sociale_du_signataire_de_la_convention:Signataire, departement:Département, nombre_d_ecoles:Écoles, dep:Dépense (€), sub:Subvention (€), taux_couverture:Taux (%)"
+      sort="dep:desc" pagination="10" decimals="0" count-label="convention"
+      caption="Conventions de l'appel à projets Socle numérique, triées par dépense décroissante"
+      export="csv">
+    </dsfr-data-list>
+
+    <!-- Agrégat global (une ligne) pour la phrase de la carte : suit les filtres. -->
+    <dsfr-data-query id="snee-tot" source="snee-f"
+      aggregate="un:sum:n, sub:sum:s, dep:sum:d, haut65:sum:n65, bas40:sum:n40"></dsfr-data-query>
+    <dsfr-data-normalize id="snee-lect" source="snee-tot"
+      compute="taux = when d = 0 then null else round(s / d * 100, 1); part65 = when n = 0 then null else round(n65 / n * 100, 0); part40 = when n = 0 then null else round(n40 / n * 100, 0)"></dsfr-data-normalize>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <dsfr-data-repeat source="snee-bilan">
+        <template>
+          <p class="fr-callout__text">Le socle numérique a été, pour la plupart des communes, une
+            dépense financée aux deux tiers par l'État&nbsp;: {{part65}}&nbsp;% des signataires
+            ont été couverts à 65&nbsp;% ou plus. Le taux d'ensemble de {{taux:number:1}}&nbsp;%
+            est tiré vers le bas par {{ng:number}} très grosses conventions, qui portent
+            {{part_gros_d:number:1}}&nbsp;% de la dépense pour {{taux_gros:number:1}}&nbsp;% de
+            couverture. Ce que le jeu ne dit pas&nbsp;: pourquoi — la règle de calcul de la
+            subvention et la nature des dépenses n'y figurent pas.</p>
+        </template>
+      </dsfr-data-repeat>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Le plafond de 70&nbsp;% est observé, pas lu dans un règlement.</strong> Le jeu
+          ne contient ni les taux ni les plafonds de l'appel à projets&nbsp;; la page décrit
+          ce que montrent les montants (une seule convention au-delà de 70&nbsp;%, à 82&nbsp;%)
+          et s'abstient d'en donner la cause.</li>
+        <li><strong>Une ligne, une convention.</strong> 6&nbsp;870 lignes pour 6&nbsp;866 SIREN
+          distincts (relevé le 2026-09-26)&nbsp;: quatre collectivités ont signé deux
+          conventions. Les compteurs comptent des conventions.</li>
+        <li><strong>Six conventions sans département.</strong> Quatre en Polynésie française,
+          une à Saint-Barthélemy, une à Saint-Pierre-et-Miquelon. Elles sont dans tous les
+          totaux et sur la carte, mais pas dans le classement des départements.</li>
+        <li><strong>Pas de montant par classe ni par élève.</strong> Le jeu jumeau « par école »
+          (<code>fr-en-aap-snee-ecoles</code>, 12&nbsp;624 lignes) donne le nombre de classes,
+          mais <strong>6&nbsp;995 de ses lignes portent le SIREN «&nbsp;#N/A&nbsp;»</strong>&nbsp;:
+          plus de la moitié des écoles ne se rattachent à aucune convention. Un montant par
+          classe calculé sur le reste serait celui d'un échantillon non choisi&nbsp;; la page y
+          renonce. Le nombre d'écoles affiché est celui que déclarent les signataires
+          (12&nbsp;670 au total).</li>
+        <li><strong>Subvention accordée ou versée&nbsp;?</strong> Le champ s'intitule «&nbsp;montant
+          de la subvention&nbsp;» sans préciser&nbsp;; le jeu ne date ni les conventions ni les
+          versements.</li>
+        <li><strong>Angles écartés.</strong> La carte des montants absolus par région ou
+          département (celle de l'original)&nbsp;: elle redessine la population scolaire. Le
+          classement des régions par nombre d'écoles (la reproduction précédente)&nbsp;: même
+          défaut. La subvention par école&nbsp;: elle dépend surtout de la taille des écoles,
+          que le jeu des collectivités ignore.</li>
+      </ol>
+    </section>
   </div>
 
-  <dsfr-data-query id="snee-reg" source="snee-f" group-by="region_academique_ou_com"
-    aggregate="nombre_d_ecoles:sum:ecoles, ecoles:share_percent:part" where="region_academique_ou_com:isnotnull"
-    order-by="ecoles:desc" limit="20"></dsfr-data-query>
-  <dsfr-data-query id="snee-top" source="snee-reg" limit="1"></dsfr-data-query>
-  <dsfr-data-query id="snee-taux" source="snee-f" group-by="tranche_taux"
-    aggregate="siren_signataire_de_la_convention:count:n" order-by="n:desc"></dsfr-data-query>
-
-  <!-- Les phrases de lecture : un agrégat global (une ligne), puis les ratios en
-       `compute` — le taux national est un ratio de sommes, pas une moyenne de taux. -->
-  <dsfr-data-query id="snee-tot" source="snee-f"
-    aggregate="siren_signataire_de_la_convention:count:n, montant_de_la_subvention:sum:sub, depenses_realisees_par_la_collectivite:sum:dep, couverture_haute:sum:n_haut, couverture_basse:sum:n_bas"></dsfr-data-query>
-  <dsfr-data-normalize id="snee-lect" source="snee-tot"
-    compute="taux = when dep = 0 then null else round(sub / dep * 100, 1); part_haut = when n = 0 then null else round(n_haut / n * 100, 0); part_bas = when n = 0 then null else round(n_bas / n * 100, 0)">
-  </dsfr-data-normalize>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
-  <details class="odv-technique" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-    <section class="fr-pt-4w">
-    <div>
-      <h2>Analyse de reproduction — Socle numérique dans les écoles</h2>
-
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — Socle numérique dans les écoles</h2>
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine : une <strong>vue de jeu héritée</strong>, slug <code>custom</code>.
-        Fiche d'audit : <code>docs/portail-education/aap-socle-numerique-ecoles.md</code>.
+        Cible d'origine&nbsp;: une <strong>vue de jeu héritée</strong> (slug <code>custom</code>),
+        deux onglets de choroplèthes de montants. Fiche d'audit&nbsp;:
+        <code>docs/portail-education/aap-socle-numerique-ecoles.md</code>. Recréée le 2026-09-26
+        en page éditoriale.
       </p>
-
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong><code>color-map</code> sur un graphique, premier emploi.</strong> Livré en
-              0.26.0 (#732) et disponible depuis la montée en 0.27.0 de ce dépôt. Le camembert
-              des tranches de taux porte <strong>exactement les couleurs de la carte</strong> :
-              rouge pour les taux faibles, bleu pour les élevés. Sans lui, il aurait pris les
-              couleurs de la palette dans l'ordre de sortie des séries, et le lecteur aurait dû
-              faire la correspondance de tête entre deux visuels voisins.</li>
-            <li><strong>Quatre indicateurs dérivés en une expression.</strong> Taux de couverture,
-              subvention par école, tranche de taux et portée de la convention : un seul
-              <code>compute</code>, et le <code>when … = 0 then null</code> qui évite la division
-              par zéro. La tranche sert à la fois la couleur de la carte, une facette et le
-              camembert.</li>
-            <li><strong>Le ratio de deux sommes, encore.</strong> Comme sur la page voisine, le
-              taux national s'écrit <code>subvention:sum / depenses:sum</code> et non comme la
-              moyenne des 6 870 taux — qui ferait peser une commune à deux écoles autant que
-              Paris.</li>
+            <li><strong>Des ratios de sommes par sous-ensemble, sans seconde requête.</strong>
+              Des montants conditionnels en <code>compute</code>
+              (<code>sub_gros = when gros = 1 then sub else 0</code>), une query sans
+              <code>group-by</code>, et chapô, KPI et phrases lisent la même ligne.</li>
+            <li><strong>Des tranches ordonnées.</strong> <code>group-by="ordre_dep, tranche_dep"</code>
+              + <code>order-by="ordre_dep:asc"</code>&nbsp;: les paliers sortent dans l'ordre
+              du montant, pas dans l'ordre alphabétique.</li>
+            <li><strong>Une ligne de référence calculée.</strong> Le graphique est estampé dans un
+              <code>dsfr-data-repeat</code> du bilan&nbsp;: <code>reference-lines</code> reçoit le
+              taux d'ensemble par <code>{{taux}}</code>, jamais écrit à la main.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le même indicateur se colore de deux façons selon la maille.</strong>
-              Ce jeu et celui de <a href="/education/hybridation-enseignement-lycee">l'hybridation
-              en lycée</a> sont jumeaux : mêmes champs, même convention, même taux de couverture.
-              Mais l'un porte des <code>geo_shape</code> régionaux et l'autre des
-              <code>geo_point</code> communaux — de sorte que sur la page voisine
-              <code>fill-field</code> + <code>breaks</code> suffisent et que la bibliothèque
-              discrétise, tandis qu'ici il faut écrire la discrétisation à la main en
-              <code>compute</code>, inventer des libellés de tranche, et les mapper une par une
-              en <code>color-map</code>. <strong>Les deux pages étant voisines dans ce dépôt,
-              l'écart se voit à l'œil nu</strong> — et c'est l'illustration la plus nette du
-              constat AM-066 : ce n'est pas une capacité qui manque, c'est une capacité qui
-              existe et s'arrête à un type de couche.</li>
-            <li><strong>Un taux à 52,5 % qui recouvre des situations très différentes.</strong>
-              La distribution des 6 870 taux est large, et le KPI national ne la montre pas. Le
-              camembert des tranches a été ajouté pour cela — il n'existe pas dans l'original,
-              qui n'affiche aucun taux.</li>
+            <li><strong>Pas de médiane.</strong> «&nbsp;La collectivité type&nbsp;» se dirait mieux
+              par la médiane des taux (63,7&nbsp;% sur l'export complet du 2026-09-26) que par une part de
+              tranche&nbsp;; <code>dsfr-data-query</code> n'agrège ni médiane ni quantile, et celle
+              d'Opendatasoft est approchée (AM-091). La page raconte la même chose par la part
+              des collectivités à 65&nbsp;% ou plus.</li>
+            <li><strong><code>y-min</code> sur un <code>bar</code> horizontal</strong> ajoute une
+              catégorie «&nbsp;0&nbsp;» sous la dernière barre (même mécanisme que
+              <code>y-max</code>, LIM-018)&nbsp;: attribut retiré, l'axe part de zéro sans lui.</li>
+            <li><strong>Le jeu frère est inexploitable pour un montant par classe</strong>
+              (SIREN «&nbsp;#N/A&nbsp;» sur 6&nbsp;995 écoles) — une limite de la donnée, pas de la
+              bibliothèque.</li>
           </ul>
         </div>
       </div>
-
       <div class="fr-table fr-table--bordered">
         <table>
-          <caption>Correspondance vue de jeu → composant dsfr-data</caption>
+          <caption>Correspondance vue Opendatasoft → composant dsfr-data</caption>
           <thead>
             <tr><th scope="col">Vue d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>contexte de la vue personnalisée</td><td><code>dsfr-data-source fetch-mode="export"</code></td><td>Équivalent</td></tr>
-            <tr><td>épingles uniformes</td><td><code>compute</code> + <code>color-field</code> + <code>color-map</code></td><td>Meilleur : le taux est représenté — mais par un détour, faute de <code>fill-field</code> sur les points</td></tr>
-            <tr><td>—</td><td>KPI en ratio de deux sommes</td><td>Sans équivalent : l'original n'affiche aucun taux</td></tr>
-            <tr><td>—</td><td>camembert des tranches, aux couleurs de la carte</td><td>Sans équivalent, et impossible avant la 0.26.0</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code>, recherche, <code>url-sync</code></td><td>Sans équivalent côté Opendatasoft</td></tr>
+            <tr><td><code>ods-analysis</code> + <code>ng-init</code> (couleurs par ternaires)</td><td><code>dsfr-data-query group-by</code> + <code>compute</code> (tranches)</td><td>Plus simple&nbsp;: les seuils sont écrits une fois</td></tr>
+            <tr><td><code>ods-map-layer display="categories"</code> (montants par région)</td><td>trois graphiques de taux + carte des conventions (<code>color-field</code> + <code>color-map</code>)</td><td>Choix éditorial&nbsp;: le taux remplace le montant absolu</td></tr>
+            <tr><td><code>ods-adv-analysis</code> (une requête par clic)</td><td><code>dsfr-data-map-popup</code> sur la ligne déjà chargée</td><td>Zéro requête au clic</td></tr>
+            <tr><td><code>ods-simple-tabs</code> régions / départements</td><td>facettes <code>region_academique_ou_com</code>, <code>departement</code> + tableau trié</td><td>Équivalent, sans perte d'état</td></tr>
+            <tr><td>—</td><td>KPI en ratio de sommes, phrases calculées, <code>dsfr-data-a11y</code>, recherche, <code>url-sync</code></td><td>Sans équivalent dans l'original</td></tr>
           </tbody>
         </table>
       </div>
-
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, et cette page vaut surtout par sa
-          <strong>voisine</strong> : deux jeux jumeaux, deux mailles géographiques, deux façons
-          de colorer le même indicateur. Sur des polygones, trois attributs et la bibliothèque
-          fait le travail ; sur des points, il faut discrétiser soi-même, nommer les tranches et
-          les mapper une à une. Le résultat est équivalent à l'écran — c'est le chemin qui
-          diffère, et c'est exactement ce que le constat AM-066 demande de corriger.</p>
+        <p>Recréation <strong>sans friction de bibliothèque</strong>&nbsp;: un jeu de 6&nbsp;870
+          lignes chargé en une requête, tout le reste en <code>compute</code> et en query côté
+          client. Le travail a été éditorial — trouver que le taux d'ensemble ne décrit presque
+          aucune collectivité. Seul manque rencontré&nbsp;: une médiane.</p>
       </div>
-    </div>
-  </section>
-  </details>
+      </section>
+    </details>
   </div>
 
 </main>

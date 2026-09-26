@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Passe ton Hack d'abord — pilotage du challenge cyber — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du tableau de bord du challenge cyber « Passe ton Hack d'abord » : 9 641 élèves, 2 257 équipes, 15,3 % de filles, et l'évolution que l'original promet sans la montrer.">
+  <meta name="description" content="Recréation avec dsfr-data du tableau de bord du challenge cyber « Passe ton Hack d'abord » : le jeu a été remis à zéro pour la 5e édition, et dès la première semaine les filles y sont encore plus rares qu'à la clôture de la 4e — concentrées dans une poignée de lycées.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,112 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       Le jeu est un COMPTEUR REMIS À ZÉRO à chaque édition : le 2026-09-10 il
+       portait les 557 inscriptions de la 4e édition, le 2026-09-26 il n'en porte
+       plus que 49, toutes de la 5e (ouverte le 14 septembre). La reproduction
+       précédente écrivait « 557 », « 9 641 », « 15,3 % » en dur : tout était
+       devenu faux sans qu'aucune erreur ne s'affiche. Ici, tout chiffre de
+       l'édition en cours est CALCULÉ ; les seuls chiffres écrits sont ceux de la
+       4e édition, datés, parce qu'ils n'existent plus nulle part à l'API.
+
+       Une ligne = une inscription (un formulaire Grist), pas un lycée : un même
+       lycée peut en déposer plusieurs.
+       ========================================================================== -->
+
+  <!-- Un seul aller-retour, tout en client. `max-records` relevé par principe :
+       la 4e édition a atteint 557 lignes, le plafond par défaut (1 000) tronque
+       en silence. La ligne sans aucun élève déclaré (un formulaire vide) est
+       écartée par le serveur. -->
+  <dsfr-data-source id="pth" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="challenge-cyber-passe-ton-hack-d-abord"
+    fetch-mode="export" max-records="3000" refresh="600"
+    where="nombre_eleves > 0">
+  </dsfr-data-source>
+
+  <!-- Indicateurs par ligne, sommés plus bas : un ratio de SOMMES, jamais une
+       moyenne de taux. `fg` = filles + garçons déclarés : la part des filles
+       se rapporte aux déclarations par sexe, pas au total déclaré ailleurs
+       (les deux ne bouclent pas sur trois inscriptions). -->
+  <dsfr-data-normalize id="pth-n" source="pth"
+    compute="fg = nb_filles + nb_garcons;
+             ecart = when fg != nombre_eleves then 1 else 0;
+             sans_fille = when nb_filles = 0 then 1 else 0;
+             au_plus_2 = when nb_filles &lt;= 2 then 1 else 0;
+             n10 = when nb_filles &gt;= 10 then 1 else 0;
+             f10 = when nb_filles &gt;= 10 then nb_filles else 0;
+             hors_annuaire = when is_empty(libelle_academie) then 1 else 0;
+             f_pub = when secteur_public_prive_libe = 'Public' then nb_filles else 0;
+             fg_pub = when secteur_public_prive_libe = 'Public' then fg else 0;
+             n_pub = when secteur_public_prive_libe = 'Public' then 1 else 0;
+             f_priv = when secteur_public_prive_libe = 'Privé' then nb_filles else 0;
+             fg_priv = when secteur_public_prive_libe = 'Privé' then fg else 0;
+             n_priv = when secteur_public_prive_libe = 'Privé' then 1 else 0;
+             debut = when cree_a &lt;= '2026-09-15' then 1 else 0;
+             secteur = coalesce(secteur_public_prive_libe, 'Hors annuaire');
+             classe_f = when nb_filles = 0 then 'Aucune fille' when nb_filles &lt;= 2 then 'Une ou deux filles' when nb_filles &lt; 10 then 'De trois à neuf filles' else 'Dix filles ou plus';
+             ordre_f = when nb_filles = 0 then 1 when nb_filles &lt;= 2 then 2 when nb_filles &lt; 10 then 3 else 4;
+             jj = when day(cree_a) &lt; 10 then concat('0', day(cree_a)) else concat('', day(cree_a));
+             mm = when month(cree_a) &lt; 10 then concat('0', month(cree_a)) else concat('', month(cree_a));
+             jour = concat(jj, '/', mm);
+             k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Le chapô : une ligne, toute l'édition ---------- -->
+  <dsfr-data-query id="nat" source="pth-n" group-by="k"
+    aggregate="identifiant_etablissement:count:n, identifiant_etablissement:distinct:lycees,
+               nombre_eleves:sum:eleves, nombre_d_equipes_a_inscrire:sum:equipes,
+               nb_filles:sum:filles, fg:sum:fg,
+               sans_fille:sum:n0, au_plus_2:sum:n2, n10:sum:n10, f10:sum:f10,
+               ecart:sum:n_ecart, hors_annuaire:sum:n_hors, debut:sum:n_debut,
+               f_pub:sum:f_pub, fg_pub:sum:fg_pub, n_pub:sum:n_pub,
+               f_priv:sum:f_priv, fg_priv:sum:fg_priv, n_priv:sum:n_priv"></dsfr-data-query>
+  <!-- `cree_a:max` dans une query rend 2026 — l'ANNÉE, sans avertissement :
+       l'agrégat passe par parseFloat, qui s'arrête au premier tiret. La
+       dernière inscription se lit donc par un tri. -->
+  <dsfr-data-query id="dern" source="pth-n" order-by="cree_a:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="dern-r" source="dern" rename="cree_a:derniere"></dsfr-data-normalize>
+  <dsfr-data-join id="chapo-j" left="nat" right="dern-r" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="chapo" source="chapo-j"
+    compute="taux = filles * 100 / fg;
+             garcons_par_fille = (fg - filles) / filles;
+             part_n2 = n2 * 100 / n;
+             part_f10 = f10 * 100 / filles;
+             part_debut = n_debut * 100 / n;
+             lignes_en_plus = n - lycees;
+             ecart_eleves = fg - eleves;
+             t_pub = f_pub * 100 / fg_pub;
+             t_priv = f_priv * 100 / fg_priv;
+             prive_moins = when t_priv &lt; t_pub then 'oui' else '';
+             prive_plus = when t_priv &gt;= t_pub then 'oui' else ''"></dsfr-data-normalize>
+
+  <!-- 1. Les inscriptions selon le nombre de filles qu'elles déclarent. -->
+  <dsfr-data-query id="cl" source="pth-n" group-by="classe_f, ordre_f"
+    aggregate="identifiant_etablissement:count:n, nb_filles:sum:filles"
+    order-by="ordre_f:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="cl-tab" source="cl"
+    rename="classe_f:Filles déclarées | n:Inscriptions | filles:Filles"></dsfr-data-normalize>
+
+  <!-- 2. Public / privé : part des filles, ratio de sommes. Les inscriptions
+       non appariées à l'annuaire n'ont pas de secteur : écartées ici, dites en page. -->
+  <dsfr-data-query id="sect" source="pth-n" group-by="secteur"
+    aggregate="nb_filles:sum:filles, fg:sum:fg, identifiant_etablissement:count:n"
+    where="hors_annuaire:eq:0" order-by="secteur:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="sect-t" source="sect" compute="taux = filles * 100 / fg"></dsfr-data-normalize>
+  <dsfr-data-normalize id="sect-r" source="sect-t" round="taux:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="sect-tab" source="sect-r"
+    rename="secteur:Secteur | taux:Part des filles (%) | filles:Filles | fg:Élèves déclarés par sexe | n:Inscriptions"></dsfr-data-normalize>
+
+  <!-- 3. Le rythme : inscriptions par jour de dépôt, puis cumul (après order-by). -->
+  <dsfr-data-query id="jours" source="pth-n" group-by="cree_a, jour"
+    aggregate="identifiant_etablissement:count:n, nombre_eleves:sum:eleves, n:running_sum:cumul"
+    order-by="cree_a:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="jours-tab" source="jours"
+    rename="jour:Jour de dépôt | n:Inscriptions du jour | cumul:Inscriptions cumulées | eleves:Élèves inscrits ce jour"></dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,426 +138,355 @@
       </div>
     </nav>
 
-    <h1>Pilotage du challenge cyber « Passe ton Hack d'abord »</h1>
+    <h1>Challenge cyber « Passe ton Hack d'abord »&nbsp;: la 5<sup>e</sup> édition repart, et les filles y restent l'exception</h1>
 
-    <p class="fr-text--lead">
-      Inscriptions des lycées au challenge « Capture The Flag » organisé par le Commandement de la
-      cyberdéfense (ministère des Armées) et le ministère de l'Éducation nationale, 4<sup>e</sup>
-      édition. <strong>557 inscriptions</strong>, <strong>9 641 élèves</strong>,
-      <strong>2 257 équipes</strong> — et <strong>15,3 % de filles</strong>, qui est le seul
-      enseignement fort du jeu et que l'original rend illisible.
+    <!-- Chapô CALCULÉ ; seul le 15,3 % de la 4e édition est écrit, daté. -->
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="fr-text--lead">
+          Depuis la réouverture des inscriptions le 14 septembre 2026, <strong>{{n}} inscriptions
+          venues de {{lycees}} lycées</strong> déclarent <strong>{{eleves:number}} élèves</strong>
+          et {{equipes:number}} équipes (dernière inscription enregistrée le {{derniere:date}}).
+          Parmi les élèves déclarés par sexe, <strong>{{taux:number:1}}&nbsp;% sont des
+          filles</strong> — une pour {{garcons_par_fille:number:0}} garçons —, contre 15,3&nbsp;% à
+          la clôture de la 4<sup>e</sup> édition. Et ces filles tiennent dans quelques lycées&nbsp;:
+          {{n0}} inscriptions n'en déclarent aucune.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      « Passe ton Hack d'abord » est un challenge de cybersécurité de type <em>Capture The
+      Flag</em>, organisé par le Commandement de la cyberdéfense (ministère des Armées) et le
+      ministère de l'Éducation nationale pour les lycéens et les étudiants de BTS et de classes
+      préparatoires. Le jeu publie les inscriptions telles que les lycées les saisissent, mises à
+      jour depuis un formulaire Grist&nbsp;; il est <strong>remis à zéro à chaque édition</strong>.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé, et ce qu'il a perdu</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/challenge-cyber-passe-ton-hack-d-abord/"
            target="_blank" rel="noopener external"><code>challenge-cyber-passe-ton-hack-d-abord</code></a>
-        — <strong>557 lignes</strong>, 30 champs, DGESCO, Licence Ouverte 2.0, alimenté
-        quotidiennement depuis Grist. Les douze premiers champs viennent du formulaire
-        d'inscription, les dix-huit suivants d'un appariement à l'annuaire de l'éducation par UAI.
-        <strong>103 Ko en une requête, mesuré à 0,13 s</strong> : tout est chargé côté client, ce
-        qui donne gratuitement les cinq filtres et la recherche que l'original n'a pas.
+        — DGESCO, Licence Ouverte 2.0, lecture sans clé. Une ligne par inscription déposée par un
+        lycée&nbsp;: élèves, filles, garçons, équipes, type de challenge, puis, par appariement du
+        code UAI à l'annuaire de l'éducation, académie, secteur et position.
       </p>
       <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>29 inscriptions n'ont pas trouvé leur UAI dans l'annuaire</strong> : elles n'ont ni
-        académie, ni région, ni département, ni secteur, ni type d'établissement. Elles pèsent
-        <strong>462 élèves, soit 4,8 % du total affiché</strong>, comptent dans les compteurs et
-        sont absentes de tous les graphiques et de toutes les cartes. L'original ne le dit nulle
-        part. <strong>32 lignes n'ont pas de position</strong> : la carte en montre 525 sur 557.
+        <strong>La 4<sup>e</sup> édition n'est plus dans le jeu.</strong> Relevée à l'API le
+        10 septembre 2026, elle comptait 557 inscriptions de 425 lycées, 9&nbsp;641 élèves
+        déclarés et 2&nbsp;257 équipes, du 3 septembre 2025 au 22 avril 2026, dont 1&nbsp;476 filles
+        pour 8&nbsp;195 garçons (15,3&nbsp;%). Ces chiffres ne se retrouvent plus à l'API&nbsp;: la
+        page d'origine avait annoncé que « les compteurs seront remis à zéro » le 14 septembre,
+        et le jeu n'en garde aucune archive. C'est la seule base de comparaison de cette page.
       </p>
     </details>
 
-    <details class="fr-callout fr-icon-information-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Pourquoi cette page existe : trois domaines pour une seule page</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        L'entrée n° 11 du catalogue de <code>data.education.gouv.fr</code> pointe vers
-        <strong><code>dataeducation.huwise.com</code></strong> — l'alias d'hôte de l'éditeur.
-        Vérifié : mêmes adresses IP, mêmes 306 jeux de données, configuration Studio identique à
-        l'octet près sur les trois domaines. Ce n'est pas un portail parallèle, c'est
-        <em>le même portail servi sous un nom commercial</em>, avec le bloc-marque
-        « GOUVERNEMENT », les mentions légales de l'État et un bandeau cookies dont le consentement
-        ne vaut que pour le <code>.com</code>. Pour couronner le tout, le lien du chapô d'origine
-        s'intitule « data.education.gouv.fr » et pointe vers
-        <code>dataeducation.opendatasoft.com</code> : <strong>trois domaines pour une même page,
-        dont un seul est celui de l'État</strong>.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        La donnée, elle, est bien sur le portail officiel : mêmes 557 lignes, même date de
-        modification, 200 en anonyme. Il n'y a rien à rapatrier, rien à négocier — juste un
-        <code>base-url</code> à écrire.
-      </p>
-    </details>
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="pth-n" value="nb_filles:sum / fg:sum" format="pourcentage" decimals="1"
+        heading="de filles parmi les élèves inscrits"
+        lines='[{"value":"nb_filles:sum","format":"nombre","suffix":" filles"},{"text":"4e édition, à la clôture : 15,3 %"}]'
+        label="élèves déclarés par sexe, 5e édition en cours"></dsfr-data-kpi>
+      <dsfr-data-kpi source="pth-n" value="count:nb_filles:0 / count" format="pourcentage" decimals="0"
+        heading="des inscriptions ne comptent aucune fille"
+        lines='[{"value":"count:nb_filles:0","format":"nombre","suffix":" inscriptions"},{"value":"count","format":"nombre","prefix":"sur "}]'
+        label="une inscription regroupe une ou plusieurs équipes d'un lycée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="pth-n" value="nombre_eleves:sum" format="nombre"
+        heading="élèves inscrits"
+        lines='[{"value":"nombre_d_equipes_a_inscrire:sum","format":"nombre","suffix":" équipes"},{"value":"cree_a:max","format":"date","prefix":"dernière inscription le "}]'
+        label="4e édition, à la clôture : 9 641 élèves"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
 
-    <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-4w">
-      <h3 class="fr-alert__title">Périmètre</h3>
-      <p class="fr-text--sm">
-        Ce qui est reproduit ici est le <strong>tableau de bord de mobilisation</strong> —
-        participation, équipes, répartition géographique. Aucun contenu d'épreuve n'est décrit.
-        La donnée s'arrête au 22 avril 2026 ; la 5<sup>e</sup> édition ouvre le 14 septembre 2026.
-      </p>
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. Les filles tiennent dans une poignée de lycées&nbsp;: la plupart des inscriptions n'en comptent aucune ou presque</h2>
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="odv-lecture"><strong>{{n2}} inscriptions sur {{n}}</strong> ({{part_n2:number:0}}&nbsp;%)
+          déclarent au plus deux filles, dont {{n0}} aucune. À l'autre bout, les
+          <strong>{{n10}} inscriptions qui en déclarent dix ou plus réunissent
+          {{part_f10:number:0}}&nbsp;% des {{filles}} filles</strong> de l'édition. La part
+          moyenne des filles ne décrit donc aucun lycée réel&nbsp;: elle mêle une majorité
+          d'équipes entièrement masculines et quelques établissements qui mobilisent
+          vraiment.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Inscriptions selon le nombre de filles qu'elles déclarent">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-cl" source="cl" type="bar"
+        label-field="classe_f" value-field="n:Inscriptions"
+        y-min="0" unit-tooltip="inscriptions" selected-palette="neutral" highlight-index="[0]"
+        databox databox-title="Inscriptions à la 5e édition, selon le nombre de filles qu'elles déclarent"
+        databox-source="DGESCO — challenge-cyber-passe-ton-hack-d-abord, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-cl" source="cl-tab" table download
+        filename="passe-ton-hack-inscriptions-par-nombre-de-filles.csv"
+        label-field="Filles déclarées" value-field="Inscriptions, Filles"
+        description="Nombre d'inscriptions de la 5e édition selon le nombre de filles qu'elles déclarent : aucune, une ou deux, de trois à neuf, dix ou plus ; et le nombre de filles que chaque groupe réunit. Les inscriptions sans fille ou avec une ou deux filles sont les plus nombreuses ; quelques inscriptions réunissent une grande part des filles."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. La nuance ---------- -->
+    <!-- Le titre suit la donnée : deux branches côte à côte, une seule rendue. -->
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <h2 class="fr-h3">2. {{#if prive_moins}}Dans les lycées privés inscrits, les filles sont plus rares encore{{/if}}{{#unless prive_moins}}Les lycées privés inscrits ne font pas moins bien que le public{{/unless}}</h2>
+        <p class="odv-lecture">Dans les inscriptions des lycées publics, les filles font
+          <strong>{{t_pub:number:1}}&nbsp;%</strong> des élèves déclarés par sexe ({{f_pub}} sur
+          {{fg_pub}}, {{n_pub}} inscriptions)&nbsp;; dans celles des lycées privés,
+          <strong>{{t_priv:number:1}}&nbsp;%</strong> ({{f_priv}} sur {{fg_priv}},
+          {{n_priv}} inscriptions). Sur si peu d'inscriptions, l'écart dit surtout où se
+          trouvent les rares lycées qui mobilisent des filles&nbsp;: il suffit d'un établissement
+          pour le déplacer.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Part des filles parmi les élèves inscrits, par secteur">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-sect" source="sect-r" type="bar"
+        label-field="secteur" value-field="taux:Part des filles (%)"
+        y-min="0" unit-tooltip="%" selected-palette="neutral" highlight-index="[1]"
+        databox databox-title="Part des filles parmi les élèves déclarés par sexe, par secteur du lycée, 5e édition en cours"
+        databox-source="DGESCO — challenge-cyber-passe-ton-hack-d-abord, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-sect" source="sect-tab" table download
+        filename="passe-ton-hack-filles-par-secteur.csv"
+        label-field="Secteur" value-field="Part des filles (%), Filles, Élèves déclarés par sexe, Inscriptions"
+        description="Part des filles parmi les élèves déclarés par sexe, dans les inscriptions des lycées publics et des lycées privés. Ratio de sommes. Les inscriptions dont le code UAI n'a pas été trouvé dans l'annuaire, sans secteur, sont écartées."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. Le contexte : où en est l'édition ---------- -->
+    <h2 class="fr-h3">3. L'édition ne fait que commencer&nbsp;: la précédente avait couru jusqu'en janvier</h2>
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="odv-lecture"><strong>{{n_debut}} des {{n}} inscriptions</strong>
+          ({{part_debut:number:0}}&nbsp;%) sont arrivées les deux premiers jours, les 14 et
+          15 septembre. La 4<sup>e</sup> édition avait fermé ses inscriptions le 6 janvier 2026
+          avec 557 inscriptions&nbsp;: les chiffres de cette page sont ceux d'une édition qui
+          commence, pas un bilan. Rien ne dit encore si les filles arriveront plus tard.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Inscriptions cumulées, par jour de dépôt">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-jours" source="jours" type="line"
+        label-field="jour" value-field="cumul" name="Inscriptions cumulées"
+        y-min="0" unit-tooltip="inscriptions"
+        databox databox-title="Inscriptions cumulées à la 5e édition, par jour de dépôt"
+        databox-source="DGESCO — challenge-cyber-passe-ton-hack-d-abord, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-jours" source="jours-tab" table download
+        filename="passe-ton-hack-inscriptions-par-jour.csv"
+        label-field="Jour de dépôt" value-field="Inscriptions du jour, Inscriptions cumulées, Élèves inscrits ce jour"
+        description="Inscriptions à la 5e édition, par jour de dépôt, et leur cumul depuis l'ouverture du 14 septembre 2026. Seuls les jours où au moins une inscription a été déposée figurent."></dsfr-data-a11y>
     </div>
   </div>
 
-  <!-- ==========================================================================
-       557 lignes, 30 champs : un seul aller-retour, tout en client. Pas de
-       `select` — sur un jeu de 100 Ko, l'arbitrage n'a même pas lieu d'être.
-       Portail visé : data.education.gouv.fr, pas l'alias de l'éditeur.
-       ========================================================================== -->
-  <dsfr-data-source id="pth" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="challenge-cyber-passe-ton-hack-d-abord"
-    fetch-mode="export" max-records="2000" refresh="600">
-  </dsfr-data-source>
-
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+  <!-- ---------- 4. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Retrouver un lycée inscrit</h2>
+    <p class="fr-text--sm">Toutes les inscriptions, une par ligne. La recherche et les filtres
+      pilotent les compteurs, la carte et la liste&nbsp;; ils ne touchent pas les graphiques
+      ci-dessus.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
-        <dsfr-data-search id="pth-q" source="pth"
-        fields="etablissement_nom_etablissement, ville, libelle_commune, identifiant_etablissement"
-        label="Chercher un lycée" placeholder="Nom d'établissement, ville, code UAI…"
-        operator="words" count count-label="lycée" url-sync>
+        <dsfr-data-search id="pth-q" source="pth-n"
+          fields="etablissement_nom_etablissement, appellation_officielle, ville, libelle_commune, identifiant_etablissement"
+          label="Chercher un lycée" placeholder="Nom d'établissement, ville, code UAI…"
+          operator="words" count count-label="inscription" url-sync url-search-param="q">
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <h2 class="fr-h4">Le challenge en chiffres</h2>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-2w">
-      <dsfr-data-kpi source="pth-f" value="nombre_eleves:sum" format="nombre"
-        heading="Élèves" label="inscrits"></dsfr-data-kpi>
-      <dsfr-data-kpi source="pth-f" value="nombre_d_equipes_a_inscrire:sum" format="nombre"
-        heading="Équipes" label="inscrites"></dsfr-data-kpi>
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
       <dsfr-data-kpi source="pth-f" value="count" format="nombre"
-        heading="Inscriptions" label="dans la sélection"></dsfr-data-kpi>
-      <dsfr-data-kpi source="pth-f"
-        value="nb_filles:sum / nombre_eleves:sum" format="pourcentage" decimals="1"
-        heading="Filles" label="parmi les élèves inscrits"></dsfr-data-kpi>
+        heading="Inscriptions" label="dans la sélection"
+        lines='[{"value":"identifiant_etablissement:distinct","format":"nombre","suffix":" lycées distincts"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="pth-f" value="nombre_eleves:sum" format="nombre"
+        heading="Élèves" label="déclarés dans la sélection"
+        lines='[{"value":"nombre_d_equipes_a_inscrire:sum","format":"nombre","suffix":" équipes"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="pth-f" value="nb_filles:sum / fg:sum" format="pourcentage" decimals="1"
+        heading="Filles" label="parmi les élèves déclarés par sexe"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
-    <div class="fr-alert fr-alert--warning fr-alert--sm fr-mb-4w">
-      <p class="fr-text--sm">
-        <strong>Les déclarations par sexe ne bouclent pas.</strong> 1 476 filles et
-        8 195 garçons font <strong>9 671</strong>, contre <strong>9 641</strong> élèves
-        déclarés au total : <strong>22 inscriptions sont en écart avec elles-mêmes</strong>,
-        pour +30 élèves. Le compteur ci-dessus rapporte les filles au total déclaré ; rapportées
-        à la somme des deux sexes, elles font 15,26 % au lieu de 15,31 %. L'original affiche
-        9 641 dans un compteur et répartit 9 671 dans son graphique de mixité, sans le dire.
-      </p>
-    </div>
-
-    <h2 class="fr-h4">Mixité, par académie</h2>
-    <p class="fr-text--sm fr-mb-2w">
-      L'original construit ce graphique sur <code>type_etablissement</code>, un champ qui
-      contient <strong>424 identifiants Grist</strong> (<code>11211</code>, <code>12869</code>…)
-      et une seule valeur textuelle. Résultat à l'écran : une centaine de barres de trois
-      pixels étiquetées par des nombres, triées comme des chaînes, et tronquées à 100 groupes
-      sur 424 par la pagination par défaut de l'API. Ici, l'axe porte l'académie.
-    </p>
-    <div class="odv-chart-slot">
-      <div class="odv-viz" data-code="Filles et garçons inscrits, par académie">
-      <dsfr-data-chart id="g-mixite" source="pth-mixite" type="bar" stacked horizontal
-        label-field="libelle_academie"
-        value-field="filles:Filles" value-fields="garcons:Garçons"
-        unit-tooltip="élèves" heading-level="3"
-        databox databox-title="Filles et garçons inscrits, par académie"
-        databox-source="DGESCO — challenge-cyber-passe-ton-hack-d-abord"
-        databox-download databox-screenshot></dsfr-data-chart>
-      <dsfr-data-a11y for="g-mixite" source="pth-mixite" table download
-        label-field="libelle_academie" value-field="filles, garcons"
-        label="Filles et garçons inscrits, par académie"></dsfr-data-a11y>
-      </div>
-    </div>
-
-    <h2 class="fr-h4 fr-mt-6w">L'évolution des inscriptions</h2>
-    <p class="fr-text--sm fr-mb-2w">
-      « Permet d'en suivre l'<strong>évolution</strong> » : la phrase figure dans la
-      description du catalogue, dans celle de l'actif et dans le chapô de la page d'origine.
-      <strong>Aucune série temporelle n'y figure.</strong> Le jeu porte pourtant
-      <code>cree_a</code>, du 3 septembre 2025 au 22 avril 2026. Le pic est en décembre
-      (4 072 élèves inscrits dans le mois) ; les inscriptions se ferment le 6 janvier 2026.
-    </p>
-    <div class="odv-chart-slot">
-      <div class="odv-viz" data-code="Élèves inscrits, par mois de dépôt">
-      <dsfr-data-chart id="g-temps" source="pth-temps" type="line"
-        label-field="periode" value-field="eleves" name="Élèves inscrits dans le mois"
-        unit-tooltip="élèves" heading-level="3"
-        databox databox-title="Élèves inscrits, par mois de dépôt"
-        databox-source="DGESCO — challenge-cyber-passe-ton-hack-d-abord"
-        databox-download></dsfr-data-chart>
-      <dsfr-data-a11y for="g-temps" source="pth-temps" table download></dsfr-data-a11y>
-      </div>
-    </div>
-
-    <h2 class="fr-h4 fr-mt-6w">Les dix premières académies</h2>
-    <p class="fr-text--sm fr-mb-2w">
-      L'original a un histogramme <code>limit: "10"</code> intitulé « par Académie », sans dire
-      qu'il est limité à dix — il y a 31 académies dans la donnée, de Versailles (896 élèves)
-      à la Guyane (3). Ici le titre le dit, et le rang est rendu par un composant qui le nomme.
-    </p>
-    <div class="odv-viz" data-code="Graphique">
-    <dsfr-data-podium source="pth-aca"
-      label-field="libelle_academie" value-field="eleves"
-      value-unit="élèves" max-items="10"
-      selected-palette="sequentialDescending"></dsfr-data-podium>
-    </div>
-
-    <h2 class="fr-h4 fr-mt-6w">Répartition territoriale</h2>
-    <p class="fr-text--sm fr-mb-2w">
-      Chez l'original, la carte des régions affiche cinq vignettes ultramarines et
-      <strong>la carte des départements, juste en dessous, n'en affiche aucune</strong> : La
-      Réunion (153 élèves), la Guadeloupe (97), la Martinique (59), Mayotte (38) et la Guyane
-      (3) disparaissent d'une carte à l'autre, sans un mot. Ici les deux tracés portent les
-      DROM.
-    </p>
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-viz" data-code="Élèves inscrits par région">
-        <dsfr-data-chart id="g-reg" source="pth-reg" type="map-reg"
-          code-field="code_region" value-field="eleves"
-          name="Élèves inscrits" unit-tooltip="élèves"
-          selected-palette="sequentialAscending" heading-level="3"
-          databox databox-title="Élèves inscrits par région"
-          databox-source="DGESCO — challenge-cyber-passe-ton-hack-d-abord"
-          databox-download></dsfr-data-chart>
-        <dsfr-data-a11y for="g-reg" source="pth-reg" table download
-          label-field="libelle_region" value-field="eleves"
-          label="Élèves inscrits par région"></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-viz" data-code="Élèves inscrits par département">
-        <dsfr-data-chart id="g-dep" source="pth-dep" type="map"
-          code-field="code_departement" value-field="eleves"
-          name="Élèves inscrits" unit-tooltip="élèves"
-          selected-palette="sequentialAscending" heading-level="3"
-          databox databox-title="Élèves inscrits par département"
-          databox-source="DGESCO — challenge-cyber-passe-ton-hack-d-abord"
-          databox-download></dsfr-data-chart>
-        <dsfr-data-a11y for="g-dep" source="pth-dep" table download
-          label-field="libelle_departement" value-field="eleves"
-          label="Élèves inscrits par département"></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-
-    <p class="fr-hint-text fr-mt-2w fr-mb-4w">
-      Les deux cartes écartent chacune une ligne, et c'est la même : la
-      <strong>Polynésie française</strong> — région <code>00</code> « TOM et Collectivités
-      territoriales », département <code>987</code>, <strong>47 élèves</strong>. Les tracés de
-      DSFR&nbsp;Chart couvrent les cinq DROM et pas les territoires du Pacifique : aucune
-      traduction de code ne peut les faire apparaître. La carte de points, plus bas, les
-      affiche, et le tableau de données ci-dessous les compte. Les 462 élèves des
-      29 inscriptions non appariées à l'annuaire ne sont, eux, sur aucune des trois.
-    </p>
-
-    <h2 class="fr-h4 fr-mt-6w">Les lycées inscrits</h2>
-    <p class="fr-text--sm fr-mb-2w">
-      La carte de l'original s'ouvre sur le planisphère — de l'Atlantique nord au Pakistan, la
-      métropole tient dans 110 pixels — parce que son cadrage automatique englobe les Antilles
-      et La Réunion. Sa légende s'intitule « Nom de l'établissement » et contient une seule
-      entrée : <code>challenge-cyber-passe-ton-hack-d-abord</code>, l'identifiant technique du
-      jeu de données. Son infobulle affiche trois champs sur trente.
-    </p>
-
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-
-        <h2 class="fr-h6">Filtrer</h2>
-        <!-- L'original n'a AUCUN filtre, alors que six facettes sont déclarées
-             au back-office (`content.filters.layout` est un tableau vide).
-             `nature_uai_libe` est le VRAI type d'établissement : le champ
-             `type_etablissement` du jeu contient 424 identifiants Grist. -->
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- `nature_uai_libe` est le vrai type d'établissement : `type_etablissement`
+             contient des identifiants Grist. `challenge` est multivalué : la
+             facette l'éclate, une inscription compte sous chacun de ses challenges. -->
         <dsfr-data-facets id="pth-f" source="pth-q"
-          fields="libelle_academie, libelle_region, secteur_public_prive_libe, nature_uai_libe, challenge"
-          labels="libelle_academie:Académie | libelle_region:Région | secteur_public_prive_libe:Secteur | nature_uai_libe:Type d'établissement | challenge:Type de challenge"
-          display="secteur_public_prive_libe:radio-inline | libelle_academie:multiselect | libelle_region:multiselect"
+          fields="challenge, classe_f, secteur, nature_uai_libe, libelle_academie"
+          labels="challenge:Type de challenge | classe_f:Filles déclarées | secteur:Secteur | nature_uai_libe:Type d'établissement | libelle_academie:Académie"
+          display="challenge:checkbox | classe_f:checkbox | secteur:checkbox | nature_uai_libe:checkbox | libelle_academie:multiselect"
           searchable="libelle_academie"
-          disjunctive="challenge, nature_uai_libe"
+          disjunctive="challenge, classe_f, secteur, nature_uai_libe, libelle_academie"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
-        </details>
-      </div>
-      <div class="fr-col-12 fr-col-md-9">
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
         <div class="odv-viz" data-code="Les lycées inscrits au challenge cyber">
-        <dsfr-data-map id="carte-pth" name="Les lycées inscrits au challenge cyber"
-          height="580px" tiles="ign-plan" tiles-style="muted"
+        <dsfr-data-map id="carte-pth" name="Les lycées inscrits à la 5e édition du challenge cyber, par secteur"
+          height="560px" tiles="ign-plan" tiles-style="muted"
           insets="drom" fit-bounds fit-max-zoom="12">
           <dsfr-data-map-layer id="couche-pth" source="pth-f" type="circle"
             geo-field="position" radius="6" fill-opacity="0.9"
             color-field="secteur_public_prive_libe"
             color-map="Public:#18753c,Privé:#000091"
             tooltip-field="etablissement_nom_etablissement"
-            max-items="2000">
+            max-items="3000">
           </dsfr-data-map-layer>
           <dsfr-data-map-legend for="couche-pth" label="Secteur de l'établissement"></dsfr-data-map-legend>
-
           <dsfr-data-map-popup mode="panel-right" title-field="etablissement_nom_etablissement" width="380px">
             <template>
-              {{#if secteur_public_prive_libe}}
-                <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur_public_prive_libe}}</p>
-              {{/if}}
-              {{#if nature_uai_libe}}
-                <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{nature_uai_libe}}</p>
-              {{/if}}
+              {{#if secteur_public_prive_libe}}<p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur_public_prive_libe}}</p>{{/if}}
+              {{#if nature_uai_libe}}<p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{nature_uai_libe}}</p>{{/if}}
               <p class="fr-text--sm fr-mb-1v"><strong>{{ville}}</strong>
                 {{#if libelle_departement}}— {{libelle_departement}}{{/if}}</p>
-              {{#if libelle_academie}}
-                <p class="fr-text--sm fr-mb-3v">académie de {{libelle_academie}}</p>
-              {{/if}}
+              {{#if libelle_academie}}<p class="fr-text--sm fr-mb-3v">académie de {{libelle_academie}}</p>{{/if}}
               <ul class="fr-text--sm fr-mb-3v">
                 <li>Élèves inscrits : <strong>{{nombre_eleves}}</strong></li>
-                <li>Équipes inscrites : <strong>{{nombre_d_equipes_a_inscrire}}</strong></li>
-                <li>Dont filles : <strong>{{nb_filles}}</strong> · garçons : <strong>{{nb_garcons}}</strong></li>
+                <li>Équipes : <strong>{{nombre_d_equipes_a_inscrire}}</strong></li>
+                <li>Filles : <strong>{{nb_filles}}</strong> · garçons : <strong>{{nb_garcons}}</strong></li>
               </ul>
               <p class="fr-text--sm fr-mb-2v">{{challenge|Challenge non précisé}}</p>
-              <p class="fr-text--xs fr-mb-0">UAI {{identifiant_etablissement}}</p>
+              <p class="fr-text--xs fr-mb-0">Inscription du {{cree_a:date}} · UAI {{identifiant_etablissement}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
         <dsfr-data-a11y source="pth-f" for="carte-pth" table download
-          filename="passe-ton-hack-lycees.csv"
+          filename="passe-ton-hack-inscriptions.csv"
           label="Données de la carte"
-          description="Une inscription par ligne : établissement, ville, académie, secteur, élèves, équipes."
+          description="Une inscription par ligne pour la sélection courante : établissement, ville, académie, secteur, élèves, filles, garçons, équipes, date d'inscription."
           label-field="etablissement_nom_etablissement"
-          value-field="ville, libelle_departement, libelle_academie, secteur_public_prive_libe, nombre_eleves, nombre_d_equipes_a_inscrire">
+          value-field="ville, libelle_academie, secteur, nombre_eleves, nb_filles, nb_garcons, nombre_d_equipes_a_inscrire, cree_a">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
 
-    <h2 class="fr-h4 fr-mt-6w">La liste</h2>
-    <div class="odv-viz" data-code="Graphique (2)">
+    <h3 class="fr-h5 fr-mt-6w">La liste</h3>
     <dsfr-data-list source="pth-f"
-      caption="Les inscriptions au challenge, par nombre d'élèves décroissant"
-      columns="etablissement_nom_etablissement:Établissement, ville:Ville, libelle_departement:Département, libelle_academie:Académie, nature_uai_libe:Type, nombre_eleves:Élèves, nombre_d_equipes_a_inscrire:Équipes"
-      search sort="nombre_eleves:desc" pagination="20" count-label="établissement"></dsfr-data-list>
+      caption="Les inscriptions à la 5e édition, par nombre de filles décroissant"
+      columns="etablissement_nom_etablissement:Établissement, ville:Ville, libelle_academie:Académie, secteur:Secteur, nombre_eleves:Élèves, nb_filles:Filles, nb_garcons:Garçons, nombre_d_equipes_a_inscrire:Équipes, cree_a:Inscription"
+      search sort="nb_filles:desc" pagination="20" count-label="inscription"></dsfr-data-list>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">« Passe ton Hack d'abord » mobilise des lycées de presque
+        toutes les académies dès sa première semaine, mais il reste un challenge de garçons&nbsp;:
+        à la clôture de la 4<sup>e</sup> édition, une fille pour cinq garçons et demi&nbsp;; à
+        l'ouverture de la 5<sup>e</sup>, moins encore. La part des filles ne se joue pas dans
+        tous les lycées à la fois&nbsp;: la plupart des inscriptions n'en comptent aucune ou
+        presque, et une poignée d'établissements en réunit une grande part. Ce que le jeu ne
+        dit pas&nbsp;: si les filles s'inscrivent plus tard dans la campagne — la 4<sup>e</sup>
+        édition n'a pas été archivée —, ni combien de lycées auraient pu participer.</p>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <dsfr-data-repeat source="chapo">
+        <template>
+          <ol class="fr-text--sm">
+            <li><strong>Une inscription n'est pas un lycée.</strong> Les {{n}} inscriptions
+              viennent de {{lycees}} codes UAI distincts&nbsp;: {{lignes_en_plus}} lignes de plus
+              que de lycées. Certaines sont des équipes supplémentaires d'un même lycée (challenge
+              lycéen et challenge Sup, par exemple), d'autres des ressaisies&nbsp;: le 26 septembre
+              2026, trois lignes du même lycée montpelliérain portent exactement les mêmes chiffres
+              (40 élèves chacune). Le jeu ne permet pas de les distinguer&nbsp;; la page n'en retire
+              aucune. Les totaux d'élèves sont donc des <em>déclarations</em>, peut-être comptées
+              deux fois.</li>
+            <li><strong>Filles et garçons ne bouclent pas toujours sur le total.</strong>
+              {{n_ecart}} inscriptions déclarent un nombre de filles et de garçons dont la somme
+              diffère du nombre d'élèves (écart cumulé&nbsp;: {{ecart_eleves}} élèves). La part des
+              filles se rapporte donc à la somme filles + garçons, jamais au total déclaré
+              ailleurs&nbsp;: numérateur et dénominateur viennent de la même déclaration. La
+              4<sup>e</sup> édition avait le même défaut (9&nbsp;671 déclarés par sexe pour 9&nbsp;641
+              au total)&nbsp;; ses 15,3&nbsp;% se lisent de la même façon.</li>
+            <li><strong>{{n_hors}} inscriptions hors de l'annuaire.</strong> Leur code UAI n'y a
+              pas été trouvé&nbsp;: elles n'ont ni académie, ni secteur, ni position. Elles comptent
+              dans le chapô et les compteurs, pas dans la comparaison public/privé ni sur la carte.
+              Le 26 septembre 2026, l'une porte un UAI à sept caractères (<code>095641F</code>, sans
+              doute une faute de frappe pour un lycée déjà inscrit sous son code exact), l'autre un
+              lycée français de l'étranger.</li>
+            <li><strong>Une ligne écartée.</strong> Une inscription ne déclare aucun élève ni
+              aucune équipe (un formulaire vide)&nbsp;: elle est retirée à la source, par le serveur.</li>
+            <li><strong>Le rythme.</strong> Le graphique cumulé n'a un point que pour les jours où
+              au moins une inscription a été déposée&nbsp;: un jour sans dépôt n'apparaît pas.</li>
+            <li><strong>Pas de taux de participation.</strong> Rapporter les inscriptions au nombre
+              de lycées de chaque académie aurait dit où le challenge prend&nbsp;; sur quelques
+              dizaines d'inscriptions, une académie passerait du premier au dernier rang avec un
+              seul lycée. Angle réservé pour la fin de la campagne.</li>
+            <li><strong>Angles écartés.</strong> Le classement des académies en volume (il mesure
+              leur taille), les cartes choroplèthes (quelques dizaines de lycées ne colorent pas un
+              territoire), la répartition par type de challenge (une inscription peut en cocher
+              plusieurs&nbsp;: la facette les compte, un graphique de parts les additionnerait au-delà
+              de 100&nbsp;%). Le champ <code>type_etablissement</code> contient des identifiants
+              Grist et <code>voie_pro</code> / <code>voie_techno</code> valent 0 partout&nbsp;: ils
+              ne sont pas utilisés.</li>
+          </ol>
+        </template>
+      </dsfr-data-repeat>
+    </section>
   </div>
 
-  <!-- Transformateurs, branchés sur la FACETTE (BUG-009) : tout suit les filtres. -->
-  <dsfr-data-query id="pth-mixite" source="pth-f" group-by="libelle_academie"
-    aggregate="nb_filles:sum:filles, nb_garcons:sum:garcons"
-    where="libelle_academie:isnotnull" order-by="filles:desc"></dsfr-data-query>
+  <!-- ====================== Analyse ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — Passe ton Hack d'abord</h2>
 
-  <dsfr-data-query id="pth-aca" source="pth-f" group-by="libelle_academie"
-    aggregate="nombre_eleves:sum:eleves" where="libelle_academie:isnotnull"
-    order-by="eleves:desc" limit="10"></dsfr-data-query>
-
-  <dsfr-data-query id="pth-reg" source="pth-f" group-by="code_region, libelle_region"
-    aggregate="nombre_eleves:sum:eleves" where="code_region:isnotnull"></dsfr-data-query>
-
-  <dsfr-data-query id="pth-dep" source="pth-f" group-by="code_departement, libelle_departement"
-    aggregate="nombre_eleves:sum:eleves" where="code_departement:isnotnull"></dsfr-data-query>
-
-  <!-- La série temporelle, entièrement côté client. `compute` a `year()` et
-       `month()` dans sa liste blanche (#671) : la troncature de date est un
-       calcul par ligne, donc dans son périmètre. Un `group-by="cree_a"` nu
-       aurait produit une catégorie par jour sur 150 jours calendaires.
-       `cle` sert au tri, `periode` à l'affichage. -->
-  <dsfr-data-normalize id="pth-n" source="pth-f"
-    compute="cle = year(cree_a) * 100 + month(cree_a); periode = when month(cree_a) &lt; 10 then concat('0', month(cree_a), '/', year(cree_a)) else concat(month(cree_a), '/', year(cree_a))">
-  </dsfr-data-normalize>
-  <dsfr-data-query id="pth-temps" source="pth-n" group-by="periode, cle"
-    aggregate="nombre_eleves:sum:eleves" where="cle:isnotnull"
-    order-by="cle:asc"></dsfr-data-query>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Passe ton Hack d'abord — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine :
-        <a href="https://dataeducation.huwise.com/p/pilotage-du-challenge-passe-ton-hack-d-abord/" target="_blank" rel="noopener external">une page ODS Studio servie sur <code>dataeducation.huwise.com</code></a>
-        (<code>uid: sp_j8vr92</code>). Fiche d'audit :
-        <code>docs/portail-education/passe-ton-hack-dabord.md</code>, vingt défauts.
+        Cible d'origine&nbsp;:
+        <a href="https://dataeducation.huwise.com/p/pilotage-du-challenge-passe-ton-hack-d-abord/" target="_blank" rel="noopener external">une page ODS Studio servie sur <code>dataeducation.huwise.com</code></a>,
+        alias d'hôte de l'éditeur pour <code>data.education.gouv.fr</code> (mêmes données, mêmes
+        IP). Fiche d'audit&nbsp;: <code>docs/portail-education/passe-ton-hack-dabord.md</code>.
+        Recréée le 2026-09-26 en page éditoriale&nbsp;; la reproduction précédente, bâtie sur la
+        4<sup>e</sup> édition, avait tous ses chiffres écrits en dur.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>L'évolution promise, en trois lignes — et une requalification.</strong>
-              La fiche d'audit classait ce point en <em>manque réel</em> : « aucune agrégation
-              temporelle dans <code>dsfr-data-query</code>, alors qu'elle existe déjà dans
-              <code>dsfr-data-map-layer</code> », un <code>group-by="cree_a"</code> client
-              produisant une catégorie par jour. Elle laissait une porte ouverte : « si la liste
-              blanche de #671 comporte une fonction de date, ce point devient prévu ».
-              <strong>Elle en comporte</strong> — <code>year(d)</code>, <code>month(d)</code>,
-              <code>day(d)</code>. La troncature de date est un calcul par ligne, donc dans le
-              périmètre de <code>compute</code> : un <code>dsfr-data-normalize</code>, un
-              <code>dsfr-data-query</code>, et la série mensuelle existe, <em>côté client</em>,
-              donc elle suit les facettes. <strong>Faux problème, à requalifier.</strong></li>
-            <li><strong>Les cinq filtres et la recherche, gratuits.</strong> Six facettes sont
-              déclarées au back-office du jeu et la page d'origine n'en utilise aucune
-              (<code>content.filters.layout</code> est un tableau vide). Sur 100 Ko chargés en une
-              requête, les compteurs, la cascade et l'URL partageable ne coûtent rien.</li>
-            <li><strong>Le cadrage métropolitain se pose tout seul.</strong>
-              <code>insets="drom"</code> suffit : poser un encart ultramarin clippe automatiquement
-              le <code>fit-bounds</code> sur la métropole (#687). Le planisphère de l'original —
-              son défaut le plus visible — n'a demandé aucune coordonnée.</li>
-            <li><strong>Les conditionnelles de gabarit.</strong> Vingt-neuf inscriptions n'ont ni
-              académie, ni département, ni secteur : sans <code>{{#if}}</code>, leur infobulle
-              afficherait des lignes vides et des tirets orphelins. Les blocs
-              <code>{{#if}}</code> / <code>{{#unless}}</code> existent depuis la 0.22.0 — le
-              contournement CSS par <code>:empty</code> et <code>:has()</code> du dépôt n'a pas
-              servi.</li>
-            <li><strong>Le podium.</strong> Il n'y a rien à construire : rang, libellé, barre
-              proportionnelle, valeur et unité sont un composant. L'original a, à sa place, un
-              histogramme silencieusement tronqué à dix.</li>
+            <li><strong>Une page qui survit à la remise à zéro.</strong> Un
+              <code>compute</code> qui pose des indicateurs par ligne, une query
+              <code>group-by</code> sur une clé constante, un <code>dsfr-data-repeat</code>&nbsp;:
+              chapô, phrases de lecture et notes se recalculent quand le jeu change d'édition.</li>
+            <li><strong>Un titre qui suit la donnée.</strong> <code>{{#if}}</code> et
+              <code>{{#unless}}</code> côte à côte dans un même nœud texte choisissent l'intitulé
+              de la section public/privé selon le sens de l'écart.</li>
+            <li><strong>Le cumul.</strong> <code>running_sum</code> après
+              <code>order-by</code>, dans la même query que le regroupement par jour.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le découpeur de <code>group-by</code> coupe sur la virgule, y compris
-              à l'intérieur d'une fonction.</strong> Voie serveur essayée d'abord :
-              <code>group_by=date_format(cree_a, 'yyyy-MM') as mois</code> — vérifié à l'API du
-              portail, HTTP 200, six mois propres. Mais l'adaptateur découpe la liste
-              <code>group-by</code> par un <code>split(',')</code> nu : la virgule d'argument est
-              prise pour un séparateur de champ, et l'expression se casse en deux. Les fonctions à
-              <em>un</em> argument passent (<code>year(cree_a) as annee</code>, PG-014), celles à
-              deux non. C'est une limite étroite mais réelle, et elle ne se voit qu'en lisant
-              <code>splitGroupBy()</code>. Contournée ici par la voie cliente, qui est de toute
-              façon meilleure sur ce jeu : elle écoute les facettes.</li>
-            <li><strong>Un <code>group-by</code> client sur un champ multivalué compte les
-              combinaisons, pas les valeurs.</strong> <code>challenge</code> est un tableau JSON :
-              côté serveur, ODS éclate correctement en trois groupes (424 / 161 / 69, total 654
-              pour 557 lignes) ; côté client, la clé de groupe est
-              <code>String(valeur)</code> et l'anneau rendrait <strong>huit</strong> secteurs — les
-              huit combinaisons observées. <code>dsfr-data-facets</code>, lui, <em>sait</em>
-              éclater le multivalué : deux composants du même pipeline donnent deux réponses
-              différentes sur la même colonne. C'est pourquoi cette page n'a pas d'anneau
-              « Répartition par challenge » : la facette « Type de challenge », à gauche, donne les
-              trois bons comptes et filtre en plus. <strong>L'asymétrie reste un manque.</strong></li>
-            <li><strong>Le total du multivalué ne se dit pas non plus.</strong> 654 inscriptions à
-              un challenge pour 557 lignes : l'anneau de l'original n'affiche ni valeur, ni
-              pourcentage, ni total, donc personne ne peut s'en apercevoir. Aucun composant ne
-              propose de dire « une ligne peut compter dans plusieurs parts ».</li>
-            <li><strong>Deux champs morts et un champ dupliqué, qu'aucun outil ne signale.</strong>
-              <code>voie_pro</code> et <code>voie_techno</code> valent 0 sur les 557 lignes ;
-              <code>options_ou_specialites</code> reproduit <code>niveaux_de_classe</code>, dont les
-              codes (<code>["L","9","10"]</code>) ne sont explicités nulle part. Et
-              <code>type_etablissement</code> — le nom le plus évident du jeu — contient des
-              identifiants Grist. <strong>Le champ le mieux nommé est le pire, et c'est celui que
-              l'original a choisi.</strong></li>
+            <li><strong>Des chiffres en dur sur un compteur remis à zéro.</strong> La page
+              précédente affirmait 557 inscriptions, 9&nbsp;641 élèves et 15,3&nbsp;% de filles
+              alors que le jeu n'en portait plus que 49 lignes&nbsp;: aucune erreur, aucune alerte,
+              seulement un texte devenu faux. La bibliothèque n'y est pour rien&nbsp;; c'est la
+              page qui figeait la donnée.</li>
+            <li><strong>La date de la dernière inscription.</strong>
+              <code>aggregate="cree_a:max"</code> sur une <code>dsfr-data-query</code> rend
+              <strong>2026</strong>&nbsp;: l'agrégat convertit la date par <code>parseFloat</code>,
+              qui s'arrête au premier tiret — un nombre plausible, sans avertissement. Le KPI,
+              lui, sait (<code>cree_a:max</code> + <code>format="date"</code> rend 20/09/2026)&nbsp;;
+              pour le chapô, un tri <code>order-by="cree_a:desc" limit="1"</code> et une
+              jointure.</li>
           </ul>
         </div>
       </div>
@@ -463,38 +498,29 @@
             <tr><th scope="col">Page Studio d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>data_providers</code> sur <code>huwise.com</code></td><td><code>dsfr-data-source base-url="https://data.education.gouv.fr"</code></td><td>Meilleur : mêmes données, domaine de l'État</td></tr>
-            <tr><td>2 blocs <code>kpi</code> (9 641 · 2 257)</td><td><code>dsfr-data-kpi</code> ×4, dont un ratio</td><td>Équivalent, plus la part de filles et le nombre d'inscriptions</td></tr>
-            <tr><td><code>comparison.columns</code> sur <code>type_etablissement</code> (424 ids Grist, tronqué à 100)</td><td><code>type="bar" stacked horizontal</code> sur l'académie</td><td>Meilleur : le graphique redevient lisible</td></tr>
-            <tr><td><code>composition.doughnut</code> sur <code>challenge</code> (multivalué, 654 pour 557)</td><td>facette « Type de challenge »</td><td>Substitut : le <code>group-by</code> client ne sait pas éclater un tableau</td></tr>
-            <tr><td>histogramme <code>limit: "10"</code> « par Académie »</td><td><code>dsfr-data-podium max-items="10"</code></td><td>Meilleur : le rang est nommé, la limite est dite</td></tr>
-            <tr><td>2 <code>choropleth.georef</code>, DROM sur l'une et pas sur l'autre</td><td><code>map-reg</code> + <code>map</code></td><td>Meilleur : DROM sur les deux</td></tr>
-            <tr><td><code>mapType: poi</code>, planisphère, sans cluster</td><td><code>dsfr-data-map insets="drom" fit-bounds</code></td><td>Meilleur : cadrage métropolitain automatique</td></tr>
-            <tr><td>légende « Nom de l'établissement » → l'id du jeu</td><td><code>dsfr-data-map-legend</code> dérivée du <code>color-map</code></td><td>Meilleur : une légende qui nomme quelque chose</td></tr>
-            <tr><td>infobulle à 3 champs, une requête par clic</td><td><code>&lt;template&gt;</code> à 10 champs, zéro requête</td><td>Meilleur</td></tr>
-            <tr><td>— (« suivre l'évolution », jamais montrée)</td><td><code>compute</code> + <code>type="line"</code></td><td>Sans équivalent : la promesse de l'original, tenue</td></tr>
-            <tr><td>— (aucun filtre, aucune recherche, aucune alternative)</td><td>facettes, <code>dsfr-data-search</code>, <code>dsfr-data-a11y</code>, <code>dsfr-data-list</code></td><td>Sans équivalent</td></tr>
+            <tr><td><code>data_providers</code> sur <code>huwise.com</code></td><td><code>dsfr-data-source fetch-mode="export"</code> sur <code>data.education.gouv.fr</code></td><td>Meilleur : domaine de l'État</td></tr>
+            <tr><td>2 blocs <code>kpi</code> (élèves, équipes)</td><td><code>dsfr-data-kpi</code> ×3, dont deux ratios</td><td>Meilleur : la part des filles est l'accroche</td></tr>
+            <tr><td><code>comparison.columns</code> sur <code>type_etablissement</code> (identifiants Grist)</td><td>barres par nombre de filles déclarées + part par secteur</td><td>Meilleur : la mixité se lit</td></tr>
+            <tr><td><code>composition.doughnut</code> sur <code>challenge</code> (multivalué)</td><td>facette « Type de challenge »</td><td>Substitut assumé : une part n'a pas de sens sur un multivalué</td></tr>
+            <tr><td>histogramme « par Académie » <code>limit: "10"</code>, 2 choroplèthes</td><td>— (écartés, dit en page)</td><td>Choix éditorial : trop peu d'inscriptions</td></tr>
+            <tr><td><code>mapType: poi</code>, planisphère</td><td><code>dsfr-data-map insets="drom" fit-bounds</code></td><td>Meilleur : cadrage métropolitain</td></tr>
+            <tr><td>— (« suivre l'évolution », jamais montrée)</td><td><code>running_sum</code> + <code>type="line"</code></td><td>Sans équivalent : la promesse tenue</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-repeat</code>, <code>dsfr-data-search</code>, <code>dsfr-data-facets</code>, <code>dsfr-data-a11y</code>, <code>dsfr-data-list</code></td><td>Sans équivalent</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong> sur un des plus petits jeux du banc, et
-          <strong>quinze des vingt défauts relevés tombent d'eux-mêmes</strong>. Les cinq qui
-          restent — l'écart 9 671 / 9 641, le contenu éditorial périmé, les deux champs morts, les
-          codes de niveau non explicités, le lien du chapô qui ment sur sa cible — sont des défauts
-          <strong>de la donnée et de l'éditorial</strong>, qu'aucune bibliothèque ne corrige.
-          Ce que cette page apporte au banc, c'est une <strong>requalification</strong> : le manque
-          le plus net que l'audit lui attribuait — pas d'agrégation temporelle — n'en est pas un,
-          <code>compute</code> ayant reçu <code>year()</code> et <code>month()</code>. Ce qui reste
-          vrai, en revanche, est plus étroit et plus sûr : <code>dsfr-data-query</code> ne sait
-          toujours pas éclater un champ multivalué, alors que <code>dsfr-data-facets</code> le sait
-          — deux composants du même pipeline, deux réponses sur la même colonne.</p>
+        <p>La bibliothèque n'a opposé aucune résistance sérieuse&nbsp;; <strong>le travail a été
+          de s'apercevoir que la donnée avait changé sous la page</strong>. Un tableau de bord
+          sur un compteur remis à zéro chaque année ne peut porter qu'une chose en dur&nbsp;: la
+          date et les chiffres de l'édition close, qu'il est seul à conserver. Tout le reste doit
+          se calculer — et la bibliothèque le permet jusque dans les titres.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>L'opération Cactus, sensibilisation à l'hameçonnage — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du suivi d'impact de l'opération Cactus : 905 établissements, et ce que le recensement dit vraiment.">
+  <meta name="description" content="Recréation avec dsfr-data du suivi d'impact de l'opération Cactus : deux établissements sur trois ont vu remonter des signalements, mais c'est là où aucune sensibilisation n'existait avant que l'on envisage le moins de suites.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,142 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original (page Studio) ne publie que des comptages. La reproduction
+       précédente titrait « 84 % ont mis en place un suivi » sur le champ
+       `suivi_sensi_cyber` ; relu à l'API, ce champ ne peut pas vouloir dire ça :
+       220 des 265 établissements qui n'envisagent AUCUNE action répondent
+       « Oui ». Son sens n'est pas documenté : il sort du récit (notes, § 6).
+
+       L'histoire, rejouée à l'API : l'opération a fait remonter des
+       signalements dans 68 % des établissements, mais 30 % n'envisagent
+       aucune suite — 39 % là où rien n'existait avant, 27 % ailleurs.
+
+       Une seule source (904 lignes, un export). Tout est calculé côté client
+       à partir de drapeaux 0/100 posés ligne à ligne : la moyenne d'un drapeau
+       est la part des réponses, et un drapeau nul (question non répondue)
+       sort du dénominateur au lieu de compter pour « non ».
+       ========================================================================== -->
+
+  <!-- Le texte long `sensibilisation_post_cactus` (combinaisons brutes) est
+       écarté par `select` : la colonne nettoyée, multivaluée, suffit. -->
+  <dsfr-data-source id="cac" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="recensement-operation-cactus"
+    fetch-mode="export" max-records="2000"
+    select="uai, uuid, horodatage, nom_academie, libelle_region, libelle_departement,
+            denomination_principale, secteur_public_prive_libe, nombre_d_eleves,
+            sensibilisation_existante, observations, sensibilisation_post_cactus_actions,
+            suivi_sensi_cyber, position">
+  </dsfr-data-source>
+
+  <!-- Drapeaux par réponse. `observations` et les actions sont des TABLEAUX :
+       `champ = 'valeur'` regarde dans le tableau (#953). Les libellés qui
+       portent une apostrophe sont testés en sous-chaîne sur le texte joint. -->
+  <dsfr-data-normalize id="cac-n" source="cac"
+    compute="k = 'France';
+             act_txt = join(sensibilisation_post_cactus_actions, ' | ');
+             repondu = when is_empty(sensibilisation_post_cactus_actions) then 0 else 1;
+             groupe = when sensibilisation_existante = 'Oui' then 'Déjà sensibilisés avant Cactus' when sensibilisation_existante = 'Non' then 'Sans sensibilisation préalable' else 'Non renseigné';
+             type_etab = when contains(denomination_principale, 'COLLEGE') then 'Collèges' when contains(denomination_principale, 'LYCEE') then 'Lycées' else 'Autre ou non renseigné';
+             f_sig = when observations = 'Des signalements de sécurité numérique' then 100 else 0;
+             f_deb = when observations = 'Des débats (élèves, adultes)' then 100 else 0;
+             f_pdc = when observations = 'Pas de changement' then 100 else 0;
+             f_der = when observations = 'Du dérangement' then 100 else 0;
+             a_aucune = when repondu = 0 then null when sensibilisation_post_cactus_actions = 'Aucune action envisagée' then 100 else 0;
+             a_ens = when repondu = 0 then null when sensibilisation_post_cactus_actions = 'Par des enseignants dans leur cours' then 100 else 0;
+             a_pp = when repondu = 0 then null when contains(act_txt, 'heure de vie de classe') then 100 else 0;
+             a_ref = when repondu = 0 then null when sensibilisation_post_cactus_actions = 'Animation par référents numériques' then 100 else 0;
+             a_fdo = when repondu = 0 then null when contains(act_txt, 'forces de l') then 100 else 0;
+             a_eafc = when repondu = 0 then null when contains(act_txt, 'EAFC') then 100 else 0;
+             a_anssi = when repondu = 0 then null when contains(act_txt, 'Cyberenjeux') then 100 else 0;
+             n_aucune = when a_aucune = 100 then 1 else 0;
+             sans_effet = when f_pdc = 100 and a_aucune = 100 then 1 else 0;
+             suivi_et_aucune = when suivi_sensi_cyber = 'Oui' and a_aucune = 100 then 1 else 0;
+             date_ok = when is_null(horodatage) then 0 else 1;
+             pendant = when horodatage &gt;= '2025-03-19' and horodatage &lt;= '2025-03-21' then 1 else 0;
+             suites = when repondu = 0 then 'Suites non renseignées' when a_aucune = 100 then 'Aucune action envisagée' else 'Au moins une action prévue'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Le total national (une ligne) ---------- -->
+  <dsfr-data-query id="tot" source="cac-n" group-by="k"
+    aggregate="uuid:count:n, f_sig:avg:sig, f_pdc:avg:pdc, a_aucune:avg:aucune,
+               repondu:sum:n_rep, n_aucune:sum:n_aucune, sans_effet:sum:n_sans,
+               suivi_et_aucune:sum:n_suivi_aucune, date_ok:sum:n_date, pendant:sum:n_pendant">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tot-r" source="tot"
+    compute="part_pendant = n_pendant / n_date * 100; part_sans = n_sans / n * 100"></dsfr-data-normalize>
+
+  <!-- ---------- 1. La preuve : selon la sensibilisation préalable ---------- -->
+  <dsfr-data-query id="grp" source="cac-n" where="groupe:neq:Non renseigné"
+    group-by="groupe, k"
+    aggregate="uuid:count:n, repondu:sum:n_rep, f_sig:avg:sig, f_pdc:avg:pdc, a_aucune:avg:aucune"
+    order-by="groupe:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="grp-r" source="grp" round="sig:1, pdc:1, aucune:1"></dsfr-data-normalize>
+  <dsfr-data-unpivot id="grp-l" source="grp-r" id-cols="groupe"
+    value-cols="sig:Ont vu remonter des signalements, pdc:Constatent « pas de changement », aucune:N'envisagent aucune action"
+    var-name="constat" value-name="part">
+  </dsfr-data-unpivot>
+  <dsfr-data-normalize id="grp-t" source="grp-r"
+    rename="groupe:Établissements | n:Réponses | sig:Signalements (%) | pdc:Pas de changement (%) | aucune:Aucune action envisagée (%) | n_rep:Réponses sur les suites">
+  </dsfr-data-normalize>
+  <!-- Les deux groupes côte à côte, pour la phrase de lecture. -->
+  <dsfr-data-pivot id="grp-w" source="grp" row="k" column="groupe" value="aucune" aggregate="first"
+    labels="Déjà sensibilisés avant Cactus:oui | Sans sensibilisation préalable:non">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="grp-e" source="grp-w" compute="ecart = non - oui"></dsfr-data-normalize>
+
+  <!-- Le même écart, collèges et lycées séparés : la preuve tient-elle ? -->
+  <dsfr-data-query id="typ" source="cac-n"
+    where="groupe:neq:Non renseigné, type_etab:neq:Autre ou non renseigné, repondu:eq:1"
+    group-by="type_etab, groupe" aggregate="a_aucune:avg:aucune, uuid:count:n"
+    order-by="type_etab:asc, groupe:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="typ-r" source="typ" round="aucune:1"></dsfr-data-normalize>
+  <dsfr-data-pivot id="typ-w" source="typ" row="type_etab" column="groupe" value="aucune" aggregate="first"
+    labels="Déjà sensibilisés avant Cactus:oui | Sans sensibilisation préalable:non">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="typ-e" source="typ-w" compute="ecart = non - oui"></dsfr-data-normalize>
+  <dsfr-data-normalize id="typ-t" source="typ-r"
+    rename="type_etab:Type | groupe:Établissements | aucune:Aucune action envisagée (%) | n:Réponses sur les suites">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 2. La nuance : ce qui a été observé, ce qui est prévu ---------- -->
+  <dsfr-data-query id="obs" source="cac-n" group-by="k"
+    aggregate="f_sig:avg:sig, f_deb:avg:deb, f_pdc:avg:pdc, f_der:avg:der"></dsfr-data-query>
+  <dsfr-data-normalize id="obs-r" source="obs" round="sig:1, deb:1, pdc:1, der:1"></dsfr-data-normalize>
+  <dsfr-data-unpivot id="obs-l" source="obs-r" id-cols="k"
+    value-cols="sig:Des signalements de sécurité numérique, deb:Des débats (élèves%2C adultes), pdc:Pas de changement, der:Du dérangement"
+    var-name="observation" value-name="part">
+  </dsfr-data-unpivot>
+  <dsfr-data-query id="obs-o" source="obs-l" order-by="part:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="obs-t" source="obs-o"
+    rename="observation:Effet observé | part:Part des réponses (%)"></dsfr-data-normalize>
+
+  <dsfr-data-query id="act" source="cac-n" group-by="k"
+    aggregate="a_ens:avg:ens, a_pp:avg:pp, a_aucune:avg:aucune, a_ref:avg:ref, a_fdo:avg:fdo, a_eafc:avg:eafc, a_anssi:avg:anssi"></dsfr-data-query>
+  <dsfr-data-normalize id="act-r" source="act" round="ens:1, pp:1, aucune:1, ref:1, fdo:1, eafc:1, anssi:1"></dsfr-data-normalize>
+  <dsfr-data-unpivot id="act-l" source="act-r" id-cols="k"
+    value-cols="ens:Par des enseignants dans leur cours, pp:Par les professeurs principaux (heure de vie de classe), aucune:Aucune action envisagée, ref:Animation par les référents numériques, fdo:Avec les forces de l'ordre ou une association, eafc:Formation des personnels avec l'EAFC, anssi:Ressource Cyberenjeux de l'Anssi"
+    var-name="action" value-name="part">
+  </dsfr-data-unpivot>
+  <dsfr-data-query id="act-o" source="act-l" order-by="part:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="act-t" source="act-o"
+    rename="action:Action envisagée | part:Part des réponses sur les suites (%)"></dsfr-data-normalize>
+
+  <!-- ---------- 3. La géographie : une participation concentrée ---------- -->
+  <dsfr-data-query id="aca" source="cac-n" group-by="nom_academie"
+    aggregate="uuid:count:n, n:share_percent:part" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-query id="aca7" source="aca" order-by="n:desc" limit="7"></dsfr-data-query>
+  <dsfr-data-normalize id="aca7-k" source="aca7" compute="k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-query id="aca7-s" source="aca7-k" group-by="k" aggregate="part:sum:p7, n:sum:n7"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-k" source="aca" compute="k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-nb" source="aca-k" group-by="k" aggregate="nom_academie:count:nb"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-t" source="aca"
+    rename="nom_academie:Académie | n:Réponses | part:Part du total (%)"></dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,321 +168,420 @@
       </div>
     </nav>
 
-    <h1>L'opération Cactus : sensibiliser au risque d'hameçonnage</h1>
+    <h1>Opération Cactus&nbsp;: l'alerte a porté, mais l'élan retombe là où rien n'existait avant</h1>
 
-    <p class="fr-text--lead">
-      L'opération « Cactus » a consisté à envoyer aux personnels un faux courriel d'hameçonnage,
-      pour mesurer et travailler leur réflexe de vigilance. <strong>905 établissements</strong>
-      ont répondu au recensement d'impact. <strong>763 d'entre eux — 84 %</strong> déclarent avoir
-      mis en place un suivi de sensibilisation au risque numérique&nbsp;; <strong>647</strong>
-      disposaient déjà d'une action de sensibilisation avant l'opération.
-    </p>
+    <!-- Le chapô est CALCULÉ sur les réponses du jeu. -->
+    <dsfr-data-repeat source="tot-r">
+      <template>
+        <p class="fr-text--lead">
+          Du 19 au 21 mars 2025, les établissements du second degré ont reçu un faux courriel
+          d'hameçonnage, pour exercer le réflexe de vigilance des élèves et des personnels. Sur
+          les <strong>{{n:number}} réponses</strong> au recensement qui a suivi,
+          <strong>{{sig:number:0}}&nbsp;%</strong> font état de signalements de sécurité
+          numérique. Mais <strong>{{aucune:number:0}}&nbsp;%</strong> des établissements qui
+          ont répondu sur les suites n'envisagent <strong>aucune action</strong> — et c'est
+          parmi ceux qui n'avaient jamais été sensibilisés que la proportion est la plus forte.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/recensement-operation-cactus/"
            target="_blank" rel="noopener external"><code>recensement-operation-cactus</code></a>
-        — 905 lignes, 25 champs, lu sans clé, 961 Ko en 0,13 s. C'est un jeu de
-        <strong>réponses à un questionnaire</strong>, pas un référentiel : chaque ligne est une
-        déclaration d'établissement, avec son horodatage et son identifiant de réponse.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        Trois observations sur la qualité, toutes vérifiées à l'API le <strong>2026-09-19</strong>
-        (le jeu est vivant : le relevé d'origine disait « 57 lignes sans position », ce qui
-        confondait les lignes nulles et les coordonnées distinctes — 904 − 847 sur le relevé de
-        l'époque ; le vrai compte,
-        <code>where=position is null</code>, est 32) :
-        <strong>877 UAI distincts pour 905 lignes</strong> — vingt-huit réponses en double&nbsp;;
-        <strong>32 lignes sans position</strong> ;
-        et la colonne <code>d4_pix_prec</code> est <strong>entièrement vide</strong>, sur les
-        905 lignes. C'est le cinquième jeu de ce portail à publier une colonne qui ne porte rien.
+        (DGESCO, Licence Ouverte) — une ligne par <strong>réponse d'établissement</strong> au
+        questionnaire de suivi, saisie entre le 14 mars et le 17 avril 2025. Lu sans clé, en un
+        export. Les parts de cette page sont des parts de réponses&nbsp;: quelques
+        établissements ont répondu deux ou trois fois (voir les notes).
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois chiffres ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="cac-n"
+        value="count{observations:eq:Des signalements de sécurité numérique} / count"
+        format="pourcentage" decimals="0"
+        heading="font état de signalements"
+        label="de sécurité numérique, pendant ou après l'opération"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cac-n"
+        value="count{sensibilisation_post_cactus_actions:eq:Aucune action envisagée} / count{repondu:eq:1}"
+        format="pourcentage" decimals="0"
+        heading="n'envisagent aucune action"
+        label="parmi les réponses sur les suites"></dsfr-data-kpi>
+      <dsfr-data-kpi source="grp-e" value="ecart:first" format="decimal" decimals="0"
+        heading="points d'écart"
+        label="sur « aucune action », entre établissements jamais sensibilisés et déjà sensibilisés"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. Là où aucune sensibilisation n'existait, quatre établissements sur dix n'envisagent aucune suite</h2>
+    <dsfr-data-repeat source="grp-e">
+      <template>
+        <p class="odv-lecture"><strong>{{non:number:0}}&nbsp;%</strong> des établissements
+          sans sensibilisation préalable n'envisagent aucune action après Cactus, contre
+          <strong>{{oui:number:0}}&nbsp;%</strong> de ceux qui en avaient déjà une&nbsp;: un
+          écart de {{ecart:number:0}} points. Les premiers ont aussi vu remonter moins de
+          signalements, et constatent plus souvent « pas de changement ». L'opération a moins
+          pris là où elle était la plus nécessaire.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-4w" data-code="Trois constats, selon que l'établissement était déjà sensibilisé ou non">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-grp" source="grp-l" type="bar"
+        label-field="constat" series-field="groupe" value-field="part"
+        color-map="Déjà sensibilisés avant Cactus:#929292,Sans sensibilisation préalable:#000091"
+        y-min="0" unit-tooltip="%"
+        databox databox-title="Signalements, absence d'effet et absence de suite, selon la sensibilisation préalable (% des réponses)"
+        databox-source="DGESCO — recensement-operation-cactus, via data.education.gouv.fr"
+        databox-date="Mars-avril 2025"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-grp" source="grp-t" table download
+        filename="cactus-selon-sensibilisation-prealable.csv"
+        label-field="Établissements"
+        value-field="Réponses, Signalements (%), Pas de changement (%), Réponses sur les suites, Aucune action envisagée (%)"
+        description="Pour les établissements déjà sensibilisés avant Cactus et pour ceux qui ne l'étaient pas : part des réponses signalant des incidents de sécurité numérique, part constatant « pas de changement », et part n'envisageant aucune action parmi les réponses sur les suites. Les établissements sans sensibilisation préalable envisagent plus souvent aucune suite."></dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5">L'écart tient chez les collèges comme chez les lycées — il est trois fois plus large au collège</h3>
+    <p class="fr-text--sm">Pour vérifier que l'écart ne vient pas d'un mélange de publics, la
+      même mesure est refaite séparément sur les collèges et sur les lycées. Elle tient dans les
+      deux cas. Le jeu ne permet pas d'en dire la cause&nbsp;: il ne porte ni les moyens de
+      l'établissement, ni le nombre de personnels formés.</p>
+    <dsfr-data-repeat source="typ-e" key-field="type_etab">
+      <template>
+        <p class="odv-lecture fr-mb-1v"><strong>{{type_etab}}</strong>&nbsp;: {{non:number:0}}&nbsp;%
+          sans suite envisagée là où rien n'existait avant, contre {{oui:number:0}}&nbsp;%
+          ailleurs — <strong>{{ecart:number:0}} points</strong> d'écart.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Aucune action envisagée, collèges et lycées séparés">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-typ" source="typ-r" type="bar"
+        label-field="type_etab" series-field="groupe" value-field="aucune"
+        color-map="Déjà sensibilisés avant Cactus:#929292,Sans sensibilisation préalable:#000091"
+        y-min="0" unit-tooltip="%"
+        databox databox-title="N'envisagent aucune action après Cactus, collèges et lycées (% des réponses sur les suites)"
+        databox-source="DGESCO — recensement-operation-cactus, via data.education.gouv.fr"
+        databox-date="Mars-avril 2025"
+        databox-download heading-level="4">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-typ" source="typ-t" table download
+        filename="cactus-aucune-action-colleges-lycees.csv"
+        label-field="Type"
+        value-field="Établissements, Aucune action envisagée (%), Réponses sur les suites"
+        description="Part des réponses n'envisageant aucune action après Cactus, pour les collèges et pour les lycées, selon que l'établissement était déjà sensibilisé ou non. L'écart est plus large chez les collèges. Les établissements d'un autre type ou sans type renseigné sont exclus."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. La nuance ---------- -->
+    <h2 class="fr-h3">2. Un quart des réponses ne voient «&nbsp;pas de changement&nbsp;», et une sur huit cumule&nbsp;: ni effet, ni suite</h2>
+    <dsfr-data-repeat source="tot-r">
+      <template>
+        <p class="odv-lecture"><strong>{{pdc:number:0}}&nbsp;%</strong> des réponses constatent
+          « pas de changement ». <strong>{{n_sans:number}}</strong>, soit
+          {{part_sans:number:0}}&nbsp;% du total, cumulent « pas de changement » et « aucune
+          action envisagée »&nbsp;: pour elles, l'opération n'a laissé aucune trace déclarée.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">Un établissement pouvait cocher plusieurs réponses&nbsp;: chaque barre
+      est une part de l'ensemble des réponses, et les barres ne se somment pas à 100&nbsp;%.</p>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Effets observés, en part des réponses">
+          <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-obs" source="obs-o" type="bar" horizontal
+            label-field="observation" value-field="part" name="Part des réponses (%)"
+            selected-palette="neutral" highlight-index="[2]"
+            y-min="0" unit-tooltip="%"
+            databox databox-title="Ce que les établissements ont observé (% des réponses)"
+            databox-source="DGESCO — recensement-operation-cactus, via data.education.gouv.fr"
+            databox-date="Mars-avril 2025"
+            databox-download heading-level="3">
+          </dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-obs" source="obs-t" table download
+            filename="cactus-effets-observes.csv"
+            label-field="Effet observé" value-field="Part des réponses (%)"
+            description="Part des réponses citant chaque effet observé pendant ou après l'opération Cactus. Plusieurs effets pouvaient être cités : les parts ne se somment pas à 100 %."></dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Actions envisagées ensuite, en part des réponses sur les suites">
+          <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-act" source="act-o" type="bar" horizontal
+            label-field="action" value-field="part" name="Part des réponses sur les suites (%)"
+            selected-palette="neutral" highlight-index="[2]"
+            y-min="0" unit-tooltip="%"
+            databox databox-title="Les suites envisagées (% des réponses sur les suites)"
+            databox-source="DGESCO — recensement-operation-cactus, via data.education.gouv.fr"
+            databox-date="Mars-avril 2025"
+            databox-download heading-level="3">
+          </dsfr-data-chart>
+          </div>
+          <dsfr-data-a11y for="g-act" source="act-t" table download
+            filename="cactus-suites-envisagees.csv"
+            label-field="Action envisagée" value-field="Part des réponses sur les suites (%)"
+            description="Part des réponses sur les suites citant chaque action envisagée après l'opération Cactus. Plusieurs actions pouvaient être citées. Les réponses sans aucune indication sur les suites sont exclues du dénominateur."></dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+    <p class="fr-text--sm fr-mb-6w">Quand une suite est prévue, elle passe d'abord par la
+      classe&nbsp;: les enseignants dans leur cours et les professeurs principaux sur l'heure de
+      vie de classe. Les relais extérieurs (forces de l'ordre, associations) et la formation des
+      personnels restent rares.</p>
+
+    <!-- ---------- 3. La géographie ---------- -->
+    <h2 class="fr-h3">3. Deux réponses sur trois viennent de sept académies</h2>
+    <dsfr-data-repeat source="aca7-s">
+      <template>
+        <p class="odv-lecture">Les sept académies qui ont le plus répondu totalisent
+          <strong>{{n7:number}} réponses</strong>, soit <strong>{{p7:number:0}}&nbsp;%</strong>
+          du recensement.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="aca-nb">
+      <template>
+        <p class="fr-text--sm">{{nb}} académies figurent dans le jeu. Le recensement ne dit pas
+          combien d'établissements ont reçu le courriel&nbsp;: on ne peut donc pas lire ces
+          écarts comme des taux de participation. Ils disent où l'on a <em>répondu</em> au
+          recensement, pas où l'opération a eu lieu.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Réponses par académie, les sept premières en évidence">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-aca" source="aca" type="bar" horizontal
+        label-field="nom_academie" value-field="n" name="Réponses"
+        selected-palette="neutral" highlight-index="[0, 1, 2, 3, 4, 5, 6]"
+        databox databox-title="Réponses au recensement par académie"
+        databox-source="DGESCO — recensement-operation-cactus, via data.education.gouv.fr"
+        databox-date="Mars-avril 2025"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-aca" source="aca-t" table download
+        filename="cactus-reponses-par-academie.csv"
+        label-field="Académie" value-field="Réponses, Part du total (%)"
+        description="Nombre de réponses au recensement de l'opération Cactus par académie, de la plus représentée à la moins représentée. Les sept premières concentrent environ deux réponses sur trois."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       Quatre drapeaux 0/1 — `sensi_pontuel_sur_annee`, `sensi_longue_duree_annee`,
-       `partage_sur_territoire`, `demande_appui` — mais avec une particularité :
-       844 des 905 lignes sont NULLES sur les quatre. Seuls une cinquantaine
-       d'établissements ont répondu à cette partie du questionnaire.
-
-       `fold` les replie quand même : il ne retient que les valeurs vraies, donc
-       une ligne sans réponse ressort avec un tableau vide, distinct d'une ligne
-       ayant répondu « non ». Ce que `fold` ne peut PAS faire, c'est distinguer
-       « a répondu non » de « n'a pas répondu » — les deux donnent un tableau
-       vide. D'où la colonne `a_repondu_suites` calculée en `compute`, qui garde
-       la différence.
-       ========================================================================== -->
-
-  <dsfr-data-source id="cac" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="recensement-operation-cactus"
-    fetch-mode="export" max-records="2000">
-  </dsfr-data-source>
-
-  <dsfr-data-normalize id="cac-n" source="cac"
-    rename="sensi_pontuel_sur_annee:Sensibilisation ponctuelle | sensi_longue_duree_annee:Sensibilisation longue durée | partage_sur_territoire:Partage sur le territoire | demande_appui:Demande d'appui"
-    fold="Sensibilisation ponctuelle:suites, Sensibilisation longue durée:suites, Partage sur le territoire:suites, Demande d'appui:suites"
-    compute="a_repondu_suites = when is_null(sensi_pontuel_sur_annee) then 'N’a pas répondu sur les suites' else 'A répondu sur les suites'; suivi_oui = when suivi_sensi_cyber = 'Oui' then 1 else 0; taille = when is_null(nombre_d_eleves) then 'Effectif non renseigné' when nombre_d_eleves &lt; 300 then 'Moins de 300 élèves' when nombre_d_eleves &lt; 700 then '300 à 700' when nombre_d_eleves &lt; 1200 then '700 à 1 200' else '1 200 et plus'">
-  </dsfr-data-normalize>
-
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+  <!-- ---------- 4. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Retrouver un établissement</h2>
+    <p class="fr-text--sm">Les établissements répondants, colorés selon les suites envisagées.
+      La recherche et les filtres pilotent les compteurs, la carte et le tableau&nbsp;; ils ne
+      touchent pas les graphiques ci-dessus.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="cac-q" source="cac-n"
-        fields="uai, nom_academie, libelle_departement, denomination_principale"
-        label="Rechercher" placeholder="Code UAI, académie, département, type d'établissement…"
-        operator="words" count count-label="réponse" url-sync>
+          fields="uai, nom_academie, libelle_departement, denomination_principale"
+          label="Rechercher" placeholder="Code UAI, académie, département, type d'établissement…"
+          operator="words" count count-label="réponse" url-sync url-search-param="q">
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Quatre indicateurs, dont deux parts en ratio de comptes">
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
       <dsfr-data-kpi source="cac-f" value="count" format="nombre"
-        heading="Réponses" label="au recensement"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cac-f" value="uai:distinct" format="nombre"
-        heading="Établissements" label="distincts (17 ont répondu deux fois)"></dsfr-data-kpi>
-      <!-- Ratio de deux comptes (#673) : la part de « Oui », calculée et non
-           écrite. `count:champ:valeur` au numérateur, `count` au dénominateur. -->
-      <dsfr-data-kpi source="cac-f" value="count:suivi_sensi_cyber:Oui / count"
-        format="pourcentage" decimals="1"
-        heading="Suivi mis en place" label="part des répondants"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cac-f" value="count:sensibilisation_existante:Oui / count"
-        format="pourcentage" decimals="1"
-        heading="Sensibilisation préexistante" label="avant l'opération"></dsfr-data-kpi>
+        heading="Réponses" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cac-f"
+        value="count{observations:eq:Des signalements de sécurité numérique} / count"
+        format="pourcentage" decimals="0"
+        heading="font état de signalements" label="part des réponses de la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cac-f"
+        value="count{sensibilisation_post_cactus_actions:eq:Aucune action envisagée} / count{repondu:eq:1}"
+        format="pourcentage" decimals="0"
+        heading="n'envisagent aucune action" label="parmi les réponses sur les suites de la sélection"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
-    </div>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-
-        <h2 class="fr-h6">Filtrer</h2>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="cac-f" source="cac-q"
-          fields="suivi_sensi_cyber, sensibilisation_existante, observations, suites, a_repondu_suites, taille, denomination_principale, secteur_public_prive_libe, nom_academie, libelle_region"
-          labels="suivi_sensi_cyber:Suivi mis en place | sensibilisation_existante:Sensibilisation préexistante | observations:Effets observés | suites:Suites données | a_repondu_suites:Réponse sur les suites | taille:Effectif | denomination_principale:Type d'établissement | secteur_public_prive_libe:Secteur | nom_academie:Académie | libelle_region:Région"
-          display="suivi_sensi_cyber:radio-inline | sensibilisation_existante:radio-inline | observations:checkbox | suites:checkbox | a_repondu_suites:checkbox | taille:checkbox | denomination_principale:multiselect | secteur_public_prive_libe:checkbox | nom_academie:multiselect | libelle_region:radio"
-          searchable="denomination_principale, nom_academie"
-          disjunctive="observations, suites, denomination_principale, nom_academie"
-          max-values="6" url-sync url-params>
+          fields="groupe, suites, observations, sensibilisation_post_cactus_actions, type_etab, nom_academie"
+          labels="groupe:Sensibilisation préalable | suites:Suites | observations:Effets observés | sensibilisation_post_cactus_actions:Actions envisagées | type_etab:Type d'établissement | nom_academie:Académie"
+          display="groupe:radio | suites:checkbox | observations:checkbox | sensibilisation_post_cactus_actions:checkbox | type_etab:checkbox | nom_academie:multiselect"
+          searchable="nom_academie"
+          disjunctive="suites, observations, sensibilisation_post_cactus_actions, type_etab, nom_academie"
+          max-values="8" url-sync url-params>
         </dsfr-data-facets>
-        </details>
-      </div>
-      <div class="fr-col-12 fr-col-md-9">
-        <div class="odv-viz" data-code="Carte des répondants, colorée par suivi mis en place">
-        <!-- Phrase calculée depuis un agrégat global (une ligne) qui suit les facettes. -->
-        <dsfr-data-repeat source="cac-lect" empty="Aucune réponse ne correspond à la sélection.">
-          <template>
-            <p class="odv-lecture"><strong>{{part_oui:number:0|—}} %</strong> des
-              <strong>{{n:number}}</strong> établissements répondants ont mis en place un suivi de
-              sensibilisation : le vert domine la carte, le rouge signale ceux qui n'en ont pas.</p>
-          </template>
-        </dsfr-data-repeat>
-
+      </details>
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des répondants, colorée par suites envisagées">
         <dsfr-data-map id="carte-cac"
           name="Établissements ayant répondu au recensement de l'opération Cactus"
           height="560px" tiles="ign-plan" tiles-style="muted"
           insets="drom" fit-bounds fit-max-zoom="13">
           <dsfr-data-map-layer id="couche-cac" source="cac-f" type="circle"
             geo-field="position" radius="6" fill-opacity="0.9"
-            color-field="suivi_sensi_cyber"
-            color-map="Oui:#18753c,Non:#c9191e"
-            color="#929292"
+            color-field="suites"
+            color-map="Au moins une action prévue:#929292,Aucune action envisagée:#000091,Suites non renseignées:#e4794a"
             tooltip-field="denomination_principale"
-            max-items="2000" cluster cluster-radius="45">
+            max-items="2000">
           </dsfr-data-map-layer>
-          <dsfr-data-map-legend for="couche-cac" label="Suivi de sensibilisation mis en place"></dsfr-data-map-legend>
+          <dsfr-data-map-legend for="couche-cac" label="Suites envisagées après Cactus"></dsfr-data-map-legend>
           <dsfr-data-map-popup mode="panel-right" title-field="denomination_principale" width="380px">
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur_public_prive_libe|secteur non renseigné}}</p>
               <p class="fr-text--sm fr-mb-3v">
-                <strong>{{libelle_departement}}</strong> — académie de {{nom_academie}}<br>
+                <strong>{{libelle_departement|département non renseigné}}</strong> — académie de {{nom_academie}}<br>
                 {{nombre_d_eleves:number|effectif non renseigné}} élèves
               </p>
-
-              <ul class="fr-text--sm fr-mb-3v">
-                <li>Suivi mis en place : <strong>{{suivi_sensi_cyber|non renseigné}}</strong></li>
-                <li>Sensibilisation préexistante : <strong>{{sensibilisation_existante|non renseigné}}</strong></li>
-              </ul>
-
+              <p class="fr-text--sm fr-mb-3v">{{groupe}}</p>
               <p class="fr-text--sm fr-mb-1v"><strong>Effets observés</strong></p>
               <ul class="fr-text--sm fr-mb-3v">{{#each observations}}<li>{{.}}</li>{{/each}}</ul>
-              {{#unless observations}}<p class="fr-text--sm fr-mb-3v">Non renseignés.</p>{{/unless}}
-
-              <p class="fr-text--sm fr-mb-1v"><strong>Suites données</strong></p>
-              <ul class="fr-text--sm fr-mb-3v">{{#each suites}}<li>{{.}}</li>{{/each}}</ul>
-              {{#unless suites}}<p class="fr-text--sm fr-mb-3v">{{a_repondu_suites}}.</p>{{/unless}}
-
-              <p class="fr-text--xs fr-mb-0">UAI {{uai}} · réponse du {{horodatage:date}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Suites envisagées</strong></p>
+              <ul class="fr-text--sm fr-mb-3v">{{#each sensibilisation_post_cactus_actions}}<li>{{.}}</li>{{/each}}</ul>
+              {{#unless sensibilisation_post_cactus_actions}}<p class="fr-text--sm fr-mb-3v">Non renseignées.</p>{{/unless}}
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}} · réponse du {{horodatage:date|date non renseignée}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="cac-f" for="carte-cac" table download
+        <dsfr-data-normalize id="cac-tableau" source="cac-f"
+          compute="effets = join(observations, ', '); suites_txt = join(sensibilisation_post_cactus_actions, ', ')"
+          rename="uai:UAI | denomination_principale:Type | nom_academie:Académie | libelle_departement:Département | groupe:Sensibilisation préalable | suites:Suites"></dsfr-data-normalize>
+        <dsfr-data-a11y source="cac-tableau" for="carte-cac" table download
           filename="operation-cactus.csv"
           label="Données de la carte"
-          description="Une réponse par ligne : établissement, académie, suivi, sensibilisation préexistante, effets observés."
-          label-field="uai"
-          value-field="denomination_principale, secteur_public_prive_libe, suivi_sensi_cyber, sensibilisation_existante, nombre_d_eleves, libelle_departement, nom_academie">
+          description="Une réponse par ligne pour la sélection courante : établissement, académie, sensibilisation préalable, effets observés et suites envisagées."
+          label-field="UAI"
+          value-field="Type, Académie, Département, Sensibilisation préalable, effets, suites_txt">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Effets observés, un champ multivalué éclaté par explode">
-        <h2 class="fr-h5">Ce que les établissements ont observé</h2>
-        <!-- Pas de part ici : après `explode`, un établissement compte dans plusieurs
-             groupes et les parts dépasseraient 100 %. On nomme l'effet le plus cité. -->
-        <dsfr-data-repeat source="cac-obs-top">
-          <template>
-            <p class="odv-lecture">L'effet le plus cité est « <strong>{{observations}}</strong> »,
-              par <strong>{{n:number}}</strong> établissements — un même répondant peut en
-              déclarer plusieurs.</p>
-          </template>
-        </dsfr-data-repeat>
-        <dsfr-data-chart id="g-cac-obs" source="cac-obs" type="bar" horizontal
-          label-field="observations" value-field="n" name="Établissements"
-          databox databox-title="Effets observés après l'opération Cactus"
-          databox-source="Ministère de l'éducation nationale — recensement-operation-cactus"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-cac-obs" source="cac-obs" table download></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          <strong>618 établissements sur 905</strong> déclarent des signalements de sécurité
-          numérique, mais <strong>220</strong> répondent « Pas de changement ». C'est la mesure
-          d'impact réelle de l'opération, et elle n'est nulle part sur le portail.
-        </p>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Actions engagées ensuite, avec la part de la première">
-        <h2 class="fr-h5">Les actions engagées ensuite</h2>
-        <dsfr-data-repeat source="cac-act-top">
-          <template>
-            <p class="odv-lecture">« <strong>{{sensibilisation_post_cactus}}</strong> » est l'action la
-              plus déclarée : <strong>{{n:number}}</strong> établissements, soit
-              <strong>{{part:number:0}} %</strong> de ceux qui ont répondu à cette question.</p>
-          </template>
-        </dsfr-data-repeat>
-        <dsfr-data-chart id="g-cac-act" source="cac-act" type="bar" horizontal
-          label-field="sensibilisation_post_cactus" value-field="n" name="Établissements"
-          databox databox-title="Actions de sensibilisation engagées après l'opération"
-          databox-source="Ministère de l'éducation nationale — recensement-operation-cactus"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-cac-act" source="cac-act" table download></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          <strong>265 établissements</strong> déclarent « Aucune action envisagée » — la deuxième
-          réponse la plus fréquente, et celle qu'un bilan d'opération montre rarement.
-        </p>
-        </div>
-      </div>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Le faux courriel a fait réagir&nbsp;: deux réponses sur trois
+        font état de signalements. Mais près d'un établissement sur trois n'envisage aucune
+        suite, et cette absence de suite est plus fréquente là où aucune sensibilisation
+        n'existait avant l'opération. Une campagne nationale de ce type touche d'abord ceux qui
+        étaient déjà prêts. Ce que ces données ne disent pas&nbsp;: combien d'établissements ont
+        été sollicités, ni ce qui a été réellement fait après le printemps 2025.</p>
     </div>
+
+    <!-- ---------- 5. Ce qu'on ne montre pas ---------- -->
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mb-3w" aria-label="Le jeu en chiffres">
+        <dsfr-data-kpi source="cac-n" value="count" format="nombre"
+          heading="Réponses" label="lignes du jeu"></dsfr-data-kpi>
+        <dsfr-data-kpi source="cac-n" value="uai:distinct" format="nombre"
+          heading="Établissements distincts" label="code UAI"></dsfr-data-kpi>
+        <dsfr-data-kpi source="cac-n" value="count{position:isnull}" format="nombre"
+          heading="Réponses sans localisation" label="absentes de la carte"></dsfr-data-kpi>
+        <dsfr-data-kpi source="cac-n" value="count{repondu:eq:0}" format="nombre"
+          heading="Sans réponse sur les suites" label="hors du dénominateur « aucune action »"></dsfr-data-kpi>
+      </dsfr-data-kpi-group>
+      <ol class="fr-text--sm">
+        <li><strong>L'unité est la réponse, pas l'établissement.</strong> Quelques établissements
+          ont répondu deux ou trois fois&nbsp;; ils pèsent autant de fois dans les parts. L'écart
+          entre réponses et établissements distincts (ci-dessus) est trop faible pour déplacer
+          les constats.</li>
+        <li><strong>Pas de dénominateur.</strong> Le jeu ne dit pas combien d'établissements ont
+          reçu le courriel. On ne mesure ni un taux de participation, ni un taux de clic&nbsp;:
+          seulement ce que les répondants ont déclaré.</li>
+        <li><strong>« Aucune action envisagée » se lit parmi les réponses sur les suites.</strong>
+          Les réponses sans aucune indication sur les suites (compte ci-dessus) sortent du
+          dénominateur au lieu de compter pour « non ». Quelques réponses cochent à la fois
+          « Aucune action envisagée » et une action&nbsp;: elles sont comptées dans « aucune
+          action », comme le fait le portail.</li>
+        <li><strong>Le mot « signalements » est celui du questionnaire.</strong> Il ne dit pas
+          s'il s'agit de signalements du faux courriel lui-même (le réflexe attendu) ou d'autres
+          incidents. La page ne l'interprète pas au-delà.</li>
+        <li><strong>Pourquoi le champ «&nbsp;Suivi sensibilité cyber&nbsp;» est écarté.</strong>
+          <dsfr-data-repeat source="tot-r">
+            <template>
+              Son sens n'est pas documenté, et il se contredit avec les suites&nbsp;:
+              {{n_suivi_aucune:number}} des {{n_aucune:number}} réponses qui n'envisagent aucune
+              action y répondent « Oui ». La reproduction précédente de cette page en tirait
+              « 84&nbsp;% ont mis en place un suivi »&nbsp;; ce chiffre n'est pas repris.
+            </template>
+          </dsfr-data-repeat></li>
+        <li><strong>Le calendrier des réponses n'est pas celui de l'opération.</strong>
+          <dsfr-data-repeat source="tot-r">
+            <template>
+              Seules {{part_pendant:number:0}}&nbsp;% des réponses datées ont été saisies
+              pendant les trois jours de l'opération&nbsp;; les autres s'étalent jusqu'à la
+              mi-avril. La courbe des saisies, que publiait l'original, décrit le rythme du
+              questionnaire, pas celui de l'opération&nbsp;: elle n'est pas reprise.
+            </template>
+          </dsfr-data-repeat></li>
+        <li><strong>Colonnes non utilisées.</strong> Quatre indicateurs 0/1 de suivi
+          (sensibilisation ponctuelle, longue durée, partage sur le territoire, demande d'appui)
+          ne sont renseignés que sur une cinquantaine de réponses&nbsp;: trop peu pour une part.
+          La colonne <code>d4_pix_prec</code> est entièrement vide. Le secteur (public ou privé)
+          est public à plus de 95&nbsp;%.</li>
+        <li><strong>Angles écartés.</strong> Le total d'élèves «&nbsp;sensibilisés&nbsp;» de
+          l'original (il additionne des effectifs d'établissements, doublons compris, et ne
+          mesure pas qui a été touché)&nbsp;; les cartes régionales et départementales de volumes
+          (elles montrent où l'on a répondu, déjà dit par le graphique par académie).</li>
+      </ol>
+    </section>
   </div>
 
-  <dsfr-data-query id="cac-obs" source="cac-f" explode="observations"
-    group-by="observations" aggregate="uuid:count:n" order-by="n:desc"></dsfr-data-query>
-  <dsfr-data-query id="cac-obs-top" source="cac-obs" limit="1"></dsfr-data-query>
-  <!-- Ici la part est juste : une réponse par établissement, `where isnotnull` exclut
-       ceux qui n'ont pas répondu, et `share_percent` se calcule avant `limit`. -->
-  <dsfr-data-query id="cac-act" source="cac-f" group-by="sensibilisation_post_cactus"
-    aggregate="uuid:count:n, n:share_percent:part" where="sensibilisation_post_cactus:isnotnull"
-    order-by="n:desc" limit="10"></dsfr-data-query>
-  <dsfr-data-query id="cac-act-top" source="cac-act" limit="1"></dsfr-data-query>
-  <!-- Agrégat global (une ligne) pour la phrase de lecture de la carte. -->
-  <dsfr-data-query id="cac-tot" source="cac-f"
-    aggregate="uuid:count:n, suivi_oui:sum:n_oui"></dsfr-data-query>
-  <dsfr-data-normalize id="cac-lect" source="cac-tot"
-    compute="part_oui = when n = 0 then null else round(n_oui / n * 100, 0)"></dsfr-data-normalize>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
-  <details class="odv-technique" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-    <section class="fr-pt-4w">
-    <div>
-      <h2>Analyse de reproduction — opération Cactus</h2>
-
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — opération Cactus</h2>
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine : une <strong>page ODS Studio</strong>,
-        <a href="https://data.education.gouv.fr/p/suivi-et-impact-de-l-operation-de-sensibilisation-cactus/" target="_blank" rel="noopener external">/p/suivi-et-impact-de-l-operation-de-sensibilisation-cactus/</a>.
-        Fiche d'audit : <code>docs/portail-education/cactus-hameconnage.md</code>.
+        Cible d'origine&nbsp;: une page ODS Studio,
+        <a href="https://data.education.gouv.fr/p/suivi-et-impact-de-l-operation-de-sensibilisation-cactus/" target="_blank" rel="noopener external">/p/suivi-et-impact-de-l-operation-de-sensibilisation-cactus/</a>
+        — quatre KPI de volume, deux graphiques de comptes, trois répartitions géographiques,
+        aucun taux. Fiche d'audit&nbsp;: <code>docs/portail-education/cactus-hameconnage.md</code>.
+        Recréée le 2026-09-26 en page éditoriale.
       </p>
-
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Les parts calculées, pas écrites.</strong> Deux KPI en
-              <code>count:champ:valeur / count</code> (#673) : la part d'établissements ayant mis
-              en place un suivi et celle disposant d'une sensibilisation préexistante se
-              recalculent à chaque filtre. Sur un jeu de réponses à un questionnaire, c'est
-              <em>la</em> forme utile — un pourcentage figé ne dit rien d'une sous-population.</li>
-            <li><strong><code>explode</code> sur les effets observés.</strong>
-              <code>observations</code> est multivalué : un établissement peut déclarer à la fois
-              des signalements et des débats. Troisième emploi du motif en deux jours.</li>
-            <li><strong>Le gabarit du questionnaire.</strong> Facettes sur les réponses fermées,
-              recherche sur les identifiants, carte colorée par la réponse principale : écrit
-              d'un trait.</li>
+            <li><strong>Une part juste sur un champ multivalué.</strong> Un drapeau 0/100 par
+              réponse en <code>compute</code> (<code>observations = '…'</code> regarde dans le
+              tableau), puis <code>avg</code>&nbsp;: la part des réponses, sans le total gonflé
+              qu'aurait donné un <code>explode</code>. Un drapeau <code>null</code> quand la
+              question n'a pas été répondue sort du dénominateur.</li>
+            <li><strong>Deux groupes côte à côte.</strong> Query par groupe,
+              <code>unpivot</code> vers le format long, <code>series-field</code> et
+              <code>color-map</code>&nbsp;: le graphique de preuve. Un <code>pivot</code> sur la
+              même query donne la phrase de lecture et l'écart.</li>
+            <li><strong>KPI conditionnels.</strong>
+              <code>count{champ:eq:v} / count{repondu:eq:1}</code> rend une part au bon
+              dénominateur, et suit les facettes dans la zone d'exploration.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong><code>fold</code> ne distingue pas « a répondu non » de « n'a pas
-              répondu ».</strong> Les quatre drapeaux de suites (<code>sensi_pontuel</code>,
-              <code>sensi_longue_duree</code>, <code>partage_sur_territoire</code>,
-              <code>demande_appui</code>) sont nuls sur <strong>844 des 905 lignes</strong> :
-              seule une cinquantaine d'établissements a répondu à cette partie du questionnaire.
-              <code>fold</code> ne retient que les valeurs vraies, si bien qu'une ligne « non » et
-              une ligne « sans réponse » ressortent toutes deux avec un tableau vide.
-              L'information « n'a pas répondu » — qui est ici la plus fréquente, et donc la plus
-              intéressante — disparaît. Il a fallu la reconstruire en <code>compute</code>, dans
-              une colonne à part. <strong>Ce n'est pas un défaut de <code>fold</code></strong>,
-              qui fait exactement ce qu'il annonce ; c'est que le motif « colonnes booléennes
-              parallèles » suppose des booléens, et qu'un questionnaire produit des
-              <em>ternaires</em> : oui, non, et rien.</li>
-            <li><strong>Une cinquième colonne entièrement vide.</strong>
-              <code>d4_pix_prec</code> ne porte aucune valeur sur les 905 lignes. Cinquième jeu de
-              ce portail dans ce cas, après Génération 2024 (44 colonnes), l'annuaire des
-              internats, la déficience sensorielle et Euroscol.</li>
-            <li><strong>Vingt-huit réponses en double.</strong> 877 UAI pour
-              905 lignes. Le KPI « Réponses » et le KPI « Établissements » sont donc tous deux
-              justes et différents — il faut les deux, et dire lequel est lequel.</li>
-                      <li><strong>Les blocs de template ne s'imbriquent pas, et le silence coûte cher (lot 18).</strong>
-              L'écriture naturelle d'une liste optionnelle est
-              <code>{{#if champ}}&lt;ul&gt;{{#each champ}}…{{/each}}&lt;/ul&gt;{{/if}}</code>. Elle ne
-              rend <strong>rien du tout</strong>&nbsp;: ni les items, ni le repli
-              <code>{{#unless}}</code>, ni un message en console. Le changelog de 0.27.0 le dit — «&nbsp;les
-              blocs ne s'imbriquent pas&nbsp;» — mais rien à l'exécution ne le rappelle, et l'infobulle
-              affichait un intertitre suivi du vide. <strong>Relevé au navigateur puis corrigé&nbsp;:</strong>
-              le <code>&lt;ul&gt;</code> sort de la condition, le <code>{{#each}}</code> reste seul (un tableau
-              vide ne rend rien), et le cas vide est masqué par une règle <code>ul:empty</code> de
-              <code>site.css</code>. C'est la famille de défauts la plus coûteuse du dépôt&nbsp;: une
-              grammaire fausse qui ne dit rien (PG-022).</li>
+            <li><strong>Une apostrophe dans une valeur à tester.</strong> Les littéraux de
+              <code>compute</code> sont entre apostrophes&nbsp;; « Par les PP sur l'heure de vie
+              de classe » s'est testé en sous-chaîne sur le tableau joint
+              (<code>contains(join(…), 'heure de vie de classe')</code>).</li>
+            <li><strong>Le sens d'un champ, pas sa syntaxe.</strong> <code>suivi_sensi_cyber</code>
+              se lisait « suivi mis en place »&nbsp;; croisé avec les suites, il se contredit. Il
+              a fallu le relire à l'API avant de décider de ne pas l'utiliser.</li>
+            <li><strong>Mettre une barre en évidence dans une série unique.</strong>
+              <code>color-map</code> colore bien la barre nommée, mais la légende n'a qu'une
+              pastille pour plusieurs couleurs et la bibliothèque prévient qu'elle peut
+              contredire le graphique. Repli sur <code>highlight-index</code>, qui désigne la
+              barre par son rang&nbsp;: juste ici parce que les réponses s'arrêtent au 17 avril 2025, fragile sur un jeu
+              vivant.</li>
           </ul>
         </div>
       </div>
-
       <div class="fr-table fr-table--bordered">
         <table>
           <caption>Correspondance bloc Studio → composant dsfr-data</caption>
@@ -355,27 +590,22 @@
           </thead>
           <tbody>
             <tr><td><code>data_provider</code> unique</td><td><code>dsfr-data-source fetch-mode="export"</code></td><td>Équivalent</td></tr>
-            <tr><td>blocs KPI</td><td><code>dsfr-data-kpi</code> dont deux en ratio</td><td>Meilleur : les parts suivent les filtres</td></tr>
-            <tr><td>graphiques de répartition</td><td><code>dsfr-data-query explode</code> + <code>dsfr-data-chart</code></td><td>Meilleur : les effets multivalués sont comptables</td></tr>
-            <tr><td>carte de points</td><td><code>color-field="suivi_sensi_cyber"</code> + <code>cluster</code></td><td>Meilleur : la réponse principale est représentée</td></tr>
-            <tr><td>quatre drapeaux de suites</td><td><code>fold</code> + colonne <code>compute</code></td><td><strong>Partiel</strong> : « non » et « sans réponse » se confondent, il faut reconstruire</td></tr>
+            <tr><td>KPI de volume</td><td><code>dsfr-data-kpi</code> en ratio conditionnel</td><td>Mieux&nbsp;: des parts au bon dénominateur</td></tr>
+            <tr><td>barres des observations et des actions</td><td>drapeaux <code>compute</code> + <code>avg</code> + <code>unpivot</code></td><td>Mieux&nbsp;: parts de réponses, non plus occurrences sommées</td></tr>
+            <tr><td>anneau « déjà sensibilisé »</td><td>croisement <code>group-by</code> + <code>series-field</code></td><td>Mieux&nbsp;: la variable devient l'explication</td></tr>
+            <tr><td>barres par académie, deux choroplèthes</td><td>barres triées, sept premières en évidence</td><td>Simplifié, volontairement</td></tr>
           </tbody>
         </table>
       </div>
-
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>. La seule friction est instructive et n'est
-          pas un défaut : <strong><code>fold</code> suppose des booléens, et un questionnaire
-          produit des ternaires</strong> — oui, non, et pas de réponse. Sur ce jeu, la troisième
-          modalité concerne 844 lignes sur 905, c'est-à-dire l'écrasante majorité, et c'est elle
-          qu'un bilan d'opération devrait regarder en premier. Ce que la page ajoute au portail
-          tient d'ailleurs à cela : <strong>220 établissements déclarent « Pas de changement » et
-          265 « Aucune action envisagée »</strong> — deux chiffres qu'un bilan montre rarement.</p>
+        <p>Recréation <strong>sans friction de bibliothèque</strong>&nbsp;: le coût a été de lire
+          le jeu, pas de l'écrire. Le constat que l'original ne faisait pas — l'absence de suite
+          plus fréquente là où rien n'existait avant — tient en un croisement que tout le
+          pipeline sait faire côté client.</p>
       </div>
-    </div>
-  </section>
-  </details>
+      </section>
+    </details>
   </div>
 
 </main>
