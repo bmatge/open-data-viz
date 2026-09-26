@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 4 demandes cadrées — 0 bugs,
-> 1 améliorations,
+> 8 demandes cadrées — 1 bugs,
+> 4 améliorations,
 > 3 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -39,7 +39,7 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-16 critiques ont été **retirées** au fil du
+20 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
 `faux-probleme` du registre), et 108
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
@@ -71,19 +71,22 @@ _1 demandes — S 1, M 0, L 0._
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
-| PG-032 | `dsfr-data-a11y` n'accepte pas la grammaire `champ:Libellé` de son propre graphique : les en-têtes gardent le nom de colonne, et écrire le libellé **vide le tableau** sans un mot | piege | S | 1 | Déposer chez dsfr-data |
+| PG-032 | `dsfr-data-a11y` n'accepte pas la grammaire `champ:Libellé` de son propre graphique : les en-têtes gardent le nom de colonne, et écrire le libellé **vide le tableau** sans un mot | piege | S | 3 | Déposer chez dsfr-data |
 | PG-034 | API Tabular : `__in` **ignore toute valeur contenant une parenthèse**, avec un HTTP 200 et zéro ligne — là où `__exact` accepte la même valeur | piege | S | 1 | Déposer chez dsfr-data et signaler à data.gouv.fr |
+| BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 1 | Déposer chez dsfr-data |
+| AM-089 | `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro | amelioration | S | 1 | Déposer chez dsfr-data |
 | AM-087 | La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-_3 demandes — S 2, M 0, L 0._
+_5 demandes — S 4, M 0, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
+| AM-088 | `subtitle-field` du podium affiche le nombre brut : ni séparateur de milliers, ni format, ni suffixe | amelioration | S | 1 | Déposer chez dsfr-data |
+| AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-
-_0 demandes — S 0, M 0, L 0._
+_2 demandes — S 1, M 0, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -147,7 +150,7 @@ Sur l'adaptateur Tabular, ne pas déléguer `order-by` quand le chargement est p
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement, dx`, `severity:moyenne`, `dsfr-data-a11y`, `dsfr-data-chart`
-**Rencontré sur** 1 page(s) : sports/portrait-federation
+**Rencontré sur** 3 page(s) : sports/portrait-federation, aides-de-minimis, barometre-france-num
 
 ### Constat
 
@@ -157,6 +160,8 @@ Sur un graphique multi-séries, `dsfr-data-chart` nomme ses séries dans l'attri
 2. **En écrivant la grammaire attendue, les en-têtes restent techniques.** Le graphique dit « Fédération sélectionnée », le tableau équivalent dit `v_fede`. Or le tableau équivalent est destiné aux lecteurs d'écran : c'est précisément là que le nom technique coûte le plus cher.
 
 Le piège est d'autant plus facile à payer que les deux balises sont adjacentes et que l'une des deux accepte la forme. Il ne s'agit pas d'un attribut manquant mais d'une **asymétrie de grammaire entre deux composants appariés par conception** — le `for="g-base100"` de l'`a11y` déclare explicitement l'appariement.
+
+**Relecture métier du 2026-09-26** — le piège payé sur deux pages, et la voie `rename` éprouvée.** Sur aides-de-minimis, le tableau équivalent du graphique des instruments porte en en-tête `instrument_aide | total | part`. Sur le Baromètre, un `dsfr-data-normalize rename` placé **après** le calcul donne des en-têtes lisibles — avec espaces et parenthèses (« Écart (pt) », « Variation (pt) »), que `compute` ne peut pas produire (identifiants `[A-Za-zÀ-ÿ0-9_]`). Le tableau et le CSV portent ces en-têtes, et graphiques et query en aval lisent les nouveaux noms (`order-by="Réponse:asc"` fonctionne). Le coût annoncé par le contournement se confirme : le libellé vit désormais dans le pipeline.
 
 ### Impact de l'erreur ou du manque
 
@@ -174,7 +179,7 @@ Structurel. Tout graphique multi-séries de la bibliothèque appelle un `a11y` a
 
 Relevé au navigateur le 2026-09-20 contre la 0.33.0 (`node scripts/rejeu-findings/run.mjs am082`, page `pages/am082.html`, cas 4). Deux `dsfr-data-a11y` sur la même source `q` : celui en grammaire nue rend les en-têtes `["dep_nom", "dep_nom__count"]` et un corps rempli ; celui en grammaire du chart (`label-field="dep_nom:Departement" value-field="dep_nom__count:Nombre d'equipements"`) rend les en-têtes `["dep_nom:Departement", "dep_nom__count:Nombre d'equipements"]` et une première ligne `["", ""]` — **cellules vides**. Console : aucun message pour ce cas (le seul message émis concerne le garde-fou de `series-field`, qui lui est bien dit). JSDoc de l'attribut relu au source (`packages/core/src/components/dsfr-data-a11y.ts`) : « Colonne(s) utilisée(s) pour les valeurs du tableau (séparées par des virgules) » — la grammaire à libellés n'y figure pas, ce qui confirme que c'est une absence assumée et non un bug de parsing.
 
-**Le banc est sain** : `grep` sur les 70 pages, **zéro** `dsfr-data-a11y` ne porte la grammaire à deux-points. Le piège est donc documenté avant d'avoir été payé — pour une fois.
+**Le banc est sain** : `grep` sur les 70 pages, **zéro** `dsfr-data-a11y` ne porte la grammaire à deux-points. Le piège est donc documenté avant d'avoir été payé — pour une fois. — **2026-09-26, 0.33.0.** Navigateur, /viz/aides-de-minimis : première ligne du `dsfr-data-a11y` de #g-instrument = « instrument_aide | total | part ». Navigateur, /viz/barometre-france-num : en-têtes « Question | Profil | France | Écart (pt) », « Question | 2024 | 2025 | Variation (pt) », « Réponse | France | Profil | Écart (pt) », valeurs inchangées (923 Bretagne 28,25 / 37,03 / −8,78), zéro erreur console.
 
 ### Contournement actuel
 
@@ -236,6 +241,90 @@ Avertir en console quand une valeur de `in` / `notin` déléguée à Tabular con
 
 ---
 
+## BUG-023 — L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-query`, `dsfr-data-kpi`
+**Rencontré sur** 1 page(s) : aides-de-minimis
+
+### Constat
+
+`aggregate="d:max:dmax"` sur une colonne de dates ISO rend **2026**, avec ou sans `group-by`. La même expression `d:max` sur `dsfr-data-kpi` rend **25/09/2026** : le KPI compare les dates en texte (#667, `computeExtremum`, branche ISO), la query passe par `toNumber` (`_computeAggregate`), qui garde l'année. Deux résultats pour la même expression, sans avertissement. Conséquence : impossible de porter une date de fraîcheur jusqu'aux lignes groupées d'un graphique, donc `databox-date-field` (livré pour AM-021) est inutilisable sur tout graphique alimenté par un `group-by`.
+
+### Impact de l'erreur ou du manque
+
+Une date devient une année sans un mot, et la même expression rend deux résultats selon le composant. La fraîcheur des données — l'information que `databox-date-field` était venue servir — ne peut pas atteindre un graphique groupé.
+
+### Objectif métier de la correction
+
+Que `d:max` veuille dire la même chose sur une query et sur un KPI.
+
+### Pérennité et reproductibilité du besoin
+
+Permanent : toute page qui date ses données par un `max` sur un jeu groupé.
+
+### Comment ça a été vérifié
+
+Page minimale le 2026-09-26, dsfr-data 0.33.0 du CDN. Source en ligne [{g:A,d:2026-09-01},{g:A,d:2026-09-25},{g:B,d:2026-08-10}] : `group-by="g" aggregate="d:max:dmax"` rend dmax=2026 pour A et pour B ; l'agrégat global rend 2026 ; `dsfr-data-kpi value="d:max" format="date"` rend 25/09/2026. Aucun message console hors #765. Source : `dsfr-data-query.ts` `_computeAggregate` (`toNumber` strict), `utils/aggregations.ts` `computeExtremum`. **Toujours présent sur origin/main (0.42.0)** le 2026-09-26 : `_computeAggregate` passe toujours par `toNumber`.
+
+### Contournement actuel
+
+KPI de fraîcheur hors du graphique (`dsfr-data-kpi value="date_octroi:max" format="date"`) ; pas de date par ligne groupée.
+
+### Demande
+
+Aligner `min`/`max` de `dsfr-data-query` sur `computeExtremum` : une colonne de dates ISO rend la date extrême (chaîne ISO), pas un nombre. À défaut, avertir en console quand `toNumber` tronque une valeur ISO.
+
+### Critères d'acceptation
+
+- [ ] `aggregate="d:max:dmax"` sur des dates ISO rend la date la plus récente, avec et sans `group-by`.
+- [ ] Même résultat que `dsfr-data-kpi value="d:max"` sur les mêmes lignes.
+- [ ] Les colonnes numériques gardent le comportement actuel.
+
+---
+
+## AM-089 — `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-chart`
+**Rencontré sur** 1 page(s) : impot-sur-le-revenu
+
+### Constat
+
+Le pivot long → large (`_processTidyData`) remplit par 0 toute cellule absente, contre la règle « donnée manquante ≠ zéro ». Sur `ir-declarations-2042-nat`, séparer les courbes d'un code réattribué par libellé (1BI) prolonge la série « pension capital PER dec2 » (2019-2020) à zéro jusqu'en 2024, et fait naître l'autre série à zéro en 2019-2020. Deux fins de série fabriquées, qui se lisent comme des effondrements. ⚠️ La demande suppose que DSFR Chart accepte `null` dans `y` — non vérifié : si ce n'est pas le cas, la moitié du correctif se remonte chez `GouvernementFR/dsfr-chart` (règle n° 4).
+
+### Impact de l'erreur ou du manque
+
+Une série qui commence ou s'arrête dans la fenêtre est dessinée comme une chute à zéro : un événement fabriqué, sans erreur ni avertissement. Tout jeu dont les séries n'ont pas les mêmes bornes est concerné (codes réattribués, nomenclatures qui changent).
+
+### Objectif métier de la correction
+
+Qu'une absence de donnée se voie comme une absence.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : le pivot est le chemin de tout graphique multi-séries en format long.
+
+### Comment ça a été vérifié
+
+2026-09-26, page minimale, 0.33.0 du CDN. Source générique `/records where nom="1BI"`, query `where annee:gte:2019`, chart `type="line" label-field="annee" value-field="nombre" series-field="libelle"` → attribut rendu `y='[[409,2321,0,0,0,0],[0,0,8618,15772,20436,25815]]'`, zéro erreur console. Source `dsfr-data-chart.ts` l. 650 (« Missing (label, series) cells are 0 ») et l. 674 (`new Array(labels.length).fill(0)`), identiques sur origin/main (0.42.0) le 2026-09-26.
+
+### Contournement actuel
+
+Ne pas séparer les séries par `series-field` quand elles ne couvrent pas les mêmes années ; la page trace la seule case choisie.
+
+### Demande
+
+Remplir par `null` (que Chart.js interrompt) au lieu de 0, ou un attribut `missing="gap|zero"`, `gap` par défaut.
+
+### Critères d'acceptation
+
+- [ ] Une cellule (label, série) absente rend `null` dans `y`, et la courbe s'interrompt.
+- [ ] Un 0 présent dans les données reste 0.
+- [ ] Si DSFR Chart refuse `null`, le constat est remonté chez `GouvernementFR/dsfr-chart` et le comportement documenté.
+
+---
+
 ## AM-087 — La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises
 
 **Priorité** P2 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
@@ -276,3 +365,85 @@ Corriger la fiche `apiProviders` : retirer Tabular de la phrase sur les APIs san
 
 - [ ] La fiche `apiProviders` liste `tabular-api.data.gouv.fr` parmi les APIs à CORS natif.
 - [ ] Un exemple Tabular de la fiche ne porte pas `proxy-url`.
+
+---
+
+## AM-088 — `subtitle-field` du podium affiche le nombre brut : ni séparateur de milliers, ni format, ni suffixe
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-podium`
+**Rencontré sur** 1 page(s) : aides-de-minimis
+
+### Constat
+
+Pour porter le nombre d'aides sous chaque barre du podium — ce qui rend lisible le paradoxe « qui déclare le plus n'est pas qui verse le plus » —, `subtitle-field="nb"` afficherait « 5164 ». Le podium lit le champ par `String(getByPath(record, subtitleField))` et n'offre aucun attribut de format.
+
+### Impact de l'erreur ou du manque
+
+Le sous-titre est l'endroit naturel du second classement d'un podium (le nombre derrière le montant). Sans format, il faut cinq assignations de `compute` pour écrire « 5 164 aides ».
+
+### Objectif métier de la correction
+
+Qu'un sous-titre de podium se formate comme une valeur de KPI.
+
+### Pérennité et reproductibilité du besoin
+
+Tout podium qui croise deux mesures.
+
+### Comment ça a été vérifié
+
+Source `packages/core/src/components/dsfr-data-podium.ts` l. 389-391 (`String()`, aucun format), identique sur origin/main (0.42.0) le 2026-09-26. Navigateur 2026-09-26, /viz/aides-de-minimis, 0.33.0 du CDN : avec le contournement, le podium rend « 5 164 aides », « 937 aides », « 1 aide ».
+
+### Contournement actuel
+
+Un `dsfr-data-normalize compute` de cinq assignations (milliers, reste, zéros de tête, espace fine insécable, singulier) produit « 5 164 aides ».
+
+### Demande
+
+Un `subtitle-format` (nombre, euro, pourcentage) avec suffixe, ou un `subtitle-template` qui accepte la grammaire de gabarit (`{{nb:number}} aides`).
+
+### Critères d'acceptation
+
+- [ ] `subtitle-format="number"` rend « 5 164 » ; un suffixe (`subtitle-unit` ou gabarit) rend « 5 164 aides ».
+- [ ] Sans l'attribut, le rendu actuel est inchangé.
+
+---
+
+## AM-090 — `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible
+
+**Priorité** P3 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-normalize`
+**Rencontré sur** 1 page(s) : barometre-france-num
+
+### Constat
+
+Le tokenizer de `compute` (`packages/shared/src/utils/compute.ts`) termine un littéral texte à la première quote, sans accepter `''` ni `\'`. On ne peut donc pas écrire `when libelle = 'J''en ai'`, alors que les libellés à apostrophe ASCII sont courants dans les jeux publics. Le JSDoc ne mentionne pas la limite.
+
+### Impact de l'erreur ou du manque
+
+Toute comparaison à un libellé français contenant une apostrophe ASCII passe par un `contains` approximatif.
+
+### Objectif métier de la correction
+
+Comparer un libellé exactement, quelle que soit sa ponctuation.
+
+### Pérennité et reproductibilité du besoin
+
+Permanent : l'apostrophe est partout dans les nomenclatures françaises.
+
+### Comment ça a été vérifié
+
+Source `compute.ts` l. 330-340 (boucle jusqu'à `input[j] !== "'"`) relue le 2026-09-26, grammaire identique dans le bundle 0.33.0 du CDN et sur origin/main (0.42.0). Contournement appliqué sur /viz/barometre-france-num : 802-807 unifiées, 802 9,46 → 21,91 affichée au navigateur.
+
+### Contournement actuel
+
+`contains(champ, 'en ai')`, qui ne tient que si aucun autre libellé ne contient la sous-chaîne — à vérifier jeu par jeu.
+
+### Demande
+
+Accepter `''` dans un littéral, comme SQL et ODSQL ; à défaut, le dire dans le JSDoc de `compute`.
+
+### Critères d'acceptation
+
+- [ ] `when libelle = 'J''en ai' then 1 else 0` compare au libellé « J'en ai ».
+- [ ] Les littéraux sans quote gardent leur comportement.
