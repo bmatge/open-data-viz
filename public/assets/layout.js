@@ -69,7 +69,7 @@
           </div>
           <div class="fr-header__service">
             <a href="/" title="Accueil — ${TITRE}">
-              <p class="fr-header__service-title">${TITRE}</p>
+              <p class="fr-header__service-title">${TITRE} <span class="fr-badge fr-badge--sm fr-badge--info fr-badge--no-icon">Données réelles, texte rédigé par IA</span></p>
             </a>
             <p class="fr-header__service-tagline">${BASELINE}</p>
           </div>
