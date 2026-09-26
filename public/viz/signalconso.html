@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Signal Conso — open-data-viz</title>
-  <meta name="description" content="Reconstitution avec dsfr-data du tableau de bord Signal Conso, dont la page du portail renvoie une erreur 404 alors que le jeu de données est toujours publié.">
+  <meta name="description" content="SignalConso en 2025 : quatre signalements sur dix n'atteignent jamais l'entreprise visée, et ceux qui l'atteignent obtiennent une promesse d'action un peu plus d'une fois sur trois. Recréation avec dsfr-data d'une page du portail disparue.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,152 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       Recréation du 2026-09-26. Quatre requêtes /exports/json, toutes agrégées
+       au portail : aucune des 1,7 million de lignes ne descend dans le navigateur.
+
+       1. sc-as    : année × statut (≈ 53 lignes). Le jeu documente ses statuts
+                     (description du champ `status`) et les trois compteurs
+                     transmis / lu / réponse s'en DÉDUISENT exactement — vérifié à
+                     l'API le 2026-09-26 : `sum(signalement_transmis)` = n pour
+                     PromesseAction, Infonde, MalAttribue, ConsulteIgnore,
+                     NonConsulte, Transmis, TraitementEnCours, et 0 ailleurs. Tout
+                     ce qui porte sur le suivi se calcule donc depuis cette source.
+       2. sc-cat   : catégorie × compteurs, année 2025 (19 lignes).
+       3. sc-cat-p : promesses d'action par catégorie, 2025 (19 lignes).
+       4. sc-bornes: dernière date du jeu (1 ligne).
+       ========================================================================== -->
+
+  <dsfr-data-source id="sc-as" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="signalconso"
+    fetch-mode="export"
+    select="count(*) as n"
+    group-by="year(creationdate) as an, status"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Une ligne = (année, statut, n). On dérive les comptes par nature de suivi.
+       Les libellés sont ceux de la description du champ `status` du jeu. -->
+  <dsfr-data-normalize id="sc-as-n" source="sc-as"
+    compute="est_transmis = when status = 'PromesseAction' or status = 'Infonde' or status = 'MalAttribue' or status = 'ConsulteIgnore' or status = 'NonConsulte' or status = 'Transmis' or status = 'TraitementEnCours' then 1 else 0;
+      n_trans = n * est_transmis;
+      n_rep = when status = 'PromesseAction' or status = 'Infonde' or status = 'MalAttribue' then n else 0;
+      n_prom = when status = 'PromesseAction' then n else 0;
+      n_inf = when status = 'Infonde' then n else 0;
+      n_nonlu = when status = 'NonConsulte' then n else 0;
+      n_rgpd = when status = 'SuppressionRGPD' then n else 0;
+      statut_lib = when status = 'PromesseAction' then 'Promesse d’action'
+        when status = 'Infonde' then 'Jugé infondé par l’entreprise'
+        when status = 'MalAttribue' then 'Mauvaise entreprise visée'
+        when status = 'ConsulteIgnore' then 'Lu, resté sans réponse'
+        when status = 'NonConsulte' then 'Jamais lu par l’entreprise'
+        when status = 'Transmis' then 'Transmis, pas encore lu'
+        when status = 'TraitementEnCours' then 'En cours de traitement'
+        else status">
+  </dsfr-data-normalize>
+
+  <!-- Par année. `n__sum:diff` = écart avec l'année précédente (après order-by). -->
+  <dsfr-data-query id="sc-an" source="sc-as-n" group-by="an"
+    aggregate="n:sum, n_trans:sum, n_rep:sum, n_prom:sum, n_inf:sum, n_nonlu:sum, n_rgpd:sum, n__sum:diff"
+    order-by="an:asc"></dsfr-data-query>
+  <!-- Taux = ratios de SOMMES, par année ; une division par zéro rend null.
+       Les colonnes brutes nourrissent les phrases (arrondies UNE fois, à
+       l'affichage, par {{x:number:0}}) ; les colonnes _1 arrondies ne servent
+       qu'aux infobulles. Arrondir deux fois écrivait « 23 jamais lus » pour
+       22,46 %. `an_txt` : une année numérique donne des graduations 2021,5. -->
+  <dsfr-data-normalize id="sc-an-t" source="sc-an"
+    compute="an_txt = concat(an, '');
+      pct_non_trans = 100 - n_trans__sum / n__sum * 100;
+      pct_rep = n_rep__sum / n_trans__sum * 100;
+      pct_prom = n_prom__sum / n_trans__sum * 100;
+      pct_inf = n_inf__sum / n_trans__sum * 100;
+      pct_nonlu = n_nonlu__sum / n_trans__sum * 100;
+      pct_prom_1 = round(pct_prom, 1);
+      pct_inf_1 = round(pct_inf, 1);
+      pct_nonlu_1 = round(pct_nonlu, 1);
+      evol = n__sum__diff / (n__sum - n__sum__diff) * 100;
+      n_garde = n__sum - n_rgpd__sum;
+      periode = when an < 2021 then 'avant' else 'apres'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="sc-2025" source="sc-an-t" where="an:eq:2025"></dsfr-data-query>
+  <dsfr-data-query id="sc-suivi" source="sc-an-t" where="an:gte:2021, an:lte:2025"></dsfr-data-query>
+  <dsfr-data-query id="sc-avant" source="sc-an-t" where="periode:eq:avant" group-by="periode"
+    aggregate="n__sum:sum, n_rgpd__sum:sum"></dsfr-data-query>
+
+  <!-- Ce que devient un signalement TRANSMIS en 2025 : part de chaque statut
+       dans les transmis (share_percent : dénominateur = lignes de sortie). -->
+  <dsfr-data-query id="sc-2025-statuts" source="sc-as-n"
+    where="an:eq:2025, est_transmis:eq:1" group-by="statut_lib"
+    aggregate="n:sum, n__sum:share_percent:part" order-by="n__sum:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="sc-2025-statuts-r" source="sc-2025-statuts"
+    compute="part_1 = round(part, 1)"></dsfr-data-normalize>
+
+  <dsfr-data-source id="sc-bornes" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="signalconso"
+    fetch-mode="export" max-records="1"
+    select="max(creationdate) as dmax"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Par catégorie, 2025 : la catégorie est un champ à une seule valeur par
+       signalement (somme des groupes = total, vérifié à l'API). -->
+  <dsfr-data-source id="sc-cat" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="signalconso"
+    fetch-mode="export"
+    select="count(*) as n, sum(signalement_transmis) as t, sum(signalement_reponse) as r"
+    group-by="category" where="year(creationdate) = 2025"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+  <dsfr-data-source id="sc-cat-p" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="signalconso"
+    fetch-mode="export"
+    select="count(*) as p"
+    group-by="category" where="year(creationdate) = 2025 and status = 'PromesseAction'"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+  <!-- Côté droit unique par construction (group_by category). -->
+  <dsfr-data-join id="sc-cat-j" left="sc-cat" right="sc-cat-p" on="category" type="left"></dsfr-data-join>
+  <!-- Le jeu publie des identifiants techniques (AM-020) : libellés écrits ici. -->
+  <dsfr-data-normalize id="sc-cat-n" source="sc-cat-j"
+    compute="cat_lib = when category = 'AchatInternet' then 'Achat sur internet'
+        when category = 'DemarchageAbusif' then 'Démarchage abusif'
+        when category = 'AchatMagasin' then 'Achat en magasin'
+        when category = 'AchatMagasinInternet' then 'Achat en magasin ou sur internet'
+        when category = 'VoitureVehiculeVelo' then 'Voiture, véhicule, vélo'
+        when category = 'CafeRestaurant' then 'Café, restaurant'
+        when category = 'TelephonieFaiMedias' then 'Téléphonie, fournisseur d’accès, médias'
+        when category = 'BanqueAssuranceMutuelle' then 'Banque, assurance, mutuelle'
+        when category = 'TravauxRenovations' then 'Travaux, rénovation'
+        when category = 'VoyageLoisirs' then 'Voyage, loisirs'
+        when category = 'ServicesAuxParticuliers' then 'Services aux particuliers'
+        when category = 'Immobilier' then 'Immobilier'
+        when category = 'Internet' then 'Internet (influenceurs, avis en ligne)'
+        when category = 'DemarchesAdministratives' then 'Démarches administratives'
+        when category = 'IntoxicationAlimentaire' then 'Intoxication alimentaire'
+        when category = 'EauGazElectricite' then 'Eau, gaz, électricité'
+        when category = 'Sante' then 'Santé'
+        when category = 'RecouvrementAmiable' then 'Recouvrement amiable'
+        when category = 'Animaux' then 'Animaux'
+        when category = 'Accessibilite' then 'Accessibilité'
+        else category;
+      nt = n - t;
+      pct_trans = round(t / n * 100, 1);
+      pct_rep_brut = r / t * 100;
+      pct_rep = round(pct_rep_brut, 1);
+      pct_prom = round(coalesce(p, 0) / t * 100, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="sc-cat-top" source="sc-cat-n" order-by="n:desc" limit="12"></dsfr-data-query>
+  <!-- Poids de chaque catégorie dans le total et dans les NON transmis. -->
+  <dsfr-data-query id="sc-cat-parts" source="sc-cat-n" group-by="category"
+    aggregate="n:sum, t:sum, nt:sum, n__sum:share_percent:part_n, nt__sum:share_percent:part_nt"></dsfr-data-query>
+  <dsfr-data-normalize id="sc-cat-parts-r" source="sc-cat-parts"
+    compute="pct_trans_r = t__sum / n__sum * 100"></dsfr-data-normalize>
+  <dsfr-data-query id="sc-demarchage" source="sc-cat-parts-r" where="category:eq:DemarchageAbusif"></dsfr-data-query>
+  <dsfr-data-query id="sc-achat-internet" source="sc-cat-parts-r" where="category:eq:AchatInternet"></dsfr-data-query>
+  <!-- Extrêmes de réponse, sur les catégories d'au moins 1 000 signalements transmis. -->
+  <dsfr-data-query id="sc-rep-haut" source="sc-cat-n" where="t:gte:1000" order-by="pct_rep_brut:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="sc-rep-bas" source="sc-cat-n" where="t:gte:1000" order-by="pct_rep_brut:asc" limit="1"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,311 +178,308 @@
       </div>
     </nav>
 
-    <h1>Tableau de bord Signal Conso</h1>
+    <h1>SignalConso&nbsp;: quatre signalements sur dix n'atteignent jamais l'entreprise, et ceux qui l'atteignent obtiennent une promesse d'action un peu plus d'une fois sur trois</h1>
 
-    <div class="fr-alert fr-alert--info fr-mb-4w">
-      <h2 class="fr-alert__title">Une dataviz reconstituée, pas reproduite</h2>
-      <p>
-        La page <code>/pages/signalconso/</code> du portail <strong>renvoie une erreur 404</strong>
-        depuis au moins le 9 septembre 2026, alors que le catalogue officiel continue de la mettre
-        en avant. Le jeu de données, lui, est toujours publié et alimenté&nbsp;:
-        1&nbsp;733&nbsp;022 signalements, dernière mise à jour le 10 mai 2026. Il n'y a donc rien à
-        reproduire — mais tout à reconstituer.
-      </p>
-    </div>
+    <dsfr-data-repeat source="sc-2025">
+      <template>
+        <p class="fr-text--lead">En 2025, les consommateurs ont déposé
+          <strong>{{n__sum:number}} signalements</strong> sur SignalConso, {{evol:number:0}}&nbsp;% de plus qu'en 2024.
+          <strong>{{pct_non_trans:number:0}}&nbsp;%</strong> ne sont jamais parvenus à une entreprise.
+          Sur 100 signalements transmis, l'entreprise a répondu à {{pct_rep:number:0}} —
+          mais <strong>{{pct_prom:number:0}} seulement par une promesse d'action</strong>&nbsp;; les autres
+          réponses jugent le signalement infondé ou disent que ce n'est pas la bonne entreprise.</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="sc-an-t" where="an:eq:2025" value="n__sum:sum" format="nombre"
+        heading="En 2025" label="signalements déposés" col="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="sc-an-t" where="an:eq:2025" value="n_trans__sum:sum / n__sum:sum" format="pourcentage" decimals="0"
+        heading="Transmis" label="des signalements parviennent à l'entreprise" col="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="sc-an-t" where="an:eq:2025" value="n_rep__sum:sum / n_trans__sum:sum" format="pourcentage" decimals="0"
+        heading="Réponse" label="des signalements transmis obtiennent une réponse" col="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="sc-an-t" where="an:eq:2025" value="n_prom__sum:sum / n_trans__sum:sum" format="pourcentage" decimals="0"
+        heading="Promesse d'action" label="des signalements transmis" col="3"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.economie.gouv.fr/explore/dataset/signalconso/" target="_blank" rel="noopener external"><code>signalconso</code></a>
-        — 1&nbsp;733&nbsp;022 signalements de consommateurs déposés sur SignalConso, publiés par la
-        DGCCRF. Catégorie, statut, département, et trois compteurs de suivi&nbsp;: signalement
-        transmis à l'entreprise, lu par elle, et ayant reçu une réponse.
+        — les signalements déposés par les consommateurs sur SignalConso, anonymisés et publiés par la
+        DGCCRF&nbsp;: catégorie, date, département, et le <strong>statut du suivi</strong> par
+        l'entreprise, dont la description du jeu donne le sens (promesse d'action, jugé infondé,
+        jamais lu, lu sans réponse, mauvaise entreprise visée, et «&nbsp;NA&nbsp;» pour les
+        signalements hors du circuit d'envoi). Une ligne = un signalement. La page d'origine
+        <code>/pages/signalconso/</code> renvoie une erreur 404&nbsp;; le jeu, lui, est toujours publié.
       </p>
     </details>
   </div>
 
-  <!-- ==========================================================================
-       1,7 million de signalements : tout est agrégé côté serveur, quatre
-       requêtes /exports/json. Aucune ligne ne descend dans le navigateur.
-
-       Lot 13 — ces quatre sources étaient écrites en mode générique
-       (`url=` vers /exports/json + `params`), contournement d'AM-011 : le mode
-       adaptateur chargeait par /records, 100 lignes par requête et en série
-       (mesure d'origine : 31 allers-retours, 28,9 s pour 3 080 lignes, contre
-       1 requête et 0,62 s par l'export). Le contournement coûtait le mode
-       adaptateur : plus de délégation serveur, plus de server-facets, et une
-       source qui n'annonçait plus quel jeu elle lit.
-       `fetch-mode="export"` (#689, dsfr-data 0.25.0) rend la même requête unique
-       EN restant en mode adaptateur : `select`, `where`, `group-by` et `order-by`
-       redeviennent des attributs, délégués au portail. Les quatre agrégations
-       tiennent chacune bien en deçà du plafond `max-records` par défaut (1 000) :
-       102, 9, 43 et 10 groupes (relevés à l'API le 2026-09-10).
-       ========================================================================== -->
-
-  <dsfr-data-source id="sc-dep" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="signalconso"
-    fetch-mode="export"
-    select="count(*) as n, sum(signalement_transmis) as transmis, sum(signalement_reponse) as reponse"
-    group-by="dep_code, dep_name"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="sc-an" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="signalconso"
-    fetch-mode="export"
-    select="count(*) as n, sum(signalement_transmis) as transmis, sum(signalement_reponse) as reponse"
-    group-by="year(creationdate) as an"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="sc-cat" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="signalconso"
-    fetch-mode="export"
-    select="category, count(*) as n"
-    group-by="category"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="sc-statut" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="signalconso"
-    fetch-mode="export"
-    select="status, count(*) as n"
-    group-by="status"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <!-- Un classement, et la part de chaque catégorie dans le TOUT : `share_percent`
-       (0.33.0) divise chaque ligne par la somme des lignes de sortie AVANT `limit` —
-       les quinze parts affichées ne somment donc pas à 100 %, et c'est voulu. -->
-  <dsfr-data-query id="sc-cat-part" source="sc-cat" group-by="category"
-    aggregate="n:sum, n__sum:share_percent:part" order-by="n__sum:desc" limit="15"></dsfr-data-query>
-  <dsfr-data-normalize id="sc-cat-top" source="sc-cat-part"
-    compute="part_txt = concat(replace(concat(round(part, 1), ''), '.', ','), ' % des signalements')"></dsfr-data-normalize>
-  <dsfr-data-query id="sc-an-tri" source="sc-an" order-by="an:asc"></dsfr-data-query>
-
   <div class="fr-container fr-mb-8w">
 
-    <div class="odv-viz" data-code="Quatre compteurs, quatre agrégations serveur">
-      <p class="odv-lecture">Trois volumes et un taux&nbsp;: la part des signalements auxquels
-        l'entreprise a répondu est <strong>un ratio de deux sommes</strong>, calculé ici — aucun de
-        ces nombres n'est écrit dans la page.</p>
-      <dsfr-data-kpi-group class="fr-mb-6w">
-        <dsfr-data-kpi source="sc-cat" value="n:sum" format="nombre"
-          heading="Depuis 2018" label="signalements déposés" col="3"></dsfr-data-kpi>
-        <dsfr-data-kpi source="sc-dep" value="transmis:sum" format="nombre"
-          heading="Suivi" label="transmis à l'entreprise" col="3"></dsfr-data-kpi>
-        <dsfr-data-kpi source="sc-dep" value="reponse:sum" format="nombre"
-          heading="Suivi" label="ayant reçu une réponse" col="3"></dsfr-data-kpi>
-        <!-- Un taux est un ratio de sommes : `reponse:sum / n:sum`, sur la même
-             source. `format="pourcentage"` met la fraction à l'échelle. -->
-        <dsfr-data-kpi source="sc-dep" value="reponse:sum / n:sum" format="pourcentage" decimals="0"
-          heading="Taux de réponse" label="des signalements déposés" col="3"></dsfr-data-kpi>
-      </dsfr-data-kpi-group>
-    </div>
-
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-viz" data-code="Carte des signalements par département">
-          <p class="odv-lecture">Les signalements se concentrent à <strong>Paris et dans sa petite
-            couronne</strong>, loin devant le Nord et le Rhône. Le total sous le titre ne compte
-            que les signalements localisés&nbsp;: sans département, ils ne sont ni sur la carte,
-            ni dans sa somme.</p>
-          <div class="odv-chart-slot">
-            <!-- Une carte de VOLUMES se résume par une somme, jamais par la moyenne
-                 des départements : `map-summary="sum"` (0.33.0). -->
-            <dsfr-data-chart id="g-carte" source="sc-dep" type="map"
-              code-field="dep_code" value-field="n" name="Signalements"
-              map-summary="sum"
-              databox databox-title="Signalements par département"
-              databox-source="DGCCRF — signalconso, via data.economie.gouv.fr"
-              databox-download>
-            </dsfr-data-chart>
-            <dsfr-data-a11y for="g-carte" source="sc-dep" table download></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-viz" data-code="Signalements et réponses par année, sur une seule échelle">
-          <p class="odv-lecture">Les dépôts <strong>augmentent chaque année</strong> depuis
-            l'ouverture du service, et la courbe des réponses reste <strong>sous la moitié</strong>
-            des dépôts — lisible parce que les deux séries partagent la même échelle. Elle ne
-            commence qu'en 2021&nbsp;: le champ de suivi n'existe pas avant. La dernière année
-            est en cours, le repère pointillé le dit.</p>
-          <h2 class="fr-h6 fr-mb-1v">Signalements déposés et réponses obtenues, par année</h2>
-          <div class="odv-chart-slot">
-          <!-- Jusqu'au 2026-09-20 ce graphique était un `bar-line` : DSFR Chart
-               lui pose DEUX axes Y (600 K à gauche, 300 K à droite), pour deux
-               séries de même unité — la courbe des réponses paraissait aussi
-               haute que les barres alors qu'elle en vaut moins de la moitié. Le
-               double axe est proscrit par le skill dataviz-metier : deux séries
-               de même unité sur un axe (`value-fields`).
-               Sans `databox` à dessein : sous une DataBox, `reference-lines`
-               n'est pas dessinée en 0.33.0 — console « instance Chart.js
-               introuvable, overlays non dessinés » (BUG-019, dsfr-data#903).
-               Le titre et la source sont donc portés par la page. -->
-          <dsfr-data-chart id="g-an" source="sc-an-tri" type="line"
-            label-field="an" value-field="n:Signalements déposés"
-            value-fields="reponse:Ayant reçu une réponse"
-            unit-tooltip=" signalements" y-min="0"
-            reference-lines='[{"axis":"x","value":2026,"label":"Année en cours","dash":true}]'>
-          </dsfr-data-chart>
-          <p class="fr-text--xs fr-mt-1v fr-mb-1v">Source&nbsp;: DGCCRF — signalconso, via data.economie.gouv.fr.</p>
-          <dsfr-data-a11y for="g-an" source="sc-an-tri" table download
-            label-field="an" value-field="n, reponse"></dsfr-data-a11y>
-          </div>
-        </div>
+    <!-- ============================ PREUVE ============================ -->
+    <div class="odv-viz" data-code="Ce que devient un signalement transmis en 2025">
+      <h2 class="fr-h4">Sur 100 signalements transmis, un peu plus d'un tiers obtient une promesse d'action</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Signalements déposés en 2025 et
+        transmis à l'entreprise visée, répartis selon leur statut à la date de publication du jeu.
+        Part de chaque statut dans les signalements transmis, en&nbsp;%.</p>
+      <dsfr-data-repeat source="sc-2025">
+        <template>
+          <p class="odv-lecture">Sur 100 signalements transmis en 2025, <strong>{{pct_prom:number:0}} ont
+            obtenu une promesse d'action</strong> et {{pct_inf:number:0}} ont été jugés infondés par
+            l'entreprise&nbsp;; {{pct_nonlu:number:0}} n'ont <strong>jamais été lus</strong>, l'entreprise
+            n'ayant pas créé de compte. «&nbsp;Réponse&nbsp;» ne veut donc pas dire «&nbsp;réparation&nbsp;».</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <dsfr-data-chart id="g-statuts" source="sc-2025-statuts-r" type="bar" horizontal
+          label-field="statut_lib" value-field="part_1:Part des signalements transmis (%)"
+          unit-tooltip="%" selected-palette="neutral" highlight-index="[0]"
+          databox databox-title="Ce que devient un signalement transmis à l'entreprise, 2025"
+          databox-source="DGCCRF — signalconso, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-statuts" source="sc-2025-statuts-r"
+          description="Barres horizontales triées : pour les signalements déposés en 2025 et transmis à l'entreprise visée, la part de chaque statut de suivi. La promesse d'action vient en tête, devant le signalement jugé infondé par l'entreprise et le signalement jamais lu ; la mauvaise entreprise visée et le signalement lu mais resté sans réponse pèsent chacun moins d'un dixième."></dsfr-data-a11y>
       </div>
     </div>
 
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-lg-7">
-        <div class="odv-viz" data-code="Les quinze catégories les plus signalées">
-          <p class="odv-lecture"><strong>L'achat sur internet</strong> domine, devant le démarchage
-            abusif&nbsp;; les achats en magasin et les travaux suivent de loin. Sous chaque
-            catégorie, sa part dans l'ensemble des signalements.</p>
-          <h2 class="fr-h6">Les quinze catégories les plus signalées</h2>
-          <!-- Un classement se lit mieux en podium qu'en barres : rang, libellé, part.
-               Les libellés restent les identifiants techniques du jeu (AM-020). -->
-          <dsfr-data-podium source="sc-cat-top" label-field="category" value-field="n__sum"
-            subtitle-field="part_txt" value-unit="signalements" max-items="15"
-            selected-palette="sequentialDescending"></dsfr-data-podium>
-        </div>
+    <!-- ============================ NUANCE 1 ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="Transmis ou non, par catégorie, 2025">
+      <h2 class="fr-h4">Le démarchage abusif, deuxième motif de plainte, n'atteint presque jamais une entreprise</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Les douze catégories les plus
+        signalées en 2025, en nombre de signalements, selon qu'ils ont été transmis à une entreprise
+        ou non. Un signalement n'est pas transmis quand il vise une adresse internet plutôt qu'une
+        entreprise identifiée, ou quand l'entreprise est hors du circuit d'envoi (statut «&nbsp;NA&nbsp;»
+        du jeu).</p>
+      <dsfr-data-repeat source="sc-demarchage">
+        <template>
+          <p class="odv-lecture">Le démarchage abusif pèse <strong>{{part_n:number:0}}&nbsp;% des
+            signalements</strong> de 2025, mais <strong>{{part_nt:number:0}}&nbsp;% de ceux qui ne sont jamais
+            transmis</strong>&nbsp;: seuls {{pct_trans_r:number:0}}&nbsp;% atteignent une entreprise, les
+            autres sont classés hors du circuit d'envoi.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="sc-achat-internet">
+        <template>
+          <p class="odv-lecture">L'achat sur internet, première catégorie, fournit
+            {{part_nt:number:0}}&nbsp;% des non-transmis&nbsp;: un signalement qui ne vise qu'une adresse
+            de site sort du circuit. À elles deux, ces catégories font l'essentiel des
+            «&nbsp;quatre sur dix&nbsp;».</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <dsfr-data-chart id="g-cat" source="sc-cat-top" type="bar" horizontal stacked
+          label-field="cat_lib" value-field="t:Transmis à une entreprise"
+          value-fields="nt:Jamais transmis"
+          unit-tooltip=" signalements"
+          databox databox-title="Signalements transmis ou non, par catégorie, 2025"
+          databox-source="DGCCRF — signalconso, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-cat" source="sc-cat-top"
+          description="Barres horizontales empilées, triées par nombre total de signalements en 2025 : pour chacune des douze catégories les plus signalées, la part transmise à une entreprise et la part jamais transmise. L'achat sur internet vient en tête ; le démarchage abusif, deuxième, est presque entièrement non transmis."></dsfr-data-a11y>
       </div>
-      <div class="fr-col-12 fr-col-lg-5">
-        <div class="odv-viz" data-code="Répartition par statut de traitement">
-          <p class="odv-lecture">Le premier statut est <strong>«&nbsp;NA&nbsp;»</strong>, un code que
-            le jeu ne documente pas&nbsp;; viennent ensuite les promesses d'action, puis les
-            signalements non consultés et les infondés.</p>
+    </div>
+
+    <!-- ============================ NUANCE 2 ============================ -->
+    <div class="fr-grid-row fr-grid-row--gutters fr-mt-6w">
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Parts de suivi par année">
+          <h2 class="fr-h4">Depuis 2021, la promesse d'action recule et le «&nbsp;infondé&nbsp;» progresse</h2>
+          <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Part des signalements transmis,
+            par année de dépôt, de 2021 à 2025. 2026 est écartée&nbsp;: des milliers de signalements y
+            sont encore en cours de traitement.</p>
+          <dsfr-data-repeat source="sc-suivi">
+            <template>
+              <p class="fr-text--sm fr-mb-1v">{{an}}&nbsp;: {{pct_prom:number:1}}&nbsp;% de promesses d'action, {{pct_inf:number:1}}&nbsp;% jugés infondés, {{pct_nonlu:number:1}}&nbsp;% jamais lus.</p>
+            </template>
+          </dsfr-data-repeat>
           <div class="odv-chart-slot">
-            <dsfr-data-chart id="g-statut" source="sc-statut" type="pie"
-              label-field="status" value-field="n"
-              databox databox-title="Répartition par statut de traitement"
+            <!-- Trois séries de même unité (%) : un seul axe, à zéro. En barres
+                 groupées et non en courbes : `line-chart` de DSFR Chart gradue
+                 des années en axe continu (2021,5…), même en texte (LIM-017,
+                 revu ici le 2026-09-26 avec `an_txt`). -->
+            <dsfr-data-chart id="g-suivi" source="sc-suivi" type="bar"
+              label-field="an_txt" value-field="pct_prom_1:Promesse d'action"
+              value-fields="pct_inf_1:Jugé infondé par l'entreprise, pct_nonlu_1:Jamais lu"
+              unit-tooltip="%"
+              databox databox-title="Part des signalements transmis, par statut et année de dépôt"
               databox-source="DGCCRF — signalconso, via data.economie.gouv.fr"
               databox-download>
             </dsfr-data-chart>
-            <dsfr-data-a11y for="g-statut" source="sc-statut" table download></dsfr-data-a11y>
+            <dsfr-data-a11y for="g-suivi" source="sc-suivi"
+              description="Barres groupées de 2021 à 2025, trois par année, en part des signalements transmis : la promesse d'action baisse d'année en année, la part jugée infondée par l'entreprise augmente depuis 2023, la part jamais lue monte jusqu'en 2023 puis redescend."></dsfr-data-a11y>
           </div>
         </div>
       </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Signalements par année, suivi conservé ou effacé">
+          <h2 class="fr-h4">Le volume a été multiplié par plus de trois depuis 2021, et le suivi des premières années est effacé</h2>
+          <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Signalements par année de dépôt,
+            selon que leur statut de suivi est conservé ou effacé au titre du RGPD (statut
+            «&nbsp;SuppressionRGPD&nbsp;» du jeu).</p>
+          <dsfr-data-repeat source="sc-avant">
+            <template>
+              <p class="odv-lecture">Les {{n__sum__sum:number}} signalements déposés avant 2021 ont
+                <strong>tous perdu leur suivi</strong> ({{n_rgpd__sum__sum:number}} au statut
+                «&nbsp;suppression RGPD&nbsp;»)&nbsp;: la page d'origine ne pouvait plus dire ce qu'il en
+                est advenu, et celle-ci non plus. Les parts de suivi ne commencent donc qu'en 2021.</p>
+            </template>
+          </dsfr-data-repeat>
+          <dsfr-data-repeat source="sc-bornes">
+            <template>
+              <p class="fr-text--sm">La dernière barre s'arrête au <strong>{{dmax:date}}</strong>, dernier
+                jour présent dans le jeu&nbsp;: l'année n'est pas complète.</p>
+            </template>
+          </dsfr-data-repeat>
+          <div class="odv-chart-slot">
+            <dsfr-data-chart id="g-an" source="sc-an-t" type="bar" stacked
+              label-field="an_txt" value-field="n_garde:Suivi conservé"
+              value-fields="n_rgpd__sum:Suivi effacé (RGPD)"
+              unit-tooltip=" signalements"
+              databox databox-title="Signalements déposés par année"
+              databox-source="DGCCRF — signalconso, via data.economie.gouv.fr"
+              databox-download>
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-an" source="sc-an-t"
+              description="Barres empilées par année de dépôt depuis 2018 : les signalements dont le suivi est conservé et ceux dont le suivi a été effacé au titre du RGPD. Jusqu'en 2020, tout est effacé ; en 2021, une partie ; ensuite, presque rien. Le volume croît chaque année ; la dernière année est incomplète."></dsfr-data-a11y>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================ EXPLORATION ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="Tableau des catégories, 2025">
+      <h2 class="fr-h4">Selon le secteur, l'entreprise répond presque toujours, ou presque jamais</h2>
+      <dsfr-data-repeat source="sc-rep-haut">
+        <template>
+          <p class="odv-lecture">Parmi les catégories d'au moins 1&nbsp;000 signalements transmis en 2025,
+            la plus répondante est <strong>{{cat_lib}}</strong>&nbsp;: {{pct_rep_brut:number:0}}&nbsp;% des
+            signalements transmis y obtiennent une réponse.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="sc-rep-bas">
+        <template>
+          <p class="odv-lecture">La moins répondante est <strong>{{cat_lib}}</strong>&nbsp;:
+            {{pct_rep_brut:number:0}}&nbsp;%.</p>
+        </template>
+      </dsfr-data-repeat>
+      <p class="fr-text--sm fr-hint-text odv-methode">Toutes les catégories de 2025. Taux de réponse
+        et de promesse rapportés aux signalements <em>transmis</em>, pas aux signalements déposés.
+        Cliquer sur un en-tête pour trier.</p>
+      <dsfr-data-list source="sc-cat-n" sort="n:desc" count-label="catégorie" export="csv"
+        caption="Signalements SignalConso par catégorie en 2025 : volume, part transmise, taux de réponse et de promesse d'action"
+        columns="cat_lib:Catégorie, n:Signalements déposés, pct_trans:Transmis (% des déposés), pct_rep:Réponse (% des transmis), pct_prom:Promesse d'action (% des transmis)">
+      </dsfr-data-list>
+    </div>
+
+    <!-- ============================ CE QU'ON NE MONTRE PAS ============================ -->
+    <div class="fr-callout fr-mt-6w">
+      <h2 class="fr-callout__title fr-h5">Ce que cette page ne montre pas</h2>
+      <ul class="fr-callout__text fr-text--sm">
+        <li><strong>Pas de carte.</strong> Le jeu donne un département, sans dire s'il s'agit de celui
+          du consommateur ou de l'entreprise, et sans population pour en faire un taux&nbsp;: une carte
+          de volumes redessinerait la carte de la population. Un peu plus d'un signalement sur vingt n'a
+          pas de département.</li>
+        <li><strong>Pas de suivi avant 2021</strong>&nbsp;: il est effacé (voir plus haut). Les
+          signalements de 2021 ont en partie perdu le leur&nbsp;; leurs parts portent sur ceux qui le
+          gardent.</li>
+        <li><strong>Pas de «&nbsp;taux de réponse&nbsp;» rapporté à tous les signalements.</strong>
+          Un signalement jamais transmis ne peut pas recevoir de réponse&nbsp;: le compter au
+          dénominateur mêlerait deux questions — le circuit atteint-il l'entreprise, l'entreprise
+          répond-elle.</li>
+        <li><strong>Pas de sous-catégories</strong> ni de thèmes transverses (champs multivalués
+          <code>subcategories</code> et <code>tags</code>)&nbsp;: une ligne y compte plusieurs fois.</li>
+        <li><strong>Le statut est une photographie</strong> à la date de publication du jeu&nbsp;: un
+          signalement récent peut encore changer de statut.</li>
+      </ul>
     </div>
 
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
-  <!-- Le livrable du banc reste entier, mais replié : le lecteur visé est celui
-       qu'il faut convaincre, l'intégrateur ouvre l'accordéon. -->
   <div class="fr-container fr-mb-8w">
   <details class="odv-technique" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
+    <summary>Analyse technique — ce que la recréation a coûté</summary>
   <section class="odv-analyse fr-py-4w">
     <div>
-      <h2>Analyse — Signal Conso, une dataviz reconstituée</h2>
-
-      <p class="fr-text--sm">
-        <strong>Refonte «&nbsp;convaincre&nbsp;» (2026-09-20).</strong> Formes poussées sur cette
-        page, chacune vérifiée au navigateur&nbsp;: un KPI de taux (<code>reponse:sum / n:sum</code>),
-        <code>map-summary="sum"</code> sur la carte de volumes, une <code>reference-lines</code>
-        verticale sur l'année en cours, et le classement des catégories en
-        <code>dsfr-data-podium</code> avec la part du total par <code>share_percent</code>. Le
-        bouton «&nbsp;Voir le code&nbsp;» sous chaque bloc lit le source de la page.
-        <strong>Deux constats au passage.</strong> Le graphique combiné vanté ci-dessous
-        (AV-017) posait <em>deux axes Y</em> pour deux séries de même unité — 600&nbsp;K à gauche,
-        300&nbsp;K à droite, la courbe des réponses semblant aussi haute que les barres&nbsp;: le
-        <code>bar-line</code> de DSFR Chart met toujours la seconde série sur un axe secondaire,
-        ce qui le réserve à deux unités différentes. Il est remplacé par deux courbes sur un
-        axe. Et <code>reference-lines</code> n'est pas dessinée sous une <code>databox</code> en
-        0.33.0 (console&nbsp;: «&nbsp;instance Chart.js introuvable, overlays non
-        dessinés&nbsp;»)&nbsp;— BUG-019 sous une autre forme&nbsp;; sans DataBox, le repère se
-        dessine sur <code>line</code> (x et y) mais, injecté sur <code>bar</code> et
-        <code>bar-line</code> avec la même donnée, seul le repère <code>y</code> apparaît, le
-        repère <code>x</code> à une catégorie numérique n'est pas tracé.
-      </p>
+      <h2>Analyse — Signal Conso, une page recréée</h2>
 
       <p class="fr-text--lead">
         Il n'y a pas de page d'origine à comparer&nbsp;:
         <a href="https://data.economie.gouv.fr/pages/signalconso/" target="_blank" rel="noopener external">/pages/signalconso/</a>
-        renvoie une 404. Le catalogue officiel continue pourtant de l'afficher comme une
-        visualisation disponible, catégorie «&nbsp;Information consommateurs&nbsp;», accès public.
-        Cette page reconstitue donc un tableau de bord à partir du seul jeu de données, toujours
-        vivant.
+        renvoie une 404 (LIM-006). Recréation du 2026-09-26 à partir du seul jeu&nbsp;: la question
+        n'est plus «&nbsp;combien de signalements, où&nbsp;» mais «&nbsp;qu'advient-il d'un signalement&nbsp;».
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>1,7 million de signalements, quatre requêtes.</strong> Le plus gros jeu du
-              banc d'essai, et le poids de la page n'en dépend pas&nbsp;: quatre agrégations
-              <code>/exports/json</code> de quelques kilo-octets chacune.</li>
-            <li><strong>Un graphique combiné barres + courbe.</strong> Comparer le nombre de
-              signalements déposés à ceux ayant reçu une réponse demande deux échelles&nbsp;:
-              <code>type="bar-line"</code> avec <code>value-field</code> et
-              <code>value-field-2</code>, plus une unité d'infobulle par série. Un type de graphique
-              que le portail n'utilise nulle part dans son catalogue.</li>
-            <li><strong>Reconstituer coûte moins cher que reproduire.</strong> Sans page de
-              référence à imiter, on va droit aux questions que la donnée permet de poser&nbsp;:
-              combien de signalements, où, sur quoi, et qu'en fait l'entreprise. Le résultat s'est
-              écrit en une passe.</li>
+            <li><strong>Une requête pour tout le suivi.</strong> Les compteurs transmis / lu / réponse
+              se déduisent exactement du statut (vérifié à l'API)&nbsp;: une source
+              <code>année × statut</code> de 53 lignes, un <code>compute</code> de drapeaux, puis des
+              <code>group-by</code> côté client. Taux = ratios de sommes, en KPI
+              (<code>n_rep__sum:sum / n_trans__sum:sum</code>) comme dans les phrases.</li>
+            <li><strong>Les phrases de lecture sont calculées</strong> par
+              <code>dsfr-data-repeat</code> sur des requêtes d'une ligne&nbsp;: croissance annuelle par
+              <code>n__sum:diff</code>, poids du démarchage par <code>share_percent</code>, secteurs
+              extrêmes par <code>order-by</code> + <code>limit="1"</code>, dernière date par
+              <code>max(creationdate)</code>.</li>
+            <li><strong>Libellés en français</strong> par un <code>compute</code>
+              <code>when … then … else category</code> — vingt lignes, sans dictionnaire (AM-020).</li>
           </ul>
         </div>
 
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>95&nbsp;309 signalements sans département.</strong> Le premier groupe
-              renvoyé par l'agrégation a un <code>dep_code</code> nul — 5,5&nbsp;% du total. La carte
-              les ignore silencieusement, et rien ne le signale à qui la regarde. C'est le pendant
-              cartographique du piège des valeurs nulles déjà consigné (AM-005)&nbsp;: sur un
-              graphique elles deviennent «&nbsp;Série&nbsp;N&nbsp;», sur une carte elles
-              disparaissent.</li>
-            <li><strong>Des catégories en <em>CamelCase</em> non intitulées.</strong>
-              <code>AchatInternet</code>, <code>DemarchageAbusif</code>, <code>TelEauElecGaz</code>…
-              Le jeu publie des identifiants techniques, pas des libellés. Les afficher tels quels
-              est laid&nbsp;; les traduire demanderait 43 règles de
-              <code>dsfr-data-normalize replace-fields</code>. Même manque que sur les carburants
-              après un unpivot&nbsp;: <strong>il n'existe pas de dictionnaire d'étiquettes</strong>
-              (registre&nbsp;: AM-020).</li>
-            <li><strong>Aucune trace de ce que montrait la page d'origine.</strong> Impossible de
-              savoir si cette reconstitution est fidèle&nbsp;: la page a disparu sans archive
-              accessible. C'est la limite propre à l'exercice — on ne reproduit pas ce qui n'existe
-              plus, on propose autre chose.</li>
+            <li><strong>La page précédente se trompait de dénominateur.</strong> Son KPI «&nbsp;taux de
+              réponse&nbsp;» rapportait les réponses à <em>tous</em> les signalements, y compris ceux
+              jamais transmis&nbsp;; et elle disait le statut «&nbsp;NA&nbsp;» non documenté, alors que
+              la description du champ <code>status</code> le définit. Ce n'est pas une limite de
+              <code>dsfr-data</code>&nbsp;: c'est une lecture du jeu.</li>
+            <li><strong>«&nbsp;Le suivi n'existe pas avant 2021&nbsp;»</strong> était faux aussi&nbsp;:
+              il a existé, puis a été effacé (statut <code>SuppressionRGPD</code> sur 100&nbsp;% des
+              signalements 2018-2020).</li>
+            <li><strong>Sans <code>color-map</code> à dessein.</strong> Les couleurs des statuts
+              restent celles de la palette&nbsp;: <code>color-map</code> laisse fausses les pastilles
+              d'infobulle (BUG-022). La mise en évidence passe par <code>highlight-index="[0]"</code>
+              — qui ne distingue rien seul sur une série unique (toutes les barres restent de la même
+              couleur) et ne fonctionne qu'avec <code>selected-palette="neutral"</code>, qui grise le
+              reste. Vérifié à l'écran dans les deux configurations.</li>
+            <li><strong>L'évolution des parts est en barres, pas en courbes.</strong> En
+              <code>type="line"</code>, l'axe des années est gradué 2021,5… et l'infobulle titre
+              «&nbsp;2,023&nbsp;», même avec l'année passée en texte par <code>compute</code>
+              (LIM-017, DSFR Chart)&nbsp;; et l'infobulle ne nomme pas les séries (AM-086).</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.22.0</h4>
-            <p class="fr-text--sm">
-              4 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-005</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code>&nbsp;: plus de «&nbsp;Série N&nbsp;» en légende pour un groupe sans valeur.</li>
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>AM-027</strong> — <strong>0.21.1</strong> (#648)&nbsp;: compteur unifié des lignes écartées faute de position exploitable, avec avertissement.</li>
-              <li><strong>AM-020</strong> — <strong>0.22.0</strong> (#668)&nbsp;: alias inline <code>col:Libellé</code> sur <code>value-cols</code> de l'unpivot et sur les séries du graphique.</li>
-            </ul>
-          </div>
         </div>
+      </div>
+
+      <div class="fr-table fr-table--sm">
+        <table>
+          <caption>Directive Opendatasoft → composant dsfr-data</caption>
+          <thead><tr><th scope="col">Besoin</th><th scope="col">Opendatasoft</th><th scope="col">dsfr-data</th></tr></thead>
+          <tbody>
+            <tr><td>Agrégat serveur</td><td><code>ods-analysis</code></td><td><code>dsfr-data-source fetch-mode="export" group-by</code></td></tr>
+            <tr><td>Colonne calculée, recodage</td><td>expressions AngularJS</td><td><code>dsfr-data-normalize compute</code> (<code>when</code>)</td></tr>
+            <tr><td>Part du total, écart annuel</td><td>—</td><td><code>dsfr-data-query aggregate</code> <code>share_percent</code>, <code>diff</code></td></tr>
+            <tr><td>Chiffre dans une phrase</td><td><code>{{ … }}</code> + <code>ods-aggregation</code></td><td><code>dsfr-data-repeat</code> sur une requête d'une ligne</td></tr>
+            <tr><td>Deux jeux agrégés à rapprocher</td><td>deux contextes</td><td><code>dsfr-data-join</code></td></tr>
+            <tr><td>Tableau triable</td><td><code>ods-table</code></td><td><code>dsfr-data-list</code></td></tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Le meilleur argument du banc d'essai n'est pas technique&nbsp;: une dataviz
-          publique a disparu, sa donnée est intacte, et la remettre en ligne a pris une
-          heure.</strong> Quatre agrégations serveur, cinq vues, une carte départementale, un
-          graphique combiné. Sur 1,7 million de signalements, sans qu'une seule ligne ne descende
-          dans le navigateur.</p>
-        <p>Ce que cela dit du coût de maintenance d'un portail&nbsp;: une page composée dans un
-          back-office est un actif fragile — elle disparaît sans que la donnée bouge, et sans que le
-          catalogue s'en aperçoive. Une page déclarative versionnée dans un dépôt Git se
-          reconstruit, se relit et se teste.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-020
-          (dictionnaire d'étiquettes), AM-027 (valeurs sans code géographique ignorées en silence
-          par une carte), AV-017 (graphique combiné barres + courbe).
-        </p>
+        <p><strong>La donnée racontait autre chose que le tableau de bord.</strong> Compter les
+          signalements par département et par catégorie mesurait l'activité du service&nbsp;;
+          suivre leur statut mesure son effet — et la réponse change&nbsp;: quatre sur dix n'atteignent
+          personne, et une «&nbsp;réponse&nbsp;» sur deux n'est pas une promesse d'agir. Tout est
+          déclaratif, quatre requêtes, aucune ligne de JavaScript.</p>
       </div>
     </div>
   </section>
@@ -350,7 +493,7 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.core.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.umd.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

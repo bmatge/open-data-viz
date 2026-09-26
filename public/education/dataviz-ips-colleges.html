@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>IPS des collèges — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz « IPS Collèges » de data.education.gouv.fr.">
+  <meta name="description" content="Recréation avec dsfr-data de la dataviz « IPS Collèges » de data.education.gouv.fr : l'écart social entre collèges publics et privés sous contrat, et son évolution.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,161 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un localisateur muet (une carte, trois facettes, aucun
+       constat). La reproduction précédente l'avait rendu juste et complet ; elle
+       restait un localisateur. Cette version part d'une question que le jeu
+       porte et que personne ne posait : l'écart social entre collèges publics et
+       privés sous contrat, et son évolution sur les neuf rentrées du jeu.
+
+       Quatre sources, toutes lues SANS clé (le portail Éducation répond en
+       anonyme) :
+         · `serie`  — neuf rentrées × deux secteurs, agrégées PAR LE SERVEUR
+                      (18 lignes) : la preuve ;
+         · `ips`    — les 6 987 collèges de la dernière rentrée, en un export :
+                      la concentration, les académies, l'exploration ;
+         · `paire`  — deux rentrées de la même méthode, collège par collège :
+                      l'écart se creuse-t-il à collèges constants ?
+         · `refs`   — les références nationales de la DEPP (pondérées par les
+                      élèves), dans le jeu public `fr-en-ips-colleges-ap2023`.
+       ========================================================================== -->
+
+  <!-- ---------- 1. La série : neuf rentrées, deux secteurs ---------- -->
+  <dsfr-data-source id="serie" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-colleges"
+    select="rentree_scolaire, secteur, avg(ips) as ips_moyen, count(ips) as nb"
+    group-by="rentree_scolaire, secteur"
+    order-by="rentree_scolaire:asc">
+  </dsfr-data-source>
+
+  <!-- Une ligne par rentrée, une colonne par secteur. -->
+  <dsfr-data-pivot id="serie-w" source="serie"
+    row="rentree_scolaire" column="secteur" value="ips_moyen" aggregate="first"
+    labels="public:public | privé sous contrat:prive">
+  </dsfr-data-pivot>
+  <!-- L'écart se calcule AVANT tout arrondi (PG-031) ; `k` est une clé
+       constante pour replier la série en une ligne plus bas. -->
+  <dsfr-data-normalize id="serie-e" source="serie-w"
+    compute="ecart = prive - public; k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="serie-r" source="serie-e"
+    round="ecart:1, prive:1, public:1">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="serie-t" source="serie-r"
+    rename="rentree_scolaire:Rentrée | public:IPS moyen public | prive:IPS moyen privé sous contrat | ecart:Écart (points)">
+  </dsfr-data-normalize>
+  <!-- La dernière rentrée, pour le chapô et l'accroche. -->
+  <dsfr-data-query id="serie-der" source="serie-e"
+    order-by="rentree_scolaire:desc" limit="1">
+  </dsfr-data-query>
+  <!-- Les bornes des deux méthodes, en une ligne, pour la phrase de lecture. -->
+  <dsfr-data-pivot id="serie-bornes" source="serie-e"
+    row="k" column="rentree_scolaire" value="ecart" aggregate="first"
+    labels="2016-2017:e16 | 2021-2022:e21 | 2022-2023:e22 | 2024-2025:e24">
+  </dsfr-data-pivot>
+
+  <!-- ---------- 2. Les références DEPP (pondérées par les élèves) ---------- -->
+  <dsfr-data-source id="refs" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-ips-colleges-ap2023"
+    select="rentree_scolaire, ips_national_public, ips_national_prive"
+    group-by="rentree_scolaire, ips_national_public, ips_national_prive"
+    where="ips_national_public is not null"
+    order-by="rentree_scolaire:asc">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="refs-e" source="refs"
+    compute="ecart_depp = ips_national_prive - ips_national_public">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 3. La dernière rentrée, collège par collège ----------
+       `fetch-mode="export"` : une requête. `max-records` relevé : le plafond par
+       défaut de 1 000 tronquerait EN SILENCE 6 987 collèges (piège maison).
+       Aucun texte long dans le `select`. -->
+  <dsfr-data-source id="ips" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-colleges"
+    fetch-mode="export" max-records="8000"
+    select="uai, appellation_officielle, ips, secteur, libelle_commune,
+            libelle_departement, libelle_academie, rentree_scolaire, position"
+    where="rentree_scolaire = '2024-2025'">
+  </dsfr-data-source>
+
+  <!-- Trois colonnes calculées, par ligne.
+       · `tranche_ips` : cinq classes pour la carte, bornes lisibles autour de la
+         moyenne des collèges. La branche `is_null` vient EN PREMIER : sans elle,
+         un collège sans IPS tombe dans le `else` et se peint « 125 et plus »
+         (payé ici le 2026-09-20 : 849 cercles pour 844 collèges).
+       · `classe10` / `rang10` : des classes de dix points pour la concentration ;
+         `rang10` porte l'ordre, que le libellé ne porte pas.
+       · `prive1` : 1 pour un collège privé sous contrat, 0 sinon. Le secteur
+         est renseigné pour les 6 987 lignes (vérifié à l'API) : la part se
+         calcule sans dénominateur caché. -->
+  <dsfr-data-normalize id="ips-n" source="ips"
+    compute="tranche_ips = when is_null(ips) then 'IPS non renseigné' when ips &lt; 90 then 'Moins de 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 125 then '110 à 125' else '125 et plus';
+             rang10 = when is_null(ips) then null when ips &lt; 80 then 1 when ips &lt; 90 then 2 when ips &lt; 100 then 3 when ips &lt; 110 then 4 when ips &lt; 120 then 5 when ips &lt; 130 then 6 when ips &lt; 140 then 7 else 8;
+             classe10 = when is_null(ips) then null when ips &lt; 80 then 'Moins de 80' when ips &lt; 90 then '80 à 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 120 then '110 à 120' when ips &lt; 130 then '120 à 130' when ips &lt; 140 then '130 à 140' else '140 et plus';
+             prive1 = when secteur = 'privé sous contrat' then 1 else 0">
+  </dsfr-data-normalize>
+
+  <!-- Concentration : la part du privé dans chaque classe d'IPS. -->
+  <dsfr-data-query id="conc" source="ips-n" where="rang10:isnotnull"
+    group-by="rang10, classe10" aggregate="prive1:sum:nb_prive, uai:count:nb"
+    order-by="rang10:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="conc-p" source="conc" compute="part_prive = nb_prive / nb * 100"></dsfr-data-normalize>
+  <dsfr-data-normalize id="conc-r" source="conc-p" round="part_prive:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="conc-t" source="conc-r"
+    rename="classe10:IPS du collège | part_prive:Part du privé sous contrat (%) | nb_prive:Collèges privés sous contrat | nb:Collèges">
+  </dsfr-data-normalize>
+
+  <!-- Académies : IPS moyen par secteur, puis écart, puis part du privé.
+       Les 6 collèges sans académie (ni nom, ni position) sont écartés ici et le
+       texte le dit. -->
+  <dsfr-data-query id="acad-s" source="ips-n" where="libelle_academie:isnotnull, ips:isnotnull"
+    group-by="libelle_academie, secteur" aggregate="ips:avg:m">
+  </dsfr-data-query>
+  <dsfr-data-pivot id="acad-w" source="acad-s"
+    row="libelle_academie" column="secteur" value="m" aggregate="first"
+    labels="public:public | privé sous contrat:prive">
+  </dsfr-data-pivot>
+  <dsfr-data-query id="acad-n" source="ips-n" where="libelle_academie:isnotnull"
+    group-by="libelle_academie" aggregate="prive1:sum:nb_prive, uai:count:nb">
+  </dsfr-data-query>
+  <dsfr-data-join id="acad-j" left="acad-w" right="acad-n" on="libelle_academie" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="acad-e" source="acad-j"
+    compute="ecart = prive - public; part_prive = nb_prive / nb * 100">
+  </dsfr-data-normalize>
+  <!-- Mayotte n'a aucun collège privé sous contrat : pas d'écart, pas de barre. -->
+  <dsfr-data-query id="acad-o" source="acad-e" where="ecart:isnotnull" order-by="ecart:desc"></dsfr-data-query>
+  <dsfr-data-query id="acad-haut" source="acad-o" order-by="ecart:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="acad-bas" source="acad-o" order-by="ecart:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="acad-r" source="acad-o" round="ecart:1, public:1, prive:1, part_prive:0"></dsfr-data-normalize>
+  <dsfr-data-normalize id="acad-t" source="acad-r"
+    rename="libelle_academie:Académie | ecart:Écart privé − public (points) | public:IPS moyen public | prive:IPS moyen privé | nb_prive:Collèges privés | nb:Collèges | part_prive:Part du privé (%)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 4. À collèges constants ----------
+       Deux rentrées de la MÊME méthode (la DEPP a changé sa table de calcul à la
+       rentrée 2022). Un collège par ligne et par secteur, une colonne par
+       rentrée : un collège qui change de secteur ou manque une année n'a pas de
+       différence, et ne compte pas. -->
+  <dsfr-data-source id="paire" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-colleges"
+    fetch-mode="export" max-records="15000"
+    select="uai, secteur, ips, rentree_scolaire"
+    where="rentree_scolaire in ('2022-2023', '2024-2025')">
+  </dsfr-data-source>
+  <dsfr-data-pivot id="paire-w" source="paire"
+    row="uai, secteur" column="rentree_scolaire" value="ips" aggregate="first"
+    labels="2022-2023:r22 | 2024-2025:r24">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="paire-d" source="paire-w"
+    compute="d = when is_null(r22) or is_null(r24) then null else r24 - r22">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="paire-s" source="paire-d" where="d:isnotnull"
+    group-by="secteur" aggregate="d:avg:d_moy, uai:count:nb" order-by="d_moy:desc">
+  </dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,150 +187,200 @@
       </div>
     </nav>
 
-    <h1>Indice de position sociale des collèges — rentrée 2023-2024</h1>
+    <h1>Collèges publics, collèges privés&nbsp;: un écart social qui se creuse</h1>
 
-    <p class="fr-text--lead">
-      L'indice de position sociale (IPS) résume la situation sociale des familles des élèves
-      d'un établissement : plus il est élevé, plus les conditions sociales sont favorables aux
-      apprentissages. Sur les <strong>6 985 collèges</strong> de la rentrée 2023-2024, l'IPS
-      <strong>moyen des collèges</strong> — chaque collège comptant pour un — est de
-      <strong>104,7</strong> et s'étend de <strong>54,9</strong> à <strong>161,9</strong>.
-      Le secteur est la variable qui le structure le plus : <strong>100,1</strong> dans le
-      public, <strong>119,4</strong> dans le privé sous contrat.
-    </p>
+    <!-- Le chapô est CALCULÉ sur la dernière rentrée du jeu : il ne vieillit pas. -->
+    <dsfr-data-repeat source="serie-der">
+      <template>
+        <p class="fr-text--lead">
+          À la rentrée {{rentree_scolaire}}, l'indice de position sociale (IPS) moyen des
+          collèges privés sous contrat est de <strong>{{prive:number:1}}</strong>, celui des
+          collèges publics de <strong>{{public:number:1}}</strong>&nbsp;: <strong>{{ecart:number:1}}
+          points d'écart</strong>. Le privé accueille des élèves d'origine sociale plus
+          favorisée, et de 2016-2017 à 2024-2025 cet écart a grandi à chaque rentrée — y compris
+          à méthode de calcul constante.
+        </p>
+      </template>
+    </dsfr-data-repeat>
     <p class="fr-text--sm">
-      La référence nationale publiée par la DEPP est un autre chiffre : <strong>105,9</strong>
-      (public 100,9 ; privé sous contrat 124,1), calculée sur les <em>élèves</em> — un gros
-      collège y pèse plus qu'un petit. Le jeu de cette page ne porte pas les effectifs, donc
-      toutes les moyennes affichées ici sont des moyennes de collèges, et se comparent à
-      104,7, pas à 105,9. La DEPP demande par ailleurs de ne pas sur-interpréter
-      <strong>des écarts de 3 points ou moins</strong> entre IPS moyens d'établissements.
+      L'IPS résume, à partir des professions des parents, les conditions sociales et
+      culturelles des élèves d'un établissement&nbsp;: plus il est élevé, plus elles sont
+      favorables à la réussite scolaire. Toutes les moyennes de cette page sont des
+      <strong>moyennes de collèges</strong> — chaque collège compte pour un —, car le jeu ne
+      porte pas les effectifs&nbsp;; la DEPP, qui pondère par les élèves, trouve un écart plus
+      grand encore (section&nbsp;1). Elle conseille de ne pas sur-interpréter des écarts de
+      3&nbsp;points ou moins entre établissements.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/donnees-ips-colleges/"
            target="_blank" rel="noopener external"><code>donnees-ips-colleges</code></a>
-        — 62 646 lignes sur 9 rentrées, produit par la DEPP. C'est un <strong>jeu technique</strong>
-        (titre interne « dataviz2 », mot-clé <em>hors catalogue</em>) : il n'apparaît pas au
-        catalogue du portail, et il est le seul des quatre jeux d'IPS de collèges à porter
-        une position géographique — c'est ce qui rend la carte possible.
-        Lu <strong>sans clé</strong> : le portail Éducation répond en anonyme.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>14 collèges sont écartés de cette page</strong> : leurs lignes n'ont ni nom, ni
-        commune, ni département, ni académie, ni position — seulement un UAI, un secteur et un
-        IPS. La carte en montre donc <strong>6 971</strong> sur 6 985. L'original les compte sans
-        le dire ; ici c'est écrit. <strong>5 autres collèges n'ont pas d'IPS</strong> : ils
-        restent sur la carte, dans une tranche « IPS non renseigné » qui leur est propre.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        Les références nationales de la DEPP (105,9 ; 100,9 ; 124,1) sont lues dans le jeu
-        public <a href="https://data.education.gouv.fr/explore/dataset/fr-en-ips-colleges-ap2023/"
+        (DEPP) — un collège par ligne et par rentrée, de 2016-2017 à 2024-2025. C'est un jeu
+        technique, hors catalogue, et le seul des jeux d'IPS de collèges à porter une position
+        géographique&nbsp;: c'est ce qui rend la carte possible.
+        Les références nationales pondérées par les élèves viennent du jeu public
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-ips-colleges-ap2023/"
            target="_blank" rel="noopener external"><code>fr-en-ips-colleges-ap2023</code></a>
-        (champs <code>ips_national</code>, <code>ips_national_public</code>,
-        <code>ips_national_prive</code>, rentrée 2023-2024).
+        (champs <code>ips_national_public</code> et <code>ips_national_prive</code>), qui publie
+        déjà la rentrée 2025-2026. Lecture sans clé.
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois repères de poids différents ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="serie-der" value="ecart:first" format="decimal" decimals="1"
+        heading="Points d'écart entre privé et public"
+        lines='[{"value":"prive:first","format":"decimal","decimals":1,"prefix":"privé sous contrat : "},{"value":"public:first","format":"decimal","decimals":1,"prefix":"public : "}]'
+        label="IPS moyen des collèges, dernière rentrée publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ips-n"
+        value="count{ips:gte:125, secteur:eq:privé sous contrat} / count{ips:gte:125}" format="pourcentage"
+        heading="des collèges les plus favorisés sont privés"
+        lines='[{"value":"count{secteur:eq:privé sous contrat} / count","format":"pourcentage","prefix":"contre ","suffix":" de l&#39;ensemble des collèges"}]'
+        label="IPS de 125 et plus, rentrée 2024-2025"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ips-n"
+        value="count{ips:lt:90, secteur:eq:public} / count{ips:lt:90}" format="pourcentage"
+        heading="des collèges les plus défavorisés sont publics"
+        label="IPS inférieur à 90, rentrée 2024-2025"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. En neuf rentrées, l'écart est passé de 13 à 20 points</h2>
+    <dsfr-data-repeat source="serie-bornes">
+      <template>
+        <p class="odv-lecture">L'écart entre les IPS moyens des collèges privés et publics a
+          augmenté <strong>à chaque rentrée</strong>. La DEPP a changé sa méthode de calcul en
+          2022, et les deux périodes ne se comparent pas directement&nbsp;: avec l'ancienne
+          méthode, l'écart passe de <strong>{{e16:number:1}}</strong> (2016-2017) à
+          <strong>{{e21:number:1}}</strong> points (2021-2022)&nbsp;; avec la nouvelle, de
+          <strong>{{e22:number:1}}</strong> (2022-2023) à <strong>{{e24:number:1}}</strong>
+          (2024-2025). Il s'est davantage creusé en deux ans qu'en cinq.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz" data-code="Écart d'IPS moyen privé − public, par rentrée">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-ecart" source="serie-r" type="bar"
+        label-field="rentree_scolaire" value-field="ecart:Écart privé − public (points d'IPS)"
+        y-min="0" unit-tooltip="points"
+        reference-lines='[{"axis":"x","value":"2022-2023","label":"Nouvelle méthode de calcul","dash":true}]'
+        databox databox-title="L'écart social entre collèges privés et publics grandit chaque année"
+        databox-source="DEPP — donnees-ips-colleges, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-ecart" source="serie-t" table download
+        filename="ips-colleges-ecart-par-rentree.csv"
+        label-field="Rentrée" value-field="IPS moyen public, IPS moyen privé sous contrat, Écart (points)"
+        description="Écart entre l'IPS moyen des collèges privés sous contrat et celui des collèges publics, chaque collège comptant pour un, de 2016-2017 à 2024-2025. Il augmente à chaque rentrée. Rupture de série à la rentrée 2022-2023 : la DEPP a changé sa table de calcul, les barres de part et d'autre ne se comparent pas directement."></dsfr-data-a11y>
+    </div>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mt-2w fr-mb-6w">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce n'est pas un effet de composition</h3>
+        <p class="fr-text--sm">Les mêmes collèges, suivis de 2022-2023 à 2024-2025 (même méthode
+          de calcul, même secteur les deux années)&nbsp;: l'IPS moyen a évolué de</p>
+        <dsfr-data-repeat source="paire-s" key-field="secteur">
+          <template>
+            <p class="fr-text--sm fr-mb-1v"><strong>{{d_moy:number:1}} point(s)</strong> dans le
+              {{secteur}} ({{nb:number}} collèges suivis)</p>
+          </template>
+        </dsfr-data-repeat>
+        <p class="fr-text--xs fr-mt-1w">Le public est resté stable&nbsp;; c'est le recrutement
+          social du privé qui s'est déplacé vers le haut.</p>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Pondéré par les élèves, l'écart est plus grand</h3>
+        <p class="fr-text--sm">Les références nationales de la DEPP, où un grand collège pèse
+          plus qu'un petit&nbsp;:</p>
+        <dsfr-data-repeat source="refs-e" key-field="rentree_scolaire">
+          <template>
+            <p class="fr-text--sm fr-mb-1v">{{rentree_scolaire}}&nbsp;: public
+              {{ips_national_public:number:1}}, privé {{ips_national_prive:number:1}} —
+              <strong>{{ecart_depp:number:1}} points</strong></p>
+          </template>
+        </dsfr-data-repeat>
+        <p class="fr-text--xs fr-mt-1w">Deux bases, deux chiffres justes, qui ne se mettent pas
+          sur le même axe. Le jeu public porte déjà la rentrée 2025-2026, mais sans position
+          géographique.</p>
+      </div>
+    </div>
+
+    <!-- ---------- 2. La concentration ---------- -->
+    <h2 class="fr-h3">2. Plus un collège est favorisé, plus il a de chances d'être privé</h2>
+    <p class="odv-lecture">Le privé sous contrat représente environ <strong>un collège sur
+      quatre</strong>. Mais sa part monte avec l'IPS, classe après classe&nbsp;: presque
+      absent des collèges les plus défavorisés, il devient majoritaire au-delà de 120. La
+      ligne pointillée marque sa part dans l'ensemble des collèges.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Part du privé sous contrat par classe d'IPS">
+      <!-- La ligne de référence est un LITTÉRAL (reference-lines n'accepte pas
+           d'expression) : 23,8 % = 1 661 collèges privés sur 6 987 à la rentrée
+           2024-2025, mesuré à l'API le 2026-09-26. Le KPI d'accroche la
+           recalcule, lui, depuis la donnée. -->
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-conc" source="conc-r" type="bar"
+        label-field="classe10" value-field="part_prive:Part des collèges privés sous contrat (%)"
+        y-min="0" y-max="100" unit-tooltip="%"
+        reference-lines='[{"axis":"y","value":23.8,"label":"Tous collèges : 23,8 % (2024-2025)","dash":true}]'
+        databox databox-title="Part du privé sous contrat parmi les collèges, par classe d'IPS, rentrée 2024-2025"
+        databox-source="DEPP — donnees-ips-colleges, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-conc" source="conc-t" table download
+        filename="ips-colleges-part-prive-par-classe.csv"
+        label-field="IPS du collège" value-field="Part du privé sous contrat (%), Collèges privés sous contrat, Collèges"
+        description="Part des collèges privés sous contrat dans chaque classe de dix points d'IPS, rentrée 2024-2025, du moins favorisé au plus favorisé. La part croît à chaque classe. Un collège sans IPS est exclu."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La nuance ---------- -->
+    <h2 class="fr-h3">3. Mais l'écart change fortement d'une académie à l'autre</h2>
+    <dsfr-data-repeat source="acad-haut">
+      <template>
+        <p class="odv-lecture">L'écart le plus large est dans l'académie de
+          <strong>{{libelle_academie}}</strong> (<strong>{{ecart:number:1}} points</strong>, pour
+          {{nb_prive}} collèges privés sur {{nb}})&nbsp;;</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="acad-bas">
+      <template>
+        <p class="odv-lecture">le plus étroit dans celle de <strong>{{libelle_academie}}</strong>
+          (<strong>{{ecart:number:1}} points</strong>, {{nb_prive}} collèges privés sur {{nb}}).</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">Les académies d'Île-de-France sont toutes dans le haut du classement.
+      L'écart tend à être plus faible là où le privé scolarise une grande part des collèges,
+      comme à Rennes ou à Nantes — sans que ce soit une règle&nbsp;: à Paris, où plus d'un
+      collège sur trois est privé, il reste parmi les plus larges. Outre-mer, les écarts
+      reposent sur une dizaine de collèges privés au plus&nbsp;: le tableau donne l'effectif
+      derrière chaque barre.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Écart privé − public par académie, trié">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-acad" source="acad-r" type="bar" horizontal
+        label-field="libelle_academie" value-field="ecart:Écart privé − public (points d'IPS)"
+        unit-tooltip="points"
+        databox databox-title="Écart d'IPS moyen entre collèges privés et publics, par académie, rentrée 2024-2025"
+        databox-source="DEPP — donnees-ips-colleges, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-acad" source="acad-t" table download
+        filename="ips-colleges-ecart-par-academie.csv"
+        label-field="Académie"
+        value-field="Écart privé − public (points), IPS moyen public, IPS moyen privé, Part du privé (%), Collèges privés, Collèges"
+        description="Écart entre l'IPS moyen des collèges privés sous contrat et celui des collèges publics, par académie, rentrée 2024-2025, trié du plus large au plus étroit, avec la part et le nombre de collèges privés. Mayotte, sans collège privé sous contrat, n'a pas d'écart."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       UNE requête pour toute la page.
-
-       L'arbitrage a été tranché par la mesure, comme l'exige le dépôt :
-         · /exports/json    → 1 requête, 0,42 s, 2,6 Mo, 6 971 lignes ;
-         · /records pagine  → 70 allers-retours en série à ~80 ms, soit ~5,6 s.
-       Donc `fetch-mode="export"` (#689), et tout se dérive côté client.
-
-       Conséquence architecturale, et c'est elle qui répond au principal défaut de
-       l'original : les facettes sont CLIENT, donc complètes. L'original passe par
-       l'API v1 dont les facettes plafonnent à 100 valeurs — sa liste de communes
-       s'arrête à « Aramon », soit 100 communes sur 3 791. Ici les 3 791 y sont.
-
-       `max-records` : le piège maison. Repasser en mode adaptateur réactive le
-       plafond par défaut de 1 000, qui tronque EN SILENCE. Sans le `max-records`
-       ci-dessous, cette page afficherait 1 000 collèges sur 6 971 sans un mot.
-       ========================================================================== -->
-
-  <!-- `select` ajoute le 2026-09-19 : l'export rendait les 29 champs du jeu,
-       la page en emploie neuf (revue critique, § 3.6 — 4,9 Mo, 6,5 s au
-       chargement, quand l'analyse de cette page annoncait 0,42 s). Le gain
-       mesure a l'API le 2026-09-19 est plus MODESTE que ne le laissait croire
-       la revue : 2 631 700 octets sans `select`, 2 269 208 avec, soit 14 %.
-       Les 29 champs du jeu sont pour l'essentiel des codes courts ; c'est le
-       nombre de cercles, pas le poids des colonnes, qui fait les 6,5 s. Les neuf
-       nommes ici sont exactement ceux que la page lit : `uai` et
-       `appellation_officielle` (libelles et infobulle), `ips` (la donnee du
-       titre, d'ou derive `tranche_ips`), les trois mailles, `secteur`,
-       `rentree_scolaire` et `position`. Aucun texte long parmi eux. -->
-  <dsfr-data-source id="ips" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-colleges"
-    fetch-mode="export"
-    max-records="8000"
-    select="uai, appellation_officielle, ips, secteur, libelle_commune,
-            libelle_departement, libelle_academie, rentree_scolaire, position"
-    where="rentree_scolaire = '2023-2024' and position is not null">
-  </dsfr-data-source>
-
-  <!-- La tranche d'IPS, calculée par ligne.
-
-       Pourquoi ce détour : `fill-field` (la choroplèthe continue) n'agit QUE sur
-       `type="geoshape"`. Vérifié au source — `if (this.fillField && this.type ===
-       'geoshape')`, aux deux endroits qui comptent : le calcul des classes et la
-       construction de la légende. Sur une couche `type="circle"`, `fill-field`,
-       `breaks`, `classes`, `method` et `selected-palette` sont acceptés puis
-       IGNORÉS, sans erreur console : les 6 971 cercles sortent tous en bleu
-       France et `getLegendEntries()` renvoie une entrée sans libellé, ce qui fait
-       que la légende se rend `hidden`. Rien ne le signale. Constat AM-065.
-
-       Voie native, cherchée avant de conclure au manque (règle du dépôt) :
-       discrétiser soi-même en une expression `compute`, puis colorer par
-       `color-field` + `color-map`, qui sont catégoriels et fonctionnent sur les
-       points. La légende est alors alimentée par le `color-map`. Les bornes sont
-       calées sur la moyenne des collèges (104,7) et non sur les effectifs — une
-       choroplèthe d'IPS a un centre de lecture.
-
-       ⚠️ La première branche est `is_null(ips)`, et elle n'y était pas jusqu'au
-       2026-09-20 : un `when` sans test de nullité envoie une valeur absente dans
-       la branche `else` — les 5 collèges sans IPS étaient peints « 125 et plus »
-       (849 cercles bleu foncé comptés au navigateur pour 844 collèges >= 125 à
-       l'API). Aucune erreur, aucun avertissement : la doctrine « null ne satisfait
-       aucune comparaison » (#958) fait tomber la ligne dans le `else` obligatoire.
-       Nommer les absents avant de comparer.
-
-       Bénéfice inattendu du détour : la tranche devient une FACETTE. -->
-  <dsfr-data-normalize id="ips-n" source="ips"
-    compute="tranche_ips = when is_null(ips) then 'IPS non renseigné' when ips &lt; 90 then 'Moins de 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 125 then '110 à 125' else '125 et plus'">
-  </dsfr-data-normalize>
-
-  <!-- ⚠️ Les deux agrégats sont branchés sur `ips-f` (la facette), PAS sur `ips`.
-       Ce n'est pas un détail de style : une `dsfr-data-query group-by` posée
-       directement sur une source ODS négocie la délégation de son agrégation au
-       serveur (comportement documenté, et c'est même l'exemple du JSDoc) — mais
-       la source repart alors chercher un agrégat, et TOUS ses consommateurs
-       reçoivent l'agrégat à la place des données. Payé ici : la source est
-       tombée de 6 971 lignes à 2, le KPI « Collèges » affichait 2 et la carte
-       ignorait ses deux lignes « sans coordonnées exploitables ». Aucune erreur
-       console. Constat BUG-009 du registre.
-
-       `ips:avg` moyenne les collèges (les lignes sans IPS sont ignorées par la
-       moyenne — vérifié : 104,7 affiché = 104,716 à l'API sur les 6 966 lignes
-       renseignées). Pas d'effectif dans le jeu : pas de pondération possible,
-       et la page le dit. -->
-  <dsfr-data-query id="ips-par-secteur" source="ips-f" group-by="secteur"
-    aggregate="ips:avg:ips_moyen, uai:count:nb" order-by="ips_moyen:desc">
-  </dsfr-data-query>
-
-  <dsfr-data-query id="ips-par-academie" source="ips-f" group-by="libelle_academie"
-    aggregate="ips:avg:ips_moyen, uai:count:nb" order-by="ips_moyen:desc" limit="12">
-  </dsfr-data-query>
-
-  <!-- Socle du gabarit (famille A, motif validé sur qualite-tourisme) : la
-       recherche va dans un bandeau pleine largeur, avec son compteur. Elle dit
-       « combien » avant que le lecteur ne choisisse « lesquels ». La question de
-       la page est « où est le collège de mes enfants, et quel est son IPS » : le
-       nom et la commune sont les deux entrées naturelles, l'UAI celle des agents. -->
+  <!-- ---------- 4. Exploration : le localisateur ----------
+       Gabarit famille A : la recherche en bandeau, les compteurs, les filtres
+       alignés sur la carte. Les filtres arrivent APRÈS le récit. -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Trouver un collège</h2>
+    <p class="fr-text--sm">Chaque collège de la rentrée 2024-2025, coloré selon sa classe d'IPS.
+      La recherche et les filtres pilotent les compteurs, la carte et le tableau&nbsp;; ils ne
+      touchent pas les graphiques ci-dessus, qui portent sur la France entière.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
@@ -190,98 +395,46 @@
   </section>
 
   <div class="fr-container fr-mb-8w">
-
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Quatre compteurs : effectif, moyenne des collèges, extrêmes">
-    <p class="odv-lecture">Quatre compteurs qui suivent la recherche et les filtres&nbsp;:
-      combien de collèges, leur IPS moyen — <strong>chaque collège comptant pour un</strong>,
-      à comparer aux 104,7 de la France entière — et les deux extrêmes de la sélection.</p>
-    <dsfr-data-kpi-group cols="4" gap="md">
+    <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
       <dsfr-data-kpi source="ips-f" value="count" format="nombre"
         heading="Collèges" label="dans la sélection"></dsfr-data-kpi>
       <dsfr-data-kpi source="ips-f" value="ips:avg" format="decimal" decimals="1"
-        heading="IPS moyen des collèges" label="un collège = un ; France entière : 104,7"></dsfr-data-kpi>
-      <dsfr-data-kpi source="ips-f" value="ips:min" format="decimal" decimals="1"
-        heading="IPS le plus bas" label="de la sélection"></dsfr-data-kpi>
+        heading="IPS moyen" label="chaque collège comptant pour un"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ips-f" value="count{secteur:eq:privé sous contrat} / count" format="pourcentage"
+        heading="Part du privé sous contrat" label="dans la sélection"></dsfr-data-kpi>
       <dsfr-data-kpi source="ips-f" value="ips:max" format="decimal" decimals="1"
-        heading="IPS le plus élevé" label="de la sélection"></dsfr-data-kpi>
+        heading="IPS le plus élevé"
+        lines='[{"value":"ips:min","format":"decimal","decimals":1,"prefix":"le plus bas : "}]'
+        label="de la sélection"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
-    </div>
 
-    <!-- Les filtres sont alignés sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Filtrer</h2>
-        <!-- Facettes CLIENT : `server-facets` exigerait `server-side`, qui ne se
-             combine pas avec `fetch-mode="export"`. Le compromis est ici tout
-             bénéfice — les 3 791 communes sont là, et les compteurs aussi.
-             `display` : `|` sépare les entrées, `:` sépare champ et mode (PG-022).
-             `radio` = menu déroulant à panneau AVEC recherche (choix unique) ;
-             ce n'est pas un bouton radio en ligne, qui serait `radio-inline` (PG-023).
-
-             La facette « Tranche d'IPS » est une échelle ORDONNÉE, mais `sort` ne
-             connaît que `alpha` et `count` (vérifié au source, facets-sort.ts) :
-             les six cases se lisent « 100 à 110, 110 à 125, 125 et plus, 90 à 100,
-             IPS non renseigné, Moins de 90 ». Aucun mode « ordre des données » ou
-             « ordre du color-map ». Le lecteur s'y retrouve, mais l'échelle ne se
-             lit pas dans l'ordre. -->
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- Facettes CLIENT sur données complètes : les 3 791 communes y sont
+             (l'original, en API v1, s'arrêtait à 100). `display` : `|` sépare
+             les entrées (PG-022). -->
         <dsfr-data-facets id="ips-f" source="ips-q"
           fields="secteur, tranche_ips, libelle_academie, libelle_departement, libelle_commune"
-          labels="secteur:Secteur | tranche_ips:Tranche d'IPS | libelle_academie:Académie | libelle_departement:Département | libelle_commune:Commune"
+          labels="secteur:Secteur | tranche_ips:Classe d'IPS | libelle_academie:Académie | libelle_departement:Département | libelle_commune:Commune"
           display="secteur:radio-inline | tranche_ips:checkbox | libelle_academie:radio | libelle_departement:radio | libelle_commune:radio"
           sort="alpha:asc"
           url-sync url-params>
         </dsfr-data-facets>
-
-        <p class="fr-text--xs fr-mt-2w fr-mb-0">
-          La recherche et les filtres se retrouvent dans l'adresse de la page : celle-ci est
-          partageable telle quelle. L'original n'a pas d'<code>urlsync</code> et ignore les
-          paramètres <code>refine.*</code> passés dans l'URL.
-        </p>
+        <p class="fr-text--xs fr-mt-2w fr-mb-0">La recherche et les filtres se retrouvent dans
+          l'adresse de la page, qui se partage telle quelle.</p>
       </details>
 
       <div class="fr-col-12 fr-col-lg-9">
-        <!-- La carte. Trois écarts assumés avec l'original, tous des corrections :
-             1. elle n'est pas centrée sur la Suisse (l'original pose
-                location="5,47.35371,8.98682", soit le canton de Glaris) — le défaut
-                du gabarit, identique sur les quatre pages IPS ;
-             2. elle n'est pas vide au chargement : l'original conditionne sa couche
-                à un refine département OU commune, si bien que choisir une académie
-                n'affiche rien du tout ;
-             3. elle ENCODE l'IPS, qui est le sujet annoncé par le titre. L'original
-                affiche 6 971 épingles rouges identiques : il faut cliquer chaque
-                épingle pour lire la valeur.
-
-             `fit-zone="none"` : le jeu porte des points ultramarins (Guadeloupe 52,
-             Martinique 50, Guyane 38, La Réunion 87, Mayotte 22, Saint-Barthélemy,
-             Saint-Martin). Sans encart `insets`, aucun clip métropole n'est posé par
-             défaut ; `none` l'écrit explicitement pour qu'un filtre « Guadeloupe »
-             recadre bien sur la Guadeloupe (variante de BUG-004, déjà payée).
-
-             Les bornes des tranches (90, 100, 110, 125) sont calées sur des seuils
-             lisibles autour de la moyenne des collèges (104,7), et non sur les
-             effectifs comme le ferait `quantile`. Une choroplèthe d'IPS a un centre
-             de lecture ; des classes à effectifs égaux le masqueraient.
-
-             Mesuré le 2026-09-20 : chacun des cinq encarts `insets="drom"` redessine
-             les 6 971 cercles (six conteneurs Leaflet à 6 971 `path` chacun, soit
-             41 826 cercles SVG pour 6 971 collèges). Les encarts ne filtrent pas
-             leurs points sur leur emprise ; c'est là que part une partie des 6,5 s
-             de rendu, pas dans le poids des colonnes. -->
-        <div class="odv-viz" data-code="Carte des collèges colorée par tranche d'IPS">
-        <h2 class="fr-h4">Où sont les collèges, et dans quelle tranche d'IPS</h2>
-        <p class="odv-lecture">Chaque collège prend la couleur de sa tranche d'IPS, centrée sur
-          la moyenne des collèges (104,7). <strong>1 264 collèges sont sous 90</strong> (18 %,
-          dont 1 243 publics)&nbsp;: le <strong>rouge</strong> se concentre dans les académies
-          de Lille (181) et Créteil (136), et outre-mer — 19 collèges sur 22 à Mayotte,
-          52 sur 87 à La Réunion. <strong>844 sont à 125 et plus</strong> (dont 564 privés
-          sous contrat), en <strong>bleu foncé</strong> à Versailles (183) et Paris (94, soit
-          plus d'un collège parisien sur deux).</p>
+        <div class="odv-viz" data-code="Carte des collèges colorée par classe d'IPS">
+        <!-- `color-field` + `color-map` : `fill-field` ne colore que les
+             polygones, et se tait sur une couche de cercles (AM-065). Les six
+             collèges sans position sont ignorés par la couche. -->
         <dsfr-data-map id="carte-ips"
-          name="Collèges de France et leur indice de position sociale, rentrée 2023-2024"
+          name="Collèges de France et leur indice de position sociale, rentrée 2024-2025"
           height="620px" tiles="ign-plan" tiles-style="muted"
           insets="drom" fit-bounds fit-max-zoom="13">
           <dsfr-data-map-layer id="couche-ips" source="ips-f" type="circle"
@@ -291,17 +444,13 @@
             tooltip-field="appellation_officielle"
             max-items="8000">
           </dsfr-data-map-layer>
-          <!-- ⚠️ `for` d'une légende = l'id de la COUCHE (`dsfr-data-map-layer`), pas
-               celui de la carte — alors que le `for` du `dsfr-data-a11y` quelques
-               lignes plus bas désigne bien la CARTE. Deux `for` voisins, deux
-               référents différents ; se tromper rend la légende vide et `hidden`,
-               sans un mot en console. Constat PG-024. -->
+          <!-- `for` = l'id de la COUCHE, pas de la carte (PG-024). -->
           <dsfr-data-map-legend for="couche-ips" label="Indice de position sociale"></dsfr-data-map-legend>
           <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="360px">
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur|secteur non renseigné}}</p>
               <p class="fr-display--xs fr-mb-1v">{{ips:number:1|non renseigné}}</p>
-              <p class="fr-text--sm fr-mb-3v">Indice de position sociale, rentrée {{rentree_scolaire}} — moyenne des collèges : 104,7</p>
+              <p class="fr-text--sm fr-mb-3v">Indice de position sociale, rentrée {{rentree_scolaire}}</p>
               <p class="fr-text--sm fr-mb-1v">
                 <strong>{{libelle_commune|commune non renseignée}}</strong><br>
                 {{libelle_departement|département non renseigné}} — académie de {{libelle_academie|non renseignée}}
@@ -311,285 +460,100 @@
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <!-- Le tableau accessible et le CSV de la sélection. L'original n'a que le
-             CSV ; le tableau est un gain net, et il porte la même sélection.
-             `dsfr-data-a11y` nomme ses colonnes d'après les champs (vérifié au
-             source : `<th>${col}`, aucune grammaire de libellé) — un `rename` en
-             amont, réservé au tableau, donne des en-têtes lisibles sans toucher
-             aux champs que lisent la carte et l'infobulle. -->
         <dsfr-data-normalize id="ips-tableau" source="ips-f"
-          rename="appellation_officielle:Collège | ips:IPS | libelle_commune:Commune | libelle_departement:Département | libelle_academie:Académie | secteur:Secteur | tranche_ips:Tranche d'IPS"></dsfr-data-normalize>
+          rename="appellation_officielle:Collège | ips:IPS | libelle_commune:Commune | libelle_departement:Département | libelle_academie:Académie | secteur:Secteur | tranche_ips:Classe d'IPS"></dsfr-data-normalize>
         <dsfr-data-a11y source="ips-tableau" for="carte-ips" table download
-          filename="ips-colleges-2023-2024.csv"
+          filename="ips-colleges-2024-2025.csv"
           label="Données de la carte"
-          description="Un collège par ligne : appellation, IPS (moyenne des collèges de France : 104,7), tranche, commune, département, académie, secteur. Cinq collèges n'ont pas d'IPS : leur cellule reste vide."
+          description="Un collège par ligne pour la sélection courante : appellation, IPS, classe, commune, département, académie, secteur. Un collège n'a pas d'IPS : sa cellule reste vide."
           label-field="Collège"
-          value-field="IPS, Tranche d'IPS, Commune, Département, Académie, Secteur">
+          value-field="IPS, Classe d'IPS, Commune, Département, Académie, Secteur">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
 
-    <h2 class="fr-h4">Ce que la page d'origine ne montre pas</h2>
-    <p class="fr-text--sm fr-mb-3w">
-      La page d'origine n'énonce aucun constat : ni définition, ni moyenne, ni comparaison.
-      Ces deux graphiques sont tirés du même jeu, sans requête supplémentaire — la source est
-      déjà entièrement chargée, et les deux suivent la recherche et les filtres.
-    </p>
-
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-5">
-        <div class="odv-viz" data-code="Public et privé sous contrat, face à la moyenne des collèges">
-        <h3 class="fr-h6">L'écart public / privé sous contrat</h3>
-        <p class="odv-lecture"><strong>100,1</strong> dans le public, <strong>119,4</strong> dans
-          le privé sous contrat&nbsp;: <strong>19,3 points</strong> d'écart entre les moyennes
-          des collèges — et 23,2 points (100,9 contre 124,1) quand la DEPP moyenne sur les
-          élèves. La ligne de référence est la moyenne des collèges, et reste en place quand
-          la sélection change.</p>
-        <!-- `reference-lines` : la moyenne des collèges de France (104,7, tous
-             collèges de la rentrée) tracée sur le graphique, pour que chaque
-             sélection se lise PAR RAPPORT à elle. Même base que les barres : une
-             moyenne de collèges face à des moyennes de collèges. La référence DEPP
-             (105,9, sur les élèves) n'est PAS tracée : ce serait comparer deux
-             bases sur un même axe. Vertical et non horizontal : la ligne de
-             référence d'axe y est un seuil de VALEUR, ce qui suppose les valeurs
-             en ordonnée. -->
-        <dsfr-data-normalize id="ips-par-secteur-r" source="ips-par-secteur" round="ips_moyen:1"></dsfr-data-normalize>
-        <dsfr-data-chart id="g-secteur" source="ips-par-secteur-r" type="bar"
-          label-field="secteur" value-field="ips_moyen" name="IPS moyen des collèges"
-          y-min="0" unit-tooltip="points d'IPS"
-          empty-label="Secteur non renseigné"
-          reference-lines='[{"axis":"y","value":104.7,"label":"Moyenne des collèges : 104,7","dash":true}]'
-          databox databox-title="IPS moyen des collèges par secteur, rentrée 2023-2024"
-          databox-source="DEPP — donnees-ips-colleges, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-normalize id="ips-par-secteur-t" source="ips-par-secteur-r"
-          rename="secteur:Secteur | ips_moyen:IPS moyen des collèges | nb:Nombre de collèges"></dsfr-data-normalize>
-        <dsfr-data-a11y for="g-secteur" source="ips-par-secteur-t" table download
-          label-field="Secteur" value-field="IPS moyen des collèges, Nombre de collèges" empty-label="Secteur non renseigné"
-          description="IPS moyen des collèges publics et privés sous contrat de la sélection, chaque collège comptant pour un, avec leur effectif ; la moyenne des collèges de France, tous secteurs, est de 104,7."></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          Le secteur est la variable la plus structurante de l'IPS — et l'original n'offre
-          aucun filtre sur elle, alors que le champ <code>secteur</code> est dans le jeu.
-          Sur les 1 264 collèges sous 90, <strong>1 243 sont publics</strong>&nbsp;; sur les
-          844 à 125 et plus, <strong>564 sont privés sous contrat</strong>.
-        </p>
-        </div>
-      </div>
-
-      <div class="fr-col-12 fr-col-md-7">
-        <div class="odv-viz" data-code="Les douze académies au plus fort IPS moyen, face à la moyenne des collèges">
-        <h3 class="fr-h6">Les douze académies au plus fort IPS moyen</h3>
-        <p class="odv-lecture"><strong>Paris (125,3)</strong> loin devant, <strong>Versailles
-          (115,3)</strong> ensuite, puis un peloton&nbsp;: de Grenoble (109,6) à Nice (106,1),
-          sept académies se tiennent en 3,5 points, soit des écarts que la DEPP demande de ne
-          pas sur-interpréter. La ligne de référence est la moyenne des collèges&nbsp;; le
-          tableau donne le nombre de collèges derrière chaque moyenne.</p>
-        <!-- Pas de podium ici, et c'est un choix mesuré : `dsfr-data-podium` formate
-             sa valeur à l'ENTIER (formatNumber sans décimales, aucun attribut
-             pour en demander), et trois académies s'y affichaient « 108 » aux
-             rangs 5, 6 et 7. Un IPS se lit au dixième. Barres horizontales, donc,
-             avec la moyenne des collèges en ligne de référence sur l'axe des VALEURS
-             — qui est l'axe x quand les barres sont couchées. -->
-        <dsfr-data-normalize id="ips-par-academie-r" source="ips-par-academie" round="ips_moyen:1"></dsfr-data-normalize>
-        <dsfr-data-chart id="g-academie" source="ips-par-academie-r" type="bar" horizontal
-          label-field="libelle_academie" value-field="ips_moyen" name="IPS moyen des collèges"
-          unit-tooltip="points d'IPS"
-          reference-lines='[{"axis":"x","value":104.7,"label":"Moyenne des collèges : 104,7","dash":true}]'
-          databox databox-title="IPS moyen des collèges par académie (sélection courante)"
-          databox-source="DEPP — donnees-ips-colleges, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-normalize id="ips-par-academie-t" source="ips-par-academie-r"
-          rename="libelle_academie:Académie | ips_moyen:IPS moyen des collèges | nb:Nombre de collèges"></dsfr-data-normalize>
-        <dsfr-data-a11y for="g-academie" source="ips-par-academie-t" table download
-          label-field="Académie" value-field="IPS moyen des collèges, Nombre de collèges"
-          description="Les douze académies au plus fort IPS moyen de la sélection, chaque collège comptant pour un, avec le nombre de collèges de chacune ; la moyenne des collèges de France est de 104,7."></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          Ce classement suit la recherche et les filtres de la colonne de gauche : il se
-          recalcule à chaque sélection, sans requête réseau. La DEPP publie pour Paris un IPS
-          académique de 128,2 (sur les élèves) là où la moyenne de ses 178 collèges est de 125,3.
-        </p>
-        </div>
-      </div>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Les collèges privés sous contrat accueillent des élèves
+        socialement plus favorisés que les collèges publics, et l'écart grandit à chaque rentrée
+        — à collèges et à méthode constants, c'est le privé qui monte, le public qui stagne.
+        L'écart n'est pas le même partout&nbsp;: il est le plus large en Île-de-France.
+        Ce que ces données ne disent pas&nbsp;: pourquoi — ni les frais de scolarité, ni la
+        sélection à l'entrée, ni les choix des familles ne sont dans le jeu.</p>
     </div>
 
-    <section class="fr-mt-4w">
-      <h2 class="fr-h5">Notes — les hypothèses éditoriales</h2>
-      <ul class="fr-text--sm">
-        <li><strong>Moyenne des collèges, pas des élèves.</strong> Toutes les moyennes de la
-          page donnent le même poids à chaque collège, parce que le jeu ne porte pas les
-          effectifs. La DEPP moyenne sur les élèves : 105,9 au lieu de 104,7 au national,
-          124,1 au lieu de 119,4 dans le privé. Les deux chiffres sont vrais ; ils ne se
-          comparent pas entre eux, et la page ne les met jamais sur le même axe.</li>
-        <li><strong>Les absents sont nommés, pas écartés.</strong> Les 5 collèges sans IPS
-          ont leur tranche (« IPS non renseigné »), leur couleur et leur case à cocher ; ils
-          restent hors des moyennes et des extrêmes. Les 14 collèges sans position ni nom ne
-          peuvent être ni cartographiés ni recherchés : ils sont écartés, et l'encart du jeu
-          de données le dit.</li>
-        <li><strong>Les bornes des tranches</strong> (90, 100, 110, 125) sont des seuils
-          lisibles autour de 104,7, pas des quantiles : la classe centrale contient la
-          moyenne, et le rouge comme le bleu foncé sont des écarts nets à cette moyenne.
-          Rouge = IPS bas = origine sociale défavorisée, dans le sens que la DEPP donne à
-          l'indice ; la couleur suit ce sens, elle ne juge pas.</li>
-        <li><strong>Douze académies sur trente</strong> dans le classement, pour rester
-          lisible ; le tableau du bloc et la facette Académie donnent les trente.</li>
-      </ul>
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Moyenne des collèges, pas des élèves.</strong> Le jeu ne porte pas les
+          effectifs&nbsp;: chaque collège compte pour un. La DEPP pondère par les élèves et
+          trouve un écart plus grand&nbsp;; les deux séries ne se mettent jamais sur le même axe.</li>
+        <li><strong>Rupture de série en 2022.</strong> La DEPP a mis à jour sa table de passage
+          profession → IPS à la rentrée 2022 et exclut depuis les élèves dont les professions des
+          deux parents sont inconnues. Les évolutions ne sont donc lues qu'<em>à l'intérieur</em>
+          de chaque méthode&nbsp;; le saut de 2021-2022 à 2022-2023 mêle méthode et réalité.</li>
+        <li><strong>Collèges écartés.</strong> Six collèges de 2024-2025 n'ont ni nom, ni commune,
+          ni académie, ni position&nbsp;: ils comptent dans la série et dans l'accroche, pas dans
+          les académies ni sur la carte. Un collège n'a pas d'IPS&nbsp;: il est hors des moyennes,
+          et nommé « IPS non renseigné » sur la carte.</li>
+        <li><strong>Deux découpages.</strong> Classes de dix points pour la concentration (un
+          découpage régulier, lisible comme une échelle)&nbsp;; cinq tranches centrées sur la
+          moyenne des collèges pour la carte (au-delà de cinq couleurs, une carte de points ne se
+          lit plus).</li>
+        <li><strong>Angles écartés.</strong> Le classement des collèges « les plus favorisés »
+          (il désigne des établissements, pas un phénomène)&nbsp;; la carte de l'IPS moyen par
+          département (elle aurait mélangé la géographie sociale et le poids du privé, que la
+          section&nbsp;3 sépare)&nbsp;; la dispersion interne des collèges (l'écart-type existe
+          dans le jeu public, pas dans celui-ci).</li>
+      </ol>
     </section>
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
     <details class="odv-technique" id="analyse">
-      <summary>Analyse technique — ce que la reproduction a coûté</summary>
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
       <section class="fr-py-4w">
-      <h2>Analyse de reproduction — IPS Collèges</h2>
+      <h2>Analyse — IPS Collèges</h2>
 
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/dataviz-ips-colleges/" target="_blank" rel="noopener external">/pages/dataviz-ips-colleges/</a>,
-        page AngularJS. Fiche d'audit : <code>docs/portail-education/dataviz-ips-colleges.md</code>.
-        <strong>Les quatre pages IPS du portail (Écoles, Collèges, Lycées, EREA) sont le même
-        fichier</strong>, à trois attributs près — même nom de contexte
-        (<code>frenipslyceesdataviz</code>, celui des lycées, recopié partout), même centrage
-        sur la Suisse, même CSS de quatre règles. Les défauts relevés ici sont donc les défauts
-        des quatre.
+        <a href="https://data.education.gouv.fr/pages/dataviz-ips-colleges/" target="_blank" rel="noopener external">/pages/dataviz-ips-colleges/</a>
+        — une carte vide au chargement, trois facettes, aucun constat. Fiche d'audit :
+        <code>docs/portail-education/dataviz-ips-colleges.md</code>. Recréée le 2026-09-26 en
+        page éditoriale&nbsp;: l'original et la reproduction précédente n'étaient que la
+        section&nbsp;4.
       </p>
-
-      <div class="fr-callout fr-icon-eye-line fr-mb-4w">
-        <h3 class="fr-callout__title fr-text--md">Relecture <code>dataviz-metier</code> et gabarit (2026-09-20)</h3>
-        <p class="fr-callout__text fr-text--sm">
-          La page a été relue avec la grille en douze points et a reçu le gabarit de la
-          famille A : recherche en bandeau, compteurs en pleine largeur, filtres alignés sur la
-          carte. Deux chiffres faux mais plausibles y ont été trouvés, et aucun des deux ne
-          venait de la bibliothèque. <strong>« Moyenne nationale : 104,7 »</strong>, écrit trois
-          fois, était la moyenne <em>des collèges</em> ; la référence nationale de la DEPP,
-          calculée sur les élèves, est <strong>105,9</strong> (et 124,1 dans le privé, pour 119,4
-          ici) — lue dans <code>fr-en-ips-colleges-ap2023</code>. Le jeu n'ayant pas d'effectifs,
-          la pondération est impossible : la page renomme la mesure et donne les deux bases.
-          <strong>Les 5 collèges sans IPS étaient peints « 125 et plus »</strong> : une valeur
-          absente ne satisfait aucune comparaison du <code>when</code> et tombe dans le
-          <code>else</code> — 849 cercles bleu foncé comptés au navigateur pour 844 collèges
-          ≥ 125 à l'API. Une branche <code>is_null(ips)</code> les nomme désormais. Les tableaux
-          équivalents ont reçu des en-têtes lisibles par un <code>rename</code> en amont.
-        </p>
-      </div>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le chargement, tranché par la mesure.</strong> 6 971 lignes en
-              <strong>une requête de 0,42 s</strong> (<code>fetch-mode="export"</code>, 2,6 Mo)
-              contre ~70 allers-retours en série pour la pagination. C'est un attribut, et il
-              change toute l'architecture de la page : à partir de là, tout se dérive côté
-              client sans une requête de plus — la recherche, les quatre KPI, les cinq
-              facettes, la carte et les deux graphiques.</li>
-            <li><strong>La discrétisation par expression.</strong> Découper l'IPS en cinq
-              tranches calées sur la moyenne des collèges tient en une expression
-              <code>compute</code> — <code>when ips &lt; 90 then … else …</code> — évaluée par
-              ligne, sans requête. Et le détour a rapporté plus qu'il n'a coûté&nbsp;: la
-              tranche est devenue une <strong>facette</strong>, que l'original n'a pas et ne
-              pouvait pas avoir, puisque le champ n'existe pas dans le jeu.</li>
-            <li><strong>La recherche en bandeau.</strong> <code>dsfr-data-search</code> sur le
-              nom, la commune et l'UAI, avec <code>count count-label="collège"</code> : le
-              compteur accordé suit la frappe, et <code>url-search-param="q"</code> met le
-              terme dans l'adresse à côté des facettes.</li>
-            <li><strong>Les encarts ultramarins.</strong> <code>insets="drom"</code> : un
-              attribut, et les cinq DROM apparaissent en encarts pendant que le cadrage
-              principal reste sur la métropole. C'est aussi ce qui règle le
-              <code>fit-bounds</code> — voir à droite.</li>
-            <li><strong>Les 3 791 communes.</strong> Le défaut le plus grave de l'original —
-              une facette Commune plafonnée à 100 valeurs, d'Abbeville à Aramon — <em>disparaît
-              sans qu'on ait rien à faire</em> : il tenait au plafond de facettes de l'API v1,
-              or ici les facettes sont calculées côté client sur des données complètes.
-              Une décision d'architecture a réglé un défaut fonctionnel.</li>
-            <li><strong>L'URL partageable.</strong> <code>url-sync url-params</code> sur la
-              balise de facettes : deux attributs booléens, et « la carte des collèges de la
-              Somme » devient un lien qu'on peut envoyer. L'original n'a pas d'<code>urlsync</code>
-              et ignore les <code>refine.*</code> passés dans l'adresse.</li>
-            <li><strong>Le tableau accessible et le CSV.</strong> <code>dsfr-data-a11y</code>
-              avec <code>table download</code> donne les deux sur la sélection courante.
-              L'original n'a que le CSV.</li>
+            <li><strong>L'écart par rentrée, sans script.</strong> Le serveur agrège (18 lignes),
+              <code>dsfr-data-pivot</code> met les secteurs en colonnes, un <code>compute</code>
+              soustrait. Le même motif sert pour les académies.</li>
+            <li><strong>Le suivi à collèges constants.</strong> Un pivot sur
+              <code>row="uai, secteur"</code> et deux rentrées&nbsp;: un collège qui change de
+              secteur ou manque une année n'a pas de différence et sort du calcul, sans ligne de
+              code.</li>
+            <li><strong>Les phrases qui ne vieillissent pas.</strong> Chapô, bornes de la série,
+              académies extrêmes, références DEPP&nbsp;: <code>dsfr-data-repeat</code> sur une
+              ligne calculée.</li>
+            <li><strong>Les parts filtrées dans un KPI.</strong>
+              <code>count{ips:gte:125, secteur:eq:…} / count{ips:gte:125}</code>&nbsp;: un filtre
+              par côté du ratio, et la ligne secondaire garde son propre dénominateur.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong><code>max-records</code>, repayé une fois de plus.</strong> Repasser en
-              mode adaptateur réactive le plafond par défaut de 1 000, qui tronque
-              <strong>en silence</strong> : sans <code>max-records="8000"</code>, la page aurait
-              montré 1 000 collèges sur 6 971 sans une ligne en console. C'est le piège le plus
-              cher du dépôt, et il ne se voit que si l'on connaît le volume réel du jeu
-              <em>avant</em> d'écrire la balise.</li>
-            <li><strong>Le choix « export » coûte les facettes serveur.</strong>
-              <code>fetch-mode="export"</code> ne se combine pas avec <code>server-side</code>,
-              donc pas de <code>server-facets</code>. Ici l'arbitrage est tout bénéfice — le jeu
-              tient en 2,6 Mo et les facettes client sont <em>meilleures</em> que les facettes
-              serveur de l'original. Mais ce n'est vrai que parce que le jeu est petit :
-              sur les 279 318 lignes d'IPS Écoles, le même raisonnement donne la réponse inverse
-              (voir cette page-là). L'arbitrage est propre au volume, il ne se recopie pas.</li>
-            <li><strong><code>fill-field</code> ne colore que les polygones — et se tait
-              sur les points.</strong> Le chemin évident pour encoder l'IPS était
-              <code>fill-field="ips"</code> + <code>breaks</code> +
-              <code>selected-palette</code>, exactement ce que décrivent leurs JSDoc
-              (« remplissage en choroplèthe », « nombre de classes de la choroplèthe »).
-              Sur une couche <code>type="circle"</code>, les quatre attributs sont acceptés
-              puis <strong>ignorés</strong> : vérifié au source, la condition est
-              <code>this.fillField &amp;&amp; this.type === 'geoshape'</code>, aux deux endroits
-              qui comptent — le calcul des classes et la construction de la légende. Résultat
-              observé : 6 971 cercles tous bleu France, une légende vide rendue
-              <code>hidden</code>, <strong>zéro erreur console</strong> et
-              <code>getSkippedCount()</code> à 0. Rien ne dit que la moitié des attributs
-              écrits n'ont servi à rien. Voie native trouvée après coup — discrétiser en
-              <code>compute</code>, colorer en <code>color-field</code> +
-              <code>color-map</code>, qui sont catégoriels et fonctionnent sur les points.
-              Elle marche, mais elle n'est ni suggérée ni documentée à cet endroit. Constat
-              AM-065.</li>
-            <li><strong>Un <code>when</code> sans test de nullité classe les absents.</strong>
-              Une valeur absente ne satisfait aucune comparaison (doctrine #958, la même que
-              le <code>where</code>), donc elle tombe dans le <code>else</code> obligatoire —
-              ici « 125 et plus ». Rien ne le dit : ni erreur, ni avertissement, et le compte
-              (849 pour 844) est du bon ordre de grandeur. Ce n'est pas un défaut de la
-              grammaire, qui fournit <code>is_null()</code> ; c'est que l'<code>else</code>
-              obligatoire, conçu pour interdire un <code>undefined</code> silencieux, produit
-              une <em>classe</em> silencieuse. Seul un recalcul à l'API l'a révélé.</li>
-            <li><strong>Une facette ordinale ne se trie pas dans l'ordre.</strong>
-              <code>sort</code> connaît <code>alpha</code> et <code>count</code>, rien d'autre
-              (vérifié au source) : les tranches se lisent « 100 à 110, 110 à 125, 125 et plus,
-              90 à 100, IPS non renseigné, Moins de 90 ». Pas de mode « ordre des données » ni
-              « ordre du <code>color-map</code> ». Contournement possible par des libellés
-              préfixés, au prix de la légende qui les afficherait aussi.</li>
-            <li><strong>Deux <code>for</code> voisins, deux référents.</strong>
-              <code>dsfr-data-map-legend for="…"</code> attend l'id de la <strong>couche</strong> ;
-              <code>dsfr-data-a11y for="…"</code>, six lignes plus bas, attend celui de la
-              <strong>carte</strong>. Y avoir mis l'id de la carte rend la légende vide et
-              <code>hidden</code>, sans un mot. Deuxième échec muet de la même page, sur le
-              même composant. Constat PG-024.</li>
-            <li><strong>Le <code>fit-bounds</code> et les DROM.</strong> Sans encart, le fit
-              est libre : il englobe la Guadeloupe et La Réunion, et la « carte de France »
-              s'ouvre sur une vue de l'Atlantique où la métropole est un pâté bleu — soit
-              exactement le défaut qu'on reprochait à l'original, obtenu par un autre chemin.
-              <code>insets="drom"</code> le corrige en posant tout seul un clip métropole.
-              C'est le bon comportement, mais il se déclenche à cause d'un <em>autre</em>
-              attribut que celui qu'on écrit : le couplage ne se voit qu'au navigateur.
-              Et chaque encart <strong>redessine les 6 971 cercles</strong> (six conteneurs
-              Leaflet à 6 971 <code>path</code>, comptés le 2026-09-20) : cinq fois le travail
-              de rendu pour cinq fenêtres de 152 px.</li>
-            <li><strong>Le point décimal dans une infobulle.</strong> <code>{{ips}}</code>
-              affiche « 108.1 ». Le pipe <code>{{ips:number:1}}</code> rend « 108,1 » en fr-FR —
-              il existe, mais il ne s'invente pas : la grammaire des pipes de template
-              (<code>number</code>, <code>date</code>, <code>datetime</code>, <code>join</code>,
-              <code>url</code>) n'est pas celle de l'attribut <code>format</code> d'un KPI
-              (<code>nombre</code>, <code>decimal</code>, <code>compact</code>…). Deux
-              vocabulaires pour une même idée, dans la même page.</li>
-            <li><strong>Des en-têtes de tableau qui sont des noms de champ.</strong>
-              <code>dsfr-data-a11y</code> rend <code>&lt;th&gt;appellation_officielle&lt;/th&gt;</code>
-              tel quel : aucune grammaire <code>champ:Libellé</code> sur <code>value-field</code>
-              (vérifié au source). La voie native est un <code>dsfr-data-normalize rename</code>
-              en amont, réservé au tableau — trois balises de plus pour trois tableaux.</li>
+            <li><strong>Une ligne de référence ne se calcule pas.</strong> La part du privé
+              (23,8&nbsp;%) est écrite en dur dans <code>reference-lines</code>, datée&nbsp;; le
+              KPI d'accroche la recalcule depuis la donnée.</li>
+            <li><strong>Une rupture de série que rien ne signale dans le jeu.</strong> Elle n'est
+              écrite que dans la description d'un jeu frère (<code>fr-en-ips-colleges-ap2022</code>)&nbsp;;
+              sans elle, on titrait « +7 points en neuf ans ».</li>
           </ul>
         </div>
       </div>
@@ -601,52 +565,22 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-dataset-context</code> + <code>ng-init refine.rentree_scolaire</code></td><td><code>dsfr-data-source</code> + <code>where</code> + <code>fetch-mode="export"</code></td><td>Équivalent, et une requête au lieu de trois</td></tr>
-            <tr><td><code>ods-facet name="libelle_academie"</code></td><td><code>dsfr-data-facets</code></td><td>Équivalent</td></tr>
-            <tr><td>liste maison <code>ods-adv-analysis</code> + <code>limitTo:nbdepts</code> + « Plus »</td><td>même <code>dsfr-data-facets</code></td><td>Nettement plus simple : la liste maison réimplémente une facette, et perd son compteur au passage</td></tr>
-            <tr><td><code>ods-facet name="libelle_commune"</code> (plafonnée à 100 valeurs)</td><td>même <code>dsfr-data-facets</code>, <code>display="…:radio"</code></td><td>Meilleur : 3 791 communes, avec recherche</td></tr>
-            <tr><td><code>ods-map location="5,47.35371,8.98682"</code></td><td><code>dsfr-data-map</code> (défauts : France, zoom 6)</td><td>Équivalent, et le centrage par défaut est déjà le bon</td></tr>
-            <tr><td><code>ods-map-layer show-if="…"</code> (épingles uniformes)</td><td><code>dsfr-data-map-layer</code> + <code>color-field</code> + <code>color-map</code>, tranche par <code>compute</code></td><td>Meilleur : la donnée du titre est enfin représentée — mais par un détour, <code>fill-field</code> ne colorant que les polygones</td></tr>
-            <tr><td>infobulle configurée au back-office (5 champs)</td><td><code>dsfr-data-map-popup</code> + <code>&lt;template&gt;</code></td><td>Équivalent, et la configuration est dans la page, pas dans un back-office</td></tr>
-            <tr><td><code>getDownloadURL('csv')</code></td><td><code>dsfr-data-a11y table download</code></td><td>Meilleur : le tableau accessible en plus</td></tr>
-            <tr><td>outils de dessin de zone, géocodeur « Trouver un lieu… »</td><td><code>dsfr-data-search</code> sur nom, commune et UAI</td><td><strong>Écart assumé</strong> : le géocodeur trouve un lieu, la recherche trouve un collège — c'est la question de la page ; le dessin de zone n'a pas d'équivalent</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-map-legend</code>, <code>dsfr-data-kpi</code>, <code>url-sync</code>, <code>insets="drom"</code>, facette « Tranche d'IPS », tranche « IPS non renseigné »</td><td>Sans équivalent côté Opendatasoft</td></tr>
+            <tr><td><code>ods-dataset-context</code> + <code>ng-init refine.rentree_scolaire</code></td><td><code>dsfr-data-source</code> + <code>where</code> + <code>fetch-mode="export"</code></td><td>Équivalent</td></tr>
+            <tr><td><code>ods-facet</code> × 2 + liste maison <code>ods-adv-analysis</code></td><td><code>dsfr-data-facets</code> (client, données complètes)</td><td>Meilleur : 3 791 communes au lieu de 100</td></tr>
+            <tr><td><code>ods-map-layer show-if</code> (épingles uniformes)</td><td><code>dsfr-data-map-layer</code> + <code>color-field</code> / <code>color-map</code></td><td>Meilleur : l'IPS est enfin représenté</td></tr>
+            <tr><td><code>getDownloadURL('csv')</code></td><td><code>dsfr-data-a11y table download</code></td><td>Meilleur : tableau accessible en plus</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-pivot</code>, <code>dsfr-data-join</code>, <code>dsfr-data-repeat</code>, <code>dsfr-data-kpi</code>, <code>reference-lines</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
-      <div class="fr-callout fr-icon-error-warning-line fr-mt-4w">
-        <h3 class="fr-callout__title fr-text--md">Ce que la reproduction a appris sur la page d'origine</h3>
-        <p class="fr-callout__text fr-text--sm">
-          Reproduire oblige à regarder la donnée, et c'est là que les défauts se voient.
-          <strong>Treize</strong> ont été relevés à l'audit ; quatre sont des chiffres, pas des
-          opinions : la facette Commune ne donne accès qu'à <strong>100 communes sur 3 791</strong> ;
-          <strong>14 collèges</strong> sont comptés dans le jeu mais inatteignables par tous les
-          filtres, si bien que la somme des facettes vaut 6 971 et non 6 985 ; la page est figée
-          sur 2023-2024 alors que le jeu contient <strong>2024-2025</strong> depuis février 2026 ;
-          et la carte reste <strong>vide</strong> quand on choisit une académie, parce que sa
-          couche exige un département ou une commune.
-        </p>
-      </div>
-
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, et supérieure à l'original sur cinq points
-          mesurables — sans que cela tienne à un tour de force : la carte est cadrée sur la
-          France parce que c'est le défaut du composant, les 3 791 communes sont là parce que
-          les données sont chargées entièrement, l'URL est partageable parce que
-          <code>url-sync</code> est un booléen. <strong>Ce qui a demandé du travail n'est pas
-          la reproduction, c'est la lecture du jeu</strong> : savoir qu'il y a 6 971 lignes
-          localisables et non 6 985, que le plafond <code>max-records</code> allait mordre, que
-          la moyenne des collèges est à 104,7 et n'est pas la référence de la DEPP, qu'une
-          discrétisation par quantiles l'aurait masquée, et que cinq lignes sans IPS allaient
-          se ranger d'elles-mêmes dans la classe la plus haute.
-          La bibliothèque a opposé une seule résistance, mais elle est instructive&nbsp;: sur
-          les frictions rencontrées, <strong>quatre ont échoué en silence</strong> —
-          <code>max-records</code> qui tronque, <code>fill-field</code> qui ne colore pas les
-          points, un <code>for</code> qui ne désigne pas ce qu'on croit, un <code>else</code>
-          qui classe les absents. Aucune n'a produit d'erreur console. C'est la famille de
-          défauts la plus coûteuse relevée par ce banc, et cette page en a rencontré quatre.</p>
+        <p>La bibliothèque n'a opposé aucune résistance au récit&nbsp;: chaque chiffre du texte
+          est calculé dans la page, par des transformateurs déclaratifs. <strong>Le travail a
+          été la lecture du jeu</strong>&nbsp;: trouver que neuf rentrées dormaient derrière un
+          filtre figé, que la série casse en 2022, et que le suivi collège par collège était
+          nécessaire pour écarter un effet de composition.</p>
       </div>
       </section>
     </details>
@@ -661,7 +595,7 @@
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
 
 <!-- dsfr-data : bundle complet (cartographie) -->
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

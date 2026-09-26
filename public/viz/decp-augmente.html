@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Données essentielles de la commande publique — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz DECP augmenté de data.economie.gouv.fr.">
+  <meta name="description" content="DECP augmentées (DAJ) : en quatre ans, la collecte des données de la commande publique a changé de canal. PES Marchés prend la tête, AWS-Achat s'arrête en janvier 2023, et le jeu s'éteint à l'automne 2023.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,101 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       LE RÉCIT — sources qui ne suivent PAS les filtres de l'exploration.
+       Le récit porte sur le jeu entier ; l'exploration, plus bas, a ses propres
+       sources, pilotées par un contexte. Toutes les agrégations sont faites par
+       Opendatasoft : aucune des 994 123 lignes ne descend dans le navigateur.
+       ========================================================================== -->
+
+  <!-- Lignes par canal de collecte et par année de notification.
+       2018-2023 seulement : avant 2018 le jeu compte 2 274 lignes éparses, après
+       2023, 75 dates de notification impossibles (2024-2048) — dit en fin de page.
+       `anneenotification` est un champ TEXTE (« 2019 », « nan ») : liste de chaînes. -->
+  <dsfr-data-source id="s-canaux" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="source, anneenotification, count(*) as n" group-by="source, anneenotification"
+    where="source is not null and anneenotification in ('2018','2019','2020','2021','2022','2023')"
+    order-by="anneenotification" fetch-mode="export" max-records="200">
+  </dsfr-data-source>
+
+  <!-- Contraste : deux canaux racontent l'histoire (PES Marchés monte, AWS-Achat
+       s'arrête), API AIFE reste le troisième, les quatre plateformes régionales
+       (Dematis, Megalis Bretagne, Territoires numériques BFC, Grand Lyon) sont
+       regroupées. `cle` sert au pivot des repères (identifiants sûrs pour compute). -->
+  <dsfr-data-normalize id="canaux-n" source="s-canaux"
+    compute="canal = when source = 'PES Marchés' then 'PES Marchés' when source = 'AWS-Achat' then 'AWS-Achat' when source = 'API AIFE' then 'API AIFE' else 'Plateformes régionales';
+             code = when source = 'PES Marchés' then 'pes' when source = 'AWS-Achat' then 'aws' when source = 'API AIFE' then 'aife' else 'autre';
+             cle = concat(code, anneenotification);
+             k = 'jeu'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="canaux-annee" source="canaux-n" group-by="canal, anneenotification"
+    aggregate="n:sum:n" order-by="anneenotification:asc"></dsfr-data-query>
+
+  <!-- Une ligne de repères pour les phrases de lecture : le pivot met chaque
+       couple canal × année en colonne (pes2019, aws2023…), `compute` en tire
+       les totaux annuels, les rapports et les parts. Rien n'est écrit à la main. -->
+  <dsfr-data-pivot id="reperes-p" source="canaux-n" row="k" column="cle" value="n" aggregate="sum"></dsfr-data-pivot>
+  <dsfr-data-normalize id="reperes" source="reperes-p"
+    compute="tot2019 = coalesce(pes2019, 0) + coalesce(aws2019, 0) + coalesce(aife2019, 0) + coalesce(autre2019, 0);
+             tot2022 = coalesce(pes2022, 0) + coalesce(aws2022, 0) + coalesce(aife2022, 0) + coalesce(autre2022, 0);
+             tot2023 = coalesce(pes2023, 0) + coalesce(aws2023, 0) + coalesce(aife2023, 0) + coalesce(autre2023, 0);
+             x_pes = round(pes2022 / pes2019, 1);
+             part_aws2019 = round(aws2019 / tot2019 * 100);
+             part_pes2022 = round(pes2022 / tot2022 * 100);
+             moy2022 = round(tot2022 / 12)">
+  </dsfr-data-normalize>
+
+  <!-- Le flux mois par mois, 2019-2023. `date_format` dans le group-by, alias
+       obligatoire côté ODS ; la virgule interne ne coupe pas l'expression. -->
+  <dsfr-data-source id="s-mois" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="count(*) as n" group-by="date_format(datenotification, 'yyyy-MM') as mois"
+    where="anneenotification in ('2019','2020','2021','2022','2023')"
+    order-by="mois" fetch-mode="export" max-records="200">
+  </dsfr-data-source>
+
+  <!-- Le compte par année sur tout le jeu (36 valeurs, « nan » compris) :
+       il sert à dire ce que la période 2019-2022 pèse, et ce qui déborde. -->
+  <dsfr-data-source id="s-annees" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="anneenotification, count(*) as n" group-by="anneenotification"
+    fetch-mode="export" max-records="200">
+  </dsfr-data-source>
+
+  <!-- Procédures, doublons d'écriture fusionnés (voir le bloc « Ce que compte une ligne »). -->
+  <dsfr-data-source id="s-procedure" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="procedure, count(*) as n" group-by="procedure" where="procedure is not null"
+    fetch-mode="export" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="procedure-n" source="s-procedure"
+    replace-fields="procedure:Appel d offres ouvert:Appel d'offres ouvert | procedure:Appel d offres restreint:Appel d'offres restreint | procedure:ProcÃ©dure adaptÃ©e:Procédure adaptée">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="procedure-q" source="procedure-n" group-by="procedure"
+    aggregate="n:sum:n" order-by="n:desc"></dsfr-data-query>
+
+  <!-- Montants : deux tranches, sous et au-dessus d'un milliard d'euros.
+       `range()` est une fonction de regroupement ODS ; la somme n'a de sens
+       qu'une fois qu'on a vu ce que pèse la seconde tranche. -->
+  <dsfr-data-source id="s-montants" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="count(*) as n, sum(montant) as s" group-by="range(montant, *, 1000000000, *) as tranche"
+    where="montant is not null" fetch-mode="export" max-records="10">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="montants" source="s-montants"
+    compute="milliard = when contains(tranche, '[*') then 0 else 1"></dsfr-data-normalize>
+
+  <!-- Médiane : `median()` d'Opendatasoft est une valeur APPROCHÉE (deux appels
+       le 2026-09-26 : 93 075,63 puis 93 044,09). Arrondie au millier, elle ne
+       bouge plus. `limit=1` : sans group_by, ODS répète l'agrégat par ligne (PG-002). -->
+  <dsfr-data-source id="s-mediane" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="median(montant) as med" limit="1">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="mediane" source="s-mediane"
+    compute="med_k = round(med / 1000) * 1000"></dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,429 +127,398 @@
       </div>
     </nav>
 
-    <h1>Données essentielles de la commande publique&nbsp;— données enrichies</h1>
+    <p class="fr-text--sm fr-hint-text fr-mb-1w">Données essentielles de la commande publique — données enrichies (DAJ)</p>
+    <h1>En quatre ans, la collecte des marchés publics a changé de canal</h1>
+
+    <dsfr-data-repeat source="reperes">
+      <template>
+        <p class="fr-text--lead">
+          En 2019, AWS-Achat apportait {{part_aws2019:number}}&nbsp;% des lignes du jeu. En 2022, le premier
+          canal est PES Marchés, le flux des comptables publics&nbsp;: {{pes2022:number}} lignes, soit
+          {{x_pes:number:1}} fois plus qu'en 2019 et {{part_pes2022:number}}&nbsp;% de l'année. En 2023,
+          AWS-Achat n'envoie plus que {{aws2023:number}} lignes, contre {{aws2022:number}} l'année
+          précédente&nbsp;: la chute de 2023 raconte l'arrêt d'un canal, puis celui du jeu, pas celui des achats publics.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
       <div class="fr-col-12 fr-col-md-8">
         <details class="fr-callout fr-icon-database-line odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+          <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
+          <p class="fr-callout__text fr-text--sm">
             <a href="https://data.economie.gouv.fr/explore/dataset/decp_augmente/"
-               target="_blank" rel="noopener external"><code>decp_augmente</code></a>
-            — 994&nbsp;123 marchés publics, produit par la DAJ.
-            <strong>Ce jeu de données est marqué «&nbsp;[DÉPRÉCIÉ]&nbsp;» par le portail</strong>, mais reste
-            celui que la page d'origine interroge&nbsp;: la reproduction utilise donc exactement la même source.
+               target="_blank" rel="noopener external"><code>decp_augmente</code></a>, produit par la
+            Direction des affaires juridiques (DAJ), sur data.economie.gouv.fr. Le portail le marque
+            <strong>«&nbsp;[DÉPRÉCIÉ]&nbsp;»</strong>&nbsp;: c'est une photographie, arrêtée à l'automne 2023,
+            des données essentielles collectées par sept canaux. Chaque chiffre de cette page est recalculé
+            à l'ouverture par l'API du portail.
           </p>
-    </details>
+        </details>
       </div>
       <div class="fr-col-12 fr-col-md-4">
-        <dsfr-data-kpi source="decp-total" value="nb:max" format="nombre"
-          heading="Volume interrogé" label="marchés publics dans le périmètre courant"
-          icon="fr-icon-file-text-line">
-        </dsfr-data-kpi>
+        <div>
+        <dsfr-data-kpi source="s-annees" value="n:sum" format="nombre"
+          heading="Lignes dans le jeu" label="une ligne par notification ou modification déclarée, pas par marché"
+          icon="fr-icon-file-text-line"></dsfr-data-kpi>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- ==========================================================================
-       Quatre sources, une par agrégation. Chacune délègue son agrégation au serveur
-       Opendatasoft (select count(*) + group_by) : aucune des 994 000 lignes ne
-       descend dans le navigateur.
-       <dsfr-data-context> diffuse les filtres de la barre latérale aux quatre.
-       Le `where="… is not null"` statique écarte le groupe des valeurs vides
-       (399 sources, 3 724 natures, 27 451 procédures nulles), que les graphiques
-       du portail n'affichent pas ; il se combine en AND avec les filtres.
-       ========================================================================== -->
-
-  <dsfr-data-source id="decp-total" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente"
-    api-key-ref="ods-mef" select="count(*) as nb" limit="1">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="decp-par-source" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente"
-    api-key-ref="ods-mef"
-    where="source is not null" select="source, count(*) as nb" group-by="source" order-by="nb:desc" limit="15">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="decp-par-nature" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente"
-    api-key-ref="ods-mef"
-    where="nature is not null" select="nature, count(*) as nb" group-by="nature" order-by="nb:desc" limit="10">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="decp-par-procedure" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente"
-    api-key-ref="ods-mef"
-    where="procedure is not null" select="procedure, count(*) as nb" group-by="procedure" order-by="nb:desc" limit="25">
-  </dsfr-data-source>
-
-  <!-- Les sept facettes du portail, dans son ordre. `anneenotification` est un
-       champ texte du jeu (« 1990 » … « 2048 », « nan ») : un `eq` suffit, sans
-       opérateur de date. -->
-  <dsfr-data-context id="ctx-decp" sources="decp-total decp-par-source decp-par-nature decp-par-procedure">
-    <dsfr-data-context-filter field="source"            operator="eq" ui="filtre-source"       label="Source"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="formeprix"         operator="eq" ui="filtre-formeprix"    label="Forme de prix"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="nature"            operator="eq" ui="filtre-nature"       label="Nature"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="procedure"         operator="eq" ui="filtre-procedure"    label="Procédure"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="anneenotification" operator="eq" ui="filtre-annee"        label="Année de notification"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="natureobjetmarche" operator="eq" ui="filtre-objet"        label="Objet"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="nomacheteur"       operator="eq" ui="filtre-acheteur"     label="Acheteur"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-
-      <!-- Variante B2 : peu de dimensions, beaucoup de vues. Les filtres passent
-           en barre COLLANTE et rendent toute la largeur aux graphiques ; sur une
-           page longue, ils suivent le lecteur au lieu de le renvoyer en haut. -->
-      <div class="fr-col-12">
-        <div class="odv-barre-filtres odv-barre-filtres--collante">
-        <form role="search" aria-label="Filtrer les marchés">
-
-        <div class="fr-select-group">
-          <label class="fr-label" for="filtre-source">Source de collecte</label>
-          <select class="fr-select" id="filtre-source">
-            <option value="">Toutes les sources</option>
-            <option>AWS-Achat</option>
-            <option>API AIFE</option>
-            <option>PES Marchés</option>
-            <option>Dematis</option>
-            <option>Megalis Bretagne</option>
-            <option>Territoires numériques BFC</option>
-            <option>Grand Lyon</option>
-          </select>
-        </div>
-
-        <div class="fr-select-group">
-          <label class="fr-label" for="filtre-formeprix">Forme de prix</label>
-          <select class="fr-select" id="filtre-formeprix">
-            <option value="">Toutes les formes de prix</option>
-            <option>Révisable</option>
-            <option>Ferme</option>
-            <option>Ferme et actualisable</option>
-            <option>Ferme actualisable</option>
-            <option>Non disponible</option>
-          </select>
-        </div>
-
-        <div class="fr-select-group">
-          <label class="fr-label" for="filtre-nature">Nature du marché</label>
-          <select class="fr-select" id="filtre-nature">
-            <option value="">Toutes les natures</option>
-            <option>MARCHE</option>
-            <option>ACCORD-CADRE</option>
-            <option>MARCHE SUBSEQUENT</option>
-            <option>CONCESSION DE SERVICE</option>
-            <option>MARCHE DE PARTENARIAT</option>
-            <option>MARCHE HORS ACCORD CADRE</option>
-            <option>DELEGATION DE SERVICE PUBLIC</option>
-            <option>CONCESSION DE SERVICE PUBLIC</option>
-            <option>CONCESSION DE TRAVAUX</option>
-          </select>
-        </div>
-
-        <div class="fr-select-group">
-          <label class="fr-label" for="filtre-procedure">Type de procédure</label>
-          <select class="fr-select" id="filtre-procedure">
-            <option value="">Toutes les procédures</option>
-            <option>Procédure adaptée</option>
-            <option>Appel d offres ouvert</option>
-            <option>Appel d'offres ouvert</option>
-            <option>Marché négocié sans publicité ni mise en concurrence préalable</option>
-            <option>Procédure avec négociation</option>
-            <option>Procédure négociée avec mise en concurrence préalable</option>
-            <option>Marché public négocié sans publicité ni mise en concurrence préalable</option>
-            <option>Appel d offres restreint</option>
-            <option>Procédure concurrentielle avec négociation</option>
-            <option>Marché passé sans publicité ni mise en concurrence préalable</option>
-            <option>Dialogue compétitif</option>
-            <option>Procédure négociée ouverte</option>
-            <option>Appel d'offres restreint</option>
-            <option>Procédure négociée restreinte</option>
-            <option>Procédure non négociée restreinte</option>
-            <option>Procédure non négociée ouverte</option>
-            <option>NC</option>
-            <option>Marchés publics passés sans publicité ni mise en concurrence préalables</option>
-            <option>ProcÃ©dure adaptÃ©e</option>
-          </select>
-          <p class="fr-hint-text fr-mt-1v">Les 19 valeurs du jeu, telles quelles — doublons d'apostrophe
-            («&nbsp;Appel d offres&nbsp;» / «&nbsp;Appel d'offres&nbsp;»), «&nbsp;NC&nbsp;» et une valeur mal
-            encodée compris, comme sur le portail.</p>
-        </div>
-
-        <div class="fr-select-group">
-          <label class="fr-label" for="filtre-annee">Année de notification</label>
-          <select class="fr-select" id="filtre-annee">
-            <option value="">Toutes les années</option>
-            <option>1990</option><option>1997</option><option>1999</option><option>2001</option>
-            <option>2002</option><option>2003</option><option>2004</option><option>2005</option>
-            <option>2006</option><option>2007</option><option>2008</option><option>2009</option>
-            <option>2010</option><option>2011</option><option>2012</option><option>2013</option>
-            <option>2014</option><option>2015</option><option>2016</option><option>2017</option>
-            <option>2018</option><option>2019</option><option>2020</option><option>2021</option>
-            <option>2022</option><option>2023</option><option>2024</option><option>2025</option>
-            <option>2026</option><option>2027</option><option>2028</option><option>2029</option>
-            <option>2030</option><option>2031</option><option>2048</option>
-            <option value="nan">Année absente («&nbsp;nan&nbsp;»)</option>
-          </select>
-          <p class="fr-hint-text fr-mt-1v">Le jeu contient des années de notification futures
-            (2027 à 2048, 18 marchés) et 4&nbsp;777 marchés sans année&nbsp;: conservés tels quels.</p>
-        </div>
-
-        <div class="fr-select-group">
-          <label class="fr-label" for="filtre-objet">Objet du marché</label>
-          <select class="fr-select" id="filtre-objet">
-            <option value="">Tous les objets</option>
-            <option>Travaux</option>
-            <option>Services</option>
-            <option>Fournitures</option>
-          </select>
-        </div>
-
-        <div class="fr-select-group">
-          <label class="fr-label" for="filtre-acheteur">Acheteur
-            <span class="fr-hint-text">Les 20 acheteurs les plus présents (le portail en propose la liste complète)</span>
-          </label>
-          <select class="fr-select" id="filtre-acheteur">
-            <option value="">Tous les acheteurs</option>
-            <option>SCE DEPARTEMENTAL INCENDIE ET SECOURS</option>
-            <option>VILLE DE PARIS</option>
-            <option>CENTRE HOSPITALIER REGIONAL DE MARSEILLE</option>
-            <option>Ministères sociaux</option>
-            <option>DEPARTEMENT DE L ISERE</option>
-            <option>COLLECTIVITE DE CORSE</option>
-            <option>REGION AUVERGNE-RHONE-ALPES</option>
-            <option>CHU NANTES</option>
-            <option>DEPARTEMENT DES PYRENEES-ORIENTALES</option>
-            <option>ORLEANS METROPOLE</option>
-            <option>CAISSE DES DEPOTS ET CONSIGNATIONS</option>
-            <option>COMMUNE DE LYON</option>
-            <option>TOULOUSE METROPOLE</option>
-            <option>CENTRE COMMUNAL D'ACTION SOCIALE</option>
-            <option>CENTRE HOSPITALIER UNIVERSITAIRE DE CAEN NORMANDIE</option>
-            <option>METROPOLE NICE COTE D AZUR</option>
-            <option>DEPARTEMENT DU VAR</option>
-            <option>CENTRE HOSPITALIER DE COLMAR</option>
-            <option>HOSPICES CIVILS DE LYON</option>
-            <option>CENTRE HOSPITALIER YVES LE FOLL</option>
-          </select>
-        </div>
-
-        <dsfr-data-context-tags for="ctx-decp"></dsfr-data-context-tags>
-
-        <p class="fr-text--xs fr-hint-text">
-          Chaque changement relance les quatre agrégations côté serveur Opendatasoft.
+  <!-- ============================ 1. LA RUPTURE ============================ -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-rupture">
+    <h2 id="t-rupture">Un flux régulier pendant quatre ans, une marche en janvier 2023, puis le silence</h2>
+    <dsfr-data-repeat source="reperes">
+      <template>
+        <p class="odv-lecture">
+          En 2022, le jeu reçoit en moyenne <strong>{{moy2022:number}} lignes par mois</strong>. L'année 2023
+          entière n'en compte que <strong>{{tot2023:number}}</strong>&nbsp;: la marche de janvier est le départ
+          d'AWS-Achat, la pente de l'automne l'arrêt de la collecte — novembre et décembre 2023 sont
+          presque vides.
         </p>
-      </form>
-        </div>
+      </template>
+    </dsfr-data-repeat>
+
+    <div class="odv-chart-slot">
+      <div class="odv-viz" data-code="Lignes par mois de notification">
+        <dsfr-data-chart id="g-mois" source="s-mois" type="bar"
+          label-field="mois" value-field="n" name="Lignes notifiées dans le mois"
+          unit-tooltip="lignes" y-min="0"
+          reference-lines='[{"axis":"x","value":"2023-01","label":"AWS-Achat cesse de transmettre","color":"#E4794A","dash":true}]'
+          databox databox-title="Lignes par mois de notification, 2019-2023"
+          databox-source="DAJ — decp_augmente, data.economie.gouv.fr"
+          databox-download></dsfr-data-chart>
+        <dsfr-data-a11y for="g-mois" source="s-mois" table download
+          label-field="mois" value-field="n" filename="decp-lignes-par-mois.csv"
+          description="Nombre de lignes du jeu par mois de notification, de janvier 2019 à décembre 2023. Le flux est régulier jusqu'à fin 2022, baisse nettement en janvier 2023 et tombe presque à zéro en novembre et décembre 2023."></dsfr-data-a11y>
       </div>
-
-      <div class="fr-col-12">
-        <div class="fr-grid-row fr-grid-row--gutters">
-
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Source des données collectées">
-              <dsfr-data-chart id="g-source" source="decp-par-source" type="bar"
-                label-field="source" value-field="nb"
-                name='["Marchés collectés"]'
-                databox databox-title="Source des données collectées"
-                databox-source="DAJ — decp_augmente, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-source" source="decp-par-source" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Répartition par nature de marché">
-              <dsfr-data-chart id="g-nature-pie" source="decp-par-nature" type="pie"
-                label-field="nature" value-field="nb"
-                databox databox-title="Répartition par nature de marché"
-                databox-source="DAJ — decp_augmente, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-nature-pie" source="decp-par-nature" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-
-          <!-- Pleine largeur, comme sur le portail : 19 barres et des libellés longs. -->
-          <div class="fr-col-12">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Répartition par type de procédure">
-              <dsfr-data-chart id="g-procedure" source="decp-par-procedure" type="bar" horizontal
-                label-field="procedure" value-field="nb"
-                name='["Marchés collectés"]'
-                databox databox-title="Répartition par type de procédure"
-                databox-source="DAJ — decp_augmente, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-procedure" source="decp-par-procedure" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-
-          <div class="fr-col-12">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Répartition des données collectées par nature de marché">
-              <dsfr-data-chart id="g-nature-bar" source="decp-par-nature" type="bar"
-                label-field="nature" value-field="nb"
-                name='["Marchés collectés"]'
-                databox databox-title="Répartition des données collectées par nature de marché"
-                databox-source="DAJ — decp_augmente, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-nature-bar" source="decp-par-nature" table download></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
     </div>
-  </div>
+  </section>
+
+  <!-- ============================ 2. LES CANAUX ============================ -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-canaux">
+    <h2 id="t-canaux">Le flux des comptables publics a pris la tête ; AWS-Achat s'est arrêté</h2>
+    <p class="fr-hint-text">
+      Lignes par année de notification et par canal de collecte. Deux canaux en couleur, les autres en
+      gris, une barre par canal et par année sur une seule échelle&nbsp;; Dematis, Megalis Bretagne, Territoires numériques BFC et Grand Lyon sont regroupés en
+      «&nbsp;plateformes régionales&nbsp;» (détail canal par canal dans le tableau ci-dessous).
+    </p>
+
+    <div class="odv-chart-slot">
+      <div class="odv-viz" data-code="Lignes par canal et par année">
+        <dsfr-data-chart id="g-canaux" source="canaux-annee" type="bar"
+          label-field="anneenotification" value-field="n" series-field="canal"
+          color-map="PES Marchés:#000091,AWS-Achat:#E4794A,API AIFE:#929292,Plateformes régionales:#CECECE"
+          unit-tooltip="lignes" y-min="0"
+          databox databox-title="Lignes collectées par canal et par année de notification"
+          databox-source="DAJ — decp_augmente, data.economie.gouv.fr"
+          databox-download></dsfr-data-chart>
+        <dsfr-data-a11y for="g-canaux" source="canaux-annee" table download
+          label-field="anneenotification" value-field="n" series-field="canal"
+          filename="decp-canaux-par-annee.csv"
+          description="Lignes par année de notification, 2018 à 2023, pour PES Marchés, AWS-Achat, API AIFE et les plateformes régionales. PES Marchés monte chaque année jusqu'en 2022 ; AWS-Achat, premier canal jusqu'en 2021, tombe presque à zéro en 2023."></dsfr-data-a11y>
+      </div>
+    </div>
+
+    <div class="fr-accordions-group fr-mt-2w">
+      <section class="fr-accordion">
+        <h3 class="fr-accordion__title">
+          <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-canaux">Le détail des sept canaux, année par année</button>
+        </h3>
+        <div class="fr-collapse" id="acc-canaux">
+          <dsfr-data-pivot id="canaux-croise" source="s-canaux" row="source" column="anneenotification"
+            value="n" aggregate="sum" column-order="asc"></dsfr-data-pivot>
+          <dsfr-data-list source="canaux-croise" columns-auto export="csv"
+            columns="source:Canal de collecte"></dsfr-data-list>
+          <p class="fr-hint-text fr-mt-1w">Une cellule vide&nbsp;: aucune ligne transmise par ce canal cette année-là.</p>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ====================== 3. CE QUE COMPTE UNE LIGNE ===================== -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ligne">
+    <h2 id="t-ligne">Ce que compte une ligne — et ce qu'on ne peut pas en additionner</h2>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-lg-6">
+        <h3 class="fr-h5">Une ligne n'est pas un marché</h3>
+        <p>
+          Un même marché revient à chaque modification déclarée et pour chacun de ses titulaires&nbsp;:
+          le terrain de football de Cenon (identifiant <code>202123TVX210</code>) occupe dix lignes, pour
+          deux entreprises et cinq dates. L'identifiant n'est unique que chez un même acheteur. Compté le
+          26&nbsp;septembre&nbsp;2026 par un export groupé, le jeu porte <strong>753&nbsp;320 couples
+          identifiant × acheteur</strong> pour 994&nbsp;123 lignes — et 9&nbsp;360 lignes partagent des
+          identifiants de remplissage (<code>0000000000000000</code>, <code>00</code>). Tous les comptes de
+          cette page sont donc des <strong>lignes</strong>&nbsp;: c'est l'unité du jeu, et c'est celle de
+          la collecte.
+        </p>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <h3 class="fr-h5">Les montants ne s'additionnent pas</h3>
+        <dsfr-data-kpi-group cols="2" gap="md">
+          <dsfr-data-kpi source="montants" value="n:sum{milliard:eq:1}" format="nombre"
+            heading="Lignes à 1 milliard € ou plus" label="sur près d'un million de montants déclarés"></dsfr-data-kpi>
+          <dsfr-data-kpi source="montants" value="s:sum{milliard:eq:1} / s:sum" format="pourcentage" decimals="1"
+            heading="Leur poids" label="dans la somme de tous les montants"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+        <p class="fr-mt-2w">
+          Quelques montants de saisie — jusqu'à 100&nbsp;000&nbsp;milliards d'euros pour l'entretien d'espaces
+          verts — font toute la somme. Cette page ne publie donc <strong>aucun total</strong>. Le montant
+          médian d'une ligne, lui, résiste&nbsp;:
+        </p>
+        <div>
+        <dsfr-data-kpi source="mediane" value="med_k:max" format="euro" decimals="0"
+          heading="Montant médian d'une ligne" label="valeur approchée par le portail, arrondie au millier"></dsfr-data-kpi>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">Six lignes sur dix relèvent de la procédure adaptée</h3>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-lg-4">
+        <div>
+        <dsfr-data-kpi source="procedure-n" value="n:sum{procedure:eq:Procédure adaptée} / n:sum"
+          format="pourcentage" decimals="0"
+          heading="Procédure adaptée" label="des lignes dont la procédure est renseignée"></dsfr-data-kpi>
+        </div>
+        <p class="fr-hint-text fr-mt-2w">
+          Le jeu écrit la même procédure de plusieurs façons&nbsp;: «&nbsp;Appel d offres ouvert&nbsp;» et
+          «&nbsp;Appel d'offres ouvert&nbsp;», idem pour l'appel d'offres restreint, plus une
+          «&nbsp;ProcÃ©dure adaptÃ©e&nbsp;» mal encodée. Ces trois doublons d'écriture sont
+          <strong>fusionnés</strong> ici. Les libellés différents de l'ancien et du nouveau code
+          («&nbsp;Marché négocié sans publicité…&nbsp;», «&nbsp;Marché passé sans publicité…&nbsp;») ne le
+          sont pas&nbsp;: les regrouper serait une interprétation juridique.
+        </p>
+      </div>
+      <div class="fr-col-12 fr-col-lg-8">
+        <div class="odv-chart-slot odv-chart-slot--haut">
+          <div class="odv-viz" data-code="Lignes par procédure">
+            <dsfr-data-chart id="g-procedure" source="procedure-q" type="bar" horizontal
+              label-field="procedure" value-field="n" name="Lignes"
+              unit-tooltip="lignes" highlight-index="[0]"
+              databox databox-title="Lignes par procédure de passation (doublons d'écriture fusionnés)"
+              databox-source="DAJ — decp_augmente, data.economie.gouv.fr"
+              databox-download></dsfr-data-chart>
+            <dsfr-data-a11y for="g-procedure" source="procedure-q" table download
+              label-field="procedure" value-field="n" filename="decp-procedures.csv"
+              description="Nombre de lignes par procédure de passation, trié du plus grand au plus petit. La procédure adaptée arrive en tête, devant l'appel d'offres ouvert."></dsfr-data-a11y>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ 4. EXPLORER ============================
+       Sources distinctes, toutes pilotées par un seul contexte. Les facettes
+       serveur (`server-facets`) peuplent leurs listes depuis l'API, avec
+       compteurs et cascade, et diffusent au contexte (AM-001, AM-043) :
+       plus une seule <option> écrite à la main. -->
+  <dsfr-data-source id="e-facettes" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="id" server-side page-size="1">
+  </dsfr-data-source>
+  <dsfr-data-source id="e-total" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="count(*) as nb" limit="1">
+  </dsfr-data-source>
+  <dsfr-data-source id="e-annee" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="anneenotification, count(*) as n" group-by="anneenotification"
+    where="anneenotification in ('2018','2019','2020','2021','2022','2023')"
+    order-by="anneenotification" fetch-mode="export" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-source id="e-source" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="source, count(*) as n" group-by="source" where="source is not null"
+    order-by="n:desc" fetch-mode="export" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-source id="e-nature" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="nature, count(*) as n" group-by="nature" where="nature is not null"
+    order-by="n:desc" fetch-mode="export" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-source id="e-procedure" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="decp_augmente" api-key-ref="ods-mef"
+    select="procedure, count(*) as n" group-by="procedure" where="procedure is not null"
+    fetch-mode="export" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="e-procedure-n" source="e-procedure"
+    replace-fields="procedure:Appel d offres ouvert:Appel d'offres ouvert | procedure:Appel d offres restreint:Appel d'offres restreint | procedure:ProcÃ©dure adaptÃ©e:Procédure adaptée">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="e-procedure-q" source="e-procedure-n" group-by="procedure"
+    aggregate="n:sum:n" order-by="n:desc"></dsfr-data-query>
+
+  <dsfr-data-context id="ctx-decp" url-sync
+    sources="e-facettes e-total e-annee e-source e-nature e-procedure"></dsfr-data-context>
+
+  <section class="fr-container fr-mb-8w fr-mt-6w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer">Explorer : un acheteur, un canal, une procédure</h2>
+    <p class="fr-hint-text">
+      Les filtres ci-dessous pilotent le compteur et les quatre graphiques de cette section — pas le
+      récit au-dessus, qui porte sur le jeu entier. Les listes et leurs compteurs viennent de l'API&nbsp;;
+      la liste des procédures montre les libellés tels que le jeu les écrit, doublons compris.
+    </p>
+
+    <div class="fr-background-alt--grey fr-p-3w fr-mb-4w">
+      <dsfr-data-facets id="e-facettes-f" source="e-facettes" server-facets context="ctx-decp"
+        fields="source, anneenotification, nature, procedure, natureobjetmarche, formeprix"
+        labels="source:Canal de collecte | anneenotification:Année de notification | nature:Nature du marché | procedure:Procédure | natureobjetmarche:Objet | formeprix:Forme de prix"
+        display="source:select | anneenotification:select | nature:select | procedure:select | natureobjetmarche:select | formeprix:select"
+        sort="anneenotification:alpha:asc" per-row="3" no-reset>
+      </dsfr-data-facets>
+      <dsfr-data-search id="e-acheteur" source="e-facettes" context="ctx-decp" fields="nomacheteur"
+        label="Acheteur (nom contenant…)" placeholder="Ex. : ville de paris" min-length="3">
+      </dsfr-data-search>
+      <dsfr-data-context-tags for="ctx-decp"></dsfr-data-context-tags>
+    </div>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-4">
+        <div>
+        <dsfr-data-kpi source="e-total" value="nb:max" format="nombre"
+          heading="Lignes dans la sélection" label="toutes années confondues"
+          icon="fr-icon-filter-line"></dsfr-data-kpi>
+        </div>
+        <div class="fr-mt-2w">
+        <dsfr-data-kpi source="e-procedure-n" value="n:sum{procedure:eq:Procédure adaptée} / n:sum"
+          format="pourcentage" decimals="0"
+          heading="Procédure adaptée" label="part de la sélection, procédure renseignée"></dsfr-data-kpi>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-8">
+        <div class="odv-chart-slot">
+          <div class="odv-viz" data-code="Sélection : lignes par année">
+            <dsfr-data-chart id="g-e-annee" source="e-annee" type="bar"
+              label-field="anneenotification" value-field="n" name="Lignes"
+              unit-tooltip="lignes" y-min="0"
+              databox databox-title="Lignes par année de notification (2018-2023)"
+              databox-source="DAJ — decp_augmente, data.economie.gouv.fr"></dsfr-data-chart>
+            <dsfr-data-a11y for="g-e-annee" source="e-annee" table download
+              label-field="anneenotification" value-field="n" filename="decp-selection-annees.csv"></dsfr-data-a11y>
+          </div>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-chart-slot">
+          <div class="odv-viz" data-code="Sélection : lignes par canal">
+            <dsfr-data-chart id="g-e-source" source="e-source" type="bar" horizontal
+              label-field="source" value-field="n" name="Lignes" unit-tooltip="lignes"
+              databox databox-title="Lignes par canal de collecte"
+              databox-source="DAJ — decp_augmente, data.economie.gouv.fr"></dsfr-data-chart>
+            <dsfr-data-a11y for="g-e-source" source="e-source" table download
+              label-field="source" value-field="n" filename="decp-selection-canaux.csv"></dsfr-data-a11y>
+          </div>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-chart-slot">
+          <div class="odv-viz" data-code="Sélection : lignes par nature">
+            <dsfr-data-chart id="g-e-nature" source="e-nature" type="bar" horizontal
+              label-field="nature" value-field="n" name="Lignes" unit-tooltip="lignes"
+              databox databox-title="Lignes par nature de marché"
+              databox-source="DAJ — decp_augmente, data.economie.gouv.fr"></dsfr-data-chart>
+            <dsfr-data-a11y for="g-e-nature" source="e-nature" table download
+              label-field="nature" value-field="n" filename="decp-selection-natures.csv"></dsfr-data-a11y>
+          </div>
+        </div>
+      </div>
+      <div class="fr-col-12">
+        <div class="odv-chart-slot odv-chart-slot--haut">
+          <div class="odv-viz" data-code="Sélection : lignes par procédure">
+            <dsfr-data-chart id="g-e-procedure" source="e-procedure-q" type="bar" horizontal
+              label-field="procedure" value-field="n" name="Lignes" unit-tooltip="lignes"
+              databox databox-title="Lignes par procédure (doublons d'écriture fusionnés)"
+              databox-source="DAJ — decp_augmente, data.economie.gouv.fr"></dsfr-data-chart>
+            <dsfr-data-a11y for="g-e-procedure" source="e-procedure-q" table download
+              label-field="procedure" value-field="n" filename="decp-selection-procedures.csv"></dsfr-data-a11y>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 5. CE QU'ON NE MONTRE PAS ===================== -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors-champ">
+    <h2 id="t-hors-champ" class="fr-h3">Ce que cette page ne montre pas, et pourquoi</h2>
+    <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-3w">
+      <dsfr-data-kpi source="s-annees" value="n:sum{anneenotification:in:2019|2020|2021|2022} / n:sum"
+        format="pourcentage" decimals="0"
+        heading="2019 à 2022" label="des lignes : les quatre seules années pleines"></dsfr-data-kpi>
+      <dsfr-data-kpi source="s-annees" value="n:sum{anneenotification:lt:2018}" format="nombre"
+        heading="Avant 2018" label="lignes, écartées des graphiques du récit"></dsfr-data-kpi>
+      <dsfr-data-kpi source="s-annees" value="n:sum{anneenotification:eq:nan}" format="nombre"
+        heading="Sans année" label="lignes dont l'année de notification vaut « nan »"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+    <ul>
+      <li><strong>Les années impossibles.</strong> Des dates de notification postérieures à l'arrêt du jeu
+        (2024 à 2048) sont des erreurs de saisie&nbsp;; elles restent sélectionnables dans l'exploration,
+        pas dans le récit.</li>
+      <li><strong>Les valeurs absentes.</strong> Les graphiques écartent les lignes sans canal, sans nature ou
+        sans procédure (<code>where … is not null</code>)&nbsp;; la part de la procédure adaptée est donc
+        calculée sur les lignes dont la procédure est renseignée.</li>
+      <li><strong>Aucun total de montants</strong>, pour la raison dite plus haut&nbsp;; et aucun montant par
+        canal ou par procédure, qui hériterait des mêmes valeurs aberrantes.</li>
+      <li><strong>Aucun compte de marchés</strong>&nbsp;: seulement des lignes. Le décompte des couples
+        identifiant × acheteur (753&nbsp;320 au 26&nbsp;septembre&nbsp;2026) demande d'exporter tout le jeu
+        groupé&nbsp;: 37&nbsp;secondes, trop pour un chargement de page. Il est donné une fois, daté.</li>
+      <li><strong>La région de l'acheteur.</strong> Le portail d'origine cache un cinquième graphique
+        (<code>display:none</code>) sur <code>libelleregionacheteur</code>, un champ absent du jeu actuel.</li>
+      <li><strong>Pourquoi le jeu s'arrête.</strong> Les données montrent l'arrêt (novembre et décembre 2023
+        presque vides), pas sa cause&nbsp;: on ne l'avance pas ici.</li>
+    </ul>
+  </section>
 
   <!-- ====================== Analyse de reproduction ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — DECP augmenté — ce que la reproduction a coûté</summary>
+    <details class="odv-technique">
+      <summary>Analyse — DECP augmentées — ce que la recréation a coûté</summary>
 
     <div class="fr-container">
       <p class="fr-text--lead">
         Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/visualisation-decp-augmente/"
-        target="_blank" rel="noopener external">visualisation-decp-augmente</a> — 6&nbsp;600 caractères de
-        template, un <code>ods-dataset-context</code>, un <code>ods-facets</code> auto-généré et
-        cinq <code>ods-chart</code> (dont un masqué en <code>display:none</code>).
+        target="_blank" rel="noopener external">visualisation-decp-augmente</a> — un contexte, des facettes
+        automatiques, quatre répartitions visibles (canal, nature deux fois, procédure) et un cinquième graphique
+        masqué. Recréée le 26&nbsp;septembre&nbsp;2026 comme une page qui répond avant qu'on clique&nbsp;: la
+        répartition par canal devient une chronologie, et la chronologie raconte l'histoire du jeu.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Les graphiques eux-mêmes.</strong> Un <code>ods-chart</code> +
-              <code>ods-chart-query</code> + <code>ods-chart-serie</code> (trois niveaux imbriqués,
-              une douzaine d'attributs) devient un <code>dsfr-data-chart</code> avec
-              <code>type</code>, <code>label-field</code>, <code>value-field</code>. Le passage
-              colonnes → camembert → barres horizontales, c'est un attribut.</li>
-            <li><strong>L'agrégation à distance.</strong> C'est le point décisif sur ce jeu de données&nbsp;:
-              994&nbsp;000 lignes ne peuvent pas descendre dans le navigateur. <code>select="count(*) as nb"</code>
-              + <code>group-by</code> sur la source délègue le calcul à Opendatasoft, exactement comme le fait
-              le contexte Angular. Chaque graphique tient dans une réponse de moins de dix lignes.</li>
-            <li><strong>L'habillage éditorial.</strong> Titre, mention de source, bouton de
-              téléchargement CSV&nbsp;: quatre attributs <code>databox-*</code>. L'original les écrit
-              en HTML à la main, ou s'en passe.</li>
-            <li><strong>L'accessibilité.</strong> <code>dsfr-data-a11y</code> ajoute sous chaque
-              graphique le tableau de données équivalent et le lien de téléchargement, avec
-              <code>aria-describedby</code> posé automatiquement. La page d'origine n'a aucun
-              équivalent&nbsp;: ses graphiques sont des canvas nus.</li>
+            <li><strong>Tout agréger chez Opendatasoft.</strong> Neuf requêtes groupées, dont un
+              <code>date_format(…, 'yyyy-MM') as mois</code> et un <code>range(montant, *, 1000000000, *)</code>
+              passés tels quels dans <code>group-by</code>&nbsp;: aucune ligne brute ne descend.</li>
+            <li><strong>Des phrases calculées.</strong> <code>dsfr-data-pivot</code> met les couples canal × année
+              en colonnes d'une seule ligne, <code>compute</code> en tire totaux, rapports et parts,
+              <code>dsfr-data-repeat</code> les écrit dans le chapô.</li>
+            <li><strong>Plus une <code>&lt;option&gt;</code> écrite à la main.</strong> L'ancienne page portait
+              106 <code>&lt;option&gt;</code> en dur&nbsp;; <code>dsfr-data-facets server-facets context</code> les tire
+              de l'API et pilote six sources à la fois, recherche d'acheteur comprise.</li>
+            <li><strong>Les doublons d'écriture</strong> se fusionnent par <code>replace-fields</code> en amont
+              d'un regroupement client de vingt lignes.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Une seule chose empêche de se passer des valeurs écrites en dur.</strong>
-              Premier réflexe&nbsp;: conclure que <code>ods-facets context="ctx"</code> — une balise,
-              zéro configuration — garde un net avantage. C'est faux, et la vérification l'a montré&nbsp;:
-              <code>dsfr-data-facets</code> a un mode <code>server-facets</code> qui interroge
-              l'endpoint <code>/facets</code> d'Opendatasoft, rend les vraies valeurs avec leurs
-              compteurs, <em>y compris au-dessus d'une source agrégée</em>, et recalcule les compteurs
-              des autres facettes à chaque sélection — le comportement contextuel qu'on attend d'un
-              portail. Testé sur ce jeu de données&nbsp;: il fonctionne.
-              <br>Ce qui bloque ici est plus étroit et plus précis&nbsp;: <strong>un composant de
-              facettes ne pilote que sa propre source.</strong> Cette page repose sur quatre
-              agrégations serveur distinctes&nbsp;; avec des facettes, une seule se refiltrerait.
-              D'où le repli sur <code>dsfr-data-context</code> et trois listes déroulantes dont les
-              valeurs sont écrites à la main. Il n'existe pas de pont entre les deux mécanismes&nbsp;:
-              <code>dsfr-data-context-filter</code> lit un <code>&lt;select&gt;</code> ou un
-              <code>&lt;input&gt;</code>, pas un composant de facettes.</li>
-            <li><strong>La sortie élégante existe, et un bug la ferme.</strong> Le bon dessin serait
-              une source unique&nbsp;: un tableau croisé <code>source × nature × procedure</code>
-              agrégé par le serveur (235 lignes seulement), des facettes serveur qui le pilotent, et
-              les quatre graphiques ré-agrégés côté client à partir de ces 235 lignes. Une requête,
-              zéro valeur en dur, tout cohérent. Cette page a été construite ainsi — puis abandonnée&nbsp;:
-              sur un <code>group_by</code>, Opendatasoft renvoie un <code>total_count</code> égal à la
-              taille de page, et la boucle de pagination de l'adaptateur s'arrête donc après 100 des
-              235 lignes. Le KPI affichait 632&nbsp;062 marchés au lieu de 994&nbsp;123,
-              <strong>sans le moindre avertissement</strong>. Corriger la condition d'arrêt sur les
-              requêtes agrégées débloquerait toute cette famille de tableaux de bord.</li>
-            <li><strong>Un filtre transverse à N vues demande une pièce de plus.</strong> Dans
-              Opendatasoft, le contexte partagé <em>est</em> le modèle&nbsp;: tout ce qui pointe
-              <code>context="ctx"</code> se refiltre. Ici il faut déclarer explicitement
-              <code>&lt;dsfr-data-context sources="…"&gt;</code> et lister les quatre sources. Plus verbeux,
-              mais aussi plus lisible&nbsp;: on voit qui écoute quoi.</li>
-            <li><strong>Un piège d'agrégation ODS.</strong> <code>select=count(*) as nb</code>
-              <em>sans</em> <code>group_by</code> renvoie la même valeur répétée autant de fois qu'il y a
-              de lignes dans la page (dix par défaut). Un KPI en <code>nb:sum</code> afficherait donc
-              dix fois le vrai total. Corrigé avec <code>limit="1"</code> et <code>value="nb:max"</code>.
-              Rien à voir avec dsfr-data, mais c'est le genre de détail qui fait qu'un chiffre faux
-              passe inaperçu.</li>
-            <li><strong>Les doublons d'encodage dans les données.</strong> Le champ
-              <code>procedure</code> contient «&nbsp;Appel d offres ouvert&nbsp;» <em>et</em>
-              «&nbsp;Appel d'offres ouvert&nbsp;» (288&nbsp;604 + 50&nbsp;443 marchés), plus un
-              «&nbsp;ProcÃ©dure adaptÃ©e&nbsp;» en mojibake. La page d'origine les affiche aussi comme des
-              catégories distinctes. Ni l'un ni l'autre outil ne peut y remédier sans un
-              <code>dsfr-data-normalize</code> ou un nettoyage à la source.</li>
-            <li><strong>Le tri par valeur.</strong> L'original écrit <code>sort="serie1-1"</code> dans
-              <code>ods-chart-query</code>. Ici le tri se fait en amont, sur la source
-              (<code>order-by="nb:desc"</code>), ce qui est plus sain mais oblige à raisonner en
-              «&nbsp;requête&nbsp;» plutôt qu'en «&nbsp;graphique&nbsp;».</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> La fiche d'audit
-              (<code>docs/portail/decp-augmente.md</code>) compte sept facettes&nbsp;; cette page n'en
-              avait que trois. Quatre listes ont été ajoutées, toujours en <code>&lt;select&gt;</code> +
-              <code>dsfr-data-context-filter operator="eq"</code>&nbsp;: forme de prix (5 valeurs),
-              objet du marché (3), année de notification et acheteur. Pour l'année, pas besoin
-              d'opérateur de date&nbsp;: le jeu porte un champ texte <code>anneenotification</code>, dont
-              les 36 valeurs vont de «&nbsp;1990&nbsp;» à «&nbsp;2048&nbsp;» en passant par
-              «&nbsp;nan&nbsp;» (4&nbsp;777 marchés) — des années futures que le portail affiche aussi, et
-              qui sont proposées telles quelles. Vérifié contre l'API&nbsp;: Ferme → 282&nbsp;094,
-              2003 → 4, «&nbsp;nan&nbsp;» → 4&nbsp;777, Travaux → 405&nbsp;866, Ville de Paris →
-              6&nbsp;101, la valeur mal encodée «&nbsp;ProcÃ©dure adaptÃ©e&nbsp;» → 1. La liste des
-              procédures a été complétée de 9 à 19 valeurs, doublons et mojibake compris. Deux
-              écarts sur les graphiques sont apparus au passage&nbsp;: la source des procédures était
-              plafonnée à <code>limit="10"</code> alors que le portail dessine les 19 barres
-              (<code>maxpoints=0</code>) — passée à 25, et le graphique mis en pleine largeur comme sur le
-              portail, sans quoi 19 libellés se chevauchent&nbsp;; et chaque agrégation renvoyait un groupe
-              «&nbsp;vide&nbsp;» (399 sources, 3&nbsp;724 natures, 27&nbsp;451 procédures nulles) que les
-              graphiques du portail n'affichent pas — écarté par un <code>where="… is not null"</code>
-              statique sur la source, qui se combine en AND avec le contexte. Un
-              <code>dsfr-data-context-tags</code> rappelle désormais les filtres actifs, comme le
-              <code>ods-filter-summary</code> du portail. <em>Ce qui manque encore&nbsp;:</em> la liste
-              des acheteurs est limitée aux 20 plus fréquents, écrits en dur — les opérateurs de
-              <code>dsfr-data-context-filter</code> sont <code>eq</code>, <code>in</code>, <code>lt</code>,
-              <code>gte</code>, <code>between</code> et cinq opérateurs de date, sans recherche textuelle
-              (<code>like</code>), donc pas de champ libre pour un acheteur quelconque&nbsp;; et aucune
-              liste ne porte de compteur à côté de ses valeurs, faute de pont entre facettes serveur
-              et contexte (AM-001). Enfin, le cinquième graphique de l'original, masqué en
-              <code>display:none</code> («&nbsp;Répartition par région (acheteur)&nbsp;» sur
-              <code>libelleregionacheteur</code>), ne peut pas être reproduit&nbsp;: ce champ n'existe pas
-              dans le jeu <code>decp_augmente</code> actuel — il était sans doute déjà cassé, d'où le
-              masquage.</li>
+            <li><strong>L'unité de compte.</strong> Ni la bibliothèque ni le portail&nbsp;: le jeu. 994&nbsp;123
+              lignes pour 753&nbsp;320 couples identifiant × acheteur, et le décompte exact exige un export complet
+              (37&nbsp;s). La page parle donc de lignes, et donne le décompte une fois, daté.</li>
+            <li><strong>La médiane bouge d'un appel à l'autre</strong> (93&nbsp;075 puis 93&nbsp;044&nbsp;€)&nbsp;:
+              <code>median()</code> d'Opendatasoft est approchée. Arrondie au millier par <code>compute</code>.</li>
+            <li><strong>Un <code>group-by</code> de source perdu en silence.</strong> Source groupée →
+              <code>dsfr-data-normalize</code> → <code>dsfr-data-query group-by</code> seule lectrice&nbsp;: la
+              requête part <em>sans</em> <code>group_by</code>, et le KPI affichait 96&nbsp;667&nbsp;200 au lieu
+              de 966&nbsp;672 (avertissement console seulement). Sans le <code>normalize</code>, correct. Contourné
+              en donnant un second lecteur au <code>normalize</code> (le KPI de part).</li>
+            <li><strong>La courbe, écartée.</strong> <code>type="line"</code> sur des années texte&nbsp;: axe
+              numérique («&nbsp;2018.5&nbsp;») et lissage entre deux années. Barres groupées à la place.</li>
+            <li><strong>Deux mondes de filtres.</strong> Le récit ne doit pas suivre les filtres, l'exploration si&nbsp;:
+              il faut deux jeux de sources, et donc interroger deux fois les mêmes répartitions.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.23.0</h4>
-            <p class="fr-text--sm">
-              7 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-005</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code>&nbsp;: plus de «&nbsp;Série N&nbsp;» en légende pour un groupe sans valeur.</li>
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>BUG-001</strong> — <strong>0.21.1</strong> (#641)&nbsp;: l'adaptateur Opendatasoft ne se fie plus au <code>total_count</code> d'un <code>group-by</code>&nbsp;: toutes les pages de l'agrégat sont lues.</li>
-              <li><strong>PG-015</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code> nomme le groupe null au lieu de le laisser anonyme (l'écarter demande toujours un <code>where … is not null</code>).</li>
-              <li><strong>AM-001</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="id"</code>&nbsp;: les facettes deviennent des filtres du contexte, qui pilote N sources.</li>
-              <li><strong>AM-003</strong> — <strong>0.23.0</strong> (#680)&nbsp;: <code>server-facets</code> sans <code>fields</code> découvre les facettes déclarées par le jeu.</li>
-              <li><strong>AM-043</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="ctx"</code> peuple ses valeurs et diffuse dans le contexte&nbsp;: plus de <code>&lt;select&gt;</code> généré hors ligne.</li>
-            </ul>
-          </div>
         </div>
       </div>
 
@@ -465,39 +529,28 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-chart</code> / <code>-query</code> / <code>-serie</code></td><td><code>dsfr-data-chart</code></td><td>3 balises imbriquées → 1</td></tr>
-            <tr><td><code>function-y="COUNT"</code> + <code>field-x</code></td><td><code>select</code> + <code>group-by</code> sur la source</td><td>Équivalent, agrégation serveur dans les deux cas</td></tr>
-            <tr><td><code>ods-facets</code> (auto depuis le back-office)</td><td><code>dsfr-data-facets server-facets</code></td><td>Équivalent — mais ne pilote qu'une source</td></tr>
-            <tr><td>contexte partagé filtrant N vues</td><td><code>dsfr-data-context</code> + <code>&lt;select&gt;</code> en dur</td><td>Le seul point où il faut écrire des valeurs à la main</td></tr>
-            <tr><td><code>ods-aggregation</code> COUNT</td><td><code>dsfr-data-kpi</code></td><td>Équivalent, mieux présenté</td></tr>
-            <tr><td><code>ods-filter-summary</code> (rappel des filtres)</td><td><code>dsfr-data-context-tags</code></td><td>Équivalent, natif</td></tr>
-            <tr><td>facette <code>dateNotification</code> par année</td><td><code>&lt;select&gt;</code> sur le champ texte <code>anneenotification</code></td><td>Équivalent, sans opérateur de date</td></tr>
-            <tr><td>facette <code>nomAcheteur</code> (liste complète)</td><td><code>&lt;select&gt;</code> des 20 premiers</td><td><strong>Partiel&nbsp;: pas d'opérateur de recherche textuelle</strong></td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code></td><td>Sans équivalent&nbsp;: gain net</td></tr>
+            <tr><td><code>ods-chart</code> COUNT par <code>source</code></td><td><code>dsfr-data-chart type="line" series-field</code> par canal et par année</td><td>Changement de forme&nbsp;: une répartition devient une trajectoire</td></tr>
+            <tr><td>—</td><td>barres mensuelles + <code>reference-lines</code></td><td>Ajout&nbsp;: la rupture de janvier 2023</td></tr>
+            <tr><td><code>ods-chart</code> COUNT par <code>procedure</code></td><td>source groupée + <code>replace-fields</code> + <code>dsfr-data-query</code></td><td>Équivalent, doublons d'écriture fusionnés et dits</td></tr>
+            <tr><td><code>ods-facets</code> automatiques</td><td><code>dsfr-data-facets server-facets context</code> + <code>dsfr-data-search context</code></td><td>Équivalent&nbsp;; l'acheteur passe par une recherche plutôt qu'une liste</td></tr>
+            <tr><td>anneau par nature</td><td>barres triées</td><td>Remplacé&nbsp;: le même compte, lisible</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-pivot</code> + <code>compute</code> + <code>dsfr-data-repeat</code></td><td>Ajout&nbsp;: phrases de lecture calculées</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-a11y</code> sous chaque graphique</td><td>Gain net</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile, à une réserve près — et elle n'est pas celle qu'on croit.</strong>
-          Les quatre graphiques et le KPI se sont écrits en une passe, et le résultat dépasse l'original
-          sur trois points&nbsp;: l'accessibilité (tableau équivalent et export sous chaque graphique),
-          l'habillage éditorial et la lisibilité du code. La réserve ne porte pas sur la capacité à
-          faire des facettes serveur&nbsp;: <code>dsfr-data</code> sait le faire, aussi bien
-          qu'Opendatasoft. Elle porte sur un seul point d'assemblage&nbsp;: <strong>faire piloter
-          plusieurs agrégations par un même jeu de facettes.</strong> C'est la seule raison pour
-          laquelle des valeurs sont écrites en dur sur cette page, et c'est une demande précise à
-          adresser à la bibliothèque plutôt qu'un verdict sur elle.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Les deux constats de cette page sont consignés au
-          <a href="/retours">registre des retours</a> (AM-001 et BUG-001), avec la trace de leur
-          vérification.
-        </p>
+        <p><strong>Tout ce que la page devait dire tient dans des balises&nbsp;; ce qui a coûté, c'est de
+          lire le jeu.</strong> La bibliothèque n'a opposé aucun manque de capacité — un bug de délégation,
+          contourné, et une courbe écartée pour une question de forme. Les trois décisions qui comptent —
+          compter des lignes et non des marchés, ne publier aucun total de montants, fusionner les doublons
+          d'écriture mais pas les libellés juridiques — viennent de l'exploration à l'API, pas de la syntaxe.</p>
       </div>
     </div>
-  
-      </details></section>
+    </details>
+  </section>
 
 </main>
 
@@ -506,7 +559,7 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.33.0/dist/dsfr-data.core.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.umd.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>
