@@ -21,6 +21,8 @@
 //                                           place de jsDelivr, quelle que soit la version
 //                                           epinglee : c'est ainsi qu'on rejoue les pages
 //                                           contre une version construite mais pas publiee.
+//   RECETTE_PROXY=socks5://localhost:1080   fait passer le navigateur par un proxy (ex. tunnel
+//                                           `ssh -D 1080 vps` quand un portail bloque l'IP locale)
 
 import { readdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -99,7 +101,9 @@ if (bundle && !existsSync(join(bundle, 'dsfr-data.esm.js'))) {
 if (bundle) console.log(`Bundle dsfr-data servi depuis ${bundle}\n`);
 
 const sortie = process.argv[2] || 'recette.json';
-const navigateur = await chromium.launch();
+const navigateur = await chromium.launch(
+  process.env.RECETTE_PROXY ? { proxy: { server: process.env.RECETTE_PROXY } } : {},
+);
 const etat = {};
 
 for (const p of pages) {
