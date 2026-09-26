@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>IPS des EREA — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz « IPS EREA » de data.education.gouv.fr : 78 établissements, et les valeurs de référence qu'aucune page IPS n'affiche.">
+  <meta name="description" content="Recréation avec dsfr-data de la dataviz « IPS EREA » de data.education.gouv.fr : les EREA accueillent les élèves socialement les plus défavorisés du second degré, et le changement de méthode de 2022 a réduit l'écart sans que rien ne change.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,130 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un localisateur muet (78 épingles rouges, centrées sur la
+       Suisse). La reproduction précédente coloriait chaque EREA « sous / au-dessus
+       de la référence départementale ». Relu à l'API, ce champ n'est PAS la
+       référence du département : c'est la moyenne des SEULS EREA du département.
+       49 départements sur 61 n'en ont qu'un — sa « référence » est lui-même. La
+       couleur ne disait donc presque rien ; elle est retirée.
+
+       Trois sources, toutes lues SANS clé :
+         · `erea`     — les 706 lignes du jeu (neuf rentrées), en un export ;
+         · `col-serie`— l'IPS moyen des collèges publics par rentrée, agrégé PAR
+                        LE SERVEUR (9 lignes) ;
+         · `col24`    — les 5 326 collèges publics de 2024-2025, IPS seul.
+       ========================================================================== -->
+
+  <!-- ---------- Les EREA, toutes rentrées ----------
+       706 lignes : `max-records` relevé par principe (plafond silencieux à 1 000). -->
+  <dsfr-data-source id="erea" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-erea"
+    fetch-mode="export" max-records="2000"
+    select="uai, appellation_officielle, ips, secteur, libelle_commune,
+            libelle_departement, libelle_academie, rentree_scolaire, position, ips_national">
+  </dsfr-data-source>
+
+  <!-- ---------- 1. La série : EREA et collèges publics, neuf rentrées ---------- -->
+  <dsfr-data-query id="erea-serie" source="erea" where="ips:isnotnull"
+    group-by="rentree_scolaire" aggregate="ips:avg:erea, uai:count:n_erea"
+    order-by="rentree_scolaire:asc">
+  </dsfr-data-query>
+  <dsfr-data-source id="col-serie" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-colleges"
+    select="rentree_scolaire, avg(ips) as col, count(ips) as n_col"
+    where="secteur = 'public'"
+    group-by="rentree_scolaire" order-by="rentree_scolaire:asc">
+  </dsfr-data-source>
+  <!-- Clé unique des deux côtés (une ligne par rentrée) : pas de relation 1-N. -->
+  <dsfr-data-join id="serie-j" left="erea-serie" right="col-serie" on="rentree_scolaire" type="inner"></dsfr-data-join>
+  <!-- L'écart se calcule AVANT tout arrondi. -->
+  <dsfr-data-normalize id="serie-e" source="serie-j"
+    compute="ecart = col - erea; k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="serie-o" source="serie-e" order-by="rentree_scolaire:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="serie-r" source="serie-o" round="erea:1, col:1, ecart:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="serie-t" source="serie-r"
+    rename="rentree_scolaire:Rentrée | erea:IPS moyen des EREA | col:IPS moyen des collèges publics | ecart:Écart (points) | n_erea:EREA | n_col:Collèges publics">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="serie-der" source="serie-e" order-by="rentree_scolaire:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-pivot id="serie-bornes" source="serie-e"
+    row="k" column="rentree_scolaire" value="ecart" aggregate="first"
+    labels="2016-2017:e16 | 2021-2022:e21 | 2022-2023:e22 | 2024-2025:e24">
+  </dsfr-data-pivot>
+
+  <!-- ---------- À EREA constants ----------
+       Un EREA par ligne, une colonne par rentrée. Un EREA absent ou sans IPS
+       l'une des deux années n'a pas de différence, et ne compte pas. -->
+  <dsfr-data-pivot id="paire-w" source="erea"
+    row="uai" column="rentree_scolaire" value="ips" aggregate="first"
+    labels="2021-2022:r21 | 2022-2023:r22 | 2024-2025:r24">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="paire-d" source="paire-w"
+    compute="d_meth = when is_null(r21) or is_null(r22) then null else r22 - r21;
+             d_new = when is_null(r22) or is_null(r24) then null else r24 - r22;
+             hausse = when is_null(d_meth) then null when d_meth &gt; 0 then 1 else 0;
+             k = 'EREA'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="paire-meth" source="paire-d" where="d_meth:isnotnull"
+    group-by="k" aggregate="d_meth:avg:moy, uai:count:nb, hausse:sum:nb_hausse">
+  </dsfr-data-query>
+  <dsfr-data-query id="paire-new" source="paire-d" where="d_new:isnotnull"
+    group-by="k" aggregate="d_new:avg:moy, uai:count:nb">
+  </dsfr-data-query>
+
+  <!-- ---------- 2. La dernière rentrée, EREA par EREA ----------
+       Deux colonnes de classe : `classe10`/`rang10` (dix points, commune aux
+       EREA et aux collèges, pour la distribution) et `tranche_ips` (cinq
+       couleurs pour la carte). La branche `is_null` vient EN PREMIER. -->
+  <dsfr-data-query id="erea24" source="erea" where="rentree_scolaire:eq:2024-2025"></dsfr-data-query>
+  <dsfr-data-normalize id="erea24-n" source="erea24"
+    compute="rang10 = when is_null(ips) then null when ips &lt; 70 then 1 when ips &lt; 80 then 2 when ips &lt; 90 then 3 when ips &lt; 100 then 4 when ips &lt; 110 then 5 when ips &lt; 120 then 6 when ips &lt; 130 then 7 else 8;
+             tranche_ips = when is_null(ips) then 'IPS non renseigné' when ips &lt; 70 then 'Moins de 70' when ips &lt; 80 then '70 à 80' when ips &lt; 90 then '80 à 90' when ips &lt; 100 then '90 à 100' else '100 et plus'">
+  </dsfr-data-normalize>
+
+  <dsfr-data-source id="col24" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-colleges"
+    fetch-mode="export" max-records="8000"
+    select="uai, ips"
+    where="rentree_scolaire = '2024-2025' and secteur = 'public' and ips is not null">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="col24-n" source="col24"
+    compute="rang10 = when ips &lt; 70 then 1 when ips &lt; 80 then 2 when ips &lt; 90 then 3 when ips &lt; 100 then 4 when ips &lt; 110 then 5 when ips &lt; 120 then 6 when ips &lt; 130 then 7 else 8;
+             classe10 = when ips &lt; 70 then 'Moins de 70' when ips &lt; 80 then '70 à 80' when ips &lt; 90 then '80 à 90' when ips &lt; 100 then '90 à 100' when ips &lt; 110 then '100 à 110' when ips &lt; 120 then '110 à 120' when ips &lt; 130 then '120 à 130' else '130 et plus'">
+  </dsfr-data-normalize>
+
+  <!-- Répartition : part de chaque population dans chaque classe. Les
+       collèges couvrent les huit classes, d'où la jointure à GAUCHE sur eux ;
+       une classe sans EREA vaut 0, pas « absent ». -->
+  <dsfr-data-query id="col-cl" source="col24-n"
+    group-by="rang10, classe10" aggregate="uai:count:n_col, n_col:share_percent:part_col">
+  </dsfr-data-query>
+  <dsfr-data-query id="erea-cl" source="erea24-n" where="rang10:isnotnull"
+    group-by="rang10" aggregate="uai:count:n_erea, n_erea:share_percent:part_erea">
+  </dsfr-data-query>
+  <dsfr-data-join id="dist-j" left="col-cl" right="erea-cl" on="rang10" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="dist-z" source="dist-j"
+    compute="part_erea = when is_null(part_erea) then 0 else part_erea; n_erea = when is_null(n_erea) then 0 else n_erea;
+             e7090 = when rang10 = 2 or rang10 = 3 then part_erea else 0; c7090 = when rang10 = 2 or rang10 = 3 then part_col else 0; k = 'France'">
+  </dsfr-data-normalize>
+  <!-- La phrase de lecture : sous 90 (classes 1 à 3), et la bande 70-90. -->
+  <dsfr-data-query id="dist-s" source="dist-z" where="rang10:lte:3"
+    group-by="k" aggregate="part_erea:sum:e, part_col:sum:c, e7090:sum:e7090, c7090:sum:c7090">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="dist-sous90" source="dist-s" round="e:1, c:1, e7090:1, c7090:1"></dsfr-data-normalize>
+  <dsfr-data-query id="dist-o" source="dist-z" order-by="rang10:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="dist-r" source="dist-o" round="part_erea:1, part_col:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="dist-t" source="dist-r"
+    rename="classe10:IPS de l'établissement | part_erea:Part des EREA (%) | part_col:Part des collèges publics (%) | n_erea:EREA | n_col:Collèges publics">
+  </dsfr-data-normalize>
+
+  <!-- Les exceptions : les EREA d'IPS 100 ou plus, et le plus bas. -->
+  <dsfr-data-query id="erea-haut" source="erea24-n" where="ips:gte:100" order-by="ips:desc"></dsfr-data-query>
+  <dsfr-data-query id="erea-bas" source="erea24-n" where="ips:isnotnull" order-by="ips:asc" limit="1"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,123 +156,248 @@
       </div>
     </nav>
 
-    <h1>Indice de position sociale des EREA — rentrée 2023-2024</h1>
+    <h1>Les EREA accueillent les élèves socialement les plus défavorisés du collège</h1>
 
-    <p class="fr-text--lead">
-      Les <strong>établissements régionaux d'enseignement adapté</strong> scolarisent des élèves
-      en grande difficulté scolaire ou en situation de handicap. Ils sont
-      <strong>78</strong> pour la rentrée 2023-2024, répartis sur 25 académies et
-      61 départements — <strong>77 publics et un seul privé sous contrat</strong>. Leur IPS moyen
-      est de <strong>80,6</strong>, contre 104,7 pour les collèges : c'est, de toutes les pages
-      IPS du portail, la population la plus défavorisée socialement, et de loin.
+    <!-- Le chapô est CALCULÉ sur la dernière rentrée du jeu. -->
+    <dsfr-data-repeat source="serie-der">
+      <template>
+        <p class="fr-text--lead">
+          À la rentrée {{rentree_scolaire}}, l'indice de position sociale (IPS) moyen des
+          {{n_erea}} établissements régionaux d'enseignement adapté (EREA) est de
+          <strong>{{erea:number:1}}</strong>, contre <strong>{{col:number:1}}</strong> pour les
+          collèges publics&nbsp;: <strong>{{ecart:number:1}} points d'écart</strong>. Neuf EREA
+          sur dix se situent là où l'on ne trouve qu'un collège public sur quatre. Cet écart n'a
+          pas bougé depuis 2016 — sauf en 2022, où il a perdu six points par un simple
+          changement de méthode de calcul.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Les EREA scolarisent, de la sixième au CAP, des élèves en grande difficulté scolaire ou
+      sociale, ou en situation de handicap, souvent en internat. L'IPS résume, à partir des
+      professions des parents, les conditions sociales et culturelles des élèves&nbsp;: plus il
+      est élevé, plus elles sont favorables à la réussite scolaire. Les moyennes de cette page
+      sont des <strong>moyennes d'établissements</strong> — chacun compte pour un —, car les
+      jeux ne portent pas les effectifs.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/donnees-ips-erea/"
            target="_blank" rel="noopener external"><code>donnees-ips-erea</code></a>
-        — 706 lignes sur 9 rentrées, produit par la DEPP, jeu technique <em>hors catalogue</em>
-        (titre interne « dataviz4 »), lu sans clé. C'est le plus petit des quatre jeux d'IPS, et
-        <strong>le mieux doté</strong> : il porte, comme celui des écoles, les
-        <strong>IPS de référence</strong> national, académique et départemental — donc de quoi
-        situer chaque établissement. <strong>Les 78 sont localisables</strong> : aucune ligne
-        écartée, ce qui n'arrive sur aucune autre page IPS.
+        (DEPP) — un EREA par ligne et par rentrée, de 2016-2017 à 2024-2025&nbsp;: 706 lignes,
+        81 établissements distincts. Jeu technique, hors catalogue (titre interne
+        « dataviz4 »). Pour la comparaison, les collèges publics de
+        <a href="https://data.education.gouv.fr/explore/dataset/donnees-ips-colleges/"
+           target="_blank" rel="noopener external"><code>donnees-ips-colleges</code></a>,
+        même producteur, même indice. Lecture sans clé.
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="serie-der" value="ecart:first" format="decimal" decimals="1"
+        heading="Points d'IPS sous les collèges publics"
+        lines='[{"value":"erea:first","format":"decimal","decimals":1,"prefix":"EREA : "},{"value":"col:first","format":"decimal","decimals":1,"prefix":"collèges publics : "}]'
+        label="IPS moyen, dernière rentrée publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="erea24-n"
+        value="count{ips:lt:90} / count{ips:isnotnull}" format="pourcentage"
+        heading="des EREA ont un IPS inférieur à 90"
+        label="rentrée 2024-2025 — contre moins d'un collège public sur quatre"></dsfr-data-kpi>
+      <dsfr-data-kpi source="paire-meth" value="moy:first" format="decimal" decimals="1"
+        heading="Points gagnés par les EREA au seul changement de méthode"
+        lines='[{"value":"nb_hausse:first","format":"nombre","suffix":" EREA en hausse"},{"value":"nb:first","format":"nombre","prefix":"sur ","suffix":" suivis"}]'
+        label="mêmes EREA, de 2021-2022 à 2022-2023"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve : deux distributions qui se touchent à peine ---------- -->
+    <h2 class="fr-h3">1. Les EREA se massent là où les collèges publics se font rares</h2>
+    <dsfr-data-repeat source="dist-sous90">
+      <template>
+        <p class="odv-lecture">À la rentrée 2024-2025, <strong>{{e:number:1}}&nbsp;% des EREA</strong>
+          ont un IPS inférieur à 90, contre <strong>{{c:number:1}}&nbsp;% des collèges
+          publics</strong>. Entre 70 et 90, deux classes où ne se trouvent que
+          {{c7090:number:1}}&nbsp;% des collèges publics, se massent {{e7090:number:1}}&nbsp;% des
+          EREA.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">Chaque barre est la part d'une population dans une classe
+      de dix points. Les EREA occupent surtout les classes de 70 à 90&nbsp;; les collèges
+      publics se répartissent autour de 100. Les deux EREA au-delà de 100 sont des exceptions,
+      décrites en section&nbsp;3.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Répartition des EREA et des collèges publics par classe d'IPS">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-dist" source="dist-r" type="bar"
+        label-field="classe10"
+        value-field="part_erea:EREA (%)" value-fields="part_col:Collèges publics (%)"
+        y-min="0" unit-tooltip="%"
+        databox databox-title="Répartition des EREA et des collèges publics par classe d'IPS, rentrée 2024-2025"
+        databox-source="DEPP — donnees-ips-erea et donnees-ips-colleges, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-dist" source="dist-t" table download
+        filename="ips-erea-colleges-repartition.csv"
+        label-field="IPS de l'établissement"
+        value-field="Part des EREA (%), EREA, Part des collèges publics (%), Collèges publics"
+        description="Part des EREA et des collèges publics dans chaque classe de dix points d'IPS, rentrée 2024-2025, du moins favorisé au plus favorisé. Les EREA se concentrent entre 70 et 90, les collèges publics autour de 100. Un EREA sans IPS est exclu."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. La nuance : la rupture de 2022 ---------- -->
+    <h2 class="fr-h3">2. Un écart stable, qui a fondu d'un coup en 2022&nbsp;: c'est la méthode, pas les établissements</h2>
+    <dsfr-data-repeat source="serie-bornes">
+      <template>
+        <p class="odv-lecture">Avec l'ancienne méthode de calcul, l'écart entre collèges publics et
+          EREA vaut <strong>{{e16:number:1}}</strong> points en 2016-2017 et
+          <strong>{{e21:number:1}}</strong> en 2021-2022&nbsp;; avec la nouvelle,
+          <strong>{{e22:number:1}}</strong> en 2022-2023 et <strong>{{e24:number:1}}</strong> en
+          2024-2025. À l'intérieur de chaque méthode, il ne bouge presque pas. La marche de 2022
+          vient d'un seul côté&nbsp;: la courbe des EREA saute, celle des collèges publics reste
+          plate.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz" data-code="IPS moyen des EREA et des collèges publics, par rentrée">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-serie" source="serie-r" type="line"
+        label-field="rentree_scolaire"
+        value-field="erea:EREA" value-fields="col:Collèges publics"
+        y-min="60" y-max="110" unit-tooltip="points d'IPS"
+        reference-lines='[{"axis":"x","value":"2022-2023","label":"Nouvelle méthode de calcul","dash":true}]'
+        databox databox-title="IPS moyen des EREA et des collèges publics, de 2016-2017 à 2024-2025"
+        databox-source="DEPP — donnees-ips-erea et donnees-ips-colleges, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-serie" source="serie-t" table download
+        filename="ips-erea-colleges-par-rentree.csv"
+        label-field="Rentrée" value-field="IPS moyen des EREA, IPS moyen des collèges publics, Écart (points), EREA, Collèges publics"
+        description="IPS moyen des EREA et des collèges publics, chaque établissement comptant pour un, de 2016-2017 à 2024-2025. L'écart est stable à l'intérieur de chaque méthode de calcul. À la rentrée 2022-2023, la DEPP change de méthode : l'IPS des EREA monte d'environ six points, celui des collèges publics d'un dixième."></dsfr-data-a11y>
+    </div>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mt-2w fr-mb-6w">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Les mêmes EREA, de part et d'autre de la rupture</h3>
+        <dsfr-data-repeat source="paire-meth">
+          <template>
+            <p class="fr-text--sm fr-mb-1v">De 2021-2022 à 2022-2023, l'IPS des mêmes
+              {{nb}} EREA a monté de <strong>{{moy:number:1}} points</strong> en moyenne&nbsp;;
+              {{nb_hausse}} d'entre eux sont en hausse. Les collèges publics, sur la même
+              rentrée, gagnent un dixième de point.</p>
+          </template>
+        </dsfr-data-repeat>
+        <dsfr-data-repeat source="paire-new">
+          <template>
+            <p class="fr-text--sm fr-mb-1v">Depuis, à méthode constante (2022-2023 à
+              2024-2025), l'évolution est de <strong>{{moy:number:1}} point</strong>
+              ({{nb}} EREA suivis).</p>
+          </template>
+        </dsfr-data-repeat>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Pourquoi les EREA, et pas les collèges&nbsp;?</h3>
+        <p class="fr-text--sm">Depuis 2022, la DEPP utilise une nouvelle table de passage
+          profession → IPS et exclut du calcul les élèves dont les professions des deux parents
+          sont inconnues. Une hypothèse, que le jeu ne permet pas de vérifier&nbsp;: ces élèves,
+          autrefois comptés avec un indice bas, sont plus nombreux en EREA. Ce que le jeu
+          établit, c'est l'ampleur&nbsp;: <strong>on ne compare jamais un IPS d'EREA d'avant
+          2022 à un IPS d'après</strong>.</p>
+      </div>
+    </div>
+
+    <!-- ---------- 3. Les exceptions ---------- -->
+    <h2 class="fr-h3">3. Deux exceptions, voisines, dans les Hauts-de-Seine</h2>
+    <p class="odv-lecture fr-mb-1v">À la rentrée 2024-2025, seuls deux EREA dépassent l'IPS
+      moyen des collèges publics&nbsp;:</p>
+    <dsfr-data-repeat source="erea-haut" key-field="uai">
+      <template>
+        <p class="odv-lecture fr-mb-1v"><strong>{{appellation_officielle}}</strong>, à
+          {{libelle_commune}} ({{libelle_departement}})&nbsp;: IPS <strong>{{ips:number:1}}</strong>.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="erea-bas">
+      <template>
+        <p class="odv-lecture fr-mt-2w">À l'autre bout, l'IPS le plus bas est celui du
+          <strong>{{appellation_officielle}}</strong>, à {{libelle_commune}}
+          ({{libelle_departement}})&nbsp;: <strong>{{ips:number:1}}</strong> — le seul EREA
+          ultramarin du jeu, et le seul {{secteur}}.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mb-6w">Tous les EREA n'accueillent pas le même public&nbsp;:
+      certains sont spécialisés dans l'accueil d'élèves en situation de handicap, dont le
+      recrutement social suit moins la difficulté scolaire. Le jeu ne porte pas cette
+      spécialité&nbsp;: il ne permet pas de dire si c'est le cas de ces deux établissements.</p>
   </div>
 
-  <!-- ==========================================================================
-       Quatrième et dernier emploi du gabarit IPS. 78 lignes : rien à arbitrer
-       sur le chargement, l'export est instantané.
-
-       Le seul point d'attention est cartographique, et c'est un piège maison
-       (BUG-004) : ce jeu contient UN SEUL point ultramarin — le lycée
-       d'enseignement adapté L'Espérance, à Mamoudzou (Mayotte), qui se trouve
-       être aussi le seul établissement privé du jeu ET celui dont l'IPS est le
-       plus bas (66,4). Poser `insets="drom"` créerait cinq encarts dont quatre
-       vides ; ne rien poser laisserait le fit englober Mayotte et ouvrir la
-       carte sur l'océan Indien. `insets="mayotte"` nomme le seul territoire
-       concerné : un encart utile, et le clip métropolitain qui va avec.
-       ========================================================================== -->
-
-  <dsfr-data-source id="erea" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="donnees-ips-erea"
-    fetch-mode="export" max-records="1000"
-    where="rentree_scolaire = '2023-2024' and position is not null">
-  </dsfr-data-source>
-
-  <!-- L'écart aux trois références, que le jeu porte et qu'aucune des quatre
-       pages IPS du portail n'affiche — alors que deux d'entre elles en ont la
-       donnée. C'est la comparaison qui donne son sens à un indice de position. -->
-  <dsfr-data-normalize id="erea-n" source="erea"
-    compute="ecart_national = round(ips - ips_national, 1); ecart_dep = round(ips - ips_departemental, 1); situation = when ips &lt; ips_departemental then 'Sous la référence départementale' else 'Au-dessus de la référence départementale'">
-  </dsfr-data-normalize>
+  <!-- ---------- 4. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Trouver un EREA</h2>
+    <p class="fr-text--sm">Les EREA de la rentrée 2024-2025, colorés selon leur classe d'IPS.
+      La recherche et les filtres pilotent les compteurs, la carte et le tableau&nbsp;; ils ne
+      touchent pas les graphiques ci-dessus.</p>
+  </div>
+  <section class="odv-bandeau">
+    <div class="fr-container">
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="erea-q" source="erea24-n"
+          fields="appellation_officielle, libelle_commune, uai"
+          label="Rechercher un EREA" placeholder="Nom, commune, code UAI…"
+          operator="words" count count-label="établissement"
+          url-sync url-search-param="q">
+        </dsfr-data-search>
+      </div>
+    </div>
+  </section>
 
   <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="erea-f" value="count" format="nombre"
+        heading="EREA" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="erea-f" value="ips:avg" format="decimal" decimals="1"
+        heading="IPS moyen" label="chaque EREA comptant pour un"></dsfr-data-kpi>
+      <dsfr-data-kpi source="erea-f" value="ips:max" format="decimal" decimals="1"
+        heading="IPS le plus élevé"
+        lines='[{"value":"ips:min","format":"decimal","decimals":1,"prefix":"le plus bas : "}]'
+        label="de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
 
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-            Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <h2 class="fr-h6">Filtrer</h2>
-        <dsfr-data-facets id="erea-f" source="erea-n"
-          fields="situation, secteur, libelle_academie, libelle_departement"
-          labels="situation:Situation | secteur:Secteur | libelle_academie:Académie | libelle_departement:Département"
-          display="situation:checkbox | secteur:radio-inline | libelle_academie:radio | libelle_departement:radio"
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="erea-f" source="erea-q"
+          fields="libelle_academie, libelle_departement"
+          labels="libelle_academie:Académie | libelle_departement:Département"
+          display="libelle_academie:radio | libelle_departement:radio"
           sort="alpha:asc"
           url-sync url-params>
         </dsfr-data-facets>
-        </details>
-      </div>
+      </details>
 
-      <div class="fr-col-12 fr-col-md-9">
-
-        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
-          <dsfr-data-kpi source="erea-f" value="count" format="nombre"
-            heading="EREA" label="dans la sélection"></dsfr-data-kpi>
-          <dsfr-data-kpi source="erea-f" value="ips:avg" format="decimal" decimals="1"
-            heading="IPS moyen" label="de la sélection (national EREA : 81,8)"></dsfr-data-kpi>
-          <dsfr-data-kpi source="erea-f" value="ips:min" format="decimal" decimals="1"
-            heading="IPS le plus bas" label="de la sélection"></dsfr-data-kpi>
-          <dsfr-data-kpi source="erea-f" value="ips:max" format="decimal" decimals="1"
-            heading="IPS le plus élevé" label="de la sélection"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <div class="odv-viz" data-code="Établissements régionaux d'enseignement adapté et leur indice de position sociale">
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des EREA colorée par classe d'IPS">
+        <!-- Un seul point ultramarin (Mayotte) : `insets="mayotte"` crée un
+             seul encart et le clip métropolitain qui va avec (BUG-004). -->
         <dsfr-data-map id="carte-erea"
-          name="Établissements régionaux d'enseignement adapté et leur indice de position sociale"
+          name="EREA et leur indice de position sociale, rentrée 2024-2025"
           height="600px" tiles="ign-plan" tiles-style="muted"
           insets="mayotte" fit-bounds fit-max-zoom="12">
-          <!-- La couleur porte la SITUATION par rapport à la référence
-               départementale, et non l'IPS brut : sur 78 points étalés de 66,4
-               à 124,3, une échelle continue dirait surtout « les EREA ont un IPS
-               bas », ce qu'on sait déjà. Ce qui s'apprend, c'est lesquels sont
-               au-dessous de leur propre département. -->
           <dsfr-data-map-layer id="couche-erea" source="erea-f" type="circle"
             geo-field="position" radius="7" fill-opacity="0.9"
-            color-field="situation"
-            color-map="Sous la référence départementale:#c9191e,Au-dessus de la référence départementale:#000091"
+            color-field="tranche_ips"
+            color-map="Moins de 70:#c9191e,70 à 80:#e4794a,80 à 90:#929292,90 à 100:#7ab1e8,100 et plus:#000091"
             tooltip-field="appellation_officielle"
             max-items="1000">
           </dsfr-data-map-layer>
-          <dsfr-data-map-legend for="couche-erea" label="Situation par rapport au département"></dsfr-data-map-legend>
-          <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="380px">
+          <dsfr-data-map-legend for="couche-erea" label="Indice de position sociale"></dsfr-data-map-legend>
+          <dsfr-data-map-popup mode="panel-right" title-field="appellation_officielle" width="360px">
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur|secteur non renseigné}}</p>
-              <p class="fr-display--xs fr-mb-1v">{{ips:number:1|—}}</p>
-              <p class="fr-text--sm fr-mb-3v">Indice de position sociale, rentrée 2023-2024</p>
-
-              <ul class="fr-text--sm fr-mb-3v">
-                <li>Écart au département&nbsp;: <strong>{{ecart_dep:number:1|—}}</strong></li>
-                <li>Écart au national&nbsp;: <strong>{{ecart_national:number:1|—}}</strong></li>
-                <li>Référence départementale&nbsp;: {{ips_departemental:number:1|—}}</li>
-                <li>Référence académique&nbsp;: {{ips_academique:number:1|—}}</li>
-                <li>Référence nationale&nbsp;: {{ips_national:number:1|—}}</li>
-              </ul>
-
+              <p class="fr-display--xs fr-mb-1v">{{ips:number:1|non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-3v">Indice de position sociale, rentrée {{rentree_scolaire}}
+                (ensemble des EREA&nbsp;: {{ips_national:number:1|—}}, pondéré par la DEPP)</p>
               <p class="fr-text--sm fr-mb-1v">
                 <strong>{{libelle_commune|commune non renseignée}}</strong><br>
                 {{libelle_departement|}} — académie de {{libelle_academie|}}
@@ -158,101 +407,95 @@
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="erea-f" for="carte-erea" table download
-          filename="ips-erea-2023-2024.csv"
+        <dsfr-data-normalize id="erea-tableau" source="erea-f"
+          rename="appellation_officielle:EREA | ips:IPS | tranche_ips:Classe d'IPS | libelle_commune:Commune | libelle_departement:Département | libelle_academie:Académie | secteur:Secteur"></dsfr-data-normalize>
+        <dsfr-data-a11y source="erea-tableau" for="carte-erea" table download
+          filename="ips-erea-2024-2025.csv"
           label="Données de la carte"
-          description="Un EREA par ligne : appellation, IPS, écarts aux références, commune, académie."
-          label-field="appellation_officielle"
-          value-field="ips, ecart_dep, ecart_national, libelle_commune, libelle_departement, libelle_academie, secteur">
+          description="Un EREA par ligne pour la sélection courante : appellation, IPS, classe, commune, département, académie, secteur."
+          label-field="EREA"
+          value-field="IPS, Classe d'IPS, Commune, Département, Académie, Secteur">
         </dsfr-data-a11y>
         </div>
-
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">Les académies les mieux dotées en EREA</h2>
-    <div class="odv-viz" data-code="Nombre d'EREA par académie, rentrée 2023-2024">
-    <dsfr-data-chart id="g-erea-aca" source="erea-aca" type="bar" horizontal
-      label-field="libelle_academie" value-field="n" name='["EREA"]'
-      databox databox-title="Nombre d'EREA par académie, rentrée 2023-2024"
-      databox-source="DEPP — donnees-ips-erea, via data.education.gouv.fr"
-      databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-erea-aca" source="erea-aca" table download></dsfr-data-a11y>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Les EREA scolarisent les élèves socialement les plus
+        défavorisés du collège&nbsp;: une vingtaine de points d'IPS sous les collèges publics,
+        et presque tous sous 90. L'écart est stable dans le temps&nbsp;; la baisse apparente de
+        2022 est un effet de la méthode de calcul, qui a relevé l'IPS des EREA sans toucher
+        celui des collèges. Ce que ces données ne disent pas&nbsp;: les effectifs, la
+        spécialité de chaque EREA, ni la part d'élèves en situation de handicap.</p>
     </div>
-    <p class="fr-text--xs fr-mt-1w">
-      78 établissements pour 25 académies : la moitié des académies en compte deux ou moins,
-      et treize académies n'en ont aucun.
-    </p>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Moyenne des établissements, pas des élèves.</strong> Aucun des deux jeux ne
+          porte les effectifs. La référence nationale que la DEPP publie dans le jeu
+          (<code>ips_national</code>, 82,2 en 2024-2025) est plus haute que la moyenne des EREA
+          (80,9)&nbsp;: elle pèse les établissements autrement.</li>
+        <li><strong>Les « références » départementale et académique ne sont pas celles du
+          territoire.</strong> Le jeu porte <code>ips_departemental</code> et
+          <code>ips_academique</code>, mais ce sont des moyennes <em>des seuls EREA</em> du
+          département ou de l'académie&nbsp;: 49 départements sur 61 n'ont qu'un EREA, dont la
+          « référence » est son propre IPS (vérifié à l'API, rentrée 2024-2025). Elles ne situent
+          donc pas un EREA dans son territoire&nbsp;; la page ne les utilise pas.</li>
+        <li><strong>La comparaison se fait avec les collèges publics.</strong> 76 EREA sur 77
+          sont publics&nbsp;; comparer aux collèges privés, plus favorisés, aurait gonflé
+          l'écart. Le seul EREA privé sous contrat (Mayotte) reste dans les moyennes.</li>
+        <li><strong>Rupture de série en 2022.</strong> Les évolutions ne se lisent qu'à
+          l'intérieur de chaque méthode. Deux EREA n'ont pas d'IPS en 2022-2023&nbsp;: ils sont
+          hors de la moyenne de cette rentrée et du suivi à EREA constants.</li>
+        <li><strong>Angles écartés.</strong> Le nombre d'EREA par académie (il décrit l'offre, pas
+          le public)&nbsp;; la carte par écart à la « référence départementale » (voir note
+          2)&nbsp;; le classement des 77 établissements (il désigne des établissements, pas un
+          phénomène).</li>
+      </ol>
+    </section>
   </div>
 
-  <dsfr-data-query id="erea-aca" source="erea-f" group-by="libelle_academie"
-    aggregate="uai:count:n, ips:avg:m" where="libelle_academie:isnotnull"
-    order-by="n:desc" limit="15"></dsfr-data-query>
+  <!-- ====================== Analyse ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — IPS EREA</h2>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — IPS EREA — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/dataviz-ips-erea/" target="_blank" rel="noopener external">/pages/dataviz-ips-erea/</a>.
-        Fiche d'audit : <code>docs/portail-education/dataviz-ips-erea.md</code>.
-        <strong>Quatrième et dernier emploi du gabarit IPS</strong> — les quatre pages du portail
-        (Écoles, Collèges, Lycées, EREA) sont le même fichier, jusqu'au nom de contexte
-        <code>frenipslyceesdataviz</code> recopié partout et au centrage sur la Suisse.
+        <a href="https://data.education.gouv.fr/pages/dataviz-ips-erea/" target="_blank" rel="noopener external">/pages/dataviz-ips-erea/</a>
+        — 78 épingles uniformes, trois facettes, aucun constat. Fiche d'audit :
+        <code>docs/portail-education/dataviz-ips-erea.md</code>. Recréée le 2026-09-26 en page
+        éditoriale&nbsp;; la reproduction précédente, figée sur 2023-2024, est remplacée.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Tout.</strong> C'est la quatrième page bâtie sur le même gabarit, et la
-              seule dont l'écriture n'a rien appris de neuf sur la bibliothèque. 78 lignes, aucun
-              arbitrage de chargement, aucun plafond à relever, aucune ligne écartée. Le fichier
-              a été écrit d'un trait à partir de celui des collèges.</li>
-            <li><strong>Un encart nommé plutôt qu'un groupe.</strong> Le jeu contient
-              <em>un seul</em> point ultramarin. <code>insets="drom"</code> aurait créé cinq
-              encarts dont quatre vides&nbsp;; <code>insets="mayotte"</code> n'en crée qu'un, et
-              apporte au passage le clip métropolitain qui évite d'ouvrir la carte sur l'océan
-              Indien. L'attribut accepte des territoires nommés autant que des groupes — c'est ce
-              qui rend le cas d'un point isolé traitable, là où le piège BUG-004 avait coûté cher
-              sur une page de Bercy.</li>
-            <li><strong>Les trois références, enfin utilisées.</strong> Le jeu porte
-              <code>ips_national</code>, <code>ips_academique</code> et
-              <code>ips_departemental</code>&nbsp;; deux expressions <code>compute</code> en
-              tirent les écarts, une troisième en tire la situation, qui devient à la fois la
-              couleur de la carte et une facette. <strong>Aucune des quatre pages IPS du portail
-              ne le fait</strong>, alors que deux d'entre elles en ont la donnée.</li>
+            <li><strong>Comparer deux populations sur une même échelle.</strong> Une query par
+              population avec <code>share_percent</code>, une jointure à gauche sur la classe,
+              et la répartition est prête — sans total écrit en dur.</li>
+            <li><strong>Isoler l'effet de méthode.</strong> Un pivot <code>row="uai"</code> sur
+              les 706 lignes donne les mêmes EREA de part et d'autre de 2022&nbsp;; un
+              <code>compute</code> fait la différence.</li>
+            <li><strong>Un seul export pour quatre usages.</strong> Série, suivi apparié,
+              répartition et carte partent de la même source de 706 lignes.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Rien — et c'est le résultat à retenir.</strong> Aucune friction, aucun
-              échec silencieux, aucun attribut à vérifier au source. Après trois pages qui ont
-              produit six constats, la quatrième n'en produit aucun. <strong>C'est la définition
-              d'un motif acquis</strong>, et c'est la réponse la plus directe à la question que
-              pose ce banc d'essai&nbsp;: une fois le premier exemplaire payé, les suivants ne
-              coûtent presque rien.</li>
-            <li><strong>Le vrai sujet de cette page n'est pas technique.</strong> Une carte de
-              78 points étalés de 66,4 à 124,3 sur une échelle continue dirait surtout « les EREA
-              ont un IPS bas » — ce que le chapô dit déjà mieux. Ce qui s'apprend, c'est lesquels
-              sont <em>au-dessous de leur propre département</em>, et cela suppose de savoir que
-              le jeu porte des références, puis de décider que c'est cela qu'il faut peindre.
-              Le choix de la variable colorée est, sur les quatre pages IPS, le seul endroit où
-              il fallait réfléchir.</li>
-            <li><strong>Une donnée qui mérite d'être signalée.</strong> L'unique établissement
-              privé sous contrat du jeu est aussi l'unique établissement ultramarin, et celui dont
-              l'IPS est le plus bas (66,4)&nbsp;: le lycée d'enseignement adapté L'Espérance, à
-              Mamoudzou. Trois singularités sur la même ligne, dans un jeu de 78 — le genre de
-              coïncidence qu'on ne voit qu'en regardant les données, et qu'aucune moyenne ne
-              montre.</li>
+            <li><strong>Des références qui n'en sont pas.</strong> Rien dans les métadonnées ne
+              dit que <code>ips_departemental</code> est la moyenne des seuls EREA du
+              département&nbsp;; il a fallu comparer le champ à l'IPS ligne à ligne. La
+              reproduction précédente en avait fait la couleur de sa carte.</li>
+            <li><strong>Une rupture que le jeu ne signale pas.</strong> Elle vaut six points
+              pour les EREA et un dixième pour les collèges&nbsp;: sans le suivi apparié, on
+              titrait « l'écart se réduit ».</li>
           </ul>
         </div>
       </div>
@@ -264,30 +507,26 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>gabarit commun aux 4 pages IPS</td><td>même gabarit <code>dsfr-data</code>, 4ᵉ emploi</td><td>Équivalent, écrit d'un trait</td></tr>
-            <tr><td><code>ods-map location="5,47.35371,8.98682"</code> (la Suisse)</td><td><code>insets="mayotte"</code> + <code>fit-bounds</code></td><td>Meilleur : un encart utile au lieu de cinq, et pas d'océan Indien</td></tr>
-            <tr><td>épingles rouges uniformes</td><td><code>color-field="situation"</code> + légende</td><td>Meilleur : la carte répond à une question</td></tr>
-            <tr><td>bulle à 5 champs, sans référence</td><td><code>dsfr-data-map-popup</code> + 2 écarts + 3 références</td><td>Meilleur : le jeu les porte, l'original ne les montre pas</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>url-sync</code>, facette « Situation »</td><td>Sans équivalent côté Opendatasoft</td></tr>
+            <tr><td><code>ods-dataset-context</code> + rentrée figée</td><td><code>dsfr-data-source fetch-mode="export"</code> + <code>dsfr-data-query where</code></td><td>Équivalent, et la série complète en plus</td></tr>
+            <tr><td><code>ods-map location="5,47.35371,8.98682"</code> (la Suisse)</td><td><code>insets="mayotte"</code> + <code>fit-bounds</code></td><td>Meilleur</td></tr>
+            <tr><td>épingles rouges uniformes</td><td><code>color-field</code> + <code>color-map</code> + légende</td><td>Meilleur : l'IPS est représenté</td></tr>
+            <tr><td><code>ods-facet</code> × 3</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-search</code></td><td>Équivalent, synchronisé dans l'URL</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-join</code>, <code>dsfr-data-pivot</code>, <code>share_percent</code>, <code>dsfr-data-repeat</code>, <code>reference-lines</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, <strong>sans une seule friction</strong>, et
-          c'est la conclusion du gabarit IPS : quatre pages du portail, quatre jeux différents,
-          un seul fichier <code>dsfr-data</code> décliné. La première a coûté trois constats
-          (<code>fill-field</code> muet, une query qui réécrit sa source, un <code>for</code> mal
-          ciblé), la deuxième un motif d'architecture, la troisième une question éditoriale, la
-          quatrième rien du tout. <strong>Ce qui reste à faire, page après page, ce n'est pas de
-          la technique : c'est de décider ce que la carte doit dire</strong> — et sur ces
-          78 établissements, la réponse n'était pas « leur IPS » mais « leur écart à leur propre
-          territoire ».</p>
+        <p>La bibliothèque n'a opposé aucune résistance&nbsp;; <strong>le travail a été la
+          lecture du jeu</strong>. Deux lectures de la page précédente ne tenaient pas&nbsp;: des
+          « références départementales » qui sont la moyenne des EREA du département (souvent
+          l'EREA lui-même), et un écart qui semblait se réduire alors que seule la méthode avait
+          changé.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 

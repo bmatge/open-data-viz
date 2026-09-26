@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Label Qualité Tourisme — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz Qualité Tourisme de data.economie.gouv.fr.">
+  <meta name="description" content="La marque d'État Qualité Tourisme est d'abord occitane : près d'un établissement labellisé sur quatre est en Occitanie, porté aux trois quarts par la marque régionale Sud de France ; Paris en compte onze. Recréation avec dsfr-data de la page de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,113 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       Recréation du 2026-09-26. UNE requête /exports/json (3 604 lignes). Tout
+       le récit se dérive côté client.
+
+       Deux chaînes partent de la même source :
+       - le récit (qt-n → …) porte sur le jeu ENTIER, il ne bouge pas avec les
+         filtres : ce sont des constats nationaux ;
+       - l'exploration (qt → qt-q → qt-f) suit la recherche et les facettes.
+       ========================================================================== -->
+
+  <!-- max-records : le plafond par défaut (1 000) tronquerait EN SILENCE ce jeu
+       de 3 604 lignes (piège payé sur cette page au lot 13). -->
+  <dsfr-data-source id="qt" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="etablissements-labellises-qualite-tourisme"
+    fetch-mode="export" api-key-ref="ods-mef"
+    max-records="5000"
+    select="nom_du_professionnel, partenaires, activite_du_professionnel, ville, code_postal_du_professionnel, adresse, site_web, telephone, email_de_l_etablissement, questionnaire_de_satisfaction, region, departement, coordonnees_geographiques">
+  </dsfr-data-source>
+
+  <!-- Drapeaux par ligne. `partenaires` est UN texte (les partenaires séparés
+       par « | ») : `contains` y cherche une sous-chaîne, insensible à la casse.
+       618 lignes citent la marque régionale « Qualité Tourisme Occitanie Sud de
+       France » : 601 en Occitanie, 17 sans région — aucune ailleurs (vérifié à
+       l'API le 2026-09-26). `tout` est une constante : clé de regroupement pour
+       une ligne de synthèse, et clé de jointure plus bas. -->
+  <dsfr-data-normalize id="qt-n" source="qt"
+    compute="tout = 'France';
+      loc = when is_null(departement) then 0 else 1;
+      occ = when region = 'Occitanie' then 1 else 0;
+      sdf = when contains(partenaires, 'Occitanie Sud de France') then 1 else 0;
+      sdf_occ = when occ = 1 and sdf = 1 then 1 else 0;
+      paris = when departement = 'Paris' then 1 else 0;
+      ot = when activite_du_professionnel = 'Office de tourisme' then 1 else 0;
+      ot_hors = when occ = 0 and ot = 1 then 1 else 0;
+      v_occ = occ;
+      v_autre = 1 - occ">
+  </dsfr-data-normalize>
+
+  <!-- Synthèse nationale : une ligne. -->
+  <dsfr-data-query id="qt-tot" source="qt-n" group-by="tout"
+    aggregate="nom_du_professionnel:count:n, loc:sum, occ:sum, sdf:sum, sdf_occ:sum, paris:sum, ot:sum, ot_hors:sum, v_autre:sum">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="qt-tot-p" source="qt-tot"
+    compute="p_occ = occ__sum / loc__sum * 100;
+      p_sdf = sdf_occ__sum / occ__sum * 100;
+      occ_sans = occ__sum - sdf_occ__sum;
+      sdf_hors = sdf__sum - sdf_occ__sum;
+      sans_loc = n - loc__sum;
+      p_ot = ot__sum / n * 100;
+      p_ot_hors = ot_hors__sum / v_autre__sum * 100">
+  </dsfr-data-normalize>
+
+  <!-- Régions : deux colonnes empilées, « marque régionale » et « autres
+       labels », pour deux couleurs sans color-map (BUG-022). Les 146 lignes sans
+       région sont écartées : on ne peut les poser nulle part. -->
+  <dsfr-data-query id="qt-reg" source="qt-n" where="region:isnotnull"
+    group-by="region, tout" aggregate="nom_du_professionnel:count:nb, sdf:sum">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="qt-reg-n" source="qt-reg"
+    compute="v_sdf = sdf__sum; v_hors = nb - sdf__sum"></dsfr-data-normalize>
+  <dsfr-data-query id="qt-reg-t" source="qt-reg-n" order-by="nb:desc"></dsfr-data-query>
+  <!-- Rang qu'aurait l'Occitanie sans la marque régionale : combien de régions
+       comptent plus que ses labels « hors marque ». L'Occitanie elle-même est
+       comptée (826 > 225), donc la somme EST le rang. Jointure sur la constante :
+       côté droit, une ligne. -->
+  <dsfr-data-join id="qt-reg-j" left="qt-reg" right="qt-tot-p" on="tout" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="qt-reg-jn" source="qt-reg-j"
+    compute="plus = when nb > occ_sans then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="qt-rang" source="qt-reg-jn" group-by="tout"
+    aggregate="plus:sum, region:count:k"></dsfr-data-query>
+
+  <!-- Départements. -->
+  <dsfr-data-query id="qt-dep" source="qt-n" where="departement:isnotnull"
+    group-by="departement, tout" aggregate="nom_du_professionnel:count:nb, v_occ:sum, v_autre:sum"
+    order-by="nb:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="qt-dep-p" source="qt-dep" group-by="departement, tout"
+    aggregate="nb:sum, v_occ__sum:sum, v_autre__sum:sum, nb__sum:share_percent:part" order-by="nb__sum:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="qt-dep-top" source="qt-dep-p" limit="20"></dsfr-data-query>
+  <dsfr-data-query id="qt-dep-1" source="qt-dep-p" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="qt-dep-5" source="qt-dep-p" limit="5"></dsfr-data-query>
+  <dsfr-data-normalize id="qt-dep-5-n" source="qt-dep-5"
+    compute="o = when v_occ__sum__sum > 0 then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="qt-dep-5-s" source="qt-dep-5-n" group-by="tout"
+    aggregate="o:sum"></dsfr-data-query>
+  <dsfr-data-query id="qt-dep-10" source="qt-dep-p" limit="10"></dsfr-data-query>
+  <dsfr-data-query id="qt-dep-10-s" source="qt-dep-10" group-by="tout" aggregate="part:sum"></dsfr-data-query>
+  <dsfr-data-query id="qt-dep-faible" source="qt-dep" where="nb:lte:5" group-by="tout"
+    aggregate="departement:count:k"></dsfr-data-query>
+  <!-- Combien de régions le premier département dépasse-t-il. -->
+  <dsfr-data-query id="qt-dep-1b" source="qt-dep" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="qt-dep-j" left="qt-reg" right="qt-dep-1b" on="tout" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="qt-dep-jn" source="qt-dep-j"
+    compute="moins = when nb < right_nb then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="qt-dep-vs" source="qt-dep-jn" group-by="tout"
+    aggregate="moins:sum, region:count:k"></dsfr-data-query>
+
+  <!-- Activités : Occitanie / reste de la France, empilées. -->
+  <dsfr-data-query id="qt-act" source="qt-n" group-by="activite_du_professionnel"
+    aggregate="nom_du_professionnel:count:nb, v_occ:sum, v_autre:sum" order-by="nb:desc" limit="10">
+  </dsfr-data-query>
+  <dsfr-data-query id="qt-cav" source="qt-n" where="activite_du_professionnel:eq:Caveaux et points de vente"
+    group-by="tout" aggregate="nom_du_professionnel:count:nb, occ:sum"></dsfr-data-query>
+  <dsfr-data-normalize id="qt-cav-p" source="qt-cav"
+    compute="p = occ__sum / nb * 100"></dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,66 +139,170 @@
       </div>
     </nav>
 
-    <h1>Label Qualité Tourisme</h1>
+    <h1>Qualité Tourisme&nbsp;: une marque d'État d'abord portée par l'Occitanie</h1>
+
+    <dsfr-data-repeat source="qt-tot-p">
+      <template>
+        <p class="fr-text--lead">Le jeu publié par la DGE (données modifiées le 25&nbsp;juin 2024)
+          recense <strong>{{n:number}} établissements</strong> titulaires de la marque Qualité Tourisme™.
+          <strong>{{p_occ:number:0}}&nbsp;%</strong> de ceux qu'on sait situer sont en Occitanie — et
+          {{p_sdf:number:0}}&nbsp;% de ces labels occitans passent par une seule porte, la marque
+          régionale <em>Qualité Tourisme Occitanie Sud de France</em>. Paris, première destination du
+          pays, en compte <strong>{{paris__sum:number}}</strong>. La carte du label est celle des
+          réseaux qui le distribuent, pas celle du tourisme.</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="qt-tot" value="n:sum" format="nombre"
+        heading="Établissements" label="titulaires de la marque" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="qt-tot" value="occ__sum:sum / loc__sum:sum" format="pourcentage" decimals="0"
+        heading="Occitanie" label="des établissements localisés" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="qt-tot" value="sdf_occ__sum:sum" format="nombre"
+        heading="Marque régionale" label="labels occitans via « Sud de France »" span="3"></dsfr-data-kpi>
+      <dsfr-data-kpi source="qt-tot" value="paris__sum:sum" format="nombre"
+        heading="Paris" label="établissements labellisés" span="3"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.economie.gouv.fr/explore/dataset/etablissements-labellises-qualite-tourisme/"
            target="_blank" rel="noopener external"><code>etablissements-labellises-qualite-tourisme</code></a>
-        — 3&nbsp;604 établissements labellisés, produit par la DGE. La marque Qualité Tourisme™ est
-        la seule marque d'État attribuée aux professionnels du tourisme pour la qualité de leur accueil.
+        — une ligne par établissement labellisé, publié par la Direction générale des entreprises. La
+        marque Qualité Tourisme™ est la seule marque d'État attribuée aux professionnels du tourisme pour
+        la qualité de leur accueil. Elle est délivrée par l'État, mais les dossiers passent par des
+        <strong>partenaires</strong> — réseaux d'offices de tourisme, CCI, comités régionaux, marques
+        régionales ou de filière — dont les noms figurent, ensemble, dans le champ <code>partenaires</code>.
+        <a href="https://www.atout-france.fr/fr/qualite-tourisme" target="_blank" rel="noopener external">En savoir plus sur la marque</a>.
       </p>
     </details>
   </div>
 
-  <!-- ==========================================================================
-       Un chargement, tout se dérive côté client. La source passe par
-       /exports/json (une requête pour les 3 604 lignes) et non par /records,
-       qui en aurait imposé 37 — leçon de la page Plan de relance.
-       ========================================================================== -->
+  <div class="fr-container fr-mb-8w">
 
-  <!-- Le mode adaptateur fait de nouveau s'appliquer `max-records`  dont le plafond
-       par défaut est 1 000 et qui tronque EN SILENCE : sans le `max-records` ci-dessous 
-       cette page afficherait 1 000 des 3 604 établissements  sans un mot.
-       C'est le piège maison  repayé une fois de plus pendant cette migration et
-       rattrapé par la recette de non-régression (scripts/recette-pages.mjs). -->
-  <dsfr-data-source id="qt" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="etablissements-labellises-qualite-tourisme"
-    fetch-mode="export" api-key-ref="ods-mef"
-    max-records="5000"
-    select="nom_du_professionnel, activite_du_professionnel, ville, code_postal_du_professionnel, adresse, site_web, telephone, email_de_l_etablissement, questionnaire_de_satisfaction, region, departement, coordonnees_geographiques">
-  </dsfr-data-source>
+    <!-- ============================ PREUVE 1 ============================ -->
+    <div class="odv-viz" data-code="Les régions, et la part de la marque régionale occitane">
+      <h2 class="fr-h4">L'Occitanie domine le classement des régions grâce à sa marque régionale</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Nombre d'établissements labellisés par
+        région, en distinguant ceux dont le dossier cite la marque régionale «&nbsp;Qualité Tourisme
+        Occitanie Sud de France&nbsp;» parmi ses partenaires. Établissements sans région écartés.</p>
+      <dsfr-data-repeat source="qt-tot-p">
+        <template>
+          <p class="odv-lecture">L'Occitanie compte <strong>{{occ__sum:number}} établissements
+            labellisés</strong>, dont <strong>{{sdf_occ__sum:number}}</strong> par sa marque régionale.
+            Sans eux, il en resterait {{occ_sans:number}}&nbsp;:</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="qt-rang">
+        <template>
+          <p class="odv-lecture">la région tomberait du premier au <strong>{{plus__sum:number}}<sup>e</sup> rang</strong>
+            des {{k:number}} régions où la marque est présente.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot odv-chart-slot--haut">
+        <dsfr-data-chart id="g-reg" source="qt-reg-t" type="bar" horizontal stacked
+          label-field="region" value-field="v_hors:Autres partenaires"
+          value-fields="v_sdf:Marque Occitanie Sud de France"
+          unit-tooltip=" établissements"
+          databox databox-title="Établissements labellisés Qualité Tourisme par région"
+          databox-source="DGE — etablissements-labellises-qualite-tourisme, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-reg" source="qt-reg-t"
+          description="Barres horizontales empilées et triées : le nombre d'établissements labellisés Qualité Tourisme dans chaque région, en distinguant ceux dont le dossier passe par la marque régionale Occitanie Sud de France. L'Occitanie vient nettement en tête, et les trois quarts de sa barre relèvent de cette marque, qui n'apparaît dans aucune autre région. Hors marque, l'Occitanie rentrerait dans le milieu du classement. L'Île-de-France et les outre-mer ferment la liste."></dsfr-data-a11y>
+      </div>
+    </div>
 
-  <!-- Un regroupement sans `limit` : le KPI « activités représentées » comptait
-       les lignes de la requête limitée à 12 — il affichait 12 quel que soit le
-       filtre (relecture face au relevé du portail : 28 activités). -->
-  <dsfr-data-query id="qt-activites-toutes" source="qt-f" group-by="activite_du_professionnel"
-    aggregate="nom_du_professionnel:count:nb">
-  </dsfr-data-query>
+    <!-- ============================ PREUVE 2 ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="Les vingt premiers départements, Occitanie en couleur">
+      <h2 class="fr-h4">Les départements du littoral occitan passent loin devant la capitale</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Les vingt départements qui comptent le
+        plus d'établissements labellisés, en distinguant les départements d'Occitanie.</p>
+      <dsfr-data-repeat source="qt-dep-1">
+        <template>
+          <p class="odv-lecture">Le premier département, <strong>{{departement}}</strong>, compte
+            <strong>{{nb__sum:number}} établissements labellisés</strong>, {{part:number:1}}&nbsp;% de
+            ceux qu'on sait situer.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="qt-dep-vs">
+        <template>
+          <p class="odv-lecture">C'est plus que <strong>{{moins__sum:number}} des {{k:number}} régions</strong>
+            prises entières.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="qt-tot-p">
+        <template>
+          <p class="odv-lecture">Paris, première destination touristique du pays, n'en compte que
+            <strong>{{paris__sum:number}}</strong>.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="qt-dep-5-s">
+        <template>
+          <p class="odv-lecture"><strong>{{o__sum:number}} des cinq premiers départements</strong> sont occitans.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="qt-dep-faible">
+        <template>
+          <p class="odv-lecture">À l'autre bout, <strong>{{k:number}} départements</strong> en comptent
+            cinq ou moins.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot odv-chart-slot--haut">
+        <dsfr-data-chart id="g-dep" source="qt-dep-top" type="bar" horizontal stacked
+          label-field="departement" value-field="v_autre__sum__sum:Hors Occitanie"
+          value-fields="v_occ__sum__sum:Occitanie"
+          unit-tooltip=" établissements"
+          databox databox-title="Les vingt départements qui comptent le plus d'établissements labellisés"
+          databox-source="DGE — etablissements-labellises-qualite-tourisme, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-dep" source="qt-dep-top"
+          description="Barres horizontales triées : les vingt départements qui comptent le plus d'établissements labellisés, ceux d'Occitanie dans une couleur distincte. L'Hérault vient nettement en tête ; les Pyrénées-Orientales, l'Aude et le Gard figurent aussi parmi les huit premiers, avec le Var, les Alpes-Maritimes et la Charente-Maritime. Paris n'apparaît pas dans ce classement."></dsfr-data-a11y>
+      </div>
+    </div>
 
-  <!-- Le classement en aval, avec la part de chaque activité dans la SÉLECTION
-       (`share_percent`, 0.33.0) : le dénominateur est la somme des lignes de
-       sortie avant `limit`, donc les douze parts ne somment pas à 100 %, et un
-       filtre de région les recalcule. -->
-  <dsfr-data-query id="qt-activites-part" source="qt-activites-toutes" group-by="activite_du_professionnel"
-    aggregate="nb:sum, nb__sum:share_percent:part" order-by="nb__sum:desc" limit="12">
-  </dsfr-data-query>
-  <dsfr-data-normalize id="qt-activites" source="qt-activites-part"
-    compute="part_txt = concat(replace(concat(round(part, 1), ''), '.', ','), ' % de la sélection')"></dsfr-data-normalize>
+    <!-- ============================ NUANCE ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="Les dix activités, Occitanie et reste de la France">
+      <h2 class="fr-h4">En Occitanie, le label va aux caves et aux professionnels&nbsp;; ailleurs, d'abord aux offices de tourisme</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Les dix activités qui comptent le plus
+        d'établissements labellisés, en distinguant l'Occitanie du reste du jeu (reste de la France et
+        établissements sans région).</p>
+      <dsfr-data-repeat source="qt-cav-p">
+        <template>
+          <p class="odv-lecture">Les caveaux et points de vente labellisés sont <strong>{{nb:number}}</strong>,
+            dont <strong>{{occ__sum:number}} en Occitanie ({{p:number:0}}&nbsp;%)</strong>&nbsp;: une catégorie
+            presque inexistante ailleurs, que les caves viticoles de la région remplissent à elles seules.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="qt-tot-p">
+        <template>
+          <p class="odv-lecture">Hors Occitanie, le label est d'abord celui d'un service public&nbsp;: les
+            offices de tourisme y font <strong>{{p_ot_hors:number:0}}&nbsp;%</strong> des établissements
+            labellisés, première activité loin devant les campings. Sur tout le jeu, ils sont
+            {{ot__sum:number}} ({{p_ot:number:0}}&nbsp;%).</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot odv-chart-slot--haut">
+        <dsfr-data-chart id="g-act" source="qt-act" type="bar" horizontal stacked
+          label-field="activite_du_professionnel" value-field="v_autre__sum:Hors Occitanie"
+          value-fields="v_occ__sum:Occitanie"
+          unit-tooltip=" établissements"
+          databox databox-title="Les dix activités les plus représentées parmi les établissements labellisés"
+          databox-source="DGE — etablissements-labellises-qualite-tourisme, via data.economie.gouv.fr"
+          databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-act" source="qt-act"
+          description="Barres horizontales empilées et triées : les dix activités qui comptent le plus d'établissements labellisés, en distinguant l'Occitanie du reste. L'office de tourisme vient en tête, surtout hors Occitanie, devant le camping et le lieu de visite. Les caveaux et points de vente sont presque entièrement occitans."></dsfr-data-a11y>
+      </div>
+    </div>
+  </div>
 
-  <!-- `where` : 146 lignes sans département formaient un groupe « null » compté
-       comme un 100e département. -->
-  <dsfr-data-query id="qt-departements" source="qt-f" group-by="departement"
-    where="departement:isnotnull" aggregate="nom_du_professionnel:count:nb">
-  </dsfr-data-query>
-
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
+  <!-- ============================ EXPLORATION ============================ -->
   <section class="odv-bandeau">
     <div class="fr-container">
+      <h2 class="fr-h4">Trouver un établissement labellisé</h2>
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="qt-q" source="qt"
         fields="nom_du_professionnel, ville, code_postal_du_professionnel, adresse, activite_du_professionnel"
@@ -103,44 +314,28 @@
   </section>
 
   <div class="fr-container fr-mb-8w">
-        <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Trois compteurs qui suivent les filtres">
-    <p class="odv-lecture">Trois compteurs qui se recalculent à chaque filtre&nbsp;: combien
-      d'établissements, dans <strong>combien d'activités</strong>, sur combien de départements.</p>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="qt-f" value="count" format="nombre"
-        heading="Sélection courante" label="établissements labellisés" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="qt-activites-toutes" value="count" format="nombre"
-        heading="Diversité" label="activités représentées" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="qt-departements" value="count" format="nombre"
-        heading="Couverture" label="départements couverts" col="4"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    </div>
-
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Filtrer</h2>
+        <h3 class="fr-h6">Filtrer</h3>
 
         <div class="odv-viz" data-code="Recherche et facettes : deux balises">
-
         <dsfr-data-facets id="qt-f" source="qt-q"
           fields="activite_du_professionnel, region, departement"
           labels="activite_du_professionnel:Activité | region:Région | departement:Département"
-          searchable="departement, region" max-values="6"
+          searchable="departement, region, activite_du_professionnel" max-values="6"
           display="activite_du_professionnel:multiselect | region:multiselect | departement:multiselect">
         </dsfr-data-facets>
         </div>
       </details>
       <div class="fr-col-12 fr-col-lg-9">
         <div class="odv-viz" data-code="Carte des établissements et fiche en panneau latéral">
-        <h2 class="fr-h4">Où sont les établissements labellisés</h2>
-        <p class="odv-lecture">Le label couvre tout le territoire, avec une densité plus forte en
-          <strong>Occitanie</strong> et sur les littoraux. Les cinq encarts d'outre-mer suivent la
-          même sélection — Guadeloupe et Mayotte y sont vides, comme dans le jeu.</p>
+        <h3 class="fr-h5">Sur la carte</h3>
+        <p class="odv-lecture">Chaque point ouvre une fiche avec les coordonnées et le lien «&nbsp;Donner
+          son avis&nbsp;». Carte, liste et compteur suivent la recherche et les filtres — contrairement aux
+          graphiques du haut de page, qui portent sur le jeu entier.</p>
         <dsfr-data-map tiles-style="muted" name="Carte des établissements labellisés Qualité Tourisme"
           center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
           fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
@@ -167,21 +362,8 @@
       </div>
     </div>
 
-    <div class="odv-viz" data-code="Les douze activités les plus représentées">
-    <h2 class="fr-h4">Les douze activités les plus représentées</h2>
-    <p class="odv-lecture"><strong>Offices de tourisme, campings et lieux de visite</strong>
-      forment le gros des labellisés&nbsp;; l'hôtellerie vient ensuite, éclatée en plusieurs
-      activités. Les parts sont celles de la sélection courante&nbsp;: filtrer une région les
-      recalcule.</p>
-    <!-- Un classement se lit en podium : rang, libellé, part. `bar-position` (0.34) n'existe
-         pas dans la 0.33.0 chargée : la console l'a nommé, il a été retiré. -->
-    <dsfr-data-podium source="qt-activites" label-field="activite_du_professionnel" value-field="nb__sum"
-      subtitle-field="part_txt" value-unit="établissements" max-items="12"
-      selected-palette="sequentialDescending"></dsfr-data-podium>
-    </div>
-
     <div class="odv-viz" data-code="La grille des établissements, paginée et synchronisée à l'URL">
-    <h2 class="fr-h4">Les établissements</h2>
+    <h3 class="fr-h5 fr-mt-4w">La liste</h3>
     <dsfr-data-display source="qt-f" cols="3" pagination="12" uid-field="nom_du_professionnel"
       empty="Aucun établissement ne correspond à ces critères." url-sync count-label="établissement">
       <template>
@@ -191,12 +373,12 @@
               <div class="fr-card__start">
                 <p class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{activite_du_professionnel|Activité non précisée}}</p>
               </div>
-              <h3 class="fr-card__title fr-text--sm">{{nom_du_professionnel}}</h3>
+              <h4 class="fr-card__title fr-text--sm">{{nom_du_professionnel}}</h4>
               <p class="fr-card__desc fr-text--xs">
                 {{adresse|}}<br>{{code_postal_du_professionnel}} {{ville}}
               </p>
               <div class="fr-card__end">
-                <p class="fr-text--xs fr-mb-0">{{departement}} · {{telephone|téléphone non renseigné}}</p>
+                <p class="fr-text--xs fr-mb-0">{{departement|département non renseigné}} · {{telephone|téléphone non renseigné}}</p>
               </div>
             </div>
           </div>
@@ -204,158 +386,106 @@
       </template>
     </dsfr-data-display>
     </div>
+
+    <!-- ============================ CE QU'ON NE MONTRE PAS ============================ -->
+    <div class="fr-callout fr-mt-6w">
+      <h2 class="fr-callout__title fr-h5">Ce que cette page ne montre pas</h2>
+      <dsfr-data-repeat source="qt-tot-p">
+        <template>
+          <ul class="fr-callout__text fr-text--sm">
+            <li><strong>{{sans_loc:number}} établissements sans région ni département</strong>&nbsp;: comptés
+              dans le total, écartés des classements territoriaux et des parts. {{sdf_hors:number}} d'entre
+              eux passent par la marque occitane&nbsp;: la part de l'Occitanie est donc plutôt
+              sous-estimée.</li>
+            <li><strong>Pas de taux.</strong> Le jeu ne dit ni la capacité d'accueil ni la fréquentation&nbsp;:
+              les volumes ne sont rapportés à rien. «&nbsp;Paris, première destination du pays&nbsp;» est un
+              repère de contexte, pas un calcul de cette page.</li>
+            <li><strong>Une photographie datée.</strong> Les données ont été modifiées pour la dernière fois
+              le 25&nbsp;juin 2024 (métadonnées du portail)&nbsp;: des établissements ont pu entrer ou sortir
+              de la marque depuis. Le jeu ne porte aucune date de labellisation&nbsp;: pas d'évolution possible.</li>
+            <li><strong>La marque régionale est lue dans un texte.</strong> Le champ <code>partenaires</code>
+              concatène tous les partenaires d'un dossier&nbsp;; un établissement est compté «&nbsp;Sud de
+              France&nbsp;» s'il cite cette marque, quels que soient les autres partenaires cités.</li>
+          </ul>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
   <div class="fr-container fr-mb-8w">
   <details class="odv-technique" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
+    <summary>Analyse technique — ce que la recréation a coûté</summary>
   <section class="odv-analyse fr-py-4w">
     <div>
-      <h2>Analyse de reproduction — Qualité Tourisme</h2>
-
-      <p class="fr-text--sm">
-        <strong>Refonte «&nbsp;convaincre&nbsp;» (2026-09-20).</strong> Le classement des activités
-        est passé du graphique en barres au <code>dsfr-data-podium</code>, avec la part de chaque
-        activité dans la sélection par <code>share_percent</code> (0.33.0) — vérifié au
-        navigateur&nbsp;: les parts se recalculent quand on filtre une région. Chaque bloc porte
-        un bouton «&nbsp;Voir le code&nbsp;» qui lit le source de la page.
-      </p>
+      <h2>Analyse — Qualité Tourisme, une page recréée</h2>
 
       <p class="fr-text--lead">
         Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/qualite-tourisme/"
-        target="_blank" rel="noopener external">qualite-tourisme</a> — 33&nbsp;200 caractères de
-        template, six <code>ods-map</code> (la même carte dupliquée pour les points de rupture),
-        trois <code>ods-select</code> alimentés par des <code>ods-facet-results</code>, et une
-        grille de cartes paginée à 12.
+        target="_blank" rel="noopener external">qualite-tourisme</a>, un annuaire cartographié (six
+        <code>ods-map</code>, trois listes de filtres, une grille de 12). Recréation du 2026-09-26&nbsp;:
+        l'annuaire est conservé en bas de page, mais la page répond d'abord à une question que l'original
+        ne posait pas — <em>où la marque est-elle, et pourquoi là&nbsp;?</em>
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le motif «&nbsp;annuaire cartographié&nbsp;» est un cas d'école.</strong>
-              Une source, une recherche, des facettes, une carte, une grille de cartes&nbsp;:
-              cinq balises, et les cinq vues se refiltrent ensemble. La page d'origine mobilise
-              trois listes déroulantes câblées à la main sur des <code>ods-facet-results</code>,
-              plus un système de vues (<code>params.view</code>) pour basculer carte / liste.</li>
-            <li><strong>Une carte responsive, pas six.</strong> L'original duplique
-              <code>ods-map</code> six fois pour couvrir les points de rupture, chaque copie portant
-              les mêmes quinze attributs. <code>dsfr-data-map</code> est responsive par construction&nbsp;:
-              une seule déclaration.</li>
-            <li><strong>Le chargement, réglé d'avance.</strong> Leçon reprise de la page
-              <a href="/viz/plan-de-relance">Plan de relance</a>&nbsp;: la source passe par
-              <code>/exports/json</code>. Les 3&nbsp;604 établissements arrivent en une requête de
-              2,8&nbsp;s, là où le mode adaptateur en aurait enchaîné 37.</li>
-            <li><strong>Les facettes à 99 valeurs.</strong> L'attribut <code>searchable</code> ajoute
-              un champ de recherche dans la facette Département — nécessaire ici, et absent de
-              l'original qui déverse ses 99 départements dans une liste déroulante.</li>
+            <li><strong>Une requête pour tout.</strong> L'export de 3&nbsp;604 lignes nourrit le récit
+              (drapeaux par <code>compute</code>, <code>group-by</code>, <code>share_percent</code>) et
+              l'exploration (recherche, facettes, carte, liste).</li>
+            <li><strong>La marque régionale se lit dans un texte</strong>&nbsp;: <code>contains(partenaires,
+              'Occitanie Sud de France')</code> dans un <code>compute</code> suffit, sans découper le champ.</li>
+            <li><strong>Un rang contrefactuel sans script</strong>&nbsp;: «&nbsp;sans sa marque, l'Occitanie
+              serait 5<sup>e</sup>&nbsp;» est une <code>dsfr-data-join</code> sur une constante, un
+              <code>when</code> et une somme.</li>
+            <li><strong>Deux couleurs par deux colonnes empilées</strong>, sans <code>color-map</code>
+              (BUG-022) ni rang deviné pour <code>highlight-index</code>.</li>
           </ul>
         </div>
 
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Les liens optionnels — moins optionnels qu'annoncé.</strong> La première
-              version de cette analyse affirmait que <code>site_web</code> était «&nbsp;vide pour une
-              partie des établissements&nbsp;». Recompté sur l'export&nbsp;: <strong>1 valeur nulle sur
-              3&nbsp;604</strong> — et 11 URL malformées (<code>http:patisseriechapuis.fr</code>,
-              <code>htts://…</code>), ce qui est un problème de donnée, pas de template.
-              <code>email_de_l_etablissement</code> et <code>questionnaire_de_satisfaction</code> sont
-              renseignés sur 100&nbsp;% des lignes&nbsp;: ils peuvent être des liens sans aucune
-              conditionnelle. Pour le seul site manquant, une règle CSS
-              (<code>.odv-lien[href=""] { display: none }</code>, dans <code>site.css</code>) retire le
-              lien vide du flux — vérifié au navigateur&nbsp;: <code>display: none</code> sur le lien de
-              «&nbsp;BEST HOTEL&nbsp;», visible sur les autres. AM-007 reste vrai en général, mais cette
-              page n'en était pas un bon exemple.</li>
-            <li><strong>Placer l'interface des facettes.</strong> <code>dsfr-data-facets</code> rend
-              son interface là où la balise est écrite, alors que son <code>id</code> seul détermine
-              le câblage. La balise doit donc être physiquement dans la colonne de filtres, avant
-              les <code>dsfr-data-query</code> qui la consomment mais s'écrivent plus haut. On s'y
-              fait, mais l'ordre du fichier cesse de refléter l'ordre du pipeline.</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> Ajouté&nbsp;: le courriel
-              (lien <code>mailto:</code>), le bouton «&nbsp;Donner son avis&nbsp;» (lien vers le
-              questionnaire de satisfaction, propre à cette marque), le site en lien cliquable, le code
-              postal dans les champs de recherche. Corrigé&nbsp;: le KPI «&nbsp;activités
-              représentées&nbsp;» affichait 12 — il comptait les lignes de la requête limitée à 12 du
-              graphique&nbsp;; une seconde requête sans <code>limit</code> donne 28, le chiffre du
-              portail. Le KPI «&nbsp;départements&nbsp;» affichait 100&nbsp;: les 146 lignes sans
-              département formaient un groupe <code>null</code> — <code>where="departement:isnotnull"</code>
-              ramène à 99. Vérifié&nbsp;: la facette Activité liste les 28 valeurs avec les effectifs
-              exacts du portail (Office de tourisme 862, Camping 634…)&nbsp;; les cinq encarts DROM
-              s'affichent, Mayotte compris — vide comme sur le portail, le jeu n'y a aucun
-              établissement (0 point dans l'export, Guadeloupe non plus). <strong>Manque
-              encore</strong>&nbsp;: l'autocomplétion sur le nom et sur la commune/CP —
-              <code>dsfr-data-search</code> n'a pas d'attribut de suggestions (attributs vérifiés dans
-              le source&nbsp;: <code>fields</code>, <code>operator</code>, <code>debounce</code>,
-              <code>min-length</code>, <code>highlight</code>, <code>count</code>…)&nbsp;; la recherche
-              filtre à la frappe, ce qui rend le bouton «&nbsp;Rechercher&nbsp;» sans objet. La
-              «&nbsp;fiche établissement&nbsp;» est le panneau latéral de la carte, pas une page
-              dédiée&nbsp;: la mini-carte de la fiche n'a donc pas de sens ici.</li>
-            <li><strong>Aucun compte par facette côté serveur.</strong> Les compteurs affichés sont
-              calculés sur les 3&nbsp;604 lignes en mémoire — exact ici, mais ce serait faux si le
-              jeu dépassait ce que l'on charge. Le mode <code>server-facets</code> existe pour ça,
-              au prix de renoncer au filtrage instantané.</li>
+            <li><strong>La page précédente l'avait vu sans le dire</strong>&nbsp;: «&nbsp;une densité plus
+              forte en Occitanie&nbsp;». Ce n'est pas une limite de <code>dsfr-data</code>&nbsp;: la
+              concentration tient à un partenaire, et seul le champ <code>partenaires</code>, jamais
+              chargé jusqu'ici, le montrait.</li>
+            <li><strong>Les alias d'agrégation s'empilent</strong>&nbsp;: une somme de somme de somme
+              s'appelle <code>v_occ__sum__sum__sum</code>. Exact et prévisible, mais illisible dans un
+              gabarit.</li>
+            <li><strong>Pas de taux possible</strong> sans capacité ni fréquentation dans le jeu&nbsp;; et
+              la date de mise à jour (juin 2024) vient des métadonnées, écrite à la main.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
-            <p class="fr-text--sm">
-              10 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore ses contournements, qui ne sont simplement plus
-              nécessaires — à l'exception d'AM-011, dont le contournement a été retiré au lot 13&nbsp;:
-              la source est repassée en mode adaptateur avec <code>fetch-mode="export"</code>. Détail et vérification au <a href="/retours#AM-012">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>AM-032</strong> — <strong>0.21.1</strong> (#643)&nbsp;: largeur par défaut de 10 rem sur les encarts territoriaux, et attribut <code>width</code>&nbsp;: la règle de <code>site.css</code> n'est plus nécessaire.</li>
-              <li><strong>BUG-004</strong> — <strong>0.21.1</strong> (#642)&nbsp;: <code>fit-bounds</code> + <code>max-bounds</code> zoome sur une emprise réduite à un point, et <code>fit-zone</code> (#687, 0.22.0) cadre la métropole sans renoncer aux encarts.</li>
-              <li><strong>PG-012</strong> — <strong>0.21.1</strong> (#645)&nbsp;: <code>sort="count:desc"</code>&nbsp;: la grammaire <code>critère:sens</code> remplace le <code>-count</code> ambigu, qui est déprécié avec avertissement.</li>
-              <li><strong>PG-015</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code> nomme le groupe null au lieu de le laisser anonyme (l'écarter demande toujours un <code>where … is not null</code>).</li>
-              <li><strong>AM-007</strong> — <strong>0.22.0</strong> (#664)&nbsp;: blocs <code>{{#if}}</code> / <code>{{#unless}}</code> et pipe <code>{{lien:url}}</code> dans les templates&nbsp;: un lien optionnel s'enveloppe.</li>
-              <li><strong>AM-017</strong> — <strong>0.22.0</strong> (#686)&nbsp;: <code>tiles-style="muted|grey"</code> atténue le fond de carte&nbsp;: la classe <code>odv-fond-attenue</code> de <code>site.css</code> n'est plus nécessaire.</li>
-              <li><strong>AM-039</strong> — <strong>0.22.0</strong> (#664)&nbsp;: conditionnelle de template <code>{{#if}}</code> / <code>{{#unless}}</code>&nbsp;: le contournement par CSS d'attribut n'est plus nécessaire.</li>
-              <li><strong>PG-017</strong> — <strong>0.22.0</strong> (#659)&nbsp;: <code>meta.total</code> et avertissement du KPI <code>count</code> quand l'amont détient plus de lignes que la query limitée.</li>
-              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du portail, en une requête et <em>sans</em> quitter le mode adaptateur. Le contournement par source générique a été retiré de cette page.</li>
-            </ul>
-          </div>
         </div>
       </div>
 
-      <div class="fr-table fr-table--bordered">
+      <div class="fr-table fr-table--sm">
         <table>
-          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
-          <thead>
-            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
-          </thead>
+          <caption>Directive Opendatasoft → composant dsfr-data</caption>
+          <thead><tr><th scope="col">Besoin</th><th scope="col">Opendatasoft</th><th scope="col">dsfr-data</th></tr></thead>
           <tbody>
-            <tr><td>6 × <code>ods-map</code> (points de rupture)</td><td>1 × <code>dsfr-data-map</code></td><td>Responsive par construction</td></tr>
-            <tr><td><code>ods-facet-results</code> + <code>ods-select</code> × 3</td><td><code>dsfr-data-facets</code></td><td>Une balise contre trois montages</td></tr>
-            <tr><td>—</td><td><code>searchable</code> sur une facette</td><td>Sans équivalent&nbsp;: indispensable à 99 valeurs</td></tr>
-            <tr><td><code>ods-results</code> + grille manuelle</td><td><code>dsfr-data-display</code> + <code>&lt;template&gt;</code></td><td>Équivalent, pagination incluse</td></tr>
-            <tr><td>bascule carte / liste (<code>params.view</code>)</td><td>les deux affichées</td><td>Choix&nbsp;: le filtrage est commun, la bascule perd son intérêt</td></tr>
-            <tr><td>6 boutons «&nbsp;Centrer la carte sur&nbsp;» (6 <code>ods-map</code> en <code>ng-if</code>)</td><td><code>insets="drom"</code></td><td>Les cinq DROM visibles en même temps, sans bouton</td></tr>
-            <tr><td>page «&nbsp;fiche établissement&nbsp;» (9 champs, bouton «&nbsp;Donner son avis&nbsp;»)</td><td><code>dsfr-data-map-popup</code> + <code>&lt;template&gt;</code></td><td>Équivalent, en panneau latéral&nbsp;; liens sans conditionnelle car les champs sont remplis à 100&nbsp;%</td></tr>
-            <tr><td>autocomplétion (<code>ods-autocomplete</code> sur nom et commune/CP)</td><td>—</td><td>Sans équivalent&nbsp;: la recherche filtre à la frappe mais ne suggère rien</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code></td><td>Sans équivalent</td></tr>
+            <tr><td>Chargement du jeu</td><td><code>ods-dataset-context</code></td><td><code>dsfr-data-source fetch-mode="export"</code> + <code>select</code></td></tr>
+            <tr><td>Recherche nom / commune</td><td><code>ods-autocomplete</code> + bouton</td><td><code>dsfr-data-search count</code> (filtre à la frappe, sans suggestions)</td></tr>
+            <tr><td>Filtres activité / département</td><td><code>ods-facet-results</code> + <code>ods-select</code> × 3</td><td><code>dsfr-data-facets searchable</code></td></tr>
+            <tr><td>Carte à clusters, 6 recentrages</td><td>6 × <code>ods-map</code></td><td><code>dsfr-data-map</code> + <code>insets="drom"</code></td></tr>
+            <tr><td>Classements, parts, rang</td><td>—</td><td><code>dsfr-data-query</code>, <code>share_percent</code>, <code>dsfr-data-join</code></td></tr>
+            <tr><td>Chiffre dans une phrase</td><td><code>{{ … }}</code> + <code>ods-aggregation</code></td><td><code>dsfr-data-repeat</code> sur une requête d'une ligne</td></tr>
+            <tr><td>Fiche établissement</td><td>page dédiée</td><td><code>dsfr-data-map-popup</code> en panneau latéral</td></tr>
+            <tr><td>Grille paginée</td><td><code>ods-result-enumerator</code></td><td><code>dsfr-data-display pagination="12"</code></td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile, la plus rapide des cinq à ce jour.</strong> Le motif
-          «&nbsp;annuaire cartographié&nbsp;» est exactement ce pour quoi ces composants sont faits&nbsp;:
-          33&nbsp;200 caractères de template deviennent une trentaine de lignes, sans perte de
-          fonction, avec en plus la recherche dans les facettes, la carte accessible et les DROM dans
-          le cadre. Le seul point de friction — les liens optionnels — est un manque déjà consigné&nbsp;;
-          la relecture face au portail a surtout montré que cette page l'illustrait mal (1 site
-          manquant sur 3&nbsp;604) et que deux de ses KPI étaient faux par construction.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-007 (liens
-          optionnels), AM-013 (placement de l'UI des facettes), AV-008 (carte responsive unique).
-        </p>
+        <p><strong>L'annuaire se reproduisait à l'identique&nbsp;; le champ qu'il n'affichait pas racontait
+          l'essentiel.</strong> Près d'un label sur quatre est occitan, et les trois quarts de ceux-là
+          passent par la marque régionale Sud de France — des caves viticoles surtout. Ailleurs, le label
+          est d'abord celui des offices de tourisme. Une source, des transformateurs, aucune ligne de
+          JavaScript.</p>
       </div>
     </div>
   </section>

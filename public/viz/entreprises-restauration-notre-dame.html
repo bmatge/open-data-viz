@@ -4,38 +4,105 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rebâtir Notre-Dame — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la cartographie des entreprises de la restauration de Notre-Dame de Paris.">
+  <meta name="description" content="Notre-Dame rebâtie depuis toute la France : les ateliers d'art sont en région, et ce sont eux qui ouvrent leurs portes. Recréation avec dsfr-data du jeu restauration-notre-dame de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://data.economie.gouv.fr" crossorigin>
-  <link rel="preconnect" href="https://public.opendatasoft.com" crossorigin>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
   <script src="/assets/cles.js"></script>
-  <style>
-    /* Fiche entreprise (panneau latéral) — les templates dsfr-data n'ont pas de
-       conditionnelle : ce que l'original teste en ng-if se règle ici en CSS
-       par sélecteur d'attribut, à partir de la valeur injectée.            */
-    /* Galerie : 12 emplacements ; une vignette absente reçoit le repli « _ » */
-    .odv-galerie { display: flex; gap: .5rem; overflow-x: auto; padding-bottom: .5rem; }
-    .odv-galerie a { flex: 0 0 auto; background: none; }
-    .odv-galerie img { height: 96px; width: auto; display: block; border-radius: .25rem; }
-    .odv-galerie a[href$="/_"] { display: none; }
-    .odv-galerie-bloc:has(.odv-galerie > a:first-child[href$="/_"]) { display: none; }
-    /* Lien si la valeur commence par http, texte sinon (même règle que l'original) */
-    .odv-lien-ou-texte a:not([href^="http"]) { display: none; }
-    .odv-lien-ou-texte span[data-v^="http"], .odv-lien-ou-texte span[data-v=""] { display: none; }
-    .odv-lien-ou-texte:has(span[data-v=""]) { display: none; }
-  </style>
 </head>
 <body>
 <div id="site-header"></div>
 
 <main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       RECRÉATION (2026-09-26) — l'original est une vitrine : une carte, quatre
+       KPI, un camembert des métiers. La recréation part d'un croisement que
+       la vitrine ne fait pas : métier × lieu × ouverture au public. Les
+       métiers d'art et du patrimoine sont le premier contingent (103 sur 225),
+       le plus souvent installés hors d'Île-de-France (59 %), et ce sont eux
+       qui ouvrent leurs ateliers (35 %, contre 20 % des autres métiers).
+
+       UN chargement (225 lignes, sous le plafond de 1 000 de max-records) :
+       `fetch-mode="export"`, SANS `select` — les champs texte longs rendent
+       la projection plus lente que l'export complet (mesuré au lot 1).
+       ========================================================================== -->
+  <dsfr-data-source id="nd" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="restauration-notre-dame"
+    fetch-mode="export" api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Indicateurs 0/1 par entreprise : leur somme est un compte, leur rapport
+       une part d'entreprises (ratio de comptes, jamais une moyenne de taux).
+       - La région vient de `nom_officiel_region` (3 vides : les 3 entreprises
+         étrangères), pas de `reg_name` (30 vides, dont 27 en France — PG-006).
+       - `metier` : libellé court de la catégorie (l'apostrophe de « Métiers
+         d'art » ne s'écrit pas dans un littéral de compute : `contains`).
+       - `dep` : département lu dans le code postal (nul à l'étranger).
+       - `site` : 199 sites, dont une partie écrits « www.… » sans schéma — le
+         pipe `:url` en ferait un lien relatif ; on préfixe https://.
+       - Lien de visite : 7 valeurs, dont 3 ne sont pas des URL (« Journées du
+         Patrimoine », une adresse électronique) : lien si URL, texte sinon. -->
+  <dsfr-data-normalize id="nd-n" source="nd"
+    compute="k = 1;
+             tout = 'Ensemble';
+             metier = when contains(categories_de_metiers, 'art et du patrimoine') then 'Art et patrimoine'
+                      when contains(categories_de_metiers, 'accompagnement') then 'Accompagnement et soutien'
+                      when contains(categories_de_metiers, 'pilotage') then 'Aide au pilotage'
+                      when contains(categories_de_metiers, 'grands chantiers') then 'Bâtiment et grands chantiers'
+                      else 'Non précisé';
+             region = coalesce(nom_officiel_region, 'Étranger');
+             zone = when is_empty(nom_officiel_region) then 'Étranger' when nom_officiel_region = 'Île-de-France' then 'Île-de-France' else 'Autres régions';
+             idf = when nom_officiel_region = 'Île-de-France' then 1 else 0;
+             etr = when is_empty(nom_officiel_region) then 1 else 0;
+             reg = 1 - idf - etr;
+             hors = 1 - idf;
+             pub = when est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public = 'Oui' then 1 else 0;
+             label_epv = when epv = 'EPV' then 1 else 0;
+             art = when contains(categories_de_metiers, 'art et du patrimoine') then 1 else 0;
+             art_hors = art * hors;
+             art_pub = art * pub;
+             art_epv = art * label_epv;
+             dep = floor(etablissement_code_postal / 1000);
+             paris = when dep = 75 then 1 else 0;
+             pc = when dep = 92 or dep = 93 or dep = 94 then 1 else 0;
+             visite = when is_empty(indiquez_le_lien_ci_apres_pour_les_conditions_de_visite) then 0 else 1;
+             pub_sans = when pub = 1 and visite = 0 then 1 else 0;
+             photos = when is_empty(images) then 0 else 1;
+             sans_geo = when is_empty(geo_point) then 1 else 0;
+             site = when is_empty(indiquez_l_adresse_de_votre_site_internet) then ''
+                    when contains(indiquez_l_adresse_de_votre_site_internet, '://') then indiquez_l_adresse_de_votre_site_internet
+                    else concat('https://', indiquez_l_adresse_de_votre_site_internet);
+             visite_url = when contains(indiquez_le_lien_ci_apres_pour_les_conditions_de_visite, '://') then indiquez_le_lien_ci_apres_pour_les_conditions_de_visite else '';
+             visite_txt = when is_empty(indiquez_le_lien_ci_apres_pour_les_conditions_de_visite) then ''
+                          when contains(indiquez_le_lien_ci_apres_pour_les_conditions_de_visite, '://') then ''
+                          else indiquez_le_lien_ci_apres_pour_les_conditions_de_visite;
+             ouvert = coalesce(est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public, 'Non renseigné');
+             label = when epv = 'EPV' then 'Labellisée EPV' else 'Non labellisée'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, tous les chiffres du chapô ---------- -->
+  <dsfr-data-query id="syn" source="nd-n" group-by="tout"
+    aggregate="k:count:n, idf:sum:n_idf, hors:sum:n_hors, etr:sum:n_etr, pub:sum:n_pub, label_epv:sum:n_epv, art:sum:n_art, art_hors:sum:n_art_hors, art_pub:sum:n_art_pub, art_epv:sum:n_art_epv, paris:sum:n_paris, pc:sum:n_pc, visite:sum:n_visite, pub_sans:sum:n_pub_sans, photos:sum:n_photos, sans_geo:sum:n_sans_geo">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="pct_hors = n_hors / n * 100;
+             pct_art = n_art / n * 100;
+             pct_art_hors = n_art_hors / n_art * 100;
+             pct_art_pub = n_art_pub / n_art * 100;
+             n_autres = n - n_art;
+             n_autres_pub = n_pub - n_art_pub;
+             pct_autres_pub = (n_pub - n_art_pub) / (n - n_art) * 100;
+             pct_pub = n_pub / n * 100;
+             n_gc = n_idf - n_paris - n_pc;
+             n_sans_photo = n - n_photos">
+  </dsfr-data-normalize>
 
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
@@ -48,275 +115,290 @@
       </div>
     </nav>
 
-    <h1>Les entreprises à l'œuvre pour la restauration de Notre-Dame de Paris</h1>
+    <h1>Notre-Dame, rebâtie depuis toute la France&nbsp;: les ateliers d'art sont en région, et ce sont eux qui ouvrent leurs portes</h1>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-8">
-        <p>
-          Le 15 avril 2019, un important incendie a touché la cathédrale Notre-Dame de Paris. Pendant
-          cinq ans, un chantier hors du commun a été mis en œuvre pour la sauver et la restaurer, sous
-          le pilotage de l'établissement public Rebâtir Notre-Dame de Paris. La cathédrale a rouvert
-          ses portes le 8 décembre 2024, relevant le défi du délai de cinq ans.
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          {{n:number}}&nbsp;entreprises ont déclaré leur part du chantier de Notre-Dame de Paris, rouverte
+          le 8&nbsp;décembre 2024. <strong>{{n_hors:number}} ({{pct_hors:number:0}}&nbsp;%) sont installées hors
+          d'Île-de-France</strong>, dont {{n_etr:number}} à l'étranger. Le premier contingent est celui des
+          métiers d'art et du patrimoine ({{n_art:number}}, {{pct_art:number:0}}&nbsp;%)&nbsp;:
+          {{pct_art_hors:number:0}}&nbsp;% d'entre eux viennent des régions, <strong>{{pct_art_pub:number:0}}&nbsp;%
+          ouvrent leur atelier au public, contre {{pct_autres_pub:number:0}}&nbsp;% des autres métiers</strong>,
+          et ils portent {{n_art_epv:number}} des {{n_epv:number}} labels «&nbsp;Entreprise du patrimoine vivant&nbsp;».
         </p>
-        <p class="fr-text--sm">
-          Afin de valoriser les entreprises et ateliers d'art dont les compétences ont contribué au
-          relèvement de la cathédrale, la Direction générale des Entreprises et l'établissement public
-          Rebâtir Notre-Dame de Paris se sont associés pour créer cette cartographie.
-        </p>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <details class="fr-callout fr-icon-database-line odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-            <a href="https://data.economie.gouv.fr/explore/dataset/restauration-notre-dame/"
-               target="_blank" rel="noopener external"><code>restauration-notre-dame</code></a>
-            — 225 entreprises, produit par la DGE.
-          </p>
-    </details>
-      </div>
-    </div>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Direction générale des Entreprises et établissement public Rebâtir Notre-Dame de Paris, jeu
+      <a href="https://data.economie.gouv.fr/explore/dataset/restauration-notre-dame/" target="_blank" rel="noopener external"><code>restauration-notre-dame</code></a>
+      — données mises à jour le 16&nbsp;juillet 2026 (relevé du 26&nbsp;septembre 2026). Une ligne est une
+      entreprise qui a répondu au questionnaire de la DGE&nbsp;; toutes celles du chantier n'y figurent pas.
+    </p>
+
+    <!-- Le contraste en deux chiffres : le même geste, deux familles de métiers. -->
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <div class="odv-avant-apres fr-mb-6w">
+          <div class="odv-avant-apres__carte">
+            <p class="fr-text--sm fr-mb-1w">Les autres métiers ({{n_autres:number}} entreprises)</p>
+            <span class="odv-avant-apres__chiffre">{{pct_autres_pub:number:0}}&nbsp;%</span>
+            <p class="fr-mb-0">ouvrent leurs portes au public ({{n_autres_pub:number}})</p>
+          </div>
+          <div class="odv-avant-apres__carte odv-avant-apres__carte--apres">
+            <p class="fr-text--sm fr-mb-1w">Les métiers d'art et du patrimoine ({{n_art:number}} entreprises)</p>
+            <span class="odv-avant-apres__chiffre">{{pct_art_pub:number:0}}&nbsp;%</span>
+            <p class="fr-mb-0">ouvrent leur atelier au public ({{n_art_pub:number}})</p>
+          </div>
+        </div>
+      </template>
+    </dsfr-data-repeat>
   </div>
 
-  <!-- ==========================================================================
-       Deux sources, sur DEUX PORTAILS différents :
-       - les entreprises, sur data.economie.gouv.fr. /exports/json SANS `select` :
-         0,6 s, contre 10,4 s avec un `select` (les champs texte longs rendent la
-         projection pathologique) et 15 s en pagination /records.
-       - le fond des régions, sur public.opendatasoft.com. La page d'origine le
-         référence par `georef-france-region@public` : le suffixe @public désigne
-         le portail mutualisé d'Opendatasoft, et non ce portail-ci.
-       ========================================================================== -->
-
-  <dsfr-data-source id="nd" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="restauration-notre-dame"
-    fetch-mode="export" api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <!-- Lot 11 : fond régional décoratif servi par la page (recette du guide
-       dsfr-data : GeoJSON simplifié statique + transform="features"), à la place
-       du jeu georef-france-region de public.opendatasoft.com (AM-016 corrigé :
-       DSFR Chart n'embarque pas de GeoJSON réutilisable, seulement des SVG).
-       225 Ko, 13 régions métropolitaines — les DROM n'y sont pas. -->
-  <dsfr-data-source id="regions" url="/data/geo/regions-simplifiees.geojson" transform="features">
-  </dsfr-data-source>
-
-  <!-- `share_percent` (#926) : la part de chaque groupe, calculée sur toutes les
-       lignes avant `limit` ; une query `limit="1"` en aval isole le groupe de tête
-       pour la phrase de lecture (dsfr-data-repeat). -->
-  <dsfr-data-query id="nd-metiers" source="nd-f" group-by="categories_de_metiers"
-    aggregate="entreprise:count:nb, nb:share_percent:part" order-by="nb:desc">
+  <!-- ---------- Une ligne par famille de métier ---------- -->
+  <dsfr-data-query id="cat" source="nd-n" group-by="metier"
+    aggregate="k:count:n, pub:sum:n_pub, label_epv:sum:n_epv, idf:sum:n_idf, reg:sum:n_reg, etr:sum:n_etr">
   </dsfr-data-query>
-  <dsfr-data-query id="nd-metier-1" source="nd-metiers" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="cat-t" source="cat"
+    compute="part_pub = round(n_pub / n * 100, 0);
+             p_idf = round(n_idf / n * 100, 0);
+             p_reg = round(n_reg / n * 100, 0);
+             p_etr = round(n_etr / n * 100, 0);
+             p_hors = round((n_reg + n_etr) / n * 100, 0);
+             Metier = concat(metier, ' (', n, ')')">
+  </dsfr-data-normalize>
 
-  <dsfr-data-query id="nd-regions" source="nd-f" group-by="nom_officiel_region"
-    aggregate="entreprise:count:nb, nb:share_percent:part" order-by="nb:desc">
-  </dsfr-data-query>
-  <dsfr-data-query id="nd-region-1" source="nd-regions" limit="1"></dsfr-data-query>
-  <!-- « N régions réunissent la moitié des entreprises » : un rang par cumul d'une
-       constante (`un = 1` puis `running_sum`), la part cumulée, et la première ligne
-       qui franchit 50 %. Le tri par `nb` décroissant est refait ici : un cumul
-       n'a de sens qu'après le tri (#738). -->
-  <dsfr-data-normalize id="nd-regions-un" source="nd-regions" compute="un = 1"></dsfr-data-normalize>
-  <dsfr-data-query id="nd-regions-cumul" source="nd-regions-un" order-by="nb:desc"
-    aggregate="un:running_sum:rang, part:running_sum:cumul"></dsfr-data-query>
-  <dsfr-data-query id="nd-moitie" source="nd-regions-cumul" where="cumul:gte:50" limit="1"></dsfr-data-query>
+  <!-- ======================= PREUVE 1 — qui se visite ======================= -->
+  <dsfr-data-query id="cat-pub" source="cat-t" order-by="part_pub:desc"></dsfr-data-query>
+  <dsfr-data-query id="cat-pub-1" source="cat-pub" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="cat-pub-z" source="cat-t" order-by="part_pub:asc" limit="1"></dsfr-data-query>
 
-  <!-- Les deux KPI filtrés de l'original (`where … LIKE 'oui'`, `where epv LIKE 'EPV'`) :
-       un dsfr-data-query `where` sans agrégat laisse passer les lignes, le KPI les compte. -->
-  <dsfr-data-query id="nd-public" source="nd-f"
-    where="est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public:eq:Oui">
-  </dsfr-data-query>
-
-  <dsfr-data-query id="nd-epv" source="nd-f" where="epv:eq:EPV"></dsfr-data-query>
-
-  <!-- Liste alphabétique : dsfr-data-display n'a pas de tri, on l'intercale ici. -->
-  <dsfr-data-query id="nd-alpha" source="nd-f" order-by="entreprise:asc"></dsfr-data-query>
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
-  <section class="odv-bandeau">
-    <div class="fr-container">
-      <div class="odv-bandeau__recherche">
-        <dsfr-data-search id="nd-q" source="nd"
-          fields="entreprise, etablissement_localite, categories_de_metiers"
-          label="Rechercher une entreprise" placeholder="Nom, commune, métier…"
-          operator="words" count count-label="entreprise">
-        </dsfr-data-search>
-      </div>
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-visite">
+    <h2 id="t-visite" class="fr-h3">Un atelier d'art sur trois se visite&nbsp;; ailleurs, une entreprise sur cinq</h2>
+    <dsfr-data-repeat source="cat-pub-1">
+      <template>
+        <p class="odv-lecture">
+          En <strong>{{metier}}</strong>, {{n_pub:number}} entreprises sur {{n:number}} déclarent ouvrir leurs
+          portes au public, soit <strong>{{part_pub:number:0}}&nbsp;%</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="cat-pub-z">
+      <template>
+        <p class="fr-text--md">
+          Les trois autres familles sont au même niveau, autour d'une sur cinq&nbsp;: {{part_pub:number:0}}&nbsp;%
+          en {{metier}} ({{n_pub:number}} sur {{n:number}}), la plus basse.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part des entreprises ouvertes au public, par famille de métier">
+      <dsfr-data-chart id="g-visite" source="cat-pub" type="bar" horizontal
+        label-field="Metier" value-field="part_pub" name="Part des entreprises ouvertes au public"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Part des entreprises qui déclarent ouvrir leurs portes au public, par famille de métier (en % des entreprises de la famille)"
+        databox-source="DGE — restauration-notre-dame, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-visite" source="cat-pub" table
+        label-field="metier" value-field="part_pub, n_pub, n"
+        description="Barres horizontales triées par part décroissante : pour chaque famille de métier, la part des entreprises qui déclarent ouvrir leurs portes au public. Entre parenthèses, le nombre d'entreprises de la famille. Les métiers d'art et du patrimoine sont mis en évidence.">
+      </dsfr-data-a11y>
     </div>
+    <p class="fr-text--xs fr-hint-text">
+      Entre parenthèses, le nombre d'entreprises de la famille. «&nbsp;Ouvre ses portes au public&nbsp;» est la
+      réponse de l'entreprise au questionnaire, pas un horaire d'ouverture.
+    </p>
   </section>
 
-  <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <h2 class="fr-h4">La restauration de Notre-Dame de Paris en quelques chiffres</h2>
-    <dsfr-data-kpi-group class="fr-mb-1w">
-      <dsfr-data-kpi source="nd-f" value="count" format="nombre"
-        heading="Sélection courante" label="entreprises participant à la restauration *" col="3"></dsfr-data-kpi>
-      <dsfr-data-kpi source="nd-public" value="count" format="nombre"
-        heading="Ouverture" label="entreprises qui accueillent du public" col="3"></dsfr-data-kpi>
-      <dsfr-data-kpi source="nd-epv" value="count" format="nombre"
-        heading="Label" label="entreprises labellisées « Entreprise du patrimoine vivant »" col="3"></dsfr-data-kpi>
-      <!-- Chiffre éditorial, absent du jeu de données : littéral, comme dans l'original. -->
-      <dsfr-data-kpi value="=+ 3 000"
-        heading="2019 – 2024" label="compagnons et artisans mobilisés" col="3"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    <p class="fr-text--xs fr-hint-text fr-mb-4w">* Seules les entreprises ayant répondu à ce jour au
-      questionnaire figurent sur cette cartographie, qui pourra évoluer.</p>
+  <!-- ======================= PREUVE 2 — d'où elles viennent ======================= -->
+  <!-- Barres empilées à 100 % : Île-de-France / autres régions / étranger.
+       Palette par défaut, sans color-map : l'infobulle d'un graphique
+       multisérie garde alors des pastilles justes (BUG-022). -->
+  <dsfr-data-query id="cat-geo" source="cat-t" order-by="p_idf:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="cat-geo-g" source="cat-geo"
+    rename="p_idf:Île-de-France | p_reg:Autres régions | p_etr:Étranger">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cat-geo-1" source="cat-geo" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="cat-geo-z" source="cat-t" order-by="p_idf:desc" limit="1"></dsfr-data-query>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
-    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-geo">
+    <h2 id="t-geo" class="fr-h3">Les ateliers d'art viennent des régions&nbsp;; l'accompagnement du chantier est francilien</h2>
+    <dsfr-data-repeat source="cat-geo-1">
+      <template>
+        <p class="odv-lecture">
+          <strong>{{p_hors:number:0}}&nbsp;%</strong> des entreprises «&nbsp;{{metier}}&nbsp;» sont installées hors
+          d'Île-de-France ({{n_reg:number}} en région, {{n_etr:number}} à l'étranger, sur {{n:number}}).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="cat-geo-z">
+      <template>
+        <p class="fr-text--md">
+          À l'opposé, {{p_idf:number:0}}&nbsp;% des entreprises «&nbsp;{{metier}}&nbsp;» ({{n_idf:number}} sur
+          {{n:number}}) sont franciliennes&nbsp;: sécurité incendie, gardiennage, électricité, propreté — les services
+          qu'un chantier achète près de lui.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Localisation des entreprises par famille de métier">
+      <dsfr-data-chart id="g-geo" source="cat-geo-g" type="bar" horizontal stacked
+        label-field="Metier" value-field="Île-de-France" value-fields="Autres régions, Étranger"
+        unit-tooltip="%"
+        databox databox-title="Où sont installées les entreprises, par famille de métier (en % des entreprises de la famille)"
+        databox-source="DGE — restauration-notre-dame, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-geo" source="cat-geo" table
+        label-field="metier" value-field="p_idf, p_reg, p_etr, n_idf, n_reg, n_etr, n"
+        description="Barres horizontales empilées à 100 %, une par famille de métier, triées de la moins francilienne à la plus francilienne : part des entreprises installées en Île-de-France, dans une autre région, et à l'étranger.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Parts arrondies à l'unité&nbsp;: une barre peut totaliser 99 ou 101&nbsp;%. La région est celle de
+      l'établissement déclaré, pas celle des équipes envoyées sur le chantier.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-nuance">
+    <h2 id="t-nuance" class="fr-h3">Ce qui complique la lecture</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul>
+          <li><strong>L'Île-de-France, c'est d'abord la petite couronne.</strong> Des {{n_idf:number}}
+            entreprises franciliennes, {{n_paris:number}} seulement sont à Paris&nbsp;; {{n_pc:number}} sont
+            dans les Hauts-de-Seine, la Seine-Saint-Denis et le Val-de-Marne, {{n_gc:number}} en grande couronne.</li>
+          <li><strong>«&nbsp;Ouvert au public&nbsp;» ne dit pas comment.</strong> {{n_pub:number}} entreprises
+            répondent oui, mais {{n_visite:number}} seulement indiquent un moyen de réserver une visite —
+            {{n_pub_sans:number}} restent sans modalité.</li>
+          <li><strong>Le label EPV est presque réservé aux ateliers d'art</strong> ({{n_art_epv:number}} sur
+            {{n_epv:number}})&nbsp;: label de savoir-faire artisanaux et industriels d'excellence, il se retrouve dans la même
+            famille que l'ouverture au public. Les deux mesures ne sont pas indépendantes.</li>
+          <li><strong>Un annuaire déclaratif, pas un recensement.</strong> Seules les entreprises qui ont
+            répondu au questionnaire figurent ici&nbsp;; rien ne dit que les absentes se répartissent de la même
+            façon entre métiers et régions.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <dsfr-data-query id="nd-region" source="nd-f" group-by="region"
+    aggregate="k:count:Entreprises" order-by="Entreprises:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="nd-alpha" source="nd-f" order-by="entreprise:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Trouver une entreprise, un métier, un atelier à visiter</h2>
+    <p class="fr-text--sm fr-hint-text">
+      La recherche porte sur le nom, la commune, la catégorie et les deux textes de présentation. Les
+      filtres agissent sur les compteurs, la carte, les régions et la liste — pas sur les deux graphiques
+      précédents, qui portent sur l'ensemble du jeu.
+    </p>
+    <div class="fr-mb-4w">
+      <dsfr-data-search id="nd-q" source="nd-n"
+        fields="entreprise, etablissement_localite, categories_de_metiers, presentez_brievement_votre_entreprise_et_votre_activite, presentez_brievement_votre_intervention_sur_le_chantier_de_notre_dame_de_paris"
+        label="Rechercher" placeholder="Nom, commune, savoir-faire (vitrail, charpente, orgue…)"
+        operator="words" count count-label="entreprise">
+      </dsfr-data-search>
+    </div>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Filtrer</h2>
-
-        <!-- Accueil du public : choix unique. Le mode « radio » est un menu déroulant
-             à panneau (nom trompeur, documenté ainsi — PG-023, ex-AM-042, requalifié en
-             piège au lot 11) ; le choix unique en ligne natif est display="…:select". -->
+        <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="nd-f" source="nd-q"
-          fields="categories_de_metiers, est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public, epv, nom_officiel_region"
-          display="est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public:select | nom_officiel_region:multiselect"
-          labels="categories_de_metiers:Catégorie de métier | est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public:Accueil du public | epv:Label EPV | nom_officiel_region:Région"
-          searchable="nom_officiel_region" max-values="8">
+          fields="metier, ouvert, label, zone, region"
+          labels="metier:Famille de métier | ouvert:Ouvre ses portes au public | label:Label EPV | zone:Localisation | region:Région"
+          display="ouvert:radio-inline | region:multiselect"
+          searchable="region" max-values="8">
         </dsfr-data-facets>
       </details>
-      <div class="fr-col-12 fr-col-lg-9">
-        <div class="odv-viz" data-code="La carte des entreprises, colorée par catégorie de métier">
-        <h2 class="fr-h4">Où sont ces entreprises</h2>
-        <dsfr-data-repeat source="nd-region-1">
-          <template>
-            <p class="odv-lecture"><strong>{{nom_officiel_region}}</strong> rassemble
-              <strong>{{part:number:0}}&nbsp;%</strong> des entreprises de la sélection ({{nb:number}}).</p>
-          </template>
-        </dsfr-data-repeat>
+
+      <div>
+        <dsfr-data-kpi-group class="fr-mb-4w">
+          <dsfr-data-kpi source="nd-f" value="count" format="nombre"
+            heading="Sélection" label="entreprises" span="3"></dsfr-data-kpi>
+          <dsfr-data-kpi source="nd-f" value="count:pub:1 / count" format="pourcentage"
+            heading="Se visitent" label="ouvrent leurs portes au public" span="3"></dsfr-data-kpi>
+          <dsfr-data-kpi source="nd-f" value="count:hors:1 / count" format="pourcentage"
+            heading="Hors Île-de-France" label="dont l'étranger" span="3"></dsfr-data-kpi>
+          <dsfr-data-kpi source="nd-f" value="count:label_epv:1" format="nombre"
+            heading="Label EPV" label="entreprises du patrimoine vivant" span="3"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+
+        <h3 class="fr-h5">Où sont les entreprises</h3>
+        <p class="fr-text--sm">
+          Un point par entreprise, coloré par famille de métier. Cliquez un point pour lire ce que
+          l'entreprise a fait sur le chantier, et voir ses photos.
+        </p>
+        <div class="odv-viz" data-code="Carte des entreprises, filtrée">
+        <!-- max-bounds est une limite DURE de déplacement : 22° E pour atteindre
+             Sesto Fiorentino (11,2° E) et Varsovie (21° E). -->
         <dsfr-data-map tiles-style="muted" name="Carte des entreprises ayant contribué à la restauration de Notre-Dame de Paris"
-          center="46.8,2.5" zoom="5" height="580px" tiles="ign-plan"
+          center="46.8,2.5" zoom="5" height="560px" tiles="ign-plan"
           max-bounds="40,-6,56,22" insets="drom">
-          <!-- max-bounds est une limite DURE de déplacement (setMaxBounds) : bornée à
-               10° E, la carte ne pouvait pas atteindre Sesto Fiorentino (11,2° E) ni
-               Varsovie (21° E). Trois entreprises étrangères, à ne pas perdre. -->
-          <!-- fond régional décoratif : sert de repère, ne réagit pas au clic -->
-          <dsfr-data-map-layer source="regions" type="geoshape" geo-field="geometry"
-            color="#000091" fill-opacity="0.06" no-interactive>
-          </dsfr-data-map-layer>
           <dsfr-data-map-layer id="nd-couche" source="nd-f" type="circle" radius="6"
             geo-field="geo_point"
-            color-field="categories_de_metiers"
-            color-map="Métiers d'art et du patrimoine:#000091, Métiers de l'accompagnement et du soutien de la restauration:#E4794A, Métiers de l'aide au pilotage:#009081, Métiers du bâtiment et des grands chantiers:#6A6AF4"
+            color-field="metier"
+            color-map="Art et patrimoine:#000091, Accompagnement et soutien:#E4794A, Aide au pilotage:#009081, Bâtiment et grands chantiers:#A94645"
             tooltip-field="entreprise" cluster>
           </dsfr-data-map-layer>
           <dsfr-data-map-popup mode="panel-right" title-field="entreprise" width="420px">
             <template>
               <p class="fr-badge fr-badge--sm fr-badge--blue-ecume fr-mb-2v">{{categories_de_metiers|Catégorie non précisée}}</p>
               <p class="fr-text--sm fr-mb-1v">{{adresse_complete|}}</p>
-              <p class="fr-text--sm fr-mb-2v"><strong>{{etablissement_code_postal|}} {{etablissement_localite|}}</strong> — {{nom_officiel_region|hors région (étranger)}}</p>
-              <p class="fr-text--sm odv-lien-ou-texte fr-mb-2v">
-                <a href="{{indiquez_l_adresse_de_votre_site_internet|}}" target="_blank" rel="noopener external">{{indiquez_l_adresse_de_votre_site_internet|}}</a><span data-v="{{indiquez_l_adresse_de_votre_site_internet|}}">Site&nbsp;: {{indiquez_l_adresse_de_votre_site_internet|}}</span>
-              </p>
-              <p class="fr-text--sm"><strong>Activité de l'entreprise.</strong> {{presentez_brievement_votre_entreprise_et_votre_activite|Non renseignée.}}</p>
-              <p class="fr-text--sm"><strong>Son rôle sur le chantier de Notre-Dame de Paris.</strong> {{presentez_brievement_votre_intervention_sur_le_chantier_de_notre_dame_de_paris|Non renseigné.}}</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>Accueil du public&nbsp;:</strong> {{est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public|non renseigné}}</p>
-              <p class="fr-text--sm odv-lien-ou-texte fr-mb-2v">
-                Pour réserver une visite&nbsp;:
-                <a href="{{indiquez_le_lien_ci_apres_pour_les_conditions_de_visite|}}" target="_blank" rel="noopener external">{{indiquez_le_lien_ci_apres_pour_les_conditions_de_visite|}}</a><span data-v="{{indiquez_le_lien_ci_apres_pour_les_conditions_de_visite|}}">{{indiquez_le_lien_ci_apres_pour_les_conditions_de_visite|}}</span>
-              </p>
-              <!-- Galerie : `images` est un tableau dans l'export JSON ; accès par index,
-                   douze emplacements (le maximum observé), les absents sont masqués en CSS
-                   (repli « _ » ; un <img> sans boîte n'est jamais chargé en `loading="lazy"`). Les
-                   photos sont hébergées sur entreprises.gouv.fr et pèsent ~1,5 Mo chacune :
-                   chargement paresseux. Clic = photo en taille réelle dans un nouvel onglet. -->
-              <div class="odv-galerie-bloc">
-              <p class="fr-text--sm fr-mb-1v"><strong>Galerie de photos</strong> <span class="fr-text--xs">— Crédit photo&nbsp;: {{indiquez_le_s_credit_s_des_photos_deposees|non renseigné}}</span></p>
-              <div class="odv-galerie">
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.0|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.0|_}}" alt="Photo 1 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.1|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.1|_}}" alt="Photo 2 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.2|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.2|_}}" alt="Photo 3 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.3|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.3|_}}" alt="Photo 4 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.4|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.4|_}}" alt="Photo 5 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.5|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.5|_}}" alt="Photo 6 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.6|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.6|_}}" alt="Photo 7 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.7|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.7|_}}" alt="Photo 8 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.8|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.8|_}}" alt="Photo 9 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.9|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.9|_}}" alt="Photo 10 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.10|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.10|_}}" alt="Photo 11 — {{entreprise}}"></a>
-                <a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.11|_}}" target="_blank" rel="noopener external"><img loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{images.11|_}}" alt="Photo 12 — {{entreprise}}"></a>
-              </div>
-              </div>
+              <p class="fr-text--sm fr-mb-2v"><strong>{{region}}</strong>{{#if epv}} · Entreprise du patrimoine vivant{{/if}}</p>
+              {{#if site}}<p class="fr-text--sm fr-mb-2v"><a class="fr-link" href="{{site:url}}" target="_blank" rel="noopener external">Site internet</a></p>{{/if}}
+              <p class="fr-text--sm"><strong>Son rôle sur le chantier.</strong> {{presentez_brievement_votre_intervention_sur_le_chantier_de_notre_dame_de_paris|Non renseigné.}}</p>
+              <p class="fr-text--sm"><strong>L'entreprise.</strong> {{presentez_brievement_votre_entreprise_et_votre_activite|Non renseignée.}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Ouvre ses portes au public&nbsp;:</strong> {{ouvert}}</p>
+              {{#if visite_url}}<p class="fr-text--sm fr-mb-2v"><a class="fr-link" href="{{visite_url:url}}" target="_blank" rel="noopener external">Conditions de visite</a></p>{{/if}}
+              {{#if visite_txt}}<p class="fr-text--sm fr-mb-2v">Pour visiter&nbsp;: {{visite_txt}}</p>{{/if}}
+              {{#if images}}<p class="fr-text--sm fr-mb-1v"><strong>Photos</strong> <span class="fr-text--xs">— crédit&nbsp;: {{indiquez_le_s_credit_s_des_photos_deposees|non renseigné}}</span></p>{{/if}}
+              <div class="fr-grid-row fr-grid-row--gutters">{{#each images}}<div class="fr-col-6"><a href="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{.}}" target="_blank" rel="noopener external"><img class="fr-responsive-img" loading="lazy" src="https://www.entreprises.gouv.fr/files/files/img-carto-rebatir-nd/{{.}}" alt="Photo transmise par l'entreprise (ouvre l'image en taille réelle)"></a></div>{{/each}}</div>
             </template>
           </dsfr-data-map-popup>
-          <!-- La carte n'avait PAS de légende : la couche est colorée par catégorie de
-               métier, et le lecteur devait deviner. `dsfr-data-map-legend` la dérive
-               du rendu (une entrée par paire de color-map), et la rafraîchit à chaque filtre. -->
-          <dsfr-data-map-legend for="nd-couche" label="Catégorie de métier"></dsfr-data-map-legend>
         </dsfr-data-map>
         </div>
+        <dsfr-data-map-legend for="nd-couche" label="Famille de métier"></dsfr-data-map-legend>
+
+        <h3 class="fr-h5 fr-mt-6w">Combien d'entreprises par région</h3>
+        <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Entreprises par région, sélection courante">
+          <dsfr-data-chart id="g-region" source="nd-region" type="bar" horizontal
+            label-field="region" value-field="Entreprises" name="Entreprises"
+            databox databox-title="Entreprises par région d'implantation, sélection courante (nombre)"
+            databox-source="DGE — restauration-notre-dame, data.economie.gouv.fr" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-region" source="nd-region" table
+            label-field="region" value-field="Entreprises"
+            description="Barres horizontales triées : nombre d'entreprises par région d'implantation, pour la sélection courante de la recherche et des filtres. « Étranger » regroupe les entreprises installées hors de France.">
+          </dsfr-data-a11y>
+        </div>
+        <p class="fr-text--xs fr-hint-text">
+          Des nombres, pas des taux&nbsp;: le jeu ne dit rien du tissu d'entreprises de chaque région.
+        </p>
       </div>
     </div>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w fr-mb-4w">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-viz" data-code="Répartition par catégorie de métier">
-          <h3 class="fr-h6">Quels métiers</h3>
-          <dsfr-data-repeat source="nd-metier-1">
-            <template>
-              <p class="odv-lecture">Les <strong>{{categories_de_metiers}}</strong> font
-                <strong>{{part:number:0}}&nbsp;%</strong> des entreprises de la sélection ({{nb:number}}).</p>
-            </template>
-          </dsfr-data-repeat>
-          <div class="odv-chart-slot">
-            <dsfr-data-chart id="g-metiers" source="nd-metiers" type="pie"
-              label-field="categories_de_metiers" value-field="nb"
-              empty-label="Catégorie non précisée"
-              databox databox-title="Répartition par catégorie de métier"
-              databox-source="DGE — restauration-notre-dame, via data.economie.gouv.fr"
-              databox-download>
-            </dsfr-data-chart>
-            <dsfr-data-a11y for="g-metiers" source="nd-metiers" table download
-              label-field="categories_de_metiers" value-field="nb, part"
-              empty-label="Catégorie non précisée"></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-viz" data-code="Le classement des régions">
-          <h3 class="fr-h6">Quelles régions</h3>
-          <dsfr-data-repeat source="nd-moitie">
-            <template>
-              <p class="odv-lecture"><strong>{{rang}} régions</strong> suffisent à réunir
-                <strong>{{cumul:number:0}}&nbsp;%</strong> des entreprises de la sélection.</p>
-            </template>
-          </dsfr-data-repeat>
-          <!-- Un classement : le podium remplace le bar horizontal. Le groupe sans
-               région (entreprises étrangères) reste dans la requête — il compte au
-               dénominateur des parts — mais n'atteint pas le top 10. -->
-          <dsfr-data-podium source="nd-regions" label-field="nom_officiel_region" value-field="nb"
-            value-unit="entreprises" max-items="10" selected-palette="sequentialDescending">
-          </dsfr-data-podium>
-        </div>
-      </div>
-    </div>
-
+    <h3 class="fr-h5 fr-mt-6w">Les entreprises de la sélection, par ordre alphabétique</h3>
     <div class="odv-viz" data-code="Les fiches des entreprises, par ordre alphabétique">
-    <h2 class="fr-h4">Les entreprises, par ordre alphabétique</h2>
-    <dsfr-data-display source="nd-alpha" cols="2" pagination="10" uid-field="entreprise"
-      empty="Aucune entreprise ne correspond à ces critères." url-sync count-label="entreprise">
+    <dsfr-data-display source="nd-alpha" cols="3" pagination="12" uid-field="entreprise"
+      empty="Aucune entreprise dans votre sélection." url-sync count-label="entreprise">
       <template>
         <div class="fr-card fr-card--sm">
           <div class="fr-card__body">
             <div class="fr-card__content">
               <div class="fr-card__start">
-                <p class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{categories_de_metiers|Catégorie non précisée}}</p>
+                <ul class="fr-badges-group">
+                  <li><p class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{metier}}</p></li>
+                  {{#if pub}}<li><p class="fr-badge fr-badge--sm fr-badge--green-emeraude">Se visite</p></li>{{/if}}
+                </ul>
               </div>
-              <h3 class="fr-card__title fr-text--sm">{{entreprise}}</h3>
-              <p class="fr-card__desc fr-text--xs">
-                {{etablissement_code_postal}} {{etablissement_localite}} — {{nom_officiel_region|région non renseignée}}
-              </p>
+              <h4 class="fr-card__title fr-text--sm">{{entreprise}}</h4>
+              <p class="fr-card__desc fr-text--xs">{{presentez_brievement_votre_intervention_sur_le_chantier_de_notre_dame_de_paris}}</p>
               <div class="fr-card__end">
-                <p class="fr-text--xs fr-mb-0">
-                  Ouvre au public&nbsp;: {{est_ce_que_votre_entreprise_atelier_ouvre_ses_portes_au_public|non renseigné}}
-                  · Label EPV&nbsp;: {{epv|non}}
-                </p>
+                <p class="fr-text--xs fr-mb-0">{{etablissement_localite|}} · {{region}}{{#if epv}} · EPV{{/if}}</p>
               </div>
             </div>
           </div>
@@ -324,165 +406,73 @@
       </template>
     </dsfr-data-display>
     </div>
-  </div>
+  </section>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <details class="odv-technique fr-container" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-  <section class="odv-analyse fr-py-8w">
-    <div class="fr-container">
-      <h2>Analyse de reproduction — Rebâtir Notre-Dame</h2>
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Les personnes.</strong> Le jeu compte des entreprises, pas des compagnons&nbsp;: le
+            «&nbsp;+&nbsp;3&nbsp;000 compagnons et artisans&nbsp;» affiché par la page d'origine n'est pas dans
+            les données et n'est pas repris ici. Ni effectifs, ni montants, ni dates d'intervention.</li>
+          <li><strong>Les entreprises qui n'ont pas répondu</strong> au questionnaire&nbsp;: la cartographie est
+            déclarée évolutive par ses producteurs.</li>
+          <li><strong>{{n_sans_geo:number}} entreprise sans coordonnées</strong>&nbsp;: comptée partout, absente
+            de la carte.</li>
+          <li><strong>La colonne <code>reg_name</code></strong>, vide pour 30 entreprises dont 27 en France&nbsp;:
+            la région vient de <code>nom_officiel_region</code>, vide seulement pour les {{n_etr:number}}
+            entreprises étrangères, regroupées sous «&nbsp;Étranger&nbsp;».</li>
+          <li><strong>{{n_sans_photo:number}} entreprises sans photo</strong> sur {{n:number}}&nbsp;: leur fiche
+            n'a pas de galerie.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Pour aller plus loin&nbsp;:
+      <a href="https://www.rebatirnotredamedeparis.fr/" target="_blank" rel="noopener external">l'établissement public Rebâtir Notre-Dame de Paris</a>,
+      <a href="https://data.economie.gouv.fr/pages/entreprises-restauration-notre-dame/" target="_blank" rel="noopener external">la page d'origine</a>.
+    </p>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la recréation a coûté</summary>
 
       <p class="fr-text--lead">
-        Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/entreprises-restauration-notre-dame"
-        target="_blank" rel="noopener external">entreprises-restauration-notre-dame</a> —
-        27&nbsp;700 caractères, une carte à deux couches (fond régional + entreprises colorées par
-        métier), une autocomplétion maison, trois filtres, et une modale de fiche entreprise ouverte
-        par clic sur la carte.
+        Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/entreprises-restauration-notre-dame/"
+        target="_blank" rel="noopener external">entreprises-restauration-notre-dame</a> — une vitrine&nbsp;:
+        carte à épingles, quatre KPI dont un chiffre écrit à la main, un camembert des métiers, une fiche par
+        entreprise. La recréation croise ce que la vitrine juxtapose&nbsp;: métier, lieu, ouverture au public.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Deux portails dans une même carte.</strong> Le fond régional vient de
-              <code>public.opendatasoft.com</code>, les entreprises de
-              <code>data.economie.gouv.fr</code>&nbsp;: deux <code>dsfr-data-source</code>, deux
-              <code>dsfr-data-map-layer</code>, aucune plomberie. C'est un cas où le modèle
-              «&nbsp;composants frères reliés par identifiant&nbsp;» paie&nbsp;: la provenance d'une
-              couche n'est qu'un attribut.</li>
-            <li><strong>La coloration par catégorie.</strong> Le <code>color-categories</code> de
-              l'original se transpose en <code>color-field</code> + <code>color-map</code>, presque
-              mot pour mot.</li>
-            <li><strong>La fiche entreprise.</strong> L'original ouvre une modale pilotée par un
-              <code>ng-if</code> sur un paramètre de contexte, avec une gymnastique de
-              <code>refine-on-click</code> pour la remplir. Ici,
-              <code>dsfr-data-map-popup mode="panel-right"</code> et un
-              <code>&lt;template&gt;</code>&nbsp;: le panneau latéral affiche la présentation de
-              l'entreprise et le récit de son intervention sur le chantier, qui sont le cœur
-              éditorial de cette dataviz.</li>
-            <li><strong>Le bon endpoint, mesuré.</strong> Sur ces 225 lignes,
-              <code>/exports/json</code> sans <code>select</code> répond en 0,6&nbsp;s. Avec un
-              <code>select</code>, il monte à 10,4&nbsp;s&nbsp;; en pagination <code>/records</code>,
-              à 15&nbsp;s pour trois pages. L'écart est contre-intuitif et ne se devine pas.</li>
+            <li><strong>Un chargement, tout le reste dans le navigateur.</strong> 225 lignes en une requête
+              d'export&nbsp;; chapô, deux graphiques, nuances, carte, facettes et liste en dérivent.</li>
+            <li><strong>Le croisement en indicateurs 0/1.</strong> Un <code>compute</code> pose
+              <code>art</code>, <code>pub</code>, <code>idf</code>&nbsp;; leurs produits (<code>art * pub</code>)
+              et leurs sommes donnent chaque chiffre du chapô sans seconde requête.</li>
+            <li><strong>La fiche sans CSS de page.</strong> <code>{{#each images}}</code> remplace les douze
+              emplacements indexés et les sélecteurs <code>a[href$="/_"]</code>&nbsp;; <code>{{#if}}</code>
+              remplace la règle «&nbsp;lien si http, texte sinon&nbsp;» en CSS d'attribut. Le bloc
+              <code>&lt;style&gt;</code> de la page a disparu.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Cliquer la carte pour filtrer le reste&nbsp;: pas d'équivalent.</strong>
-              L'original porte <code>refine-on-click-context</code>,
-              <code>refine-on-click-context-field</code> et <code>refine-on-click-map-field</code>&nbsp;:
-              cliquer une entreprise sur la carte refiltre le contexte, donc toutes les autres vues.
-              <code>dsfr-data-map-layer</code> n'a rien de tel — un clic ouvre une popup, il n'émet
-              pas de commande de filtre vers la source. C'est le manque le plus net de cette page
-              (registre&nbsp;: AM-015).</li>
-            <li><strong>Le jeu fédéré ne se trouve pas où il est écrit.</strong> La page d'origine
-              référence <code>georef-france-region@public</code>. Interrogé sur l'API de
-              data.economie.gouv.fr, ce jeu «&nbsp;n'existe pas&nbsp;»&nbsp;: le suffixe
-              <code>@public</code> désigne le portail mutualisé
-              <code>public.opendatasoft.com</code>, où il se trouve effectivement — sans clé, en
-              CORS ouvert. Rien à reprocher à <code>dsfr-data</code>, mais c'est une convention
-              Opendatasoft qu'il faut connaître pour reproduire une page hors de son portail
-              d'origine (registre&nbsp;: PG-005).</li>
-            <li><strong>Une région renseignée dans deux colonnes.</strong> Le jeu porte
-              <code>reg_name</code> (vide 30 fois sur 225) et <code>nom_officiel_region</code>
-              (vide 3 fois). Rien ne le signale&nbsp;: il faut compter les valeurs nulles pour
-              choisir la bonne colonne. Un filtre sur la mauvaise aurait silencieusement écarté
-              13&nbsp;% des entreprises.</li>
-            <li><strong>Le fond régional coûte cher, et ne se voit pas.</strong> 135&nbsp;Ko de
-              polygones et 4 à 5&nbsp;s de réponse pour une couche décorative — qui, posée sur
-              <code>ign-plan</code>, est quasi invisible&nbsp;: le fond IGN dessine déjà les limites
-              administratives et son niveau de détail concurrence la donnée. La carte d'origine
-              s'appuyait sur <code>jawg.light</code>, un fond neutre où les aplats régionaux
-              ressortaient. Or les préréglages de <code>dsfr-data-map</code> ne comportent aucun fond
-              clair et neutre&nbsp;: <code>carto-positron</code> est déprécié et redirige vers
-              <code>ign-plan</code>. J'en avais tiré deux demandes&nbsp;: un fond neutre parmi les
-              préréglages (AM-017), et un fond administratif embarqué que
-              <code>dsfr-data-chart type="map-reg"</code> aurait déjà (AM-016). La relecture du lot 11 a
-              corrigé les deux. <em>Le fond qui s'efface</em> s'obtient en CSS de page, parce que les
-              tuiles Leaflet sont en light DOM&nbsp;: <code>.leaflet-tile-pane { filter: grayscale(1)
-              opacity(.55) }</code>, une règle de <code>site.css</code> posée par une classe sur les huit
-              cartes du banc — capture avant/après à l'appui, les aplats régionaux et les grappes
-              ressortent, y compris dans les encarts ultramarins. Souverain, zéro dépendance. Et
-              «&nbsp;l'IGN publie un plan clair&nbsp;» était faux&nbsp;: le WMTS libre ne sert que
-              <code>PLANIGNV2</code> en raster, les styles atténués sont des tuiles vectorielles que Leaflet
-              ne rend pas. <em>Le fond administratif embarqué</em> reposait sur une prémisse fausse&nbsp;:
-              <code>map-reg</code> embarque des SVG, pas des géométries réutilisables par Leaflet. La
-              recette du guide de la bibliothèque est un GeoJSON simplifié <em>statique</em> servi par la
-              page (<code>url="/data/geo/regions-simplifiees.geojson" transform="features"</code>,
-              225&nbsp;Ko, 0,8&nbsp;ms en local contre 307&nbsp;Ko et 1,1&nbsp;s sur
-              <code>public.opendatasoft.com</code> ce jour)&nbsp;: 13 polygones rendus, plus aucun
-              aller-retour vers un second portail. Ce qui reste vrai&nbsp;: ce fichier ne couvre que la
-              métropole, les encarts DROM n'ont plus de contour — et le préréglage neutre reste
-              demandé (AM-017 réduit), comme la livraison de GeoJSON simplifiés dans le paquet npm
-              (AM-016 réécrit).</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> La confrontation à
-              la fiche d'audit (<code>docs/portail/</code>) a fait remonter cinq écarts, quatre
-              ont été comblés en HTML déclaratif. <em>Les quatre KPI de l'original</em>&nbsp;:
-              «&nbsp;accueillent du public&nbsp;» et «&nbsp;labellisées EPV&nbsp;» sont un
-              <code>dsfr-data-query where="…:eq:Oui"</code> sans agrégat dont le KPI compte les
-              lignes (225 / 61 / 28, identiques à l'API, et qui suivent les filtres)&nbsp;; le
-              «&nbsp;+&nbsp;3&nbsp;000 compagnons&nbsp;», chiffre éditorial absent des données,
-              est un littéral <code>value="=+ 3 000"</code>, ce que le composant prévoit.
-              <em>La fiche</em>&nbsp;: site internet et lien de réservation suivent la règle de
-              l'original «&nbsp;lien si la valeur commence par http, texte sinon, rien si
-              vide&nbsp;» — les templates n'ont pas de conditionnelle, mais un sélecteur CSS
-              d'attribut (<code>a:not([href^="http"])</code>, <code>:has(span[data-v=""])</code>)
-              la rend sans une ligne de script. <em>La galerie</em>&nbsp;: <code>images</code> est
-              un tableau dans l'export JSON et les templates acceptent l'index
-              (<code>{{images.3|_}}</code>)&nbsp;; douze emplacements — le maximum observé —, les
-              absents masqués par <code>a[href$="/_"]</code>, chargement paresseux (les photos
-              d'entreprises.gouv.fr pèsent 1,6&nbsp;Mo pièce, et un <code>&lt;img&gt;</code> sans
-              boîte n'est jamais chargé). Vérifié sur Pradeau Morin (1 photo affichée, 11
-              masquées, «&nbsp;Journées du Patrimoine&nbsp;» rendu en texte) et Ombre et Lumière
-              (bloc galerie absent). <em>La liste alphabétique</em>&nbsp;:
-              <code>dsfr-data-display</code> n'a pas de tri, un <code>dsfr-data-query
-              order-by="entreprise:asc"</code> s'intercale. <em>Les entreprises hors
-              région</em>&nbsp;: le relevé les disait étrangères&nbsp;; en fait 27 des 30 lignes sans
-              <code>reg_name</code> sont à Paris, Lyon ou Marseille et ont un
-              <code>nom_officiel_region</code>, seules Varsovie, Bruxelles et Sesto Fiorentino
-              sont hors de France — et <code>max-bounds</code> étant une limite dure de
-              déplacement (<code>setMaxBounds</code>), la borne à 10°&nbsp;E rendait deux
-              d'entre elles inatteignables&nbsp;; élargie à 22°&nbsp;E, vérifié par
-              <code>setView</code>. Restent&nbsp;: la visionneuse modale (les vignettes ouvrent
-              la photo dans un nouvel onglet), les épingles à picto par métier, les deux boutons
-              radio Oui / Non en ligne — le mode <code>display="…:radio"</code> rend un menu à
-              panneau, ce que sa documentation annonce d'ailleurs («&nbsp;dropdown collapsible avec
-              radio buttons&nbsp;»)&nbsp;; c'est un nom trompeur, pas un manque (PG-023, ex-AM-042, requalifié en
-              piège au lot 11), et le choix unique en ligne natif est <code>display="…:select"</code>,
-              posé ici&nbsp;: «&nbsp;Tous / Non (164) / Oui (61)&nbsp;», choisir Oui ramène la
-              sélection à 61 —, les tags supprimables des filtres actifs (les facettes
-              n'ont qu'un bouton «&nbsp;Réinitialiser&nbsp;»), et la fiche ouverte depuis la
-              liste ou une suggestion de recherche — la fiche ne s'ouvre qu'au clic sur la
-              carte.</li>
+            <li><strong>Une apostrophe dans une valeur.</strong> «&nbsp;Métiers d'art et du patrimoine&nbsp;» ne
+              s'écrit pas dans un littéral de <code>compute</code> (quotes simples)&nbsp;: la comparaison passe
+              par <code>contains(…, 'art et du patrimoine')</code>.</li>
+            <li><strong>Des sites sans schéma.</strong> Une partie des adresses sont écrites
+              «&nbsp;www.…&nbsp;»&nbsp;; <code>{{site:url}}</code> les laisse passer comme URL relatives (lien
+              cassé vers le banc lui-même). Préfixe <code>https://</code> calculé en amont.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
-            <p class="fr-text--sm">
-              12 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore ses contournements, qui ne sont simplement plus
-              nécessaires — à l'exception d'AM-011, dont le contournement a été retiré au lot 13&nbsp;:
-              la source est repassée en mode adaptateur avec <code>fetch-mode="export"</code>. Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-005</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code>&nbsp;: plus de «&nbsp;Série N&nbsp;» en légende pour un groupe sans valeur.</li>
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>AM-032</strong> — <strong>0.21.1</strong> (#643)&nbsp;: largeur par défaut de 10 rem sur les encarts territoriaux, et attribut <code>width</code>&nbsp;: la règle de <code>site.css</code> n'est plus nécessaire.</li>
-              <li><strong>BUG-004</strong> — <strong>0.21.1</strong> (#642)&nbsp;: <code>fit-bounds</code> + <code>max-bounds</code> zoome sur une emprise réduite à un point, et <code>fit-zone</code> (#687, 0.22.0) cadre la métropole sans renoncer aux encarts.</li>
-              <li><strong>PG-012</strong> — <strong>0.21.1</strong> (#645)&nbsp;: <code>sort="count:desc"</code>&nbsp;: la grammaire <code>critère:sens</code> remplace le <code>-count</code> ambigu, qui est déprécié avec avertissement.</li>
-              <li><strong>AM-007</strong> — <strong>0.22.0</strong> (#664)&nbsp;: blocs <code>{{#if}}</code> / <code>{{#unless}}</code> et pipe <code>{{lien:url}}</code> dans les templates&nbsp;: un lien optionnel s'enveloppe.</li>
-              <li><strong>AM-016</strong> — <strong>0.22.0</strong> (#688)&nbsp;: le paquet npm livre <code>dsfr-data/geo/regions.json</code> (18 régions) et <code>departements.json</code>.</li>
-              <li><strong>AM-017</strong> — <strong>0.22.0</strong> (#686)&nbsp;: <code>tiles-style="muted|grey"</code> atténue le fond de carte&nbsp;: la classe <code>odv-fond-attenue</code> de <code>site.css</code> n'est plus nécessaire.</li>
-              <li><strong>AM-039</strong> — <strong>0.22.0</strong> (#664)&nbsp;: conditionnelle de template <code>{{#if}}</code> / <code>{{#unless}}</code>&nbsp;: le contournement par CSS d'attribut n'est plus nécessaire.</li>
-              <li><strong>AM-015</strong> — <strong>0.23.0</strong> (#681)&nbsp;: événement <code>dsfr-data-map-select</code> et <code>refine-on-click="champ"</code>&nbsp;: un clic sur la carte filtre le contexte.</li>
-              <li><strong>PG-023</strong> — <strong>0.23.0</strong> (#684)&nbsp;: mode <code>display="champ:radio-inline"</code>&nbsp;: des boutons radio DSFR en ligne, avec une option «&nbsp;Tous&nbsp;».</li>
-              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du portail, en une requête et <em>sans</em> quitter le mode adaptateur. Le contournement par source générique a été retiré de cette page.</li>
-            </ul>
-          </div>
         </div>
       </div>
 
@@ -493,38 +483,25 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>2 contextes, 2 <code>ods-map-layer</code></td><td>2 sources, 2 <code>dsfr-data-map-layer</code></td><td>Équivalent, y compris entre portails</td></tr>
-            <tr><td><code>color-categories</code></td><td><code>color-field</code> + <code>color-map</code></td><td>Transposition directe</td></tr>
-            <tr><td>modale + <code>refine-on-click</code></td><td><code>dsfr-data-map-popup mode="panel-right"</code></td><td>Meilleur panneau, mais pas de filtrage au clic</td></tr>
-            <tr><td><code>refine-on-click-context</code></td><td>—</td><td><strong>Sans équivalent</strong></td></tr>
-            <tr><td>autocomplétion maison (<code>ods-adv-analysis</code>)</td><td><code>dsfr-data-search</code></td><td>Une balise contre trente lignes</td></tr>
-            <tr><td>KPI <code>where … LIKE 'oui'</code></td><td><code>dsfr-data-query where="…:eq:Oui"</code> + KPI <code>count</code></td><td>Équivalent, une balise de plus</td></tr>
-            <tr><td>KPI codé en dur «&nbsp;+ 3 000&nbsp;»</td><td><code>dsfr-data-kpi value="=+ 3 000"</code></td><td>Littéral prévu</td></tr>
-            <tr><td><code>ng-if</code> lien / texte, <code>ng-repeat</code> galerie</td><td>index de tableau <code>{{images.N|_}}</code> + sélecteurs CSS d'attribut</td><td>Sans conditionnelle ni boucle&nbsp;: le CSS fait le tri</td></tr>
-            <tr><td>visionneuse modale (<code>params.image_selected</code>)</td><td>photo dans un nouvel onglet</td><td><strong>Sans équivalent</strong></td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>insets</code>, <code>dsfr-data-map-legend</code> (la carte n'en avait pas), podium des régions, trois phrases de lecture calculées (<code>share_percent</code>, <code>running_sum</code>)</td><td>Sans équivalent</td></tr>
+            <tr><td><code>ods-dataset-context</code></td><td><code>dsfr-data-source fetch-mode="export"</code></td><td>Une requête pour tout le jeu</td></tr>
+            <tr><td>KPI <code>where … LIKE 'oui'</code></td><td>KPI <code>count:pub:1 / count</code></td><td>Une part, plus un compte</td></tr>
+            <tr><td>autocomplétion maison + 3 filtres</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code></td><td>Équivalent, recherche dans les récits en plus</td></tr>
+            <tr><td><code>ods-map</code> + épingles par métier</td><td><code>dsfr-data-map</code> + <code>color-map</code> + légende dérivée</td><td>Équivalent, sans pictos</td></tr>
+            <tr><td>modale <code>ng-if</code> + <code>ng-repeat</code> galerie</td><td><code>map-popup panel-right</code>, <code>{{#if}}</code>, <code>{{#each}}</code></td><td>Équivalent, sans visionneuse</td></tr>
+            <tr><td>camembert des métiers</td><td>barres triées de taux, barres empilées à 100&nbsp;%</td><td>L'histoire, absente de l'original</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile, avec un manque identifié.</strong> La carte à deux couches
-          alimentées par deux portails différents se déclare sans effort, et le panneau latéral rend
-          mieux justice au contenu éditorial que la modale d'origine. Le seul écart de fonction est
-          le <em>refine-on-click</em>&nbsp;: chez Opendatasoft, cliquer un point de la carte filtre
-          tout le reste de la page. C'est une interaction utile sur une cartographie d'annuaire, et
-          elle n'a pas d'équivalent déclaratif ici.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-015
-          (filtrer au clic sur la carte), AM-016 réécrit et AM-017 réduit au lot 11 (fond statique, fond atténué par CSS), PG-023 (ex-AM-042, mode radio mal nommé), PG-005 (le suffixe
-          <code>@public</code> d'Opendatasoft), PG-006 (deux colonnes pour la même information),
-          AV-010 (couches de portails différents dans une même carte).
-        </p>
+        <p><strong>La vitrine cachait une géographie des métiers.</strong> Compter les entreprises par région
+          dit «&nbsp;l'Île-de-France d'abord&nbsp;» (108 sur 225)&nbsp;; croiser avec le métier dit l'inverse pour
+          les ateliers d'art, majoritairement en région et deux fois plus souvent ouverts au public. Tout
+          s'établit en déclaratif, depuis une seule requête.</p>
       </div>
-    </div>
+    </details>
   </section>
-  </details>
 
 </main>
 
@@ -533,6 +510,7 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- bundle complet (ESM) : la cartographie charge Leaflet en import dynamique -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>

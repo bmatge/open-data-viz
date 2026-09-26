@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Les personnels dans les écoles primaires et maternelles — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz des personnels du premier degré : trois blocs sur quatre en erreur chez l'original, zéro ici, et le bon jeu de données.">
+  <meta name="description" content="Recréation avec dsfr-data de la dataviz des personnels du premier degré : en un an, la part des enseignants de 50 ans et plus a augmenté dans toutes les académies.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,145 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       Des trois jeux « personnels », celui du premier degré est le seul à porter
+       DEUX rentrées (2024 et 2025). L'histoire est là : en un an, la part des
+       ETP enseignants de 50 ans et plus a augmenté dans les 31 académies. La
+       reproduction précédente avait le chiffre dans un paragraphe figé ; ici il
+       ouvre la page.
+
+       94 584 lignes (7 Mo gzip) : pas de chargement client. Tout est AGRÉGÉ
+       CÔTÉ SERVEUR (mode adaptateur ODS, `group-by` + `select`), quelques
+       dizaines de lignes au total, puis dérivé dans la page.
+
+       Périmètre de TOUTES les parts : les écoles renseignées
+       (`etp_de_femmes_enseignantes is not null`). Les écoles de moins de 5 ETP
+       sont sous secret statistique : leur total d'ETP est publié, pas sa
+       décomposition. Rapporter un numérateur masqué au total complet
+       sous-estimerait tout de ~18 % (les tranches d'âge sommeraient à 82 %).
+       ========================================================================== -->
+
+  <!-- ---------- Le récit : France entière, les deux rentrées ---------- -->
+
+  <!-- La France, une ligne par rentrée : le périmètre renseigné… -->
+  <dsfr-data-source id="s-nat" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
+    where="etp_de_femmes_enseignantes is not null"
+    group-by="annee_de_la_rentree_scolaire"
+    select="count(*) as n, sum(etp_d_enseignants_hommes_et_femmes) as ens,
+            sum(etp_d_enseignants_de_moins_de_35_ans) as j,
+            sum(etp_d_enseignants_de_35_a_moins_de_50_ans) as m,
+            sum(etp_d_enseignants_de_50_ans_ou_plus) as v"
+    max-records="10"></dsfr-data-source>
+  <!-- … et le périmètre complet, pour dire ce que le secret retire. -->
+  <dsfr-data-source id="s-tot" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
+    group-by="annee_de_la_rentree_scolaire"
+    select="count(*) as n_tot, sum(etp_d_enseignants_hommes_et_femmes) as ens_tot"
+    max-records="10"></dsfr-data-source>
+  <dsfr-data-join id="nat-j" left="s-nat" right="s-tot" on="annee_de_la_rentree_scolaire" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="nat-p" source="nat-j"
+    compute="pj = j / ens * 100; pm = m / ens * 100; pv = v / ens * 100;
+             pj_aff = round(pj, 1); pm_aff = round(pm, 1); pv_aff = round(pv, 1);
+             n_secret = n_tot - n; pct_secret = (ens_tot - ens) / ens_tot * 100; k = 'fr'">
+  </dsfr-data-normalize>
+
+  <!-- Avant / après : la tranche sur l'axe, la rentrée en série. -->
+  <dsfr-data-unpivot id="nat-l" source="nat-p" id-cols="annee_de_la_rentree_scolaire"
+    value-cols="pj_aff:Moins de 35 ans, pm_aff:35 à 49 ans, pv_aff:50 ans et plus"
+    var-name="tranche" value-name="part"></dsfr-data-unpivot>
+  <dsfr-data-pivot id="nat-t" source="nat-l" row="tranche" column="annee_de_la_rentree_scolaire"
+    value="part" aggregate="first" column-format="Rentrée {value} (%)"></dsfr-data-pivot>
+
+  <!-- Les deux rentrées côte à côte, sur une seule ligne (clé constante). -->
+  <dsfr-data-query id="n24" source="nat-p" where="annee_de_la_rentree_scolaire:eq:2024"></dsfr-data-query>
+  <dsfr-data-query id="n25" source="nat-p" where="annee_de_la_rentree_scolaire:eq:2025"></dsfr-data-query>
+  <dsfr-data-normalize id="n24-r" source="n24"
+    rename="ens:ens24 | j:j24 | m:m24 | v:v24 | pv:pv24 | n:n24 | pct_secret:sec24"></dsfr-data-normalize>
+  <dsfr-data-normalize id="n25-r" source="n25"
+    rename="ens:ens25 | j:j25 | m:m25 | v:v25 | pv:pv25 | n:n25 | pct_secret:sec25 | n_secret:nsec25 | n_tot:ntot25"></dsfr-data-normalize>
+  <dsfr-data-join id="duo-j" left="n24-r" right="n25-r" on="k" type="inner"></dsfr-data-join>
+
+  <!-- Les académies : une ligne par (rentrée, académie), puis une colonne par rentrée. -->
+  <dsfr-data-source id="s-aca" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
+    where="etp_de_femmes_enseignantes is not null"
+    group-by="annee_de_la_rentree_scolaire, libelle_academie"
+    select="count(*) as n, sum(etp_d_enseignants_hommes_et_femmes) as ens,
+            sum(etp_d_enseignants_de_50_ans_ou_plus) as v"
+    max-records="200"></dsfr-data-source>
+  <dsfr-data-normalize id="aca-p" source="s-aca" compute="pv = v / ens * 100"></dsfr-data-normalize>
+  <dsfr-data-pivot id="aca-w" source="aca-p" row="libelle_academie" column="annee_de_la_rentree_scolaire"
+    value="pv" aggregate="first" column-format="pv_{value}"></dsfr-data-pivot>
+  <dsfr-data-normalize id="aca-d" source="aca-w"
+    compute="delta = pv_2025 - pv_2024; delta_aff = round(delta, 1);
+             pv24_aff = round(pv_2024, 1); pv25_aff = round(pv_2025, 1);
+             hausse = when delta > 0 then 1 else 0; k = 'fr'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="aca-o" source="aca-d" order-by="delta:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-t" source="aca-o"
+    rename="libelle_academie:Académie | pv24_aff:Rentrée 2024 (%) | pv25_aff:Rentrée 2025 (%) | delta_aff:Écart (points)"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-n" source="aca-d" group-by="k"
+    aggregate="hausse:sum:nh, libelle_academie:count:na"></dsfr-data-query>
+  <dsfr-data-query id="aca-min" source="aca-d" order-by="delta:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-min-k" source="aca-min"
+    rename="libelle_academie:min_nom | delta:min_delta"></dsfr-data-normalize>
+
+  <!-- Le chapô : la France (2 rentrées) + le compte des académies en hausse. -->
+  <dsfr-data-join id="chapo-1" left="duo-j" right="aca-n" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="chapo-2" left="chapo-1" right="aca-min-k" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="chapo" source="chapo-2"
+    compute="dpts = pv25 - pv24; dv = v25 - v24; dm = m24 - m25; dj = j24 - j25;
+             dens = abs(ens25 - ens24);
+             sens = when ens25 < ens24 then 'recule de' else 'progresse de'">
+  </dsfr-data-normalize>
+
+  <!-- Les départements, rentrée 2025 : le renseigné, et le total (secret compris).
+       Jointure 1-1 : une ligne par code de chaque côté (group-by). -->
+  <dsfr-data-source id="s-dep" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
+    where="annee_de_la_rentree_scolaire = '2025' and etp_de_femmes_enseignantes is not null"
+    group-by="code_departement, libelle_departement"
+    select="count(*) as n, sum(etp_d_enseignants_hommes_et_femmes) as ens,
+            sum(etp_d_enseignants_de_50_ans_ou_plus) as v"
+    max-records="200"></dsfr-data-source>
+  <dsfr-data-source id="s-dep-tot" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
+    where="annee_de_la_rentree_scolaire = '2025'"
+    group-by="code_departement"
+    select="count(*) as n_tot, sum(etp_d_enseignants_hommes_et_femmes) as ens_tot"
+    max-records="200"></dsfr-data-source>
+  <dsfr-data-join id="dep-j" left="s-dep" right="s-dep-tot" on="code_departement" type="inner"></dsfr-data-join>
+  <!-- La carte dessine l'arrondi, son résumé se calcule sur la colonne brute
+       pondérée par l'effectif (map-summary-field, PG-031). -->
+  <dsfr-data-normalize id="dep-c" source="dep-j"
+    compute="pv = v / ens * 100; pv_aff = round(pv, 1);
+             pct_secret = (ens_tot - ens) / ens_tot * 100; pct_secret_aff = round(pct_secret, 1);
+             n_secret = n_tot - n; k = 'fr'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-o" source="dep-c" order-by="pv:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="dep-t" source="dep-o"
+    rename="libelle_departement:Département | pv_aff:50 ans et plus (% des ETP renseignés) | pct_secret_aff:ETP sous secret statistique (%) | n:Écoles renseignées | n_secret:Écoles sous secret"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-haut" source="dep-c" order-by="pv:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-bas" source="dep-c" order-by="pv:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="sec-haut" source="dep-c" order-by="pct_secret:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="haut-k" source="dep-haut"
+    rename="libelle_departement:haut_nom | pv:haut_pv | pct_secret:haut_sec"></dsfr-data-normalize>
+  <dsfr-data-normalize id="bas-k" source="dep-bas"
+    rename="libelle_departement:bas_nom | pv:bas_pv | pct_secret:bas_sec"></dsfr-data-normalize>
+  <dsfr-data-normalize id="sec-k" source="sec-haut"
+    rename="libelle_departement:sec_nom | pct_secret:sec_pct | n_secret:sec_n | n_tot:sec_ntot"></dsfr-data-normalize>
+  <dsfr-data-join id="geo-1" left="haut-k" right="bas-k" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="geo-2" left="geo-1" right="sec-k" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="geo" left="geo-2" right="n25-r" on="k" type="inner"></dsfr-data-join>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,101 +171,186 @@
       </div>
     </nav>
 
-    <h1>Les écoles primaires et maternelles en chiffres : effectifs en équivalents temps plein et profils des personnels</h1>
+    <h1>Écoles&nbsp;: en un an, les enseignants de 50&nbsp;ans et plus ont gagné du terrain dans toutes les académies</h1>
 
-    <p class="fr-text--lead">
-      Rentrée 2024 : <strong>47 507 écoles</strong> et <strong>316 887 équivalents temps plein
-      enseignants</strong>. Les caractéristiques des personnels ne sont publiées que pour les écoles
-      d'au moins 5 ETP — <strong>27 151 écoles sur 47 507</strong> — et sur ce périmètre, le corps
-      enseignant du premier degré est féminin à <strong>86,9 %</strong>. Source : DEPP.
+    <!-- Chapô CALCULÉ : les deux rentrées et le compte des académies sont lus dans la donnée. -->
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="fr-text--lead">
+          À la rentrée 2025, <strong>{{pv25:number:1}}&nbsp;%</strong> des enseignants des écoles
+          maternelles et élémentaires ont 50&nbsp;ans ou plus, contre {{pv24:number:1}}&nbsp;% un an
+          plus tôt&nbsp;: <strong>+{{dpts:number:1}}&nbsp;point en une rentrée</strong>. La hausse
+          touche <strong>{{nh}} académies sur {{na}}</strong>. Les 50&nbsp;ans et plus comptent
+          {{dv:number:0}}&nbsp;ETP de plus, quand le total des enseignants mesurés {{sens}}
+          {{dens:number:0}}&nbsp;ETP.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Toutes les parts de cette page sont des parts d'<strong>équivalents temps plein</strong> (ETP)
+      enseignants, calculées comme un rapport de deux sommes, et portent sur les écoles d'au moins
+      5&nbsp;ETP&nbsp;: dans les plus petites, le secret statistique masque l'âge des enseignants
+      (voir la section&nbsp;4). Source&nbsp;: DEPP, rentrées 2024 et 2025.
     </p>
-
-    <details class="fr-callout fr-icon-alert-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">L'original ne fonctionne pas — et ce n'est pas un détail</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        Relevé le 10 septembre 2026 :
-        <strong>trois des quatre blocs de données de la page d'origine affichent
-        « Erreur — Request failed with status code 400 »</strong> (le KPI de parité et les deux
-        graphiques), <strong>le quatrième affiche 631 578</strong>, qui est la somme des deux
-        rentrées 2024 et 2025 du même corps enseignant, et <strong>les trois filtres n'ont aucun
-        effet</strong> — ils pilotent le jeu du <em>second</em> degré, que la page déclare et
-        n'utilise dans aucun bloc.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        La cause est un typage : dans le jeu branché sur la page,
-        <strong>sept colonnes de mesure sur neuf sont déclarées <code>text</code></strong>, parce
-        que le secret statistique y écrit la chaîne <code>"ss"</code> sur 40 476 lignes.
-        Un <code>sum()</code> sur une colonne texte est refusé par l'API — <code>dsfr-data</code>
-        échouerait exactement pareil, l'API est la même. <strong>Le producteur a déjà publié le
-        correctif</strong> : <code>…1d-numerique</code>, « copie pour dataviz », mêmes 94 584 lignes,
-        21 champs tous numériques. C'est ce jeu-là qui est branché ici.
-      </p>
-    </details>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-indicateurs_personnels_etablissements1d-numerique/"
            target="_blank" rel="noopener external"><code>fr-en-indicateurs_personnels_etablissements1d-numerique</code></a>
-        — <strong>94 584 lignes</strong>, 21 champs, DEPP, deux rentrées : <strong>2024</strong>
-        (47 507 écoles) et <strong>2025</strong> (47 077). C'est le seul des trois jeux du triplet
-        « personnels » à porter plus d'une rentrée — et la seule des trois pages dont le graphique
-        temporel ne s'affiche pas.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>7 Mo transférés et 96 Mo à désérialiser si on le chargeait entier</strong> : ici
-        tout est <strong>agrégé côté serveur</strong>, six requêtes de quelques centaines d'octets,
-        rejouées à chaque filtre. C'est l'écart d'architecture avec les pages collèges et lycées,
-        qui chargent leurs 10 697 lignes en une fois.
+        (DEPP) — une école par ligne et par rentrée, deux rentrées publiées. C'est la «&nbsp;copie
+        pour dataviz&nbsp;» du jeu branché sur l'original, dont sept colonnes sur neuf sont typées
+        texte parce que le secret y est écrit <code>ss</code>&nbsp;: sur ce jeu-là, toute somme
+        renvoie une erreur, et trois des quatre blocs de l'original l'affichaient. Ici, les
+        agrégats sont calculés par le portail (quelques dizaines de lignes), jamais les
+        94&nbsp;584 lignes brutes.
       </p>
     </details>
 
-    <details class="fr-callout fr-icon-scales-3-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le secret statistique, et le dénominateur qu'il impose</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        « Si l'école comprend moins de 5 ETP, les valeurs sur les caractéristiques des personnels
-        sont remplies en <code>ss</code> » : <strong>20 356 écoles sur 47 507</strong>
-        (56 906 ETP, 18 % du total) sont masquées en 2024. Leur total d'ETP reste renseigné, mais
-        pas sa décomposition. <strong>Rapporter un numérateur masqué à un dénominateur complet
-        sous-estime tout d'environ 18 %</strong> — c'est ce que ferait un portage littéral de la
-        formule d'origine : 71,3 % de femmes au lieu de 86,9 %, et des tranches d'âge qui somment
-        à 82 % au lieu de 100.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>La somme qui ne fait pas 100 est le témoin.</strong> Toutes les proportions de cette
-        page portent sur les <strong>27 151 écoles renseignées</strong> (259 980 ETP), et les trois
-        tranches d'âge somment bien à 100.
-      </p>
-    </details>
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="n25-r" value="v25:sum / ens25:sum" format="pourcentage" decimals="1"
+        heading="50 ans et plus"
+        label="des ETP enseignants des écoles, rentrée 2025"></dsfr-data-kpi>
+      <dsfr-data-kpi source="chapo" value="nh:sum" format="nombre" decimals="0"
+        heading="Académies où cette part augmente"
+        lines='[{"value":"na:sum","format":"nombre","decimals":0,"prefix":"sur ","suffix":" académies, de 2024 à 2025"}]'
+        label="aucune ne recule"></dsfr-data-kpi>
+      <dsfr-data-kpi source="n25-r" value="j25:sum / ens25:sum" format="pourcentage" decimals="1"
+        heading="Moins de 35 ans"
+        label="des ETP enseignants des écoles, rentrée 2025"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve, nationale ---------- -->
+    <h2 class="fr-h3">1. Les 50 ans et plus progressent, toutes les autres tranches reculent</h2>
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="odv-lecture">Entre les deux rentrées, les 35-49&nbsp;ans perdent
+          <strong>{{dm:number:0}}&nbsp;ETP</strong>, presque autant que les 50&nbsp;ans et plus en
+          gagnent ({{dv:number:0}})&nbsp;; les moins de 35&nbsp;ans en perdent {{dj:number:0}}. Le jeu
+          ne suit pas les personnes, mais la symétrie est celle d'une génération nombreuse qui passe
+          la cinquantaine, sans relève équivalente par le bas.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Âge des enseignants des écoles, 2024 et 2025">
+      <dsfr-data-chart id="g-nat" source="nat-l" type="bar"
+        label-field="tranche" value-field="part:Part des ETP enseignants (%)" series-field="annee_de_la_rentree_scolaire"
+        unit-tooltip="%" y-min="0"
+        databox databox-title="Répartition des ETP enseignants des écoles par âge, rentrées 2024 et 2025"
+        databox-source="DEPP — fr-en-indicateurs_personnels_etablissements1d-numerique, écoles d'au moins 5 ETP"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-nat" source="nat-t" table download
+        filename="ecoles-age-enseignants-2024-2025.csv"
+        label-field="tranche" value-field="Rentrée 2024 (%), Rentrée 2025 (%)"
+        description="Part des ETP enseignants des écoles par tranche d'âge, rentrées 2024 et 2025, en pourcentage. La tranche des 50 ans et plus est la seule à progresser ; les trois tranches somment à 100 chaque année."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. La preuve, partout ---------- -->
+    <h2 class="fr-h3">2. La hausse n'épargne aucune académie</h2>
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="odv-lecture">Chaque barre mesure l'écart, en points, de la part des 50&nbsp;ans et
+          plus entre les rentrées 2024 et 2025. Elles sont toutes du même côté&nbsp;: {{nh}} académies
+          sur {{na}} en hausse, la plus faible étant {{min_nom}} (+{{min_delta:number:1}}&nbsp;point).
+          Les écarts les plus forts concernent de petits effectifs (Nouvelle-Calédonie, Guadeloupe,
+          Martinique), où quelques départs ou arrivées suffisent à déplacer la part.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Écart de la part des 50 ans et plus, par académie">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-aca" source="aca-o" type="bar" horizontal
+        label-field="libelle_academie" value-field="delta_aff:Écart 2025 − 2024 (points)"
+        unit-tooltip="points"
+        databox databox-title="Évolution de la part des enseignants de 50 ans et plus entre 2024 et 2025, par académie, en points"
+        databox-source="DEPP — fr-en-indicateurs_personnels_etablissements1d-numerique, écoles d'au moins 5 ETP"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-aca" source="aca-t" table download
+        filename="ecoles-50-ans-et-plus-par-academie.csv"
+        label-field="Académie"
+        value-field="Rentrée 2024 (%), Rentrée 2025 (%), Écart (points)"
+        description="Part des ETP enseignants de 50 ans et plus dans les écoles de chaque académie, rentrées 2024 et 2025, et écart en points, de la plus forte hausse à la plus faible. Toutes les académies sont en hausse."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La géographie ---------- -->
+    <h2 class="fr-h3">3. Du simple au double selon le département</h2>
+    <dsfr-data-repeat source="geo">
+      <template>
+        <p class="odv-lecture">À la rentrée 2025, la part des 50&nbsp;ans et plus va de
+          <strong>{{bas_pv:number:1}}&nbsp;%</strong> à {{bas_nom}} à
+          <strong>{{haut_pv:number:1}}&nbsp;%</strong> en {{haut_nom}}. Le corps enseignant le plus
+          âgé est dans le Massif central, les Pyrénées, les Alpes du Sud, la Bretagne occidentale et
+          aux Antilles&nbsp;; le plus jeune en Guyane, à Mayotte et dans la banlieue
+          parisienne (Seine-Saint-Denis, Val-d'Oise, Essonne, Seine-et-Marne).</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Carte : part des 50 ans et plus par département">
+      <dsfr-data-chart id="g-dep" source="dep-c" type="map"
+        code-field="code_departement" value-field="pv_aff"
+        map-summary="weighted" map-summary-weight="ens" map-summary-field="pv"
+        name="Enseignants de 50 ans et plus (%)" unit-tooltip="%"
+        selected-palette="sequentialAscending"
+        databox databox-title="Enseignants de 50 ans et plus, par département, écoles, rentrée 2025"
+        databox-source="DEPP — écoles d'au moins 5 ETP"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dep" source="dep-t" table download
+        filename="ecoles-50-ans-et-plus-par-departement.csv"
+        label-field="Département"
+        value-field="50 ans et plus (% des ETP renseignés), ETP sous secret statistique (%), Écoles renseignées, Écoles sous secret"
+        description="Part des ETP enseignants de 50 ans et plus dans les écoles d'au moins 5 ETP de chaque département, rentrée 2025, du plus âgé au plus jeune, avec la part des ETP sous secret statistique."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 4. La nuance ---------- -->
+    <h2 class="fr-h3">4. Là où les enseignants sont les plus âgés, une grande part d'entre eux n'est pas mesurée</h2>
+    <dsfr-data-repeat source="geo">
+      <template>
+        <p class="odv-lecture">Les écoles de moins de 5&nbsp;ETP ne publient pas l'âge de leurs
+          enseignants&nbsp;: {{nsec25:number:0}} écoles sur {{ntot25:number:0}} à la rentrée 2025,
+          soit <strong>{{sec25:number:1}}&nbsp;% des ETP</strong> en France. Mais cette part est très
+          inégale&nbsp;: <strong>{{sec_pct:number:1}}&nbsp;% en {{sec_nom}}</strong>, et
+          {{haut_sec:number:1}}&nbsp;% en {{haut_nom}}, le département le plus âgé, contre
+          {{bas_sec:number:1}}&nbsp;% à {{bas_nom}}. La carte de la section&nbsp;3 décrit donc,
+          dans les départements ruraux, les seules écoles de 5&nbsp;ETP et plus&nbsp;: rien ne dit
+          que les petites écoles aient la même pyramide des âges.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Carte : part des ETP sous secret statistique par département">
+      <dsfr-data-chart id="g-sec" source="dep-c" type="map"
+        code-field="code_departement" value-field="pct_secret_aff"
+        map-summary="weighted" map-summary-weight="ens_tot" map-summary-field="pct_secret"
+        name="ETP sous secret statistique (%)" unit-tooltip="%"
+        selected-palette="sequentialAscending"
+        databox databox-title="Part des ETP enseignants dont l'âge n'est pas publié (écoles de moins de 5 ETP), par département, rentrée 2025"
+        databox-source="DEPP — fr-en-indicateurs_personnels_etablissements1d-numerique"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-sec" source="dep-t" table download
+        filename="ecoles-secret-statistique-par-departement.csv"
+        label-field="Département"
+        value-field="ETP sous secret statistique (%), Écoles sous secret, Écoles renseignées, 50 ans et plus (% des ETP renseignés)"
+        description="Part des ETP enseignants des écoles de moins de 5 ETP, dont les caractéristiques sont sous secret statistique, par département, rentrée 2025. Elle est la plus forte dans les départements ruraux et la plus faible en Île-de-France et en outre-mer."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       94 584 lignes : le chargement client est exclu. Six sources en mode
-       adaptateur ODS, toutes agrégées côté serveur, toutes abonnées au même
-       contexte — le `where` statique de chaque source et la surcouche du
-       contexte fusionnent (getEffectiveWhere).
-
-       `limit="1"` + lecture en `:max` sur les sources d'agrégat sans group_by :
-       piège maison, `select=count(*)` sans `group_by` renvoie la valeur
-       répétée une fois par ligne de page.
-       ========================================================================== -->
-
-  <!-- Périmètre complet : le nombre d'écoles et le total d'ETP -->
+  <!-- ---------- 5. Exploration ----------
+       Les filtres arrivent APRÈS le récit et ne pilotent que cette section :
+       le contexte ne diffuse qu'aux quatre sources ci-dessous. -->
   <dsfr-data-source id="e-tot" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr"
     dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
     select="count(*) as ecoles, sum(etp_d_enseignants_hommes_et_femmes) as etp"
     limit="1"></dsfr-data-source>
-
-  <!-- Périmètre du secret statistique : ce que la page doit AFFICHER, pas cacher -->
   <dsfr-data-source id="e-secret" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr"
     dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
     where="etp_de_femmes_enseignantes is null"
     select="count(*) as ecoles, sum(etp_d_enseignants_hommes_et_femmes) as etp"
     limit="1"></dsfr-data-source>
-
-  <!-- Périmètre renseigné : le seul sur lequel une proportion a un sens -->
+  <!-- `limit="1"` + lecture en `:max` : `select=count(*)` sans group_by renvoie
+       la valeur répétée une fois par ligne de page (piège maison). -->
   <dsfr-data-source id="e-ren" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr"
     dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
@@ -141,325 +365,204 @@
             sum(etp_d_enseignants_ayant_une_anciennete_dans_l_etablissement_de_5_ans_a_moins_de_8_ans) as anc3,
             sum(etp_d_enseignants_ayant_une_anciennete_dans_l_etablissement_de_8_ans_ou_plus) as anc4"
     limit="1"></dsfr-data-source>
-
-  <!-- Ventilations territoriales : la carte que la page d'origine n'a pas,
-       alors que les deux pages sœurs en ont quatre chacune.
-       Pas d'alias sur `group-by` : sans parenthèse, il vaut un HTTP 400 (BUG-010). -->
-  <dsfr-data-source id="e-reg" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
-    where="etp_de_femmes_enseignantes is not null and reflibelle_region is not null"
-    group-by="code_region_insee, reflibelle_region"
-    select="sum(etp_de_femmes_enseignantes) as femmes, sum(etp_d_enseignants_hommes_et_femmes) as ens,
-            sum(etp_d_enseignants_de_50_ans_ou_plus) as vieux"
-    max-records="50"></dsfr-data-source>
-
-  <dsfr-data-source id="e-dep" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
-    where="etp_de_femmes_enseignantes is not null and code_departement is not null"
-    group-by="code_departement, libelle_departement"
-    select="sum(etp_de_femmes_enseignantes) as femmes, sum(etp_d_enseignants_hommes_et_femmes) as ens,
-            sum(etp_d_enseignants_de_50_ans_ou_plus) as vieux"
-    max-records="200"></dsfr-data-source>
-
-  <!-- La source des facettes ET de la liste : server-side, une page à la fois -->
   <dsfr-data-source id="e-base" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr"
     dataset-id="fr-en-indicateurs_personnels_etablissements1d-numerique"
     server-side page-size="20"
     select="nom_de_l_etablissement, secteur, libelle_departement, libelle_academie,
             identifiant_de_l_etablissement, etp_d_enseignants_hommes_et_femmes,
-            etp_de_femmes_enseignantes"></dsfr-data-source>
+            etp_de_femmes_enseignantes, etp_d_enseignants_de_50_ans_ou_plus"></dsfr-data-source>
 
-  <!-- Le contexte diffuse la rentrée et les facettes aux SIX sources.
-       Le bug de cible de l'original disparaît par construction : il n'y a pas
-       de `dataProviderUid` à choisir bloc par bloc, il y a une liste de sources. -->
-  <dsfr-data-context id="ctx" url-sync
-    sources="e-tot e-secret e-ren e-reg e-dep e-base">
+  <dsfr-data-context id="ctx" url-sync sources="e-tot e-secret e-ren e-base">
     <dsfr-data-context-filter field="annee_de_la_rentree_scolaire"
-      label="Rentrée" ui="e-annee" default="2024"></dsfr-data-context-filter>
+      label="Rentrée" ui="e-annee" default="2025"></dsfr-data-context-filter>
   </dsfr-data-context>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
+  <!-- Les parts de la sélection : une ligne de sommes → parts → unpivot. -->
+  <dsfr-data-normalize id="e-p" source="e-ren"
+    compute="a1 = round(age1 / ens * 100, 1); a2 = round(age2 / ens * 100, 1); a3 = round(age3 / ens * 100, 1);
+             b1 = round(anc1 / ens * 100, 1); b2 = round(anc2 / ens * 100, 1); b3 = round(anc3 / ens * 100, 1); b4 = round(anc4 / ens * 100, 1)"></dsfr-data-normalize>
+  <dsfr-data-unpivot id="e-age" source="e-p"
+    value-cols="a1:Moins de 35 ans, a2:35 à 49 ans, a3:50 ans et plus" var-name="tranche" value-name="part"></dsfr-data-unpivot>
+  <dsfr-data-unpivot id="e-anc" source="e-p"
+    value-cols="b1:Moins de 2 ans, b2:2 à 4 ans, b3:5 à 7 ans, b4:8 ans et plus" var-name="anciennete" value-name="part"></dsfr-data-unpivot>
 
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-            Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <h2 class="fr-h6">Filtrer</h2>
+  <div class="fr-container fr-mb-6w">
+    <h2 class="fr-h3">5. Les enseignants de votre territoire</h2>
+    <p class="fr-text--sm">Les chiffres clés de l'original, recalculés par le portail pour la
+      sélection&nbsp;: rentrée, secteur, région, académie, département. Les parts portent sur les
+      écoles renseignées&nbsp;; le troisième compteur dit combien en sont exclues.</p>
 
-        <div class="fr-select-group">
-          <label class="fr-label" for="e-annee">Rentrée scolaire</label>
-          <select class="fr-select" id="e-annee">
-            <option value="2024">2024</option>
-            <option value="2025">2025</option>
-          </select>
-          <p class="fr-hint-text">
-            L'original n'a pas ce sélecteur, et additionne les deux rentrées.
-          </p>
-        </div>
-
-        <!-- Les facettes s'enregistrent au CONTEXTE (#678) : leur sélection est
-             diffusée aux six sources, pas seulement à celle qui les calcule.
-             `server-facets` : les cinq champs sont déclarés au back-office. -->
-        <dsfr-data-facets id="e-f" source="e-base" server-facets context="ctx"
-          fields="secteur, reflibelle_region, libelle_departement, libelle_academie"
-          labels="secteur:Secteur | reflibelle_region:Région | libelle_departement:Département | libelle_academie:Académie"
-          display="secteur:radio-inline | reflibelle_region:multiselect | libelle_departement:multiselect | libelle_academie:multiselect"
-          searchable="libelle_departement, libelle_academie"
-          max-values="8">
-        </dsfr-data-facets>
-        </details>
+    <div>
+    <div class="odv-barre-filtres odv-barre-filtres--collante">
+      <div class="fr-select-group">
+        <label class="fr-label" for="e-annee">Rentrée scolaire</label>
+        <select class="fr-select" id="e-annee">
+          <option value="2025">2025</option>
+          <option value="2024">2024</option>
+        </select>
       </div>
+      <!-- Les facettes s'enregistrent au CONTEXTE (#678) : leur sélection est
+           diffusée aux quatre sources, pas seulement à celle qui les calcule. -->
+      <dsfr-data-facets id="e-f" source="e-base" server-facets context="ctx"
+        fields="secteur, reflibelle_region, libelle_academie, libelle_departement"
+        labels="secteur:Secteur | reflibelle_region:Région | libelle_academie:Académie | libelle_departement:Département"
+        display="secteur:radio-inline | reflibelle_region:multiselect | libelle_academie:multiselect | libelle_departement:multiselect"
+        searchable="libelle_departement, libelle_academie"
+        max-values="8">
+      </dsfr-data-facets>
+    </div>
 
-      <div class="fr-col-12 fr-col-md-9">
+    <dsfr-data-context-tags for="ctx" class="fr-mt-2w"></dsfr-data-context-tags>
 
-        <dsfr-data-context-tags for="ctx" class="fr-mb-2w"></dsfr-data-context-tags>
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mt-4w fr-mb-2w" aria-label="La sélection : écoles et effectifs">
+      <dsfr-data-kpi source="e-tot" value="ecoles:max" format="nombre" decimals="0"
+        heading="Écoles" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="e-tot" value="etp:max" format="nombre" decimals="0"
+        heading="ETP enseignants" label="toutes écoles"></dsfr-data-kpi>
+      <dsfr-data-kpi source="e-secret" value="ecoles:max" format="nombre" decimals="0"
+        heading="Écoles sous secret statistique" label="moins de 5 ETP, exclues des parts"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection : profil des enseignants">
+      <dsfr-data-kpi source="e-ren" value="femmes:max / ens:max" format="pourcentage" decimals="1"
+        heading="Femmes" label="des ETP enseignants renseignés"></dsfr-data-kpi>
+      <dsfr-data-kpi source="e-ren" value="age3:max / ens:max" format="pourcentage" decimals="1"
+        heading="50 ans et plus" label="des ETP enseignants renseignés"></dsfr-data-kpi>
+      <dsfr-data-kpi source="e-ren" value="anc1:max / ens:max" format="pourcentage" decimals="1"
+        heading="Arrivés dans leur école depuis moins de 2 ans" label="des ETP enseignants renseignés"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
 
-        <h2 class="fr-h4">1. Les personnels dans les écoles — données clés</h2>
-        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-2w">
-          <dsfr-data-kpi source="e-tot" value="ecoles:max" format="nombre" decimals="0"
-            heading="Écoles" label="dans la sélection"></dsfr-data-kpi>
-          <dsfr-data-kpi source="e-tot" value="etp:max" format="nombre" decimals="0"
-            heading="ETP" label="enseignants"></dsfr-data-kpi>
-          <dsfr-data-kpi source="e-secret" value="ecoles:max" format="nombre" decimals="0"
-            heading="Sous secret statistique" label="écoles de moins de 5 ETP"></dsfr-data-kpi>
-          <dsfr-data-kpi source="e-ren"
-            value="femmes:max / ens:max" format="pourcentage" decimals="1"
-            heading="Femmes" label="parmi les ETP enseignants renseignés"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <p class="fr-hint-text fr-mb-4w">
-          Le troisième compteur est celui que l'original n'a pas : il dit sur quoi porte le
-          quatrième. Rapportée au dénominateur complet, la part de femmes tomberait à 71,3 % —
-          un chiffre qui ne veut rien dire, puisque son numérateur est nul sur les écoles masquées
-          alors que leur total d'ETP est renseigné.
-        </p>
-
-        <h2 class="fr-h4">2. Le personnel enseignant — âge et ancienneté dans l'établissement</h2>
-        <p class="fr-text--sm fr-mb-2w">
-          Périmètre renseigné, rentrée 2024 : <strong>19,8 %</strong> de moins de 35 ans,
-          <strong>46,9 %</strong> de 35 à 50 ans, <strong>33,3 %</strong> de plus de 50 ans — la
-          somme fait 100, c'est le contrôle. Ancienneté : <strong>27,9 / 19,4 / 15,3 / 37,5 %</strong>.
-          À la rentrée 2025, les plus de 50 ans passent à <strong>35,2 %</strong> : le
-          vieillissement se lit d'une rentrée à l'autre, et c'est la seule lecture temporelle de
-          tout le triplet « personnels ».
-        </p>
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-viz" data-code="Répartition par âge">
-            <dsfr-data-chart id="c-age" source="age" type="bar" horizontal
-              label-field="tranche" value-field="etp" name="ETP enseignants"
-              unit-tooltip="ETP" heading-level="3"
-              databox databox-title="Répartition par âge"
-              databox-source="DEPP — fr-en-indicateurs_personnels_etablissements1d-numerique"
-              databox-download></dsfr-data-chart>
-            <dsfr-data-a11y for="c-age" source="age" table download></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-viz" data-code="Répartition par ancienneté dans l'établissement">
-            <dsfr-data-chart id="c-anc" source="anc" type="bar"
-              label-field="anciennete" value-field="etp" name="ETP enseignants"
-              unit-tooltip="ETP" heading-level="3"
-              databox databox-title="Répartition par ancienneté dans l'établissement"
-              databox-source="DEPP — fr-en-indicateurs_personnels_etablissements1d-numerique"
-              databox-download></dsfr-data-chart>
-            <dsfr-data-a11y for="c-anc" source="anc" table download></dsfr-data-a11y>
-            </div>
-          </div>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Âge des enseignants de la sélection">
+        <dsfr-data-chart id="g-age" source="e-age" type="bar"
+          label-field="tranche" value-field="part:Part des ETP enseignants (%)"
+          unit-tooltip="%" y-min="0"
+          databox databox-title="Âge des enseignants de la sélection"
+          databox-source="DEPP — écoles d'au moins 5 ETP" databox-download heading-level="3">
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-age" source="e-age" table download
+          filename="ecoles-age-enseignants-selection.csv" label-field="tranche" value-field="part"
+          description="Répartition des ETP enseignants de la sélection par tranche d'âge, en pourcentage. Les trois tranches somment à 100."></dsfr-data-a11y>
         </div>
-
-        <h2 class="fr-h4">3. La géographie que la page d'origine n'a pas</h2>
-        <p class="fr-text--sm fr-mb-2w">
-          Les pages collèges et lycées ont quatre cartes chacune ; celle des écoles n'en a aucune,
-          parce que le jeu du premier degré n'a ni statut ni diplôme. Il porte pourtant les mêmes
-          codes de région et de département — et une <code>geolocalisation</code> sur chacune de
-          ses 47 507 écoles, qu'aucune des trois pages n'utilise.
-        </p>
-        <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-3w">
-          <p class="fr-text--sm">
-            <strong>Le chiffre « en France » des cartes est juste depuis la 0.29.</strong> Il
-            annonçait <strong>85,53</strong> pour la part de femmes et <strong>35,84</strong> pour
-            la part de plus de 50 ans, quand les valeurs nationales sont <strong>86,9&nbsp;%</strong>
-            et <strong>33,3&nbsp;%</strong>&nbsp;: le résumé était la <em>moyenne non pondérée</em>
-            des territoires dessinés, où Mayotte pesait autant que l'Île-de-France.
-            <code>map-summary-weight="ens"</code> pondère par l'effectif enseignant&nbsp;: les cartes
-            affichent <strong>86,91</strong> et <strong>33,31</strong>, exactement les rapports de
-            sommes calculés à l'API sur la rentrée 2024. C'est ici que l'écart était le plus faible
-            sur la part de femmes (−1,4 point)&nbsp;: un indicateur homogène rend le défaut presque
-            invisible, ce qui en faisait le plus dangereux. Constat LIM-014, corrigé par
-            <a href="https://github.com/bmatge/dsfr-data/pull/795" target="_blank" rel="noopener external">#795</a>.
-            ⚠️ Le banc voulait le remonter chez DSFR&nbsp;Chart&nbsp;: le calcul venait de
-            <code>dsfr-data</code>, l'issue aurait été rejetée à raison.
-          </p>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Ancienneté dans l'école, sélection">
+        <dsfr-data-chart id="g-anc" source="e-anc" type="bar"
+          label-field="anciennete" value-field="part:Part des ETP enseignants (%)"
+          unit-tooltip="%" y-min="0"
+          databox databox-title="Depuis combien de temps les enseignants sont dans leur école"
+          databox-source="DEPP — écoles d'au moins 5 ETP" databox-download heading-level="3">
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-anc" source="e-anc" table download
+          filename="ecoles-anciennete-enseignants-selection.csv" label-field="anciennete" value-field="part"
+          description="Répartition des ETP enseignants de la sélection selon leur ancienneté dans l'école, en pourcentage. Les quatre tranches somment à 100."></dsfr-data-a11y>
         </div>
-        <div class="fr-grid-row fr-grid-row--gutters">
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-viz" data-code="Part de femmes parmi les ETP enseignants, par région">
-            <dsfr-data-chart id="c-fem-reg" source="e-reg-n" type="map-reg"
-              code-field="code_region_insee" value-field="pct_femmes" map-summary-weight="ens"
-              name="Part de femmes" unit-tooltip="%"
-              selected-palette="sequentialAscending" heading-level="3"
-              databox databox-title="Part de femmes parmi les ETP enseignants, par région"
-              databox-source="DEPP — fr-en-indicateurs_personnels_etablissements1d-numerique"
-              databox-download></dsfr-data-chart>
-            <dsfr-data-a11y for="c-fem-reg" source="e-reg-n" table download
-              label-field="reflibelle_region" value-field="pct_femmes, pct_50ans"
-              label="Part de femmes et part de plus de 50 ans, par région"></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-viz" data-code="Part d'enseignants de plus de 50 ans, par département">
-            <dsfr-data-chart id="c-vieux-dep" source="e-dep-n" type="map"
-              code-field="code_departement" value-field="pct_50ans" map-summary-weight="ens"
-              name="Part de plus de 50 ans" unit-tooltip="%"
-              selected-palette="sequentialAscending" heading-level="3"
-              databox databox-title="Part d'enseignants de plus de 50 ans, par département"
-              databox-source="DEPP — fr-en-indicateurs_personnels_etablissements1d-numerique"
-              databox-download></dsfr-data-chart>
-            <dsfr-data-a11y for="c-vieux-dep" source="e-dep-n" table download
-              label-field="libelle_departement" value-field="pct_femmes, pct_50ans"
-              label="Part de femmes et part de plus de 50 ans, par département"></dsfr-data-a11y>
-            </div>
-          </div>
-        </div>
-
-        <p class="fr-hint-text fr-mt-2w fr-mb-4w">
-          Les deux cartes écartent chacune une ligne, et les deux méritent d'être nommées.
-          Côté régions, la ligne <code>00</code> « Collectivités et territoires
-          <em>doutre-mer</em> hors régions académiques » — l'apostrophe manque dans le jeu, et le
-          jeu du second degré appelle le même périmètre « TOM et Collectivités territoriales ».
-          Côté départements, la ligne <strong><code>983</code> « Nouvelle Calédonie »</strong>
-          (71 écoles) : le code INSEE de la Nouvelle-Calédonie est <strong>988</strong>, et son nom
-          porte un trait d'union. Deux valeurs hors référentiel, deux territoires qui disparaissent
-          d'une carte sans que rien ne l'annonce à l'écran — le composant le dit en console, et
-          c'est le seul endroit où il le dit.
-        </p>
-
-        <h2 class="fr-h4 fr-mt-6w">Les écoles une par une</h2>
-        <p class="fr-text--sm">
-          Chargée page par page côté serveur : 94 584 lignes ne se rapatrient pas pour être
-          feuilletées vingt par vingt. <code>etp_de_femmes_enseignantes</code> vide signale une
-          école sous secret statistique.
-        </p>
-        <div class="odv-viz" data-code="Graphique">
-        <dsfr-data-list source="e-base"
-          caption="Les écoles de la sélection"
-          columns="nom_de_l_etablissement:École, identifiant_de_l_etablissement:UAI, secteur:Secteur, libelle_departement:Département, etp_d_enseignants_hommes_et_femmes:ETP enseignants, etp_de_femmes_enseignantes:dont femmes"
-          pagination="20" url-sync count-label="école"></dsfr-data-list>
-        </div>
-
       </div>
     </div>
+
+    <h3 class="fr-h5">Les écoles une par une</h3>
+    <p class="fr-text--sm">Chargées vingt par vingt par le portail. Une colonne «&nbsp;dont
+      femmes&nbsp;» vide signale une école sous secret statistique.</p>
+    <div class="odv-viz" data-code="Liste des écoles">
+    <dsfr-data-list source="e-base"
+      caption="Les écoles de la sélection"
+      columns="nom_de_l_etablissement:École, identifiant_de_l_etablissement:UAI, secteur:Secteur, libelle_departement:Département, etp_d_enseignants_hommes_et_femmes:ETP enseignants, etp_de_femmes_enseignantes:dont femmes, etp_d_enseignants_de_50_ans_ou_plus:dont 50 ans et plus"
+      pagination="20" url-sync count-label="école"></dsfr-data-list>
+    </div>
+    </div>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Un peu plus d'un enseignant des écoles sur trois a 50&nbsp;ans ou
+        plus, et cette part a augmenté en un an dans toutes les académies&nbsp;: les 35-49&nbsp;ans
+        glissent vers la tranche supérieure, et les moins de 35&nbsp;ans ne compensent pas. Le
+        vieillissement est le plus marqué dans les départements ruraux — là même où le secret
+        statistique cache l'âge d'une large part des enseignants. Ce que le jeu ne dit pas&nbsp;:
+        si la tendance se prolonge (deux rentrées ne font pas une série), ni pourquoi (il ne porte
+        ni départs en retraite, ni recrutements, ni effectifs d'élèves).</p>
+    </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Des ETP, pas des personnes.</strong> Un enseignant à mi-temps compte pour 0,5.
+          Toutes les parts sont des rapports de sommes d'ETP&nbsp;: une grande école pèse plus
+          qu'une petite.</li>
+        <li><strong>Le dénominateur est restreint aux écoles renseignées.</strong> Le total d'ETP
+          des écoles sous secret est publié, pas sa décomposition&nbsp;: le garder au dénominateur
+          ferait sommer les tranches d'âge à 82&nbsp;% au lieu de 100. Le périmètre renseigné change
+          légèrement d'une rentrée à l'autre (des écoles passent le seuil de 5&nbsp;ETP dans les deux
+          sens)&nbsp;: la comparaison porte sur deux photographies, pas sur un panel d'écoles.</li>
+        <li><strong>Deux rentrées, pas une tendance.</strong> L'écart 2024-2025 est net et touche
+          toutes les académies, mais rien ne dit qu'il se répétera. L'explication par une génération
+          qui passe la cinquantaine est une lecture de la symétrie des chiffres, pas une donnée du
+          jeu, qui ne suit pas les personnes.</li>
+        <li><strong>Deux territoires hors des cartes.</strong> La ligne <code>983</code>
+          «&nbsp;Nouvelle Calédonie&nbsp;» (le code INSEE est 988) n'a pas de forme sur la carte des
+          départements&nbsp;; elle reste dans le tableau et dans les académies. Le résumé «&nbsp;en
+          France&nbsp;» des cartes est pondéré par les ETP des départements dessinés. Le tableau
+          accessible des deux cartes s'arrête à 100 lignes sur 102&nbsp;: les deux dernières
+          (Guyane et Mayotte, les plus jeunes) ne sont que dans le fichier CSV téléchargeable.</li>
+        <li><strong>Public et privé sous contrat réunis.</strong> Le récit ne les sépare pas&nbsp;;
+          l'exploration le permet.</li>
+        <li><strong>Choix nommés dans le texte.</strong> Les régions citées en section&nbsp;3 et les
+          petites académies de la section&nbsp;2 sont écrites à la main d'après les données de la
+          rentrée 2025&nbsp;; tous les chiffres, eux, sont recalculés à chaque chargement.</li>
+        <li><strong>Angles écartés.</strong> La féminisation (87&nbsp;% de femmes, stable d'une
+          rentrée à l'autre, et au-dessus de 80&nbsp;% dans tous les départements sauf Mayotte)&nbsp;; l'ancienneté dans l'école, qui
+          bouge peu&nbsp;; la carte des moins de 35&nbsp;ans, qui redit celle des collèges
+          (Île-de-France, Guyane, Mayotte).</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- Transformateurs. `dsfr-data-normalize` vide d'interposition : e-ren
-       alimente déjà deux KPI, on ne branche pas un dépliage dessus en direct
-       (BUG-009). L'unpivot déplie UNE ligne de sommes en trois (ou quatre)
-       lignes de tranches — le cas que la fiche du composant n'illustre pas,
-       et dont dépendait toute la réécriture des deux graphiques. -->
-  <dsfr-data-normalize id="e-ren-n" source="e-ren"></dsfr-data-normalize>
-  <dsfr-data-unpivot id="age" source="e-ren-n"
-    value-cols="age1:Moins de 35 ans, age2:35 à 50 ans, age3:Plus de 50 ans"
-    var-name="tranche" value-name="etp"></dsfr-data-unpivot>
-  <dsfr-data-unpivot id="anc" source="e-ren-n"
-    value-cols="anc1:Moins de 2 ans, anc2:2 à 5 ans, anc3:5 à 8 ans, anc4:8 ans et plus"
-    var-name="anciennete" value-name="etp"></dsfr-data-unpivot>
+  <!-- ====================== Analyse ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — les personnels dans les écoles primaires et maternelles</h2>
 
-  <dsfr-data-normalize id="e-reg-n" source="e-reg"
-    compute="pct_femmes = femmes / ens * 100; pct_50ans = vieux / ens * 100"
-    round="pct_femmes:1, pct_50ans:1"></dsfr-data-normalize>
-  <dsfr-data-normalize id="e-dep-n" source="e-dep"
-    compute="pct_femmes = femmes / ens * 100; pct_50ans = vieux / ens * 100"
-    round="pct_femmes:1, pct_50ans:1"></dsfr-data-normalize>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — les personnels dans les écoles primaires et maternelles — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine :
+        Page d'origine&nbsp;:
         <a href="https://dataeducation.opendatasoft.com/p/personnels-enseignants-dans-ecoles-primaires-et-maternelles-en-france/" target="_blank" rel="noopener external">une page ODS Studio servie sur <code>dataeducation.opendatasoft.com</code></a>
-        (<code>uid: sp_w53z2w</code>). Fiche d'audit :
-        <code>docs/portail-education/personnels-ecoles-primaires.md</code>. C'est la déclinaison
-        dégradée du triplet « personnels » : mêmes UID de blocs que les pages collèges et lycées,
-        autre jeu, et <strong>un bloc sur quatre qui affiche quelque chose — de faux</strong>.
+        — deux KPI et deux graphiques, dont trois en erreur 400 (colonnes typées texte) et un qui
+        additionne deux rentrées&nbsp;; trois filtres branchés sur le jeu du second degré. Fiche
+        d'audit&nbsp;: <code>docs/portail-education/personnels-ecoles-primaires.md</code>. Recréée le
+        2026-09-26 en page éditoriale&nbsp;; l'ancienne reproduction est devenue la section&nbsp;5.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Les trois pannes de l'original sont impossibles ici, par
-              construction.</strong> Les filtres pointent le mauvais jeu parce qu'un bloc Studio
-              choisit son <code>dataProviderUid</code> dans un back-office ;
-              <code>dsfr-data-context</code> a une <em>liste de sources</em>, et une facette lit la
-              source qu'elle filtre. Le double comptage d'années vient d'un <code>where</code>
-              absent de dix-huit endroits ; ici c'est un filtre unique, avec une valeur par défaut.
-              Les 400 viennent d'un <code>datasetId</code> à changer.</li>
-            <li><strong>Six agrégats serveur, quelques centaines d'octets.</strong> Sur 94 584
-              lignes, la question du chargement client ne se pose pas — et l'agrégation serveur
-              <em>écoute les facettes</em> : le <code>where</code> statique de chaque source et la
-              surcouche du contexte fusionnent. C'est ce qui évite le piège maison de la source
-              générique (<code>url=</code> + <code>params</code>), qui n'écoute plus rien.</li>
-            <li><strong>Le dépliage d'une ligne de sommes.</strong> C'était le point le plus
-              incertain de la fiche d'audit — « je n'ai pas vérifié que <code>dsfr-data-unpivot</code>
-              accepte une source d'une seule ligne sans <code>id-cols</code> ». <strong>Vérifié au
-              navigateur : il l'accepte.</strong> Une requête, une ligne, trois barres, et la
-              tranche d'âge sur l'axe des catégories.</li>
-            <li><strong>La carte, avec les codes du jeu.</strong> <code>code_region_insee</code>
-              est traduit en clé DSFR&nbsp;Chart par la bibliothèque (#729) : il n'y a rien à
-              écrire. Les deux cartes de cette page sont une <em>addition</em> — l'original n'en a
-              aucune.</li>
+            <li><strong>Agréger au portail, dériver dans la page.</strong> Six sources
+              <code>group-by</code> ramènent quelques dizaines de lignes au lieu de 94&nbsp;584&nbsp;;
+              parts, écarts et extrêmes se calculent ensuite par <code>compute</code>,
+              <code>order-by</code> + <code>limit</code>.</li>
+            <li><strong>L'écart entre deux rentrées</strong> tient en un <code>dsfr-data-pivot</code>
+              (<code>column-format="pv_{value}"</code>) suivi d'un <code>compute</code>, et le compte
+              des académies en hausse en un <code>when … then 1 else 0</code> sommé.</li>
+            <li><strong>Avant / après</strong>&nbsp;: <code>unpivot</code> avec
+              <code>id-cols</code> sur la rentrée, puis <code>series-field</code>.</li>
+            <li><strong>Deux périmètres joints</strong> (renseigné et total, 1-1 par département)
+              donnent la carte du secret statistique, que ni l'original ni la reproduction ne
+              montraient.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le « en France » des cartes était une moyenne de territoires — corrigé en 0.29.</strong>
-              Le résumé était la moyenne non pondérée des valeurs cartographiées&nbsp;: 85,53 pour la
-              part de femmes par région, quand la valeur nationale est 86,9&nbsp;%. Un point et demi
-              d'écart seulement&nbsp;: sur un indicateur homogène, le défaut est presque invisible,
-              et c'est ce qui le rendait dangereux — les deux pages sœurs, elles, perdaient un quart
-              de la valeur. <code>map-summary-weight="ens"</code>
-              (<a href="https://github.com/bmatge/dsfr-data/pull/795" target="_blank" rel="noopener external">#795</a>,
-              livré en 0.29.0) rend 86,91 et 33,31, soit exactement les rapports de sommes calculés à
-              l'API sur la rentrée 2024. <strong>Le constat était à porter chez
-              <code>dsfr-data</code>, pas chez DSFR&nbsp;Chart</strong> comme l'écrivait cette
-              page&nbsp;: la moyenne était calculée ici, pas là-bas.</li>
-            <li><strong>Le vrai travail a été de choisir un dénominateur, encore.</strong> Rien
-              dans <code>dsfr-data</code> ne dit qu'un numérateur masqué ne se rapporte pas à un
-              dénominateur complet. Le portage littéral de la formule Studio compile, s'affiche,
-              et sous-estime tout de 18 %. <strong>Le seul contrôle gratuit est la somme des
-              tranches</strong> : 82 % au lieu de 100 signale l'erreur. Aucun composant ne le fait
-              à votre place, et la page d'origine ne le faisait pas.</li>
-            <li><strong>Un <code>sum()</code> sur une colonne <code>text</code> part quand
-              même.</strong> C'est le seul enseignement de cette page pour la bibliothèque :
-              l'adaptateur ODS <em>connaît</em> le schéma (il appelle
-              <code>/catalog/datasets/&lt;id&gt;</code>) et laisse pourtant composer une agrégation
-              numérique sur un champ que ce schéma déclare texte. Le 400 revient du serveur, et
-              <code>dsfr-data</code> le rend plus lisiblement que Studio — <code>dsfr-data-error</code>
-              porte l'URL réellement appelée — mais un avertissement de configuration au moment de
-              la composition économiserait la moitié du chemin.</li>
-            <li><strong>Deux graphies pour un même territoire, entre deux jeux frères.</strong>
-              Le premier degré écrit « <em>Collectivités et territoires doutre-mer hors régions
-              académiques</em> » (apostrophe manquante comprise) et « Ile-de-France » sans accent ;
-              le second degré écrit « TOM et Collectivités territoriales » et « Ile-de-France ». Le
-              secteur s'écrit « Privé sous contrat » ici et « Privé » là-bas. <strong>Aucun filtre
-              ne peut être partagé entre les deux jeux</strong> — c'est exactement ce que l'original
-              a tenté, et c'est pourquoi ses filtres ne filtrent rien.</li>
-            <li><strong>Le nom du champ de dénominateur diffère d'un <code>d_</code>.</strong>
-              <code>etp_d_enseignants_hommes_et_femmes</code> au premier degré,
-              <code>etp_enseignants_hommes_et_femmes</code> au second. C'est ce qui a obligé
-              l'auteur de l'original à réécrire à la main sept formules recopiées — sept occasions
-              de se tromper. Ici c'est un paramètre du gabarit, mais il a fallu le lire.</li>
+            <li><strong>Un chapô qui combine cinq lectures</strong> passe par une chaîne de
+              <code>dsfr-data-join</code> sur une clé constante&nbsp;: sept jointures dans la page,
+              toutes 1-1, pour des phrases. C'est la voie native, mais elle est longue.</li>
+            <li><strong>Le dénominateur, encore.</strong> Rien dans la chaîne ne signale qu'un
+              numérateur masqué ne se rapporte pas à un total complet&nbsp;; le seul contrôle reste
+              la somme des tranches (100 et non 82).</li>
+            <li><strong>Les écarts les plus forts sont les moins robustes</strong> (petites
+              académies ultramarines)&nbsp;: aucune forme ne porte l'effectif sur la barre, il faut le
+              dire en phrase et dans le tableau.</li>
           </ul>
         </div>
       </div>
@@ -471,33 +574,26 @@
             <tr><th scope="col">Page Studio d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>dataProviders</code> : <code>…1d</code> (7 colonnes en <code>text</code>)</td><td><code>dataset-id="…1d-numerique"</code></td><td>Meilleur : un identifiant à changer, trois blocs réparés</td></tr>
-            <tr><td>3 <code>select</code> pointant le jeu du <strong>second</strong> degré</td><td><code>dsfr-data-facets context="ctx"</code> sur la source filtrée</td><td>Meilleur : le bug de cible n'est pas exprimable</td></tr>
-            <tr><td>aucun filtre d'année, deux rentrées additionnées</td><td><code>dsfr-data-context-filter default="2024"</code></td><td>Meilleur : 631 578 redevient 316 887</td></tr>
-            <tr><td>KPI <code>sum(a)/sum(b)*100</code> → HTTP 400</td><td>ratio de KPI (#673) sur un agrégat serveur</td><td>Équivalent, et il s'affiche</td></tr>
-            <tr><td>2 <code>comparison.bars</code> sur l'axe « Année » → HTTP 400</td><td>agrégat + <code>dsfr-data-unpivot</code> + <code>type="bar"</code></td><td>Meilleur : la tranche est sur l'axe des catégories</td></tr>
-            <tr><td>— (aucune carte, aucun tableau, aucune alternative)</td><td>2 cartes + <code>dsfr-data-a11y</code> + <code>dsfr-data-list</code></td><td>Sans équivalent</td></tr>
-            <tr><td>— (le périmètre du secret statistique n'est jamais dit)</td><td>un KPI dédié et deux encadrés</td><td>Sans équivalent, et c'est l'essentiel</td></tr>
+            <tr><td><code>dataProviders</code> <code>…1d</code> (7 colonnes en <code>text</code>)</td><td><code>dataset-id="…1d-numerique"</code></td><td>Meilleur : les sommes passent</td></tr>
+            <tr><td>3 <code>select</code> pointant le jeu du second degré</td><td><code>dsfr-data-facets server-facets context="ctx"</code></td><td>Meilleur : les filtres filtrent</td></tr>
+            <tr><td>KPI <code>sum()</code> sur deux rentrées additionnées</td><td><code>dsfr-data-context-filter default="2025"</code></td><td>Meilleur</td></tr>
+            <tr><td>2 <code>comparison.bars</code> sur l'axe «&nbsp;Année&nbsp;» → 400</td><td><code>unpivot</code> + <code>series-field</code>, la rentrée en série</td><td>Meilleur : c'est enfin une comparaison</td></tr>
+            <tr><td>—</td><td><code>pivot</code> + <code>compute</code> (écart par académie), 2 cartes pondérées, <code>dsfr-data-repeat</code>, <code>dsfr-data-a11y</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Zéro encadré d'erreur</strong> — c'était le critère de réussite le plus simple de
-          tout le portage, et il tenait à un identifiant de jeu. Mais ce n'est pas là que se joue la
-          différence. Les quatre pannes de l'original — 400 sur colonne texte, double comptage
-          d'années, filtres branchés sur le mauvais jeu, dénominateur non restreint — <strong>ne
-          sont pas des limites d'outil : ce sont les conséquences mécaniques d'une page
-          dupliquée</strong> depuis sa sœur, bloc par bloc, dans un back-office où chaque bloc
-          choisit sa source. Un gabarit paramétré par <code>dataset-id</code>, un nom de champ et
-          un <code>where</code> rend ces quatre pannes inexprimables. C'est le meilleur argument
-          du banc d'essai, et il n'est pas technique : <strong>ce qui se recopie dix-huit fois
-          finit par diverger</strong>.</p>
+        <p>Aucune résistance de la bibliothèque&nbsp;: tous les chiffres du texte sont calculés dans
+          la page, à partir d'agrégats serveur. <strong>Le travail a été de lire le jeu</strong>&nbsp;:
+          le seul des trois jeux «&nbsp;personnels&nbsp;» à porter deux rentrées racontait un
+          vieillissement uniforme, et son secret statistique, inégal, dessinait la limite de ce
+          récit.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 
@@ -506,11 +602,8 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<!-- Bundle `core` (446 Ko) et non `esm` (551 Ko) : cette page n'a aucune
-     <dsfr-data-map> Leaflet. Verifie le 2026-09-19 sur les noms d'elements du
-     paquet publie 0.31.0 : `core` definit tout ce que la page emploie, les
-     cartes DSFR Chart (map-chart) comprises ; il ne lui manque que les enfants
-     de la carte Leaflet (map-layer, map-popup, map-legend, map-inset...). -->
+<!-- Bundle `core` : aucune carte Leaflet ici ; les cartes DSFR Chart
+     (map-chart) et tous les composants employés y sont définis. -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>

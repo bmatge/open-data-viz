@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Annuaire des centres de contrôle technique — open-data-viz</title>
-  <meta name="description" content="Reconstitution avec dsfr-data de l'annuaire des centres de contrôle technique, dont la page du portail est en 404.">
+  <meta name="description" content="Presque tous les centres agréés de contrôle technique acceptent les voitures ; un sur six seulement contrôle les motos, et cette part va presque du simple au triple entre l'Ouest et le Sud. Lu dans l'annuaire quotidien de la DGCCRF.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,85 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       UNE SEULE REQUÊTE pour toute la page. Le jeu compte une ligne par centre
+       (6 135 lignes, 6 135 SIRET distincts au 2026-09-26, vérifié sur l'export
+       complet) et ses catégories de véhicules et d'énergies arrivent en
+       TABLEAUX. On le charge entier (`fetch-mode="export"`, ~900 Ko), puis
+       tout le récit se calcule côté client sur la source BRUTE `qt` — les
+       graphiques du récit ne suivent pas les filtres de l'exploration.
+       max-records="8000" : le plafond par défaut (1 000) tronquerait en silence.
+       ========================================================================== -->
+  <dsfr-data-source id="qt" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr"
+    dataset-id="annuaire-centres-controle-technique"
+    fetch-mode="export" max-records="8000"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Indicateurs par centre. Sur un champ TABLEAU, `=` regarde DANS le
+       tableau (#953) : `cat_vehicule_libelle = 'Motocyclette'` est vrai pour
+       un centre qui contrôle, entre autres, les motos. -->
+  <dsfr-data-normalize id="qt-n" source="qt"
+    compute="moto = when cat_vehicule_libelle = 'Motocyclette' then 1 else 0; vp = when cat_vehicule_libelle = 'Voiture particulière' then 1 else 0; gaz = when cat_energie_libelle = 'Gaz' then 1 else 0; elec = when cat_energie_libelle = 'Electrique' then 1 else 0; moto_seule = when cat_vehicule_libelle = 'Motocyclette' and cat_vehicule_libelle != 'Voiture particulière' then 1 else 0">
+  </dsfr-data-normalize>
+
+  <!-- France entière : une ligne. -->
+  <dsfr-data-query id="nat-brut" source="qt-n"
+    aggregate="cct_siret:count:n, moto:sum:moto, vp:sum:vp, gaz:sum:gaz, elec:sum:elec, moto_seule:sum:moto_seule">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="nat" source="nat-brut"
+    compute="part_moto = round(moto / n * 100, 1); part_vp = round(vp / n * 100, 1); part_gaz = round(gaz / n * 100, 0); part_elec = round(elec / n * 100, 0); un_sur = round(n / moto, 0); sans_moto = n - moto">
+  </dsfr-data-normalize>
+
+  <!-- Catégories de véhicules : une ligne par catégorie, un centre compté
+       dans chacune des catégories qu'il déclare (explode). -->
+  <dsfr-data-query id="cat" source="qt" group-by="cat_vehicule_libelle" explode="cat_vehicule_libelle"
+    aggregate="cct_siret:count:centres" order-by="centres:desc">
+  </dsfr-data-query>
+
+  <!-- Départements : centres, centres qui contrôlent les motos, part. -->
+  <dsfr-data-query id="dep-brut" source="qt-n" group-by="code_departement, nom_departement"
+    aggregate="cct_siret:count:centres, moto:sum:motos">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="dep" source="dep-brut"
+    compute="part_brute = motos / centres * 100; part = round(part_brute, 1)">
+  </dsfr-data-normalize>
+  <!-- Le tableau équivalent est trié du département le moins pourvu au mieux pourvu :
+       il n'affiche que 100 lignes (la bibliothèque le dit sous le tableau), le
+       CSV porte les 101 départements. -->
+  <dsfr-data-query id="dep-tri" source="dep" order-by="part_brute:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="dep-table" source="dep-tri"
+    rename="nom_departement:Département | centres:Centres agréés | motos:Dont motos | part:Part motos (%25)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-zero" source="dep" where="motos:eq:0" aggregate="code_departement:count:n"></dsfr-data-query>
+  <dsfr-data-query id="dep-rares" source="dep" where="motos:lte:2" order-by="centres:desc"></dsfr-data-query>
+  <dsfr-data-query id="dep-rares-n" source="dep-rares" aggregate="code_departement:count:n, centres:sum:centres, motos:sum:motos"></dsfr-data-query>
+  <!-- Le cas le plus parlant : parmi les départements d'au moins 50 centres,
+       celui où la part est la plus faible. -->
+  <dsfr-data-query id="dep-gros-bas" source="dep" where="centres:gte:50" order-by="part_brute:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-haut" source="dep" where="centres:gte:50" order-by="part_brute:desc" limit="1"></dsfr-data-query>
+
+  <!-- Régions : même calcul. Les régions de moins de vingt centres (Mayotte 1,
+       Guyane 5 au 2026-09-26) sont écartées du classement : une part calculée
+       sur cinq centres n'est pas une part régionale. Elles restent sur la carte. -->
+  <dsfr-data-query id="reg-brut" source="qt-n" group-by="nom_region"
+    aggregate="cct_siret:count:centres, moto:sum:motos">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="reg-tout" source="reg-brut"
+    compute="part_brute = motos / centres * 100; part = round(part_brute, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="reg" source="reg-tout" where="centres:gte:20" order-by="part_brute:desc"></dsfr-data-query>
+  <dsfr-data-query id="reg-petites" source="reg-tout" where="centres:lt:20" aggregate="nom_region:count:n, centres:sum:centres"></dsfr-data-query>
+  <!-- L'écart entre la région la mieux pourvue et la moins pourvue de
+       métropole (la Martinique, à zéro, est traitée à part dans le texte). -->
+  <dsfr-data-query id="reg-ext-brut" source="reg" where="motos:gt:0"
+    aggregate="part_brute:max:haut, part_brute:min:bas">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="reg-ext" source="reg-ext-brut" compute="ratio = round(haut / bas, 1)"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-haut" source="reg" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-bas" source="reg" where="motos:gt:0" order-by="part_brute:asc" limit="1"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,275 +111,322 @@
       </div>
     </nav>
 
-    <h1>Annuaire des centres agréés de contrôle technique</h1>
+    <h1>Presque tous les centres de contrôle technique acceptent les voitures, un sur six seulement contrôle les motos</h1>
 
-    <div class="fr-alert fr-alert--info fr-mb-4w">
-      <h2 class="fr-alert__title">Troisième dataviz remise en ligne dans ce lot</h2>
-      <p>
-        La page <code>/pages/annuaire-centres-controles-techniques/</code> renvoie une
-        <strong>404</strong>, et les deux jeux qu'elle référence
-        (<code>prix-des-controles-techniques-annuaire-des-centres</code> et
-        <code>-prix-prestations</code>) n'existent plus. Mais l'annuaire est publié sous un
-        identifiant renommé, <code>annuaire-centres-controle-technique</code>, <strong>mis à jour le
-        jour même</strong> de cette reconstitution. Le catalogue officiel marque d'ailleurs cette
-        entrée « accès public : non ».
-      </p>
+    <!-- Chapô : chaque chiffre est lu dans la donnée au chargement. -->
+    <dsfr-data-repeat source="nat">
+      <template>
+        <p class="fr-text--lead fr-mb-2w">Sur les <strong>{{n:number}}</strong> centres agréés que recense la DGCCRF,
+          <strong>{{vp:number}}</strong> ({{part_vp:number:1}}&nbsp;%) contrôlent les voitures particulières. Pour une
+          moto, le choix se réduit à <strong>{{moto:number}} centres</strong>&nbsp;: {{part_moto:number:1}}&nbsp;%,
+          à peu près un sur {{un_sur:number}}.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="reg-ext">
+      <template>
+        <p class="odv-lecture">Et ce n'est pas une affaire de moyenne&nbsp;: d'une région à l'autre (parmi celles qui en ont au
+          moins un), la part des centres ouverts aux motos va de {{bas:number:1}}&nbsp;% à {{haut:number:1}}&nbsp;%, <strong>{{ratio:number:1}} fois
+          plus</strong>. L'Ouest et le Nord sont les mieux pourvus, le Sud le moins.</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+      <div class="fr-col-12 fr-col-md-6">
+        <details class="fr-callout fr-icon-database-line odv-contexte">
+          <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
+          <p class="fr-callout__text fr-text--sm">
+            <a href="https://data.economie.gouv.fr/explore/dataset/annuaire-centres-controle-technique/"
+               target="_blank" rel="noopener external"><code>annuaire-centres-controle-technique</code></a>
+            — l'annuaire des centres agréés, publié par la DGCCRF et actualisé chaque jour&nbsp;: une ligne par
+            centre (un SIRET), avec les catégories de véhicules et d'énergies qu'il déclare contrôler. Relu ici à
+            chaque chargement. La page d'origine du portail (<code>/pages/annuaire-centres-controles-techniques/</code>)
+            est en 404 et les deux jeux qu'elle citait n'existent plus&nbsp;: l'annuaire vit sous cet identifiant
+            renommé. Les tarifs sont dans un autre jeu, lu par la page
+            <a href="/viz/prix-controle-technique">Prix des contrôles techniques</a>.
+          </p>
+        </details>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <dsfr-data-kpi-group>
+          <dsfr-data-kpi source="nat" value="moto:max" format="nombre"
+            heading="Contrôlent les motos" label="centres agréés, France entière" col="6"></dsfr-data-kpi>
+          <dsfr-data-kpi source="dep-zero" value="n:max" format="nombre"
+            heading="Aucun centre moto" label="départements sans aucun centre ouvert aux motos" col="6"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+      </div>
     </div>
-
-    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <a href="https://data.economie.gouv.fr/explore/dataset/annuaire-centres-controle-technique/"
-           target="_blank" rel="noopener external"><code>annuaire-centres-controle-technique</code></a>
-        — 6&nbsp;126 centres agréés au 20&nbsp;septembre 2026 (le jeu est mis à jour
-        quotidiennement&nbsp;; le compteur du bandeau lit le chiffre du jour), publiés par la
-        DGCCRF, avec les catégories de véhicules et d'énergies prises en charge par chacun.
-        Un centre = une ligne = un SIRET&nbsp;: vérifié sur l'export complet, 6&nbsp;126 SIRET
-        distincts pour 6&nbsp;126 lignes.
-      </p>
-    </details>
   </div>
 
-  <!-- ==========================================================================
-       Cinquième emploi du gabarit « annuaire cartographié ». Les catégories de
-       véhicules et d'énergies arrivent en tableaux : facettes multi-valeurs
-       natives, sans rien déclarer.
+  <div class="fr-container fr-mb-8w">
 
-       Lot 13 — cette source était écrite en mode générique (`url=` vers
-       /exports/json, sans `params` : le jeu est chargé entier), contournement
-       d'AM-011 : c'était le seul moyen d'obtenir la requête unique, et il coûtait
-       le mode adaptateur lui-même (plus de délégation serveur du where/order-by,
-       plus de server-facets, plus de meta.truncated, et une source qui n'annonçait
-       plus quel jeu elle lit). La mesure d'origine reste la justification :
-       /records plafonne à 100 lignes par requête, soit 62 allers-retours
-       séquentiels pour ce jeu-ci. `fetch-mode="export"` (#689, dsfr-data 0.25.0)
-       rend la même requête unique EN restant en mode adaptateur.
-       Conséquence directe : `max-records` s'applique de nouveau, et son plafond
-       par défaut (1 000) tronquerait le jeu en silence — le jeu compte 6 115
-       centres (relevé à l'API le 2026-09-10, `metas.default.records_count`),
-       d'où le max-records="8000".
-       ========================================================================== -->
+    <!-- ===================== Preuve : la marche ===================== -->
+    <h2 class="fr-mt-4w">Deux mondes&nbsp;: cinq catégories de voitures partout, cinq de deux-roues et quads dans un centre sur six</h2>
+    <dsfr-data-repeat source="nat">
+      <template>
+        <p class="odv-lecture">Les cinq premières barres sont les voitures, 4×4, utilitaires, camping-cars et
+          voitures de collection&nbsp;: la quasi-totalité des centres les déclarent. Les cinq dernières, en
+          bleu — motos, cyclomoteurs, voiturettes, quads, tricycles — tombent toutes autour de
+          {{moto:number}}. Ce sont presque toujours les mêmes centres&nbsp;: seuls {{moto_seule:number}} contrôlent
+          les motos sans contrôler les voitures.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+      <div class="fr-col-12 fr-col-lg-8">
+        <div class="odv-chart-slot odv-viz" data-code="Nombre de centres agréés par catégorie de véhicule">
+          <dsfr-data-chart id="g-cat" source="cat" type="bar" horizontal
+            label-field="cat_vehicule_libelle" value-field="centres:Centres agréés"
+            selected-palette="neutral" highlight-index="[5, 6, 7, 8, 9]"
+            databox databox-title="Nombre de centres agréés qui contrôlent chaque catégorie de véhicule"
+            databox-source="DGCCRF — annuaire-centres-controle-technique, via data.economie.gouv.fr">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-cat" source="cat" table
+            label-field="cat_vehicule_libelle" value-field="centres"
+            description="Barres horizontales partant de zéro : nombre de centres agréés qui déclarent contrôler chaque catégorie de véhicule, de la plus répandue à la moins répandue. Un centre compte dans chaque catégorie qu'il déclare. Les cinq catégories de voitures dépassent chacune 5 900 centres ; les cinq catégories de deux-roues et quadricycles, en bleu, restent autour de 1 000.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-4">
+        <p class="fr-text--sm">Les barres partent de zéro&nbsp;; un centre compte dans chacune des catégories qu'il
+          déclare, la somme des barres dépasse donc le nombre de centres.</p>
+        <p class="fr-text--sm">Le contrôle technique des deux-roues motorisés n'est obligatoire que depuis
+          2024&nbsp;: le réseau des centres, bâti pour la voiture, ne s'est ouvert aux motos qu'en partie. Le jeu
+          ne dit ni combien de motos circulent ni combien de visites chaque centre réalise&nbsp;: il décrit l'offre,
+          pas la demande.</p>
+      </div>
+    </div>
 
-  <dsfr-data-source id="qt" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr"
-    dataset-id="annuaire-centres-controle-technique"
-    fetch-mode="export" max-records="8000"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
+    <!-- ===================== Preuve : la géographie ===================== -->
+    <h2 class="fr-mt-6w">L'Ouest et le Nord ont ouvert leurs centres aux motos, le Sud beaucoup moins</h2>
+    <dsfr-data-repeat source="reg-haut">
+      <template>
+        <p class="odv-lecture">En tête, <strong>{{nom_region}}</strong>&nbsp;: {{motos:number}} centres sur
+          {{centres:number}} contrôlent les motos ({{part:number:1}}&nbsp;%).</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="reg-bas">
+      <template>
+        <p class="odv-lecture">Parmi les régions qui en ont au moins un, la moins pourvue est
+          <strong>{{nom_region}}</strong>&nbsp;: {{motos:number}} sur {{centres:number}} ({{part:number:1}}&nbsp;%).</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+      <div class="fr-col-12 fr-col-lg-7">
+        <div class="odv-chart-slot odv-viz" data-code="Part des centres qui contrôlent les motos, par département">
+          <!-- Un TAUX : le résumé « en France » est pondéré par le nombre de
+               centres et calculé sur la colonne non arrondie — c'est la part
+               nationale du chapô, pas une moyenne de départements. -->
+          <dsfr-data-chart id="g-carte" source="dep" type="map"
+            code-field="code_departement" value-field="part" name="Part des centres ouverts aux motos (%)" unit-tooltip=" %"
+            selected-palette="sequentialAscending"
+            map-summary="weighted" map-summary-weight="centres" map-summary-field="part_brute"
+            databox databox-title="Part des centres agréés qui contrôlent les motos, par département"
+            databox-source="DGCCRF — annuaire-centres-controle-technique, via data.economie.gouv.fr" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-carte" source="dep-table" table download
+            label-field="Département" value-field="Centres agréés, Dont motos, Part motos (%)"
+            filename="controle-technique-centres-motos-par-departement.csv"
+            description="Carte des départements colorés selon la part des centres agréés de contrôle technique qui déclarent contrôler les motocyclettes. Le tableau donne, pour chaque département, le nombre de centres, le nombre de ceux qui contrôlent les motos et leur part, du département le moins pourvu au mieux pourvu ; il affiche les cent premières lignes, le fichier CSV les contient toutes. Le chiffre « en France » est la part nationale, pondérée par le nombre de centres.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-5">
+        <div class="odv-chart-slot odv-viz" data-code="Part des centres qui contrôlent les motos, par région">
+          <dsfr-data-chart id="g-reg" source="reg" type="bar" horizontal
+            label-field="nom_region" value-field="part:Part des centres ouverts aux motos (%)" unit-tooltip=" %"
+            selected-palette="neutral"
+            databox databox-title="Part des centres qui contrôlent les motos, par région (au moins 20 centres)"
+            databox-source="DGCCRF — annuaire-centres-controle-technique, via data.economie.gouv.fr">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-reg" source="reg" table
+            label-field="nom_region" value-field="centres, motos, part"
+            description="Barres horizontales partant de zéro : part des centres agréés qui contrôlent les motos, par région, de la plus haute à la plus basse. Seules les régions d'au moins vingt centres sont classées. Le tableau donne le nombre de centres, le nombre de centres ouverts aux motos et la part.">
+          </dsfr-data-a11y>
+        </div>
+        <dsfr-data-repeat source="reg-petites">
+          <template>
+            <p class="fr-text--sm">{{n:number}} régions de moins de vingt centres ({{centres:number}} centres au total)
+              ne sont pas classées&nbsp;: une part calculée sur une poignée de centres n'est pas une part régionale.
+              Elles restent sur la carte.</p>
+          </template>
+        </dsfr-data-repeat>
+      </div>
+    </div>
 
-  <!-- La part du total (`share_percent`, #926) se calcule sur toutes les régions,
-       avant `limit` : la première ligne nourrit la phrase de lecture de la carte. -->
-  <dsfr-data-query id="qt-regions" source="qt-f" group-by="nom_region"
-    aggregate="cct_siret:count:nb, nb:share_percent:part" order-by="nb:desc">
-  </dsfr-data-query>
-  <dsfr-data-query id="qt-region-1" source="qt-regions" limit="1"></dsfr-data-query>
+    <!-- ===================== L'exception ===================== -->
+    <h2 class="fr-mt-6w">Dans une vingtaine de départements, un motard n'a pas plus de deux centres où aller</h2>
+    <dsfr-data-repeat source="dep-rares-n">
+      <template>
+        <p class="odv-lecture"><strong>{{n:number}} départements</strong> comptent au plus deux centres ouverts aux
+          motos&nbsp;: {{motos:number}} en tout, pour {{centres:number}} centres agréés au total.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="dep-gros-bas">
+      <template>
+        <p class="odv-lecture">Le cas le plus net parmi les départements d'au moins cinquante centres&nbsp;:
+          <strong>{{nom_departement}}</strong>, {{centres:number}} centres dont {{motos:number}} pour les motos.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="dep-haut">
+      <template>
+        <p class="odv-lecture">À l'opposé, {{nom_departement}}&nbsp;: {{motos:number}} sur {{centres:number}}
+          ({{part:number:1}}&nbsp;%).</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-4w" data-code="Les départements qui comptent au plus deux centres ouverts aux motos">
+      <dsfr-data-list source="dep-rares"
+        columns="nom_departement:Département, centres:Centres agréés, motos:Dont motos, part:Part motos (%)"
+        sort="centres:desc">
+      </dsfr-data-list>
+    </div>
+    <p class="fr-text--sm">Un tableau plutôt qu'un graphique&nbsp;: la question est «&nbsp;où&nbsp;», la réponse une
+      liste de noms. Il est trié par nombre de centres&nbsp;: plus un département en a, plus le manque de centres
+      ouverts aux motos y relève d'un choix du réseau plutôt que de sa taille.</p>
 
-  <!-- Choroplèthe départementale : `code_departement` est une chaîne à zéro de
-       tête (« 01 », « 2A », « 971 »), ce que `type="map"` attend (vérifié à l'API). -->
-  <dsfr-data-query id="qt-deps-carte" source="qt-f" group-by="code_departement, nom_departement"
-    where="code_departement:isnotnull"
-    aggregate="cct_siret:count:nb, nb:share_percent:part" order-by="nb:desc">
-  </dsfr-data-query>
-  <dsfr-data-query id="qt-dep-1" source="qt-deps-carte" limit="1"></dsfr-data-query>
+    <!-- ===================== Nuance ===================== -->
+    <h2 class="fr-mt-6w">Ce que la carte ne dit pas</h2>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+      <div class="fr-col-12 fr-col-md-6">
+        <ul class="fr-text--sm">
+          <li><strong>Un compte n'est pas une distance.</strong> Deux centres dans un petit département urbain ne
+            valent pas deux centres en Lozère. Le jeu donne les coordonnées de chaque centre, pas les temps de
+            trajet&nbsp;; la carte d'exploration ci-dessous permet de juger sur place.</li>
+          <li><strong>L'offre, pas la demande.</strong> Aucun chiffre de parc de motos ni de visites réalisées
+            dans ce jeu&nbsp;: une part faible peut répondre à une demande faible. On ne le sait pas ici.</li>
+        </ul>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <dsfr-data-repeat source="nat">
+          <template>
+            <ul class="fr-text--sm">
+              <li><strong>Les énergies, elles, sont presque partout.</strong> {{elec:number}} centres
+                ({{part_elec:number}}&nbsp;%) déclarent les véhicules électriques. Seul le gaz fait exception, avec
+                {{gaz:number}} centres ({{part_gaz:number}}&nbsp;%)&nbsp;: une voiture au GPL se contrôle dans trois
+                centres sur quatre environ.</li>
+              <li><strong>Ce que le centre déclare.</strong> L'annuaire reprend les catégories que chaque centre
+                déclare à l'administration&nbsp;; la page ne vérifie pas qu'il les contrôle effectivement.</li>
+            </ul>
+          </template>
+        </dsfr-data-repeat>
+      </div>
+    </div>
 
-  <!-- Le tableau équivalent a des colonnes NOMMÉES. `dsfr-data-a11y` ne lit pas la
-       grammaire `champ:Libellé` de son propre graphique (PG-032) : le libellé va donc
-       dans la donnée, sur une branche à part — la carte garde ses noms de colonnes.
-       L'arrondi de la part (`round`, avant `rename`) ne touche que cette branche : la
-       phrase de lecture et la carte lisent `qt-deps-carte`, jamais la valeur arrondie.
-       (La query `qt-departements` qui vivait ici ne nourrissait plus rien depuis le
-       passage du KPI à `nom_departement:distinct` : retirée.) -->
-  <dsfr-data-normalize id="qt-deps-table" source="qt-deps-carte" round="part:1"
-    rename="nom_departement:Département | nb:Centres agréés | part:Part de la sélection (%25)">
-  </dsfr-data-normalize>
+    <!-- ===================== Exploration ===================== -->
+    <h2 class="fr-mt-6w">Trouver un centre qui contrôle votre véhicule</h2>
+    <p>Cherchez une commune, un code postal ou un nom de centre, puis choisissez la catégorie de véhicule
+      (par exemple «&nbsp;Motocyclette&nbsp;») et l'énergie&nbsp;: la carte, le compteur et les fiches suivent.</p>
+  </div>
 
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="qt-q" source="qt"
-        fields="cct_denomination, cct_code_commune, cct_adresse, cct_code_postal"
-        label="Rechercher un centre" placeholder="Nom, commune, code postal…"
-        operator="words" count count-label="centre">
+          fields="cct_denomination, cct_code_commune, cct_adresse, cct_code_postal"
+          label="Rechercher un centre" placeholder="Nom, commune, code postal…"
+          operator="words" count count-label="centre">
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Trois compteurs qui suivent les filtres">
-    <p class="odv-lecture">Trois compteurs qui se recalculent à chaque filtre&nbsp;: combien de
-      centres, sur combien de régions et de départements. Sans filtre, tous les départements
-      en ont au moins un&nbsp;— la couverture ne devient une information qu'une fois une
-      catégorie de véhicule ou d'énergie choisie.</p>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="qt-f" value="count" format="nombre"
-        heading="Sélection courante" label="centres agréés" col="4"></dsfr-data-kpi>
-      <!-- ⚠️ PG-017, repayé ici : ces deux KPI comptaient les lignes de
-           `qt-activites` et `qt-departements`, deux `dsfr-data-query` écrites
-           POUR LES GRAPHIQUES. La première porte `limit="14"` : le KPI
-           affichait « 14 régions couvertes » pour 18 (vérifié à l'API le
-           2026-09-19 : `count(distinct nom_region)` = 18, `nom_departement`
-           = 101). La 0.29 le disait même en console (« compte 14 lignes
-           reçues, l'amont en détient 18 ») — personne ne l'avait lu.
-           `champ:distinct` sur la source filtrée compte la donnée, pas la
-           limite d'affichage d'un graphique voisin. -->
-      <!-- La base du chiffre est dans le libellé : 18 régions et 101 départements dans
-           le jeu (relevé sur l'export du 2026-09-20), soit toutes les régions et tous les
-           départements. -->
-      <dsfr-data-kpi source="qt-f" value="nom_region:distinct" format="nombre"
-        heading="Couverture" label="régions couvertes, sur 18" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="qt-f" value="nom_departement:distinct" format="nombre"
-        heading="Couverture" label="départements couverts, sur 101" col="4"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    </div>
-
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
         </summary>
         <h2 class="fr-h6">Filtrer</h2>
-
         <div class="odv-viz" data-code="Recherche et facettes : deux balises">
-
-        <dsfr-data-facets id="qt-f" source="qt-q"
-          fields="cat_vehicule_libelle, cat_energie_libelle, nom_region, nom_departement"
-          labels="cat_vehicule_libelle:Catégorie de véhicule | cat_energie_libelle:Énergie | nom_region:Région | nom_departement:Département"
-          searchable="nom_departement, nom_region" max-values="6"
-          display="cat_vehicule_libelle:multiselect | nom_region:multiselect | nom_departement:multiselect">
-        </dsfr-data-facets>
+          <!-- Catégories et énergies arrivent en tableaux : facettes
+               multi-valeurs natives, sans rien déclarer (AV-011). -->
+          <dsfr-data-facets id="qt-f" source="qt-q"
+            fields="cat_vehicule_libelle, cat_energie_libelle, nom_region, nom_departement"
+            labels="cat_vehicule_libelle:Catégorie de véhicule | cat_energie_libelle:Énergie | nom_region:Région | nom_departement:Département"
+            searchable="nom_departement, nom_region" max-values="10"
+            display="cat_vehicule_libelle:multiselect | nom_region:multiselect | nom_departement:multiselect">
+          </dsfr-data-facets>
         </div>
       </details>
       <div class="fr-col-12 fr-col-lg-9">
         <div class="odv-viz" data-code="La carte des centres agréés">
-        <h2 class="fr-h4">Où sont les centres</h2>
-        <dsfr-data-repeat source="qt-region-1">
-          <template>
-            <p class="odv-lecture"><strong>{{nom_region}}</strong> est la région la mieux dotée&nbsp;:
-              <strong>{{part:number:0}}&nbsp;%</strong> des centres de la sélection ({{nb:number}}).</p>
-          </template>
-        </dsfr-data-repeat>
-        <!-- ⚠️ Le champ `cct_commune` du jeu est CORROMPU sur 6 124 lignes sur 6 126 :
-             « Sin-le-Noble/Sin-le-Noble/… », le nom répété (véhicules × énergies) fois —
-             la trace d'un produit cartésien aplati chez l'éditeur, jusqu'à 974 caractères.
-             Le nom propre est dans `cct_code_commune`, mal nommé (ce n'est pas un code) :
-             c'est lui que lisent la recherche, la fiche et le popup. Vérifié à l'API le
-             2026-09-20. Aucune recette ne pouvait le voir : ce n'est ni une erreur console
-             ni un chiffre faux, seulement du texte faux. -->
-        <dsfr-data-map tiles-style="muted" name="Carte des centres agréés de contrôle technique"
-          center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
-          tiles-switcher="ign-plan,ign-ortho"
-          fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
-          <dsfr-data-map-layer source="qt-f" type="circle" radius="5"
-            geo-field="coordgeo" color="#000091"
-            tooltip-field="cct_denomination" cluster max-items="12000">
-          </dsfr-data-map-layer>
-          <dsfr-data-map-popup mode="panel-right" title-field="cct_denomination" width="380px">
-            <template>
-              <p class="fr-text--sm fr-mb-1v">{{cct_adresse|}}</p>
-              <p class="fr-text--sm fr-mb-2v"><strong>{{cct_code_postal}} {{cct_code_commune}}</strong> — {{nom_departement}}, {{nom_region}}</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>Véhicules&nbsp;:</strong> {{cat_vehicule_libelle|non précisés}}</p>
-              <p class="fr-text--sm fr-mb-2v"><strong>Énergies&nbsp;:</strong> {{cat_energie_libelle|non précisées}}</p>
-              <p class="fr-text--xs fr-mb-1v">Téléphone&nbsp;: {{cct_tel|non renseigné}}</p>
-              <p class="fr-text--xs">Site&nbsp;: {{#if cct_url}}<a class="fr-link fr-text--xs" href="{{cct_url:url}}" target="_blank" rel="noopener external">{{cct_url}}</a>{{/if}}{{#unless cct_url}}non renseigné{{/unless}} · SIRET {{cct_siret}}</p>
-            </template>
-          </dsfr-data-map-popup>
-        </dsfr-data-map>
+          <h2 class="fr-h4">Les centres de la sélection</h2>
+          <!-- `cct_commune` est corrompu (le nom répété une fois par couple
+               véhicule × énergie) : le nom propre est dans `cct_code_commune`,
+               mal nommé. Vérifié sur l'export du 2026-09-26. -->
+          <dsfr-data-map tiles-style="muted" name="Carte des centres agréés de contrôle technique"
+            center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
+            tiles-switcher="ign-plan,ign-ortho"
+            fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
+            <dsfr-data-map-layer source="qt-f" type="circle" radius="5"
+              geo-field="coordgeo" color="#000091"
+              tooltip-field="cct_denomination" cluster max-items="12000">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-popup mode="panel-right" title-field="cct_denomination" width="380px">
+              <template>
+                <p class="fr-text--sm fr-mb-1v">{{cct_adresse|}}</p>
+                <p class="fr-text--sm fr-mb-2v"><strong>{{cct_code_postal}} {{cct_code_commune}}</strong> — {{nom_departement}}, {{nom_region}}</p>
+                <p class="fr-text--sm fr-mb-1v"><strong>Véhicules&nbsp;:</strong> {{cat_vehicule_libelle|non précisés}}</p>
+                <p class="fr-text--sm fr-mb-2v"><strong>Énergies&nbsp;:</strong> {{cat_energie_libelle|non précisées}}</p>
+                <p class="fr-text--xs fr-mb-1v">Téléphone&nbsp;: {{cct_tel|non renseigné}}</p>
+                <p class="fr-text--xs">Site&nbsp;: {{#if cct_url}}<a class="fr-link fr-text--xs" href="{{cct_url:url}}" target="_blank" rel="noopener external">{{cct_url}}</a>{{/if}}{{#unless cct_url}}non renseigné{{/unless}} · SIRET {{cct_siret}}</p>
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
         </div>
       </div>
     </div>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w fr-mb-4w">
-      <div class="fr-col-12">
-        <div class="odv-viz" data-code="Centres agréés par département">
-          <h2 class="fr-h4">Combien par département</h2>
-          <dsfr-data-repeat source="qt-dep-1">
-            <template>
-              <p class="odv-lecture">Le département le mieux doté, <strong>{{nom_departement}}</strong>,
-                compte <strong>{{nb:number}} centres</strong> — {{part:number:1}}&nbsp;% de la sélection.</p>
-            </template>
-          </dsfr-data-repeat>
-          <!-- Le résumé « en France » d'une carte de VOLUMES est la SOMME
-               (`map-summary="sum"`, #927) : la moyenne d'un nombre de centres
-               par département ne mesurerait rien. Il suit les filtres. -->
-          <dsfr-data-chart id="g-deps" source="qt-deps-carte" type="map"
-            code-field="code_departement" value-field="nb" name="Centres agréés"
-            map-summary="sum"
-            databox databox-title="Centres agréés par département"
-            databox-source="DGCCRF — annuaire-centres-controle-technique, via data.economie.gouv.fr"
-            databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-deps" source="qt-deps-table" table download
-            label-field="Département" value-field="Centres agréés, Part de la sélection (%)"
-            description="Nombre de centres agréés de contrôle technique par département, du mieux doté au moins doté, et part de chacun dans la sélection courante. Le résumé « en France » est la somme des départements dessinés."></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-
-    <div class="odv-viz" data-code="Les fiches des centres">
-    <h2 class="fr-h4">Les centres</h2>
-    <dsfr-data-display source="qt-f" cols="3" pagination="12" uid-field="cct_siret"
-      empty="Aucun centre ne correspond à ces critères." url-sync count-label="centre">
-      <template>
-        <div class="fr-card fr-card--sm">
-          <div class="fr-card__body">
-            <div class="fr-card__content">
-              <div class="fr-card__start">
-                <p class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{nom_departement}}</p>
-              </div>
-              <h3 class="fr-card__title fr-text--sm">{{cct_denomination}}</h3>
-              <p class="fr-card__desc fr-text--xs">
-                {{cct_adresse|}}<br>{{cct_code_postal}} {{cct_code_commune}}
-              </p>
-              <div class="fr-card__end">
-                <p class="fr-text--xs fr-mb-0">Énergies&nbsp;: {{cat_energie_libelle|non précisées}}</p>
+    <div class="odv-viz fr-mt-4w" data-code="Les fiches des centres">
+      <h2 class="fr-h4">Les fiches</h2>
+      <dsfr-data-display source="qt-f" cols="3" pagination="12" uid-field="cct_siret"
+        empty="Aucun centre ne correspond à ces critères." url-sync count-label="centre">
+        <template>
+          <div class="fr-card fr-card--sm">
+            <div class="fr-card__body">
+              <div class="fr-card__content">
+                <div class="fr-card__start">
+                  <p class="fr-badge fr-badge--sm fr-badge--blue-ecume">{{nom_departement}}</p>
+                </div>
+                <h3 class="fr-card__title fr-text--sm">{{cct_denomination}}</h3>
+                <p class="fr-card__desc fr-text--xs">
+                  {{cct_adresse|}}<br>{{cct_code_postal}} {{cct_code_commune}}
+                </p>
+                <div class="fr-card__end">
+                  <p class="fr-text--xs fr-mb-0">Véhicules&nbsp;: {{cat_vehicule_libelle|non précisés}}</p>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </template>
-    </dsfr-data-display>
+        </template>
+      </dsfr-data-display>
     </div>
   </div>
 
   <section class="fr-container fr-mb-6w" id="hypotheses">
-    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
+    <h2 class="fr-h4">Ce qu'on ne montre pas, et les choix de la page</h2>
     <p class="fr-text--sm fr-hint-text">
-      Les choix faits sur cette page, et pourquoi. Ils sont discutables&nbsp;: ils sont écrits
-      pour pouvoir l'être.
+      Les choix faits sur cette page, et pourquoi. Ils sont discutables&nbsp;: ils sont écrits pour pouvoir l'être.
     </p>
     <ol class="fr-text--sm">
-      <li class="fr-mb-2w"><strong>La commune vient de <code>cct_code_commune</code>, pas de
-        <code>cct_code_commune</code>.</strong> Le champ nommé « commune » est corrompu sur
-        6&nbsp;124 lignes sur 6&nbsp;126&nbsp;: le nom y est répété, séparé par des barres
-        obliques, autant de fois que le centre a de couples véhicule&nbsp;×&nbsp;énergie
-        («&nbsp;Sin-le-Noble/Sin-le-Noble/…&nbsp;», 25 fois pour 5&nbsp;véhicules et
-        5&nbsp;énergies&nbsp;; jusqu'à 974&nbsp;caractères). C'est la trace d'un produit
-        cartésien aplati chez l'éditeur, pas un défaut de la bibliothèque. Le champ
-        <code>cct_code_commune</code>, mal nommé, porte le nom propre.</li>
-      <li class="fr-mb-2w"><strong>Un centre = une ligne.</strong> Les 6&nbsp;126 lignes portent
-        6&nbsp;126 SIRET distincts (vérifié sur l'export complet)&nbsp;; le compteur, les KPI et
-        les parts comptent donc des centres, pas des lignes. À l'API, <code>count(distinct
-        cct_siret)</code> répond 5&nbsp;967&nbsp;: ce compte est approximatif (PG-026), il ne
-        sert pas de référence.</li>
-      <li class="fr-mb-2w"><strong>Les parts sont des parts de la sélection.</strong> «&nbsp;13&nbsp;%
-        des centres&nbsp;» pour Auvergne-Rhône-Alpes vaut sans filtre&nbsp;; choisir «&nbsp;Gaz&nbsp;»
-        recalcule le dénominateur. Le résumé «&nbsp;en France&nbsp;» de la carte départementale
-        est une <em>somme</em> (<code>map-summary="sum"</code>)&nbsp;: la moyenne d'un nombre de
-        centres par département ne mesurerait rien.</li>
-      <li class="fr-mb-2w"><strong>Ce qu'on ne montre pas.</strong> Aucun centre sans coordonnées ni
-        sans département (0 valeur nulle sur ces deux champs, relevé à l'API le 2026-09-20)&nbsp;:
-        la carte et la choroplèthe portent toute la sélection. En revanche 3&nbsp;293 centres
-        sur 6&nbsp;126 n'ont pas de site web et 678 pas de téléphone&nbsp;: la fiche écrit
-        «&nbsp;non renseigné&nbsp;» plutôt que de cacher la ligne. Les cinq départements
-        d'outre-mer comptent 132 centres, dont un seul à Mayotte&nbsp;: les encarts peuvent
-        paraître vides sans l'être.</li>
+      <li class="fr-mb-2w"><strong>«&nbsp;Contrôle les motos&nbsp;» veut dire&nbsp;: déclare la catégorie
+        «&nbsp;Motocyclette&nbsp;».</strong> Les quatre autres catégories de deux-roues et quadricycles
+        (cyclomoteur, voiturette, quad, tricycle) suivent à quelques centres près&nbsp;; le graphique des catégories
+        les montre toutes.</li>
+      <li class="fr-mb-2w"><strong>Un centre = une ligne = un SIRET.</strong> Vérifié sur l'export complet du
+        2026-09-26 (6&nbsp;135 lignes, 6&nbsp;135 SIRET distincts)&nbsp;: les comptes sont des centres.</li>
+      <li class="fr-mb-2w"><strong>Des parts, pas des volumes.</strong> Le Nord compte plus de centres motos que la
+        Sarthe parce qu'il compte plus de centres&nbsp;; la carte montre donc la part des centres ouverts aux
+        motos, et son chiffre «&nbsp;en France&nbsp;» est pondéré par le nombre de centres.</li>
+      <li class="fr-mb-2w"><strong>Petits territoires.</strong> Mayotte (1 centre) et la Guyane (5) sont sur la carte
+        mais hors du classement régional. La Martinique, 42 centres et aucun ouvert aux motos, est classée&nbsp;:
+        son zéro n'est pas un effet de petit nombre.</li>
+      <li class="fr-mb-2w"><strong>Champs incomplets ou faux.</strong> Aucun centre sans coordonnées ni sans
+        département. En revanche 3&nbsp;294 centres n'ont pas de site web et 678 pas de téléphone (relevé du
+        2026-09-26)&nbsp;: la fiche écrit «&nbsp;non renseigné&nbsp;». Le champ <code>cct_commune</code> répète le
+        nom de la commune une fois par couple véhicule&nbsp;×&nbsp;énergie (jusqu'à plusieurs centaines de
+        caractères)&nbsp;: la page lit le nom dans <code>cct_code_commune</code>, mal nommé mais juste.</li>
+      <li class="fr-mb-2w"><strong>Récit et exploration séparés.</strong> Les graphiques du récit portent sur la
+        France entière et ne suivent pas les filtres&nbsp;; seuls la carte des centres, le compteur et les fiches
+        les suivent.</li>
     </ol>
   </section>
 
@@ -308,88 +434,62 @@
     <summary>Analyse technique — ce que la reproduction a coûté</summary>
   <section class="odv-analyse fr-py-8w">
     <div class="fr-container">
-      <h2>Analyse — Centres de contrôle technique, un jeu renommé sans suivi</h2>
+      <h2>Analyse — Centres de contrôle technique, d'un annuaire à une question</h2>
 
       <p class="fr-text--lead">
-        Troisième dataviz remise en ligne dans ce lot, et le cas le plus net. La page est en 404,
-        les deux jeux qu'elle référence ont disparu, et le catalogue officiel marque l'entrée
-        «&nbsp;accès public&nbsp;: non&nbsp;». Or l'annuaire est publié, sous un identifiant
-        renommé, et <strong>mis à jour le jour même</strong>&nbsp;: 6&nbsp;113 centres agréés.
+        L'original (en 404) était un annuaire&nbsp;: une carte, des filtres. La recréation garde l'annuaire en bas de
+        page et pose d'abord la question que le jeu permet de trancher&nbsp;: où peut-on faire contrôler une moto.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Cinquième emploi du gabarit.</strong> Page dérivée de
-              <a href="/viz/qualite-tourisme">Qualité Tourisme</a> par substitution de noms de
-              champs. Aucun constat inédit — le troisième résultat négatif consécutif sur ce motif,
-              et le plus concluant.</li>
-            <li><strong>Deux facettes multi-valeurs, gratuites.</strong>
-              <code>cat_vehicule_libelle</code> et <code>cat_energie_libelle</code> arrivent en
-              tableaux&nbsp;: on peut chercher les centres qui contrôlent les véhicules
-              électriques, ou les camping-cars, sans rien déclarer. C'est précisément le service
-              que rendait la page disparue.</li>
-            <li><strong>Pas de <code>select</code> nécessaire.</strong> Le jeu ne contient aucun
-              champ texte long&nbsp;: l'export complet répond en 1,4&nbsp;s pour 900&nbsp;Ko. La
-              règle du lot&nbsp;3 s'applique à l'envers — quand il n'y a pas de texte long, le
-              <code>select</code> ne sert à rien.</li>
+            <li><strong>Une requête pour toute la page.</strong> L'export complet (6&nbsp;135 lignes) nourrit le récit
+              et l'exploration&nbsp;; tous les agrégats se calculent côté client.</li>
+            <li><strong>Un champ tableau, compté sans script.</strong> <code>explode</code> sur la query donne le
+              nombre de centres par catégorie&nbsp;; <code>compute</code> avec <code>=</code> sur un tableau
+              (#953) dérive un indicateur «&nbsp;contrôle les motos&nbsp;» par centre, que <code>group-by</code>
+              somme par département et par région.</li>
+            <li><strong>Un taux honnête sur la carte.</strong> <code>map-summary="weighted"</code> +
+              <code>map-summary-field</code> sur la colonne non arrondie&nbsp;: le chiffre «&nbsp;en France&nbsp;»
+              est la part nationale du chapô.</li>
           </ul>
         </div>
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Retrouver le jeu.</strong> Rien ne relie l'ancien identifiant au nouveau.
-              Il a fallu une recherche plein texte au catalogue de l'API
-              (<code>search(dataset_id,"technique")</code>) pour tomber sur
-              <code>annuaire-centres-controle-technique</code>. Un usager qui suit le lien du
-              catalogue officiel n'a, lui, aucun moyen de savoir que la donnée existe encore
-              (registre&nbsp;: PG-010).</li>
-            <li><strong>Le catalogue se contredit.</strong> L'entrée porte «&nbsp;accès public&nbsp;:
-              non&nbsp;» alors que le jeu de remplacement est parfaitement public et
-              interrogeable sans clé particulière. La métadonnée décrit un état qui n'est plus
-              vrai.</li>
-            <li><strong>Un champ « commune » qui n'en est pas un</strong> (relecture du 2026-09-20).
-              La page a affiché pendant tous les lots «&nbsp;59450 Sin-le-Noble/Sin-le-Noble/…&nbsp;»
-              sur chaque fiche&nbsp;: <code>cct_code_commune</code> est corrompu sur 6&nbsp;124 lignes,
-              et aucune recette ne l'a vu — un texte trop long n'est ni une erreur console ni un
-              chiffre faux. Seule la lecture d'une fiche le montre. Le nom propre est dans
-              <code>cct_code_commune</code>, qui n'est pas un code&nbsp;: il a fallu comparer les
-              deux colonnes sur l'export pour le savoir.</li>
+            <li><strong>Retrouver le jeu</strong> (lots précédents)&nbsp;: rien ne relie l'ancien identifiant au
+              nouveau (PG-010).</li>
+            <li><strong>Un champ «&nbsp;commune&nbsp;» corrompu chez l'éditeur</strong>, que seule la lecture d'une
+              fiche révèle&nbsp;; le nom propre est dans <code>cct_code_commune</code>.</li>
+            <li><strong>La mise en avant par position.</strong> <code>highlight-index</code> colore les cinq dernières
+              barres des catégories&nbsp;: juste tant que les deux-roues restent en bas du classement, ce que l'écart
+              (≈ 1&nbsp;000 contre ≈ 6&nbsp;000) rend durable, mais la couleur suit un rang, pas un nom.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
-            <p class="fr-text--sm">
-              7 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore ses contournements, qui ne sont simplement plus
-              nécessaires — à l'exception d'AM-011, dont le contournement a été retiré au lot 13&nbsp;: la source
-              est repassée en mode adaptateur avec <code>fetch-mode="export"</code>. Détail et vérification au <a href="/retours#AM-012">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>BUG-004</strong> — <strong>0.21.1</strong> (#642)&nbsp;: <code>fit-bounds</code> + <code>max-bounds</code> zoome sur une emprise réduite à un point, et <code>fit-zone</code> (#687, 0.22.0) cadre la métropole sans renoncer aux encarts.</li>
-              <li><strong>PG-012</strong> — <strong>0.21.1</strong> (#645)&nbsp;: <code>sort="count:desc"</code>&nbsp;: la grammaire <code>critère:sens</code> remplace le <code>-count</code> ambigu, qui est déprécié avec avertissement.</li>
-              <li><strong>PG-013</strong> — <strong>0.21.1</strong> (#644)&nbsp;: le bandeau <code>max-items</code> nomme le vrai remède hors mode <code>bbox</code> et disparaît des encarts (le plafond de 5 000 reste délibéré).</li>
-              <li><strong>AM-007</strong> — <strong>0.22.0</strong> (#664)&nbsp;: blocs <code>{{#if}}</code> / <code>{{#unless}}</code> et pipe <code>{{lien:url}}</code> dans les templates&nbsp;: un lien optionnel s'enveloppe.</li>
-              <li><strong>AM-017</strong> — <strong>0.22.0</strong> (#686)&nbsp;: <code>tiles-style="muted|grey"</code> atténue le fond de carte&nbsp;: la classe <code>odv-fond-attenue</code> de <code>site.css</code> n'est plus nécessaire.</li>
-              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du portail, en une requête et <em>sans</em> quitter le mode adaptateur. Le contournement par source générique a été retiré de cette page (lot 13).</li>
-            </ul>
-          </div>
         </div>
+      </div>
+
+      <div class="fr-table fr-table--sm">
+        <table>
+          <caption>Directive Opendatasoft → composant dsfr-data</caption>
+          <thead><tr><th>Original (Opendatasoft)</th><th>Recréation (dsfr-data)</th></tr></thead>
+          <tbody>
+            <tr><td><code>ods-dataset-context</code></td><td><code>dsfr-data-source fetch-mode="export"</code></td></tr>
+            <tr><td><code>ods-facets</code> (catégories en tableau)</td><td><code>dsfr-data-facets</code> multi-valeurs natives</td></tr>
+            <tr><td><code>ods-map</code></td><td><code>dsfr-data-map</code> + <code>insets="drom"</code></td></tr>
+            <tr><td><em>aucune</em> (l'original ne comptait rien)</td><td><code>dsfr-data-query explode</code>, <code>dsfr-data-normalize compute</code>, <code>dsfr-data-chart type="map" map-summary="weighted"</code></td></tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reconstitution immédiate d'un service public d'information qui n'était plus
-          accessible.</strong> Une page en 404, deux identifiants de jeux périmés, une métadonnée
-          d'accès erronée — et derrière, un annuaire de 6&nbsp;113 centres mis à jour
-          quotidiennement. Le gabarit «&nbsp;annuaire cartographié&nbsp;» a fait le reste.</p>
+        <p><strong>Le jeu racontait plus que l'annuaire ne le montrait.</strong> Les catégories de véhicules en
+          tableau, ignorées par l'original sinon comme filtre, portent une géographie nette de l'offre de contrôle
+          des motos. Tout le récit tient en transformateurs déclaratifs sur une seule requête.</p>
         <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: PG-010 (identifiant
-          de jeu périmé au catalogue), AV-009 (cinquième confirmation), AV-011 (facettes
-          multi-valeurs natives), AM-013, AM-017 (réduit au lot 11, fond atténué par CSS de page).
+          Constats au <a href="/retours">registre des retours</a>&nbsp;: PG-010, AV-009, AV-011, AM-007, AM-011.
         </p>
       </div>
     </div>
