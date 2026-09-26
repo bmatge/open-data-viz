@@ -1,5 +1,5 @@
 // Construit public/data/stats.json : les statistiques du banc d'essai lui-meme,
-// lues par le tableau de bord de la page d'accueil (public/index.html).
+// lues par le tableau de bord du banc (public/banc.html, ex-page d'accueil).
 //
 //   node scripts/build-stats.mjs
 //

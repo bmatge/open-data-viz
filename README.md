@@ -44,7 +44,9 @@ choix entre les deux mécanismes de filtrage) sont documentés dans
 
 ```
 public/
-  index.html              tableau de bord du banc (KPI + graphiques, + son analyse)
+  index.html              accueil-vitrine : ce que sait faire dsfr-data (catalogue dataviz.json)
+  dataviz.html            toutes les dataviz, une même carte, filtres et recherche
+  banc.html               tableau de bord du banc (KPI + graphiques, + son analyse)
   bercy.html              catalogue Bercy reproduit (+ son analyse)
   education.html          catalogue Éducation reproduit (+ son analyse)
   sports.html             accueil du portail Sports + registre par onglet (+ son analyse)
@@ -53,7 +55,8 @@ public/
   education/<slug>.html   une page par dataviz reproduite (Éducation)
   sports/<slug>.html      une page par portrait Sports, un onglet fr-tabs par onglet d'origine
   data/registre.json      état de reproduction, joint au catalogue ODS
-  data/stats.json         statistiques du banc (build-stats.mjs), lu par index.html
+  data/stats.json         statistiques du banc (build-stats.mjs), lu par banc.html
+  data/dataviz.json       catalogue de toutes les dataviz (build-catalogue.mjs)
   assets/
     cles.js               clé de lecture publique de l'API ODS du portail
     layout.js             en-tête et pied de page DSFR communs
@@ -128,7 +131,7 @@ node scripts/build-retours.mjs      # -> export/issues-dsfr-data.md + note du va
 Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
 
 - **15 entrées reproduites** (14 pages : le catalogue compte deux fois l'annuaire DGFiP) —
-  [tableau de bord](public/index.html) · [catalogue Bercy](public/bercy.html) · [DECP augmenté](public/viz/decp-augmente.html) ·
+  [tableau de bord](public/banc.html) · [catalogue Bercy](public/bercy.html) · [DECP augmenté](public/viz/decp-augmente.html) ·
   [Plan de relance](public/viz/plan-de-relance.html) · [Qualité Tourisme](public/viz/qualite-tourisme.html) ·
   [Tourisme & Handicap](public/viz/tourisme-et-handicap.html) ·
   [Rebâtir Notre-Dame](public/viz/entreprises-restauration-notre-dame.html) ·

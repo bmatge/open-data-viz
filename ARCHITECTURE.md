@@ -22,7 +22,8 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 ## 2. Points d'entrée
 
 - Serveur / routage : `server.js:28` (`resolveFile`) et `server.js:47` (handler)
-- Tableau de bord (accueil) : `public/index.html` — trois sources sur `data/stats.json` via `transform`
+- Accueil-vitrine : `public/index.html` et catalogue `public/dataviz.html` — `data/dataviz.json` (`scripts/build-catalogue.mjs`) via `transform`
+- Tableau de bord du banc : `public/banc.html` — trois sources sur `data/stats.json` via `transform`
 - Page catalogue Bercy : `public/bercy.html` (le pipeline commence à la `dsfr-data-source`)
 - Page catalogue Éducation : `public/education.html`
 - Page portail Sports : `public/sports.html` (pas de catalogue vivant, registre seul)
@@ -36,7 +37,8 @@ chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 | Module | Rôle | Chemin |
 |---|---|---|
 | Serveur statique | Sert `public/`, URLs propres, `/healthz` | `server.js` |
-| Tableau de bord | Le banc mesuré par lui-même (avancement, usage des composants, constats) | `public/index.html` |
+| Vitrine | Accueil et catalogue de toutes les dataviz, une même carte rendue depuis `data/dataviz.json` | `public/index.html`, `public/dataviz.html` |
+| Tableau de bord | Le banc mesuré par lui-même (avancement, usage des composants, constats) | `public/banc.html` |
 | Pages catalogue | Reproduisent les pages d'accueil ODS + badges d'avancement | `public/bercy.html`, `public/education.html`, `public/sports.html` |
 | Pages dataviz | Une par visualisation reproduite, avec sa section `#analyse` | `public/viz/*.html`, `public/education/*.html` |
 | Pages portraits | Une par portrait Sports, un `fr-tabs` = un panneau par onglet d'origine | `public/sports/*.html` |
