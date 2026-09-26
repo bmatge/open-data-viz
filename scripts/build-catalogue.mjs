@@ -78,7 +78,7 @@ const VARIANTES = { '/viz/rappel-conso-tableau-de-bord': '/viz/rappelconso' };
 // Commits de la methode dataviz-metier (sujet de commit, hors fusions).
 const METHODE = [
   /en récit/i,
-  /^feat\(portails\): vague \d/i,
+  /^feat(\([^)]*\))?: vague \d/i,
   /relecture (dataviz-)?m[ée]tier/i,
 ];
 
