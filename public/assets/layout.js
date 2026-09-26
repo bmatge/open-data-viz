@@ -10,6 +10,8 @@
     { href: '/bercy', libelle: 'Portail Bercy' },
     { href: '/education', libelle: 'Portail Éducation' },
     { href: '/sports', libelle: 'Portail Sports' },
+    { href: '/culture', libelle: 'Culture' },
+    { href: '/developpement-durable', libelle: 'Développement durable' },
     { href: '/demo', libelle: 'Démonstrations' },
     { href: '/synthese', libelle: 'Synthèse' },
     { href: '/retours', libelle: 'Registre des retours' }
@@ -116,6 +118,8 @@
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/bercy">Portail Bercy</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/education">Portail Éducation</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/sports">Portail Sports</a></li>
+        <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/culture">Culture</a></li>
+        <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/developpement-durable">Développement durable</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/demo">Démonstrations</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/synthese">Synthèse des analyses</a></li>
         <li class="fr-footer__bottom-item"><a class="fr-footer__bottom-link" href="/retours">Registre des retours</a></li>
