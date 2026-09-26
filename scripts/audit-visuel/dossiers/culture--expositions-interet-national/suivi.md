@@ -1,0 +1,8 @@
+# Suivi — Expositions d'intérêt national
+
+> Le journal de la transformation. Une ligne par intervention, la plus recente en haut.
+> **Ce fichier n'est jamais ecrase par un script.**
+
+| Date | Ce qui a change | Pourquoi | Verifie comment |
+|---|---|---|---|
+| 2026-09-27 | Création de la page (fiche 28, vague 5) : chapô et 4 KPI calculés ; part des musées / part des labels par classe ; podium des 7 musées labellisés ≥ 4 fois ; barres empilées premier label / retour par année + encadré sur l'effet de fenêtre ; taux de musées labellisés par région (dénominateur Muséofile) ; carte de cercles avec encarts DROM ; exploration facettes + liste ; ce qu'on ne montre pas ; `#analyse`. Titre-message du cadrage précisé : 170 musées, les 68 qui reviennent font 62,9 % des labels ; 32 labels en 2025 et non 33 (ligne vide) ; 261 expositions (9 coproduites) | Vague 5 Culture | Les 276 lignes (Tabular, 2 pages, tunnel SOCKS) et Muséofile (1 216 lignes, 1 216 identifiants distincts ; les 170 identifiants des labels y sont tous) recalculés en Python : chaque chiffre affiché identique. Source `fetch-mode="export"` : 2 requêtes de métadonnées + 10 plages Parquet, chargement ≈ 13 s de page complète par le tunnel. Recette `RECETTE_PROXY` : `err: 0 kpi: 4 graph: 3 carte: 6 cfg:0`, 0 légende fausse. Playwright port 3878 : défilement de chaque graphique, 0 erreur console, 18 avertissements #765 (sources lues par plusieurs queries, attendu) ; survol de la barre 2025 : « 2025 / 14 / 18 » (conforme) ; carte : `fit-bounds` ouvrait au zoom 5 (Dublin-Athènes) à 560 et 660 px → vue fixe `center` + `zoom="6"` ; encart Réunion : 1 musée visible sur 5 (dit en page). Captures `captures/creation-2026-09-26/page.png`, `survol.png` |

@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journées du patrimoine 2023 et accessibilité — open-data-viz</title>
+  <meta name="description" content="Aux Journées européennes du patrimoine 2023, un événement sur cinq se déclare accessible en fauteuil roulant ; les quatre autres ne disent rien, pas même dans les lieux labellisés Tourisme et handicap. Création avec dsfr-data à partir de l'agenda OpenAgenda des JEP 2023 publié par le ministère de la Culture, servi par l'API Tabular de data.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 23 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte l'agenda des Journées européennes du patrimoine
+       2023 (ressource 22c595ae-…, 28 395 lignes, une ligne = un événement OpenAgenda).
+
+       L'UNITÉ. Un événement, pas un lieu : 18 322 lieux portent les 28 395 événements.
+       Les parts sont des parts d'ÉVÉNEMENTS. Le champ « Accessibilité » est une
+       DÉCLARATION de l'organisateur, par événement : vide pour 22 257 lignes. Vide ne
+       veut pas dire « inaccessible » — la page ne l'écrit jamais ainsi.
+
+       LE CHARGEMENT. Export Parquet (15 Mo toutes colonnes, surtout des descriptions
+       longues) : `fetch-mode="export"` + `select` de dix colonnes courtes. Pas de where
+       ni group-by sur la source (sinon repli paginé : 142 pages). `max-records` relevé à
+       100 000 : le défaut (25 000) tronquerait en silence.
+
+       LES MODALITÉS (sondées le 2026-09-27 sur l'export CSV complet).
+       - `Accessibilité` : liste à virgules de cinq valeurs « handicap moteur »,
+         « … auditif », « … visuel », « … intellectuel », « … psychique ».
+       - `Tags du lieu` : liste à POINTS-VIRGULES (les tags contiennent des virgules :
+         « Lieu de culture, spectacles, sports et loisirs »). 44 tags ; 2 807 lignes vides.
+       - `Région` : 386 vides ; deux graphies parasites (« Ile de France » ×2,
+         « Provence-Alpes-Côte d'azur » ×16) recodées ; quelques lignes hors France
+         (Guernesey, Jersey) écartées du graphique régional par le seuil de 40 événements.
+       - `Département` : 126 graphies pour une centaine de départements (« Paris008 »,
+         « SARTHE », « C.D.10 »), 664 vides : pas de lecture départementale.
+       ========================================================================== -->
+
+  <dsfr-data-source id="jep" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="22c595ae-8104-4911-b7c3-3cad982eee9c"
+    fetch-mode="export" max-records="100000"
+    select="Identifiant, URL, Titre, Identifiant du lieu, Nom du lieu, Ville, Région, Tags du lieu, Accessibilité, Première date - Début">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="jep-a" source="jep"
+    rename="Identifiant du lieu:lieu | Nom du lieu:nom_lieu | Tags du lieu:tags | Accessibilité:acc_brut | Première date - Début:debut"
+    compute="un = 1; k = 1;
+             mot = when contains(acc_brut, 'moteur') then 1 else 0;
+             rien = when is_empty(acc_brut) then 1 else 0;
+             autre = 1 - mot - rien;
+             aud = when contains(acc_brut, 'auditif') then 1 else 0;
+             vis = when contains(acc_brut, 'visuel') then 1 else 0;
+             int = when contains(acc_brut, 'intellectuel') then 1 else 0;
+             psy = when contains(acc_brut, 'psychique') then 1 else 0;
+             declaration = when mot = 1 then 'Accessible en fauteuil (déclaré)'
+                           when rien = 1 then 'Rien de déclaré'
+                           else 'Autre handicap seulement';
+             handicaps = replace(acc_brut, 'handicap ', '');
+             region = when contains(Région, 'Provence') then 'Provence-Alpes-Côte d’Azur'
+                      when Région = 'Ile de France' then 'Île-de-France'
+                      else Région;
+             jour = when contains(debut, '2023-09-16') then 'Samedi 16 septembre'
+                    when contains(debut, '2023-09-17') then 'Dimanche 17 septembre'
+                    when contains(debut, '2023-09-15') then 'Vendredi 15 septembre'
+                    else 'Autre date'">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="jep-n" source="jep-a" split="handicaps, tags:;"></dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="jep-n" group-by="k"
+    aggregate="un:sum:n, mot:sum:mot, rien:sum:rien, autre:sum:autre, aud:sum:aud, vis:sum:vis, int:sum:int, psy:sum:psy">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="p_mot = mot / n * 100;
+             p_rien = rien / n * 100;
+             p_decl = (n - rien) / n * 100;
+             ratio_vis = mot / vis">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Journées du patrimoine 2023</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Journées du patrimoine 2023&nbsp;: un événement sur cinq se dit accessible en fauteuil, les quatre autres ne disent rien</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          L'agenda national des Journées européennes du patrimoine des 16 et 17&nbsp;septembre 2023 compte
+          {{n:number}}&nbsp;événements. <strong>{{mot:number}} se déclarent accessibles aux personnes en situation de
+          handicap moteur</strong>, soit {{p_mot:number:1}}&nbsp;%. Mais {{rien:number}}, {{p_rien:number:0}}&nbsp;% de
+          l'agenda, ne renseignent aucune accessibilité&nbsp;: ni oui, ni non. Le champ ne mesure donc pas combien de lieux
+          accueillent un fauteuil&nbsp;; il mesure combien d'organisateurs l'ont dit. Et le silence touche même les lieux labellisés «&nbsp;Tourisme et handicap&nbsp;»&nbsp;: plus d'un
+          événement sur deux n'y renseigne rien.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture — <em>Journées européennes du patrimoine 2023</em>, export des agendas régionaux OpenAgenda
+      de l'édition 2023&nbsp;; fichier déposé le 24&nbsp;septembre 2025. Une ligne par événement. Données lues à l'ouverture
+      de la page sur
+      <a href="https://www.data.gouv.fr/datasets/5369978fa3a729239d204d11" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="3"
+        heading="Événements" label="agenda national JEP 2023"></dsfr-data-kpi>
+      <dsfr-data-kpi source="lieu-p" value="nb_lieux:max" format="nombre" span="3"
+        heading="Lieux" label="qui accueillent ces événements"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_mot:max" format="decimal" decimals="1" unit="%" span="3"
+        heading="Accessible en fauteuil" label="part des événements qui le déclarent"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_rien:max" format="decimal" decimals="1" unit="%" span="3"
+        heading="Rien de déclaré" label="part des événements sans aucune accessibilité renseignée"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — ce qui est déclaré ======================= -->
+  <dsfr-data-query id="hand" source="jep-n" group-by="handicaps" explode="handicaps" aggregate="un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="hand-t" source="hand"
+    compute="lib = when handicaps = 'moteur' then 'Moteur (fauteuil)'
+                   when handicaps = 'auditif' then 'Auditif'
+                   when handicaps = 'visuel' then 'Visuel'
+                   when handicaps = 'intellectuel' then 'Intellectuel'
+                   when handicaps = 'psychique' then 'Psychique'
+                   else handicaps"
+    rename="n:Événements"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-hand">
+    <h2 id="t-hand" class="fr-h3">Quand l'accessibilité est déclarée, c'est presque toujours celle du fauteuil</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{mot:number}}&nbsp;événements se disent accessibles en fauteuil. Les autres handicaps viennent loin
+          derrière&nbsp;: {{int:number}} événements pour le handicap intellectuel, {{psy:number}} pour le psychique,
+          {{aud:number}} pour l'auditif et {{vis:number}} pour le visuel — {{ratio_vis:number:0}}&nbsp;fois moins que le
+          fauteuil. Seuls {{autre:number}}&nbsp;événements déclarent une accessibilité sans mentionner le handicap moteur.
+          Un événement peut cocher plusieurs handicaps&nbsp;: les barres ne s'additionnent pas.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Événements déclarés accessibles, par type de handicap">
+      <dsfr-data-chart id="g-hand" source="hand-t" type="bar" horizontal
+        label-field="lib" value-field="Événements" name="Événements déclarés accessibles"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="événements"
+        databox databox-title="Événements des JEP 2023 déclarés accessibles, par type de handicap"
+        databox-source="Ministère de la Culture — JEP 2023, agendas OpenAgenda (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-hand" source="hand-t" label-field="lib" value-field="Événements"
+        description="Cinq barres horizontales triées : le nombre d'événements déclarés accessibles pour chaque type de handicap. La barre du handicap moteur, mise en évidence, approche 6 000 événements ; les quatre autres — intellectuel, psychique, auditif, visuel — restent chacune autour de 700 à 1 100. Les 22 257 événements qui ne déclarent rien n'ont pas de barre.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LE CONTRASTE — le type de lieu ======================= -->
+  <dsfr-data-query id="tag" source="jep-n" group-by="tags" explode="tags" aggregate="un:sum:n, mot:sum:mot, rien:sum:rien"></dsfr-data-query>
+  <dsfr-data-normalize id="tag-t" source="tag"
+    compute="p_mot = round(mot / n * 100, 1); p_rien = round(rien / n * 100, 1)"></dsfr-data-normalize>
+  <dsfr-data-query id="tag-f" source="tag-t" where="n:gte:500" order-by="p_mot:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="tag-g" source="tag-f" rename="tags:Tag du lieu | p_mot:Déclarés accessibles en fauteuil (%) | n:Événements | p_rien:Sans accessibilité renseignée (%)"></dsfr-data-normalize>
+  <!-- Une ligne pour la phrase de lecture : la valeur de chaque tag cité, posée dans sa colonne. -->
+  <dsfr-data-normalize id="tag-c" source="tag-t"
+    compute="k = 1;
+             a_arch = when tags = 'Archives' then p_mot else 0;
+             a_mus = when contains(tags, 'salle d') then p_mot else 0;
+             a_cha = when contains(tags, 'Château') then p_mot else 0;
+             a_jar = when tags = 'Jardin remarquable' then p_mot else 0;
+             a_mh = when tags = 'Monument historique' then p_mot else 0;
+             n_mh = when tags = 'Monument historique' then n else 0;
+             a_th = when tags = 'Tourisme et handicap' then p_mot else 0;
+             r_th = when tags = 'Tourisme et handicap' then p_rien else 0;
+             n_th = when tags = 'Tourisme et handicap' then n else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="tag-s" source="tag-c" group-by="k"
+    aggregate="a_arch:sum:arch, a_mus:sum:mus, a_cha:sum:cha, a_jar:sum:jar, a_mh:sum:mh, n_mh:sum:n_mh, a_th:sum:th, r_th:sum:r_th, n_th:sum:n_th"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-tag">
+    <h2 id="t-tag" class="fr-h3">Archives et musées se déclarent deux fois plus souvent accessibles que châteaux et jardins — et le label «&nbsp;Tourisme et handicap&nbsp;» n'y suffit pas</h2>
+    <dsfr-data-repeat source="tag-s">
+      <template>
+        <p class="odv-lecture">
+          Dans les services d'archives, {{arch:number:0}}&nbsp;% des événements se déclarent accessibles en fauteuil&nbsp;;
+          dans les musées et salles d'exposition, {{mus:number:0}}&nbsp;%. Les châteaux, hôtels urbains et palais tombent
+          à {{cha:number:0}}&nbsp;%, les jardins remarquables à {{jar:number:0}}&nbsp;%, et les monuments historiques, premier
+          tag de l'agenda ({{n_mh:number}}&nbsp;événements), restent à {{mh:number:0}}&nbsp;%. Le bâti ancien pèse sans
+          doute&nbsp;; mais le fichier ne permet pas de le démontrer, puisqu'il ne dit pas si les autres événements sont
+          inaccessibles ou simplement muets. <strong>La barre du haut le montre&nbsp;:</strong> dans les lieux labellisés
+          «&nbsp;Tourisme et handicap&nbsp;» — un label qui atteste justement l'accueil des personnes handicapées — seuls
+          {{th:number:0}}&nbsp;% des {{n_th:number}}&nbsp;événements déclarent l'accès en fauteuil, et {{r_th:number:0}}&nbsp;%
+          ne déclarent rien du tout.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Part des événements déclarés accessibles en fauteuil, par tag du lieu">
+      <dsfr-data-chart id="g-tag" source="tag-g" type="bar" horizontal
+        label-field="Tag du lieu" value-field="Déclarés accessibles en fauteuil (%)" name="Déclarés accessibles en fauteuil (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Part des événements déclarés accessibles en fauteuil, selon le tag du lieu (%, tags de 500 événements et plus)"
+        databox-source="Ministère de la Culture — JEP 2023, agendas OpenAgenda (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-tag" source="tag-g" label-field="Tag du lieu" value-field="Déclarés accessibles en fauteuil (%), Sans accessibilité renseignée (%), Événements"
+        description="Vingt-quatre barres horizontales triées de la plus longue à la plus courte : pour chaque tag de lieu portant au moins 500 événements, la part des événements qui se déclarent accessibles en fauteuil. En tête, mise en évidence, le label Tourisme et handicap, un peu au-dessus de 40 % ; suivent les archives, près de 38 %, puis les lieux de spectacles et les musées, autour de 30 %. Monuments historiques et édifices religieux sont vers 18-19 % ; châteaux, espaces naturels, édifices ruraux et militaires autour de 15 % ; jardins remarquables et espaces urbains aménagés ferment la marche, vers 11-12 %.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Tags attribués au lieu dans OpenAgenda (44 tags, un lieu peut en porter plusieurs&nbsp;: un événement compte dans
+      chacun de ses tags, les barres ne forment pas une répartition). Tags de moins de 500 événements écartés du
+      graphique, pas des chiffres. Les événements dont le lieu n'a aucun tag n'y figurent pas.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — un même lieu, deux réponses ======================= -->
+  <dsfr-data-query id="lieu" source="jep-n" where="lieu:isnotnull" group-by="lieu" aggregate="un:sum:n, mot:sum:mot"></dsfr-data-query>
+  <dsfr-data-normalize id="lieu-t" source="lieu"
+    compute="k = 1;
+             multi = when n >= 2 then 1 else 0;
+             mixte = when multi = 1 and mot > 0 and n > mot then 1 else 0;
+             tous = when multi = 1 and mot = n then 1 else 0;
+             au_moins = when multi = 1 and mot > 0 then 1 else 0;
+             aucun = when multi = 1 and mot = 0 then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="lieu-s" source="lieu-t" group-by="k" aggregate="k:sum:nb_lieux, multi:sum:multi, mixte:sum:mixte, tous:sum:tous, au_moins:sum:au_moins, aucun:sum:aucun"></dsfr-data-query>
+  <dsfr-data-normalize id="lieu-p" source="lieu-s" compute="p_mixte = mixte / au_moins * 100"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-lieu">
+    <h2 id="t-lieu" class="fr-h3">Un même lieu, deux réponses&nbsp;: l'accessibilité est déclarée événement par événement</h2>
+    <dsfr-data-repeat source="lieu-p">
+      <template>
+        <p class="odv-lecture">
+          {{multi:number}}&nbsp;lieux accueillent au moins deux événements. Parmi eux, {{au_moins:number}} déclarent au
+          moins un événement accessible en fauteuil&nbsp;: <strong>{{mixte:number}} ({{p_mixte:number:0}}&nbsp;%) ont d'autres
+          événements, dans le même lieu, qui ne le déclarent pas</strong>&nbsp;; {{tous:number}} le déclarent partout. Ce n'est
+          pas toujours une erreur — une visite des combles n'est pas celle du rez-de-chaussée — mais c'est le signe que le
+          champ est rempli par chaque organisateur, pour chaque fiche, et qu'aucune information «&nbsp;lieu&nbsp;» ne le
+          complète. {{aucun:number}}&nbsp;lieux à plusieurs événements ne le déclarent jamais.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="lieu-p" value="mixte:max" format="nombre" span="4"
+        heading="Lieux à réponses contraires" label="un événement déclaré accessible, un autre non"></dsfr-data-kpi>
+      <dsfr-data-kpi source="lieu-p" value="tous:max" format="nombre" span="4"
+        heading="Lieux constants" label="tous leurs événements déclarés accessibles"></dsfr-data-kpi>
+      <dsfr-data-kpi source="lieu-p" value="aucun:max" format="nombre" span="4"
+        heading="Lieux muets" label="aucun de leurs événements déclaré accessible"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </section>
+
+  <!-- ======================= OÙ — les régions ======================= -->
+  <dsfr-data-query id="reg" source="jep-n" where="region:isnotnull" group-by="region" aggregate="un:sum:n, mot:sum:mot, rien:sum:rien"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-t" source="reg"
+    compute="k = 1; p_mot = round(mot / n * 100, 1); p_rien = round(rien / n * 100, 1);
+             outremer = when region = 'La Réunion' or region = 'Martinique' or region = 'Guadeloupe' or region = 'Guyane' or region = 'Mayotte' then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-f" source="reg-t" where="n:gte:40" order-by="p_mot:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-g" source="reg-f" rename="region:Région | p_mot:Déclarés accessibles en fauteuil (%) | n:Événements | p_rien:Sans accessibilité renseignée (%)"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-haut" source="reg-t" where="n:gte:1000, outremer:eq:0" order-by="p_mot:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-bas" source="reg-t" where="n:gte:1000, outremer:eq:0" order-by="p_mot:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="reg-hb" left="reg-haut" right="reg-bas" on="k" type="inner" prefix-right="b_"></dsfr-data-join>
+  <dsfr-data-query id="reg-sans" source="jep-n" where="region:isnull" group-by="k" aggregate="un:sum:n"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">Dans l'Hexagone, d'un événement sur six à un sur quatre selon la région&nbsp;: le silence est partout majoritaire</h2>
+    <dsfr-data-repeat source="reg-hb">
+      <template>
+        <p class="odv-lecture">
+          Parmi les régions de l'Hexagone, {{region}} déclare le plus souvent l'accès en fauteuil ({{p_mot:number:1}}&nbsp;%
+          de ses {{n:number}}&nbsp;événements), {{b_region}} le moins souvent ({{b_p_mot:number:1}}&nbsp;%, et
+          {{b_p_rien:number:0}}&nbsp;% d'événements sans rien de renseigné). Aucune région ne fait de la déclaration la
+          règle. Chaque région tient son propre agenda OpenAgenda&nbsp;: l'écart peut venir de la consigne de saisie autant
+          que des lieux. Outre-mer, le taux le plus haut (Mayotte) et le plus bas (Guyane) portent chacun sur moins de
+          cent événements.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Part des événements déclarés accessibles en fauteuil, par région">
+      <dsfr-data-chart id="g-reg" source="reg-g" type="bar" horizontal
+        label-field="Région" value-field="Déclarés accessibles en fauteuil (%)" name="Déclarés accessibles en fauteuil (%)"
+        unit-tooltip="%"
+        databox databox-title="Part des événements déclarés accessibles en fauteuil, par région (%, régions de 40 événements et plus)"
+        databox-source="Ministère de la Culture — JEP 2023, agendas OpenAgenda (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-g" label-field="Région" value-field="Déclarés accessibles en fauteuil (%), Sans accessibilité renseignée (%), Événements"
+        description="Dix-huit barres horizontales triées de la plus longue à la plus courte : pour chaque région, la part des événements déclarés accessibles en fauteuil. Mayotte (46 événements) et La Réunion sont en tête, autour de 28 à 33 % ; les douze régions de l'Hexagone s'étagent ensuite entre un peu plus de 25 % (Hauts-de-France) et un peu plus de 16 % (Bourgogne-Franche-Comté) ; la Corse descend à 10 % et la Guyane, 86 événements, ferme la marche sous 4 %.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="reg-sans">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Région du lieu telle que saisie dans l'agenda, deux graphies parasites recodées. {{n:number}}&nbsp;événements
+          sans région renseignée, et une vingtaine situés à Saint-Pierre-et-Miquelon, Saint-Martin, Guernesey ou Jersey,
+          ou portant un libellé erroné (moins de 40 événements par libellé), sont comptés dans les totaux mais pas dans ce graphique.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: quels événements, dans quels lieux&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Les filtres agissent sur les chiffres et sur la liste. La recherche porte sur la liste affichée. Un événement de
+      2023 n'a plus lieu&nbsp;: la liste sert à comprendre l'agenda, pas à préparer une sortie.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="fac" value="count" format="nombre"
+        heading="Événements" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="mot:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Accessible en fauteuil" label="part déclarée dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="rien:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Rien de déclaré" label="part de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="fac" source="jep-n"
+          fields="declaration, handicaps, region, tags, jour"
+          labels="declaration:Accessibilité déclarée | handicaps:Handicap déclaré | region:Région | tags:Tag du lieu | jour:Premier jour"
+          display="declaration:checkbox | handicaps:checkbox | region:multiselect | tags:multiselect | jour:checkbox"
+          disjunctive="declaration, handicaps, region, tags, jour"
+          searchable="region, tags"
+          sort="region:alpha:asc"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-list source="fac"
+          columns="Titre:Événement, nom_lieu:Lieu, Ville:Commune, region:Région, declaration:Accessibilité"
+          search sort="Ville:asc" pagination="20" count-label="événement|événements" export="csv"
+          caption="Événements des Journées européennes du patrimoine 2023 (sélection courante)">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Combien de lieux sont réellement accessibles.</strong> Les {{rien:number}}&nbsp;événements sans rien de
+            renseigné ne sont pas inaccessibles&nbsp;: on n'en sait rien. Aucun chiffre de la page n'est une part de lieux
+            inaccessibles, et le titre ne dit pas «&nbsp;quatre sur cinq ne sont pas accessibles&nbsp;».</li>
+          <li><strong>Une carte départementale.</strong> La colonne <code>Département</code> est saisie à la main&nbsp;: plus
+            de 120 graphies pour une centaine de départements («&nbsp;Paris008&nbsp;», «&nbsp;SARTHE&nbsp;»,
+            «&nbsp;C.D.10&nbsp;») et 664 cases vides. Un taux par département aurait été faux là où l'agenda est le plus
+            dense.</li>
+          <li><strong>La fréquentation.</strong> L'agenda dit ce qui est proposé, pas qui est venu.</li>
+          <li><strong>Les autres éditions.</strong> Seule l'édition 2023 est publiée sous cette forme&nbsp;: aucune évolution
+            n'est tracée.</li>
+          <li><strong>Les dates de chaque séance.</strong> Un événement peut avoir plusieurs créneaux&nbsp;; le filtre
+            «&nbsp;Premier jour&nbsp;» ne lit que le premier. Une poignée de fiches porte une date d'une autre année
+            (reprises d'éditions antérieures)&nbsp;: elles sont classées «&nbsp;Autre date&nbsp;».</li>
+          <li><strong>Des doublons possibles.</strong> Un même événement peut figurer dans deux agendas régionaux
+            (limites de région, lieux transfrontaliers)&nbsp;; aucun dédoublonnage n'est tenté.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir de l'agenda des JEP 2023, servi par l'API Tabular. Les chiffres
+        du cadrage tiennent (28&nbsp;395 événements, 5&nbsp;910 déclarés accessibles en fauteuil le 27&nbsp;septembre
+        2026)&nbsp;; l'histoire a changé de sens&nbsp;: «&nbsp;un sur cinq accessible&nbsp;» laissait entendre que les quatre
+        autres ne l'étaient pas, alors que 78&nbsp;% de l'agenda ne renseigne rien. Le sujet est la déclaration.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>28&nbsp;395 lignes en une requête.</strong> L'export Parquet pèse 15&nbsp;Mo, surtout des
+              descriptions longues&nbsp;; <code>fetch-mode="export"</code> + <code>select</code> ne lit que dix colonnes
+              courtes.</li>
+            <li><strong>Deux listes multivaluées à deux séparateurs.</strong> Handicaps à virgules, tags à points-virgules
+              (qui contiennent des virgules)&nbsp;: <code>split="handicaps, tags:;"</code>, puis <code>explode</code> pour
+              regrouper et les facettes pour filtrer — mêmes modalités des deux côtés.</li>
+            <li><strong>Un statut à trois valeurs.</strong> Déclaré fauteuil / autre handicap seulement / rien&nbsp;: un
+              <code>compute</code> avec <code>contains</code> et <code>is_empty</code>.</li>
+            <li><strong>Un constat par lieu depuis un fichier par événement.</strong> <code>group-by</code> sur
+              l'identifiant du lieu, drapeaux en <code>compute</code>, puis somme&nbsp;: 18&nbsp;322 groupes calculés dans
+              le navigateur.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Un champ vide qui voulait dire deux choses.</strong> Rien dans le fichier ne distingue «&nbsp;non
+              accessible&nbsp;» de «&nbsp;non renseigné&nbsp;». C'est une limite du jeu, pas de la bibliothèque, mais elle a
+              réécrit le titre.</li>
+            <li><strong>Des régions et des départements saisis à la main.</strong> Deux graphies de région recodées en
+              <code>compute</code>&nbsp;; pour les départements, plus de 120 graphies&nbsp;: pas de lecture départementale.
+              Le code INSEE de la commune aurait donné le département, mais <code>compute</code> n'a pas de fonction de
+              sous-chaîne pour en extraire les deux premiers caractères.</li>
+            <li><strong>Une apostrophe dans un libellé recodé.</strong> Le littéral de <code>compute</code> est entre
+              apostrophes droites&nbsp;: «&nbsp;Provence-Alpes-Côte d'Azur&nbsp;» s'écrit avec l'apostrophe typographique,
+              ou se repère par <code>contains</code>.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 28&nbsp;395 lignes Tabular sans les descriptions</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select max-records</code></td><td>Natif (Parquet)</td></tr>
+            <tr><td>Statut déclaré / rien, région recodée</td><td><code>normalize compute</code> (<code>when</code>, <code>contains</code>, <code>is_empty</code>, <code>replace</code>)</td><td>Natif</td></tr>
+            <tr><td>Compter par handicap et par tag</td><td><code>normalize split</code> + <code>query group-by explode</code></td><td>Natif</td></tr>
+            <tr><td>Part déclarée par tag, par région</td><td><code>query group-by</code> + <code>compute</code> + <code>where="n:gte:…"</code></td><td>Natif</td></tr>
+            <tr><td>Lieux à réponses contraires</td><td><code>query group-by="lieu"</code> + <code>compute</code> + second <code>group-by</code></td><td>Natif</td></tr>
+            <tr><td>Département depuis le code commune</td><td>—</td><td>Pas de sous-chaîne dans <code>compute</code></td></tr>
+            <tr><td>Chercher un événement</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-list search</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>La bibliothèque a tout fait&nbsp;; le fichier a changé l'histoire.</strong> Le coût de la page n'est pas
+          technique&nbsp;: c'est de ne jamais écrire «&nbsp;inaccessible&nbsp;» pour «&nbsp;non renseigné&nbsp;», et de le
+          prouver avec le label qui aurait dû tout déclarer.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte Leaflet sur la page. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

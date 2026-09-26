@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voyages officiels des présidents depuis 1945 — open-data-viz</title>
+  <meta name="description" content="Dans les dossiers de voyages officiels conservés aux Archives nationales, la part des étapes présidentielles passées hors de France monte de trois sur dix sous de Gaulle à neuf sur dix sous Hollande et Macron — l'Allemagne toujours en tête — tandis que les déplacements en France s'effacent du fonds. Création avec dsfr-data (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 21 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte « Déplacements des présidents de la République et
+       des Premiers ministres depuis 1945 » (Archives nationales), servi par Tabular.
+
+       L'UNITÉ. Une ligne = un LIEU d'un dossier de voyage (une « étape ») : la tournée
+       africaine de 1958 fait sept lignes, le voyage au Japon de 2000 trois. Toute la page compte des
+       étapes, jamais des « voyages » : vérifié sur l'export complet, 1 352 lignes
+       présidentielles pour 1 075 intitulés de dossier distincts. En dossiers, la part hors de
+       France est la même à un point près dès Mitterrand, plus haute pour de Gaulle (37 %
+       contre 29 %) et Pompidou (54 % contre 47 %) : même tendance, pente un peu moins forte.
+
+       LE CHAMP. Un fonds d'archives, pas un agenda : 2 750 lignes, 1945-2018, dont 1 352
+       pour les présidents et 1 398 pour les Premiers ministres. De Gaulle est « Président de
+       la République » dès 1945 dans le jeu (43 étapes de 1945-1946 et 1958, avant son
+       mandat) ; deux dates d'Auriol sont fautives (1960 et 1972 pour 1950 et 1952).
+
+       LE CHARGEMENT. `fetch-mode="export"` : l'export Parquet de la ressource (3,5 Mo
+       parce qu'il porte les contours GeoJSON de chaque lieu ; `select` ne lit que neuf
+       colonnes). Sans export : 14 pages de 200.
+
+       LES DÉRIVATIONS (`compute`) :
+       - `etr` : 1 si `Pays` n'est pas « France ». L'Algérie avant 1962 et les territoires
+         africains de 1958-1959 comptent donc « hors de France » (pays actuels du jeu).
+       - `iso` : `Code pays` corrigé de deux codes non ISO (CDN → CAN, RCH → CHL : codes de
+         plaque d'immatriculation) pour la carte monde.
+       - `rang`, `mandat` : ordre et libellé des présidents, recodés à la main (dates de
+         mandat constitutionnelles, pas lues dans le jeu).
+       ========================================================================== -->
+
+  <dsfr-data-source id="dep" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="d6df4e06-d55c-4616-a974-2b53d0d4e025"
+    fetch-mode="export" max-records="5000"
+    select="Fonction, Individu, Contenu initial, Lieu, Pays, Code pays, Date de début, Année du voyage, URL de la notice">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="d-n" source="dep" trim numeric="annee"
+    rename="Fonction:fonction | Individu:individu | Contenu initial:contenu | Lieu:lieu | Pays:pays | Code pays:code | Date de début:debut | Année du voyage:annee | URL de la notice:url"
+    compute="un = 1;
+             k = 1;
+             pres = when fonction = 'Président de la République' then 1 else 0;
+             pm = 1 - pres;
+             etr = when pays = 'France' then 0 else 1;
+             fr = 1 - etr;
+             pct_etr = etr * 100;
+             ou = when etr = 1 then 'Hors de France' else 'En France';
+             iso = when code = 'CDN' then 'CAN' when code = 'RCH' then 'CHL' else code;
+             rang = when pres = 0 then null
+                    when contains(individu, 'Auriol') then 1 when contains(individu, 'Coty') then 2
+                    when contains(individu, 'Gaulle') then 3 when contains(individu, 'Pompidou') then 4
+                    when contains(individu, 'Giscard') then 5 when contains(individu, 'Mitterrand') then 6
+                    when contains(individu, 'Chirac') then 7 when contains(individu, 'Sarkozy') then 8
+                    when contains(individu, 'Hollande') then 9 when contains(individu, 'Macron') then 10 else null;
+             mandat = when rang = 1 then 'Vincent Auriol (1947-1954)' when rang = 2 then 'René Coty (1954-1959)'
+                      when rang = 3 then 'Charles de Gaulle (1959-1969)' when rang = 4 then 'Georges Pompidou (1969-1974)'
+                      when rang = 5 then 'Valéry Giscard d’Estaing (1974-1981)' when rang = 6 then 'François Mitterrand (1981-1995)'
+                      when rang = 7 then 'Jacques Chirac (1995-2007)' when rang = 8 then 'Nicolas Sarkozy (2007-2012)'
+                      when rang = 9 then 'François Hollande (2012-2017)' when rang = 10 then 'Emmanuel Macron (depuis 2017)' else null;
+             qui = concat(individu, ' — ', fonction)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Synthèse présidentielle : une ligne ---------- -->
+  <dsfr-data-query id="syn" source="d-n" where="pres:eq:1" group-by="k"
+    aggregate="un:sum:n, etr:sum:e, fr:sum:f, annee:min:de, annee:max:a"></dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn" compute="part = e / n * 100"></dsfr-data-normalize>
+  <dsfr-data-query id="syn-pays" source="d-n" where="pres:eq:1, etr:eq:1" group-by="k"
+    aggregate="iso:distinct:pays"></dsfr-data-query>
+  <dsfr-data-query id="syn-pm" source="d-n" where="pm:eq:1" group-by="k"
+    aggregate="un:sum:n, etr:sum:e"></dsfr-data-query>
+  <dsfr-data-normalize id="syn-pm-t" source="syn-pm" compute="part = e / n * 100"></dsfr-data-normalize>
+
+  <!-- ---------- Par président, dans l'ordre des mandats ---------- -->
+  <dsfr-data-query id="pr" source="d-n" where="pres:eq:1" group-by="mandat, rang"
+    aggregate="un:sum:n, etr:sum:e, fr:sum:f, pct_etr:avg:part, annee:min:de, annee:max:a"
+    order-by="rang:asc"></dsfr-data-query>
+  <dsfr-data-query id="pr-20" source="pr" where="n:gte:20"></dsfr-data-query>
+  <dsfr-data-normalize id="pr-g" source="pr-20" round="part:1"
+    rename="mandat:Président | part:Part des étapes hors de France (%) | n:Étapes | e:Hors de France | f:En France | de:Première année | a:Dernière année"></dsfr-data-normalize>
+  <dsfr-data-query id="pr-dg" source="pr" where="rang:eq:3"></dsfr-data-query>
+  <dsfr-data-query id="pr-fm" source="pr" where="rang:eq:6"></dsfr-data-query>
+  <dsfr-data-query id="pr-jc" source="pr" where="rang:eq:7"></dsfr-data-query>
+  <dsfr-data-query id="pr-fh" source="pr" where="rang:eq:9"></dsfr-data-query>
+  <dsfr-data-query id="pr-em" source="pr" where="rang:eq:10"></dsfr-data-query>
+  <dsfr-data-query id="pr-rc" source="pr" where="rang:eq:2"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Voyages officiels des présidents depuis 1945</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Voyages présidentiels&nbsp;: dans les archives, l'étranger passe de trois étapes sur dix sous de Gaulle à neuf sur dix sous Hollande</h1>
+
+    <p class="fr-text--lead">
+      <dsfr-data-repeat source="syn-t"><template>Les Archives nationales conservent les dossiers de {{n:number}}&nbsp;étapes de
+        voyages présidentiels, de {{de}} à {{a}}. {{e:number}} se sont déroulées hors de France, soit
+        <strong>{{part:number:0}}&nbsp;%</strong>.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-dg"><template>Mais la part change du tout au tout d'un président à l'autre&nbsp;:
+        {{part:number:0}}&nbsp;% sous Charles de Gaulle,</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-fm"><template>{{part:number:0}}&nbsp;% sous François Mitterrand,</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-fh"><template><strong>{{part:number:0}}&nbsp;% sous François Hollande</strong>.</template></dsfr-data-repeat>
+      Le président des archives est de plus en plus un président qui voyage à l'étranger — et de moins en moins un
+      président dont on garde les tournées en province.
+    </p>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Archives nationales, ministère de la Culture — <em>Déplacements des présidents de la République et des Premiers
+      ministres depuis 1945</em>. Une ligne par lieu visité dans un dossier de voyage (une «&nbsp;étape&nbsp;»). Données lues à
+      l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/deplacements-des-presidents-de-la-republique-et-des-premiers-ministres-depuis-1945/" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="4"
+        heading="Étapes présidentielles" label="dans les dossiers conservés"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Hors de France" label="part des étapes, tous présidents"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-pays" value="pays:max" format="nombre" span="4"
+        heading="Pays et territoires" label="visités au moins une fois"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — la part hors de France ======================= -->
+  <!-- `pct_etr:avg` sur un indicateur 0/100 : la part des étapes de CHAQUE président, pas une
+       moyenne de taux. Coty (4 étapes) sous le seuil de 20, écarté du graphique, dit en note. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-part">
+    <h2 id="t-part" class="fr-h3">La part de l'étranger monte presque à chaque mandat, de 29&nbsp;% sous de Gaulle à 90&nbsp;% sous Hollande</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="pr-dg"><template>Sur les {{n:number}}&nbsp;étapes de Charles de Gaulle conservées,
+        {{e:number}} sont à l'étranger ({{part:number:0}}&nbsp;%).</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-jc"><template>Sous Jacques Chirac, {{e:number}} sur {{n:number}}
+        ({{part:number:0}}&nbsp;%).</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-fh"><template>Sous François Hollande, {{e:number}} sur {{n:number}}
+        ({{part:number:0}}&nbsp;%)&nbsp;;</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-em"><template>sous Emmanuel Macron, {{e:number}} sur {{n:number}}
+        ({{part:number:0}}&nbsp;%, deux premières années seulement).</template></dsfr-data-repeat>
+      Deux marches seulement redescendent, de deux points au plus&nbsp;: Giscard d'Estaing sous Pompidou, et Macron —
+      sur deux années — sous Hollande.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Part des étapes hors de France, par président">
+      <dsfr-data-chart id="g-part" source="pr-g" type="bar"
+        label-field="Président" value-field="Part des étapes hors de France (%)" name="Part des étapes hors de France (%)"
+        selected-palette="neutral" highlight-index="[1, 7]" unit-tooltip="%" y-min="0" y-max="100"
+        databox databox-title="Part des étapes présidentielles situées hors de France, par président, dans les dossiers conservés (%)"
+        databox-source="Archives nationales — Déplacements des présidents de la République et des Premiers ministres depuis 1945 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-part" source="pr-g" label-field="Président"
+        value-field="Part des étapes hors de France (%), Hors de France, Étapes, Première année, Dernière année"
+        description="Barres verticales, une par président dans l'ordre des mandats, échelle de 0 à 100 %. Vincent Auriol est sous 10 % ; Charles de Gaulle, mis en évidence, autour de 30 % ; Pompidou et Giscard d'Estaing autour de 45 % ; Mitterrand un peu au-dessus de 60 % ; Chirac et Sarkozy au-dessus de 80 % ; Hollande, mis en évidence, et Macron autour de 90 %.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      <dsfr-data-repeat source="pr-rc"><template>René Coty n'a que {{n:number}}&nbsp;étapes dans le fonds&nbsp;: il est écarté
+        du graphique (seuil de 20 étapes) et reste dans le tableau et la liste.</template></dsfr-data-repeat>
+      «&nbsp;Hors de France&nbsp;» suit le pays actuel du lieu, tel que le jeu le code&nbsp;: les étapes en Algérie avant 1962
+      et en Afrique en 1958-1959 comptent hors de France. Les compter en France ferait baisser la part de De Gaulle, pas monter.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — la France s'efface du fonds ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-fr">
+    <h2 id="t-fr" class="fr-h3">Ce n'est pas l'étranger qui grossit, c'est la France qui disparaît des dossiers</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="pr-dg"><template>Charles de Gaulle a {{f:number}}&nbsp;étapes en France dans le fonds.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-fm"><template>François Mitterrand en a {{f:number}} en quatorze ans,</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-jc"><template>Jacques Chirac {{f:number}},</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-fh"><template>François Hollande {{f:number}} en cinq ans.</template></dsfr-data-repeat>
+      Six étapes en France en cinq ans ne sont pas l'agenda d'un président&nbsp;: ses déplacements en région ne sont plus
+      versés dans ce fonds, ou plus sous cette forme.
+      <dsfr-data-repeat source="pr-fm"><template>Les étapes à l'étranger varient aussi — {{e:number}} pour Mitterrand,</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pr-fh"><template>{{e:number}} pour Hollande —</template></dsfr-data-repeat>
+      mais elles ne s'effondrent pas comme celles en France. La hausse de la part mesure donc au moins autant ce que les
+      archives gardent que ce que les présidents font.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Étapes en France et hors de France, par président">
+      <dsfr-data-chart id="g-fr" source="pr-g" type="bar" stacked horizontal
+        label-field="Président" value-fields="En France:En France, Hors de France:Hors de France"
+        name='["En France","Hors de France"]'
+        unit-tooltip="étapes"
+        databox databox-title="Étapes présidentielles conservées, en France et hors de France, par président (nombre d'étapes)"
+        databox-source="Archives nationales — Déplacements des présidents de la République et des Premiers ministres depuis 1945 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-fr" source="pr-g" label-field="Président"
+        value-field="En France, Hors de France, Étapes"
+        description="Barres horizontales empilées, une par président dans l'ordre des mandats : en premier les étapes en France, puis hors de France. La part en France domine chez Auriol et de Gaulle (plus de 150 étapes en France pour de Gaulle) ; Mitterrand a la barre la plus longue, plus de 350 étapes dont environ 130 en France ; à partir de Chirac, la part en France devient mince, jusqu'à six étapes seulement pour Hollande et pour Macron.">
+      </dsfr-data-a11y>
+    </div>
+    <div class="fr-callout fr-icon-information-line fr-mt-4w">
+      <dsfr-data-repeat source="syn-pm-t">
+        <template>
+          <p class="fr-callout__text">
+            <strong>La preuve par les Premiers ministres.</strong> Le même fonds compte {{n:number}}&nbsp;étapes de chefs de
+            gouvernement, dont {{part:number:0}}&nbsp;% hors de France. Mais la part saute d'un gouvernement à l'autre sans
+            tendance&nbsp;: elle dépend de ce que chaque cabinet a versé, pas de l'époque. Le graphique ci-dessous le montre.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+  </section>
+
+  <!-- ---------- Premiers ministres, ordre d'arrivée dans le fonds ---------- -->
+  <dsfr-data-query id="pm" source="d-n" where="pm:eq:1" group-by="individu"
+    aggregate="un:sum:n, etr:sum:e, pct_etr:avg:part, annee:min:de, annee:max:a"
+    order-by="de:asc"></dsfr-data-query>
+  <dsfr-data-query id="pm-20" source="pm" where="n:gte:20"></dsfr-data-query>
+  <dsfr-data-normalize id="pm-g" source="pm-20" round="part:1"
+    rename="individu:Premier ministre | part:Part des étapes hors de France (%) | n:Étapes | e:Hors de France | de:Première année | a:Dernière année"></dsfr-data-normalize>
+  <dsfr-data-query id="pm-jpr" source="pm" where="individu:eq:Jean-Pierre Raffarin"></dsfr-data-query>
+  <dsfr-data-query id="pm-ff" source="pm" where="individu:eq:François Fillon"></dsfr-data-query>
+  <dsfr-data-query id="pm-petits" source="pm" where="n:lt:20" group-by="k"
+    aggregate="n:sum:n, n:count:nb"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-pm">
+    <h2 id="t-pm" class="fr-h3">Chez les Premiers ministres, la part hors de France dit surtout ce que chaque cabinet a archivé</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="pm-jpr"><template>Jean-Pierre Raffarin laisse {{n:number}}&nbsp;étapes, dont
+        {{part:number:0}}&nbsp;% hors de France&nbsp;;</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="pm-ff"><template>François Fillon, son deuxième successeur, {{n:number}}, dont
+        {{part:number:0}}&nbsp;% hors de France.</template></dsfr-data-repeat>
+      Deux Premiers ministres à deux ans d'écart, deux fonds sans commune mesure&nbsp;: c'est la trace d'un versement
+      d'archives, pas d'une politique. La courbe des présidents est plus régulière, mais elle est de même nature.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Part des étapes hors de France, par Premier ministre">
+      <dsfr-data-chart id="g-pm" source="pm-g" type="bar"
+        label-field="Premier ministre" value-field="Part des étapes hors de France (%)" name="Part des étapes hors de France (%)"
+        selected-palette="neutral" unit-tooltip="%" y-min="0" y-max="100"
+        databox databox-title="Part des étapes situées hors de France, par Premier ministre ayant au moins 20 étapes dans le fonds (%)"
+        databox-source="Archives nationales — Déplacements des présidents de la République et des Premiers ministres depuis 1945 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-pm" source="pm-g" label-field="Premier ministre"
+        value-field="Part des étapes hors de France (%), Hors de France, Étapes, Première année, Dernière année"
+        description="Barres verticales, une par Premier ministre dans l'ordre de leur première étape dans le fonds, échelle de 0 à 100 %. Les hauteurs montent et descendent sans tendance : Pompidou à 0 %, Rocard et Bérégovoy autour de 65 %, Balladur à 22 %, Jospin à 47 %, Raffarin et Villepin sous 20 %, Fillon à 91 %.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      <dsfr-data-repeat source="pm-petits"><template>{{nb:number}}&nbsp;Premiers ministres ont moins de 20 étapes dans le
+        fonds ({{n:number}} au total)&nbsp;: écartés du graphique, ils sont dans la liste.</template></dsfr-data-repeat>
+      Jacques Chirac et Georges Pompidou figurent ici pour leurs étapes de Premier ministre, et plus haut pour celles de
+      président.
+    </p>
+  </section>
+
+  <!-- ======================= OÙ — les pays ======================= -->
+  <!-- Carte monde DSFR Chart (`map-monde`, alpha-3 converti en alpha-2 par dsfr-data).
+       Onze codes ne se colorient pas : trois sans pays actuel (CSK, YUG, XKX), six absents
+       de la table alpha-3 → alpha-2 de dsfr-data 0.42.0 (AND, COM, MCO, MUS, SYC, VAT : « 6
+       ligne(s) ignorée(s) » en console) et deux que la carte de DSFR Chart 2.1.1 n'a pas
+       (SG, BH : « L'élément de la carte n'existe pas »). Écartés de la CARTE seulement,
+       gardés dans les barres, la liste et le compte de pays. -->
+  <dsfr-data-query id="py" source="d-n" where="pres:eq:1, etr:eq:1" group-by="iso, pays"
+    aggregate="un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-query id="py-carte" source="py" where="iso:notin:CSK|YUG|XKX|AND|COM|MCO|MUS|SYC|VAT|SGP|BHR"></dsfr-data-query>
+  <dsfr-data-query id="py-top" source="py" limit="15"></dsfr-data-query>
+  <dsfr-data-normalize id="py-g" source="py-top" rename="pays:Pays | n:Étapes présidentielles"></dsfr-data-normalize>
+  <dsfr-data-query id="py-1" source="py" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="py-us" source="py" where="iso:eq:USA"></dsfr-data-query>
+  <dsfr-data-query id="py-hist" source="py" where="iso:in:CSK|YUG|XKX|AND|COM|MCO|MUS|SYC|VAT|SGP|BHR" group-by="k"
+    aggregate="n:sum:n"></dsfr-data-query>
+  <dsfr-data-query id="py-de" source="d-n" where="pres:eq:1, iso:eq:DEU" group-by="k"
+    aggregate="individu:distinct:nb"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-pays">
+    <h2 id="t-pays" class="fr-h3">L'Allemagne d'abord, loin devant les États-Unis</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="py-1"><template>Premier pays des voyages présidentiels&nbsp;: {{pays}}, avec
+        {{n:number}}&nbsp;étapes,</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="py-us"><template>devant les {{pays}} ({{n:number}}).</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="py-de"><template>{{nb:number}}&nbsp;présidents sur dix y ont au moins une étape dans le fonds.</template></dsfr-data-repeat>
+      Le couple franco-allemand, les sommets européens de Bruxelles et le Royaume-Uni font l'essentiel du haut du
+      classement&nbsp;; l'Afrique francophone est dispersée entre beaucoup de pays à quelques étapes chacun.
+    </p>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-lg-7">
+        <div class="odv-chart-slot odv-viz" data-code="Étapes présidentielles par pays, carte du monde">
+          <dsfr-data-chart id="g-monde" source="py-carte" type="map-monde"
+            code-field="iso" value-field="n" name="Étapes présidentielles" unit-tooltip="étapes"
+            map-summary="none"
+            databox databox-title="Étapes présidentielles par pays, hors France, 1945-2018 (nombre d'étapes)"
+            databox-source="Archives nationales — Déplacements des présidents de la République et des Premiers ministres depuis 1945 (data.gouv.fr)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-monde" source="py-carte" label-field="pays" value-field="n"
+            description="Carte du monde : chaque pays est coloré selon le nombre d'étapes présidentielles qui s'y sont déroulées. L'Allemagne est la plus foncée, suivie des États-Unis, de la Belgique, du Royaume-Uni et de la Russie ; la plupart des pays d'Afrique, d'Amérique latine et d'Asie ont moins de cinq étapes. Le tableau donne les valeurs de chaque pays.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-5">
+        <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Les quinze premiers pays des étapes présidentielles">
+          <dsfr-data-chart id="g-top" source="py-g" type="bar" horizontal
+            label-field="Pays" value-field="Étapes présidentielles" name="Étapes présidentielles"
+            selected-palette="neutral" highlight-index="[0]" unit-tooltip="étapes" x-min="0"
+            databox databox-title="Les quinze premiers pays des étapes présidentielles, 1945-2018 (nombre d'étapes)"
+            databox-source="Archives nationales — Déplacements des présidents de la République et des Premiers ministres depuis 1945 (data.gouv.fr)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-top" source="py-g" label-field="Pays" value-field="Étapes présidentielles"
+            description="Barres horizontales triées, quinze pays. L'Allemagne, mise en évidence, dépasse 80 étapes ; les États-Unis suivent avec près de 50, puis la Belgique autour de 40, le Royaume-Uni et la Russie autour de 30 ; les dix suivants sont entre 10 et 25.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      <dsfr-data-repeat source="py-hist"><template>{{n:number}}&nbsp;étapes ne sont pas sur la carte&nbsp;: dans des États
+        disparus (Tchécoslovaquie, Yougoslavie), au Kosovo, ou dans des pays que la carte du monde ne sait pas colorier
+        (Andorre, Monaco, Vatican, Comores, Maurice, Seychelles, Singapour, Bahreïn). Elles restent dans les barres et la
+        liste.</template></dsfr-data-repeat>
+      Le Canada et le Chili sont codés CDN et RCH dans le jeu (codes de plaque d'immatriculation, pas ISO)&nbsp;: la page les
+      recode pour la carte. Une étape est un lieu&nbsp;: un voyage en trois villes compte trois fois.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: retrouver un voyage, un lieu, un président</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Chercher un lieu ou un intitulé de dossier, filtrer par fonction, personne, pays. Chaque fiche renvoie vers la notice
+      des Archives nationales. Premiers ministres inclus.
+    </p>
+
+    <div class="fr-mb-4w">
+      <dsfr-data-search id="d-q" source="d-n"
+        fields="lieu, contenu, pays, individu"
+        label="Rechercher une étape" placeholder="Lieu, pays ou intitulé : Bonn, Moscou, sommet, obsèques…"
+        operator="words" count count-label="étape|étapes">
+      </dsfr-data-search>
+    </div>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="d-fac" value="count" format="nombre"
+        heading="Étapes" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="d-fac" value="etr:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Hors de France" label="part de la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="d-fac" value="iso:distinct" format="nombre"
+        heading="Pays et territoires" label="dans la sélection, France comprise"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="d-fac" source="d-q"
+          fields="fonction, ou, individu, pays"
+          labels="fonction:Fonction | ou:Où | individu:Personne | pays:Pays"
+          display="fonction:checkbox | ou:checkbox | individu:multiselect | pays:multiselect"
+          disjunctive="fonction, ou, individu, pays"
+          searchable="individu, pays"
+          sort="individu:alpha:asc | pays:alpha:asc"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-display source="d-fac" per-row="2" pagination="12"
+          count-label="étape|étapes"
+          empty="Aucune étape ne correspond à cette recherche.">
+          <template>
+            <div class="fr-card fr-card--sm">
+              <div class="fr-card__body">
+                <div class="fr-card__content">
+                  <h4 class="fr-card__title">{{lieu}} — {{pays}}</h4>
+                  <p class="fr-card__desc fr-text--sm">{{contenu}}</p>
+                  <div class="fr-card__start">
+                    <p class="fr-text--xs fr-mb-1v">{{individu}} · {{fonction}} · {{annee}}</p>
+                  </div>
+                  <div class="fr-card__end">
+                    {{#if url}}<p class="fr-text--xs fr-mb-0"><a href="{{url:url}}" target="_blank" rel="noopener external">Notice des Archives nationales</a></p>{{/if}}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </dsfr-data-display>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>L'agenda réel des présidents.</strong> Le jeu est l'index d'un fonds d'archives&nbsp;: ce qui a été versé,
+        et décrit. Les déplacements en France des présidents récents y sont presque absents, ceux des Premiers ministres
+        varient d'un facteur dix d'un cabinet à l'autre. Aucun chiffre de cette page n'est un nombre de voyages effectués.</li>
+      <li><strong>Des voyages.</strong> Une ligne est un lieu d'un dossier&nbsp;: la tournée africaine de 1958 compte sept
+        étapes, le voyage au Japon de 2000 (Tokyo, Nagoya, Okinawa) en compte trois. Compter les dossiers plutôt que les lieux donne la même
+        tendance&nbsp;: les mêmes parts à un point près à partir de Mitterrand, des parts plus hautes pour de Gaulle (37&nbsp;%)
+        et Pompidou (54&nbsp;%), dont les tournées en France comptent beaucoup de lieux (vérifié sur l'export complet,
+        2026-09-27).</li>
+      <li><strong>Des mandats complets.</strong>
+        <dsfr-data-repeat source="syn-t"><template>Le fonds s'arrête en {{a}}&nbsp;:</template></dsfr-data-repeat>
+        Emmanuel Macron n'y a que ses deux premières années, François Hollande s'arrête en 2016, Jacques Chirac commence en
+        1997. Aucune étape présidentielle en 1955, 1956 ni 1996 (relevé sur l'export complet, 2026-09-27).</li>
+      <li><strong>Des fonctions exactes.</strong> Charles de Gaulle est «&nbsp;Président de la République&nbsp;» dès 1945
+        dans le jeu, alors qu'il préside le Gouvernement provisoire, puis le Conseil en 1958&nbsp;: 43 de ses étapes
+        précèdent son mandat. Deux étapes de Vincent Auriol sont datées de 1960 et 1972 alors que leur intitulé dit 1950 et
+        1952&nbsp;; Valéry Giscard d'Estaing a quelques étapes de 1993-1994, après son mandat. La page garde le jeu tel quel.</li>
+      <li><strong>Une série par année.</strong> Avec quelques dizaines d'étapes par an et des trous de versement, une courbe
+        annuelle raconterait le rythme des versements plutôt que celui des voyages.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir de l'index d'un fonds des Archives nationales servi par l'API
+        Tabular. Le cadrage demandait «&nbsp;où vont les présidents&nbsp;» et prévoyait un tableau faute de carte monde&nbsp;;
+        la carte existe, et la donnée raconte surtout autre chose — la bascule de la France vers l'étranger, qui est pour
+        moitié un effet d'archive. La page le dit dans son titre («&nbsp;dans les archives&nbsp;») et le prouve par les
+        Premiers ministres.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Tout le jeu en une requête.</strong> <code>fetch-mode="export"</code> lit l'export Parquet avec
+              neuf colonnes sur quatorze (les contours GeoJSON restent sur le serveur).</li>
+            <li><strong>Une carte du monde sans bibliothèque.</strong> <code>type="map-monde"</code> lit le code ISO
+              alpha-3 du jeu et le convertit&nbsp;: aucune table de passage à écrire.</li>
+            <li><strong>Une part par groupe.</strong> Indicateur 0/100 par ligne et <code>avg</code>&nbsp;: la part hors de
+              France de chaque président, sans seconde source.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Des codes pays qui n'en sont pas.</strong> CDN et RCH (plaques d'immatriculation) pour le Canada et
+              le Chili, CSK et YUG pour des États disparus&nbsp;: recodés par <code>compute</code>, ou écartés de la carte par
+              un <code>where</code> — à trouver en lisant les modalités, rien ne le signale sinon.</li>
+            <li><strong>Un ordre qui n'est pas dans la donnée.</strong> L'ordre des mandats ne se déduit pas de la première
+              année (De Gaulle apparaît en 1945)&nbsp;: rang et libellé recodés à la main par une cascade de
+              <code>when</code>.</li>
+            <li><strong>Des pays que la carte ne sait pas colorier.</strong> Andorre, Monaco, le Vatican, les Comores,
+              Maurice et les Seychelles manquent à la table de conversion alpha-3 de dsfr-data&nbsp;; Singapour et Bahreïn
+              à la carte de DSFR Chart. Les deux le disent en console, pas en page&nbsp;: la page les écarte et les compte.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 2&nbsp;750 lignes Tabular, neuf colonnes</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Hors de France / en France</td><td><code>compute etr = when pays = 'France' then 0 else 1</code></td><td>Natif</td></tr>
+            <tr><td>Part par président, dans l'ordre des mandats</td><td><code>aggregate="pct_etr:avg"</code> + <code>rang</code> recodé + <code>order-by</code></td><td>Natif (ordre recodé à la main)</td></tr>
+            <tr><td>France et étranger empilés</td><td><code>dsfr-data-chart stacked horizontal value-fields</code></td><td>Natif</td></tr>
+            <tr><td>Carte du monde par pays</td><td><code>type="map-monde" code-field="iso"</code></td><td>Natif (le cadrage la croyait absente) ; micro-États non coloriés</td></tr>
+            <tr><td>Nombre de pays visités</td><td><code>aggregate="iso:distinct"</code></td><td>Natif (calcul client)</td></tr>
+            <tr><td>Recherche et fiche avec lien vers la notice</td><td><code>dsfr-data-search</code> → facettes → <code>dsfr-data-display</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>La bibliothèque a tout fait&nbsp;; le travail a été de ne pas croire le jeu sur parole.</strong> Un
+          chargement, quelques <code>compute</code>, une carte du monde native. Ce qui a demandé du temps, c'est de voir que
+          «&nbsp;neuf étapes sur dix à l'étranger&nbsp;» sous Hollande vient d'abord de six étapes en France en cinq ans — un
+          fonds, pas un agenda — et de le montrer plutôt que de titrer sur la diplomatie.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; map-monde est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Été culturel — open-data-viz</title>
+  <meta name="description" content="L'agenda de l'Été culturel 2025 compte 2 365 événements, trois sur dix publiés par la DRAC Île-de-France, mais il ne suit pas la carte des crédits : les Hauts-de-France et l'Occitanie, dotées chacune de 1,15 M€, y pèsent moins de 3 %, et six territoires financés n'y publient rien. Création avec dsfr-data sur l'agenda Été culturel et les aides déconcentrées 2021-2023 du ministère de la Culture (API Tabular de data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 24 de docs/portail-culture/proposition.md.
+
+       DEUX JEUX, DEUX MILLÉSIMES.
+       - « Été culturel 2024 », ressource affd17b7… : 2 365 événements, 39
+         colonnes, export de l'agenda OpenAgenda « eteculturel ». Malgré son
+         titre, toutes les dates vont du 15 juin au 30 septembre 2025. Chargé en
+         entier par l'export Parquet, 13 colonnes par `select` (les descriptions
+         longues ne sont jamais lues).
+       - « Les aides déconcentrées pour l'Été culturel », ressource 872361c7… :
+         21 lignes (DRAC, DAC, MAC, DCJS), une colonne par année 2021, 2022,
+         2023. Pas d'export Parquet : une page Tabular suffit.
+       Aucun des deux ne couvre l'année de l'autre : la page les juxtapose,
+       elle ne divise jamais des euros de 2023 par des événements de 2025.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué le 2026-09-27) :
+       - « 3 M€ pour l'Île-de-France » est vrai (2022 et 2023), mais l'histoire
+         n'est pas là : l'Île-de-France publie 30 % des événements pour 18 % des
+         crédits, et l'agenda ne suit pas la carte de l'argent.
+       - La région d'un événement se lit dans l'AGENDA qui le publie (celui de
+         la DRAC), pas dans la colonne « Région » du lieu : 17 lieux n'ont pas
+         de région, 6 l'écrivent en minuscules, 26 événements viennent
+         d'agendas qui ne sont pas ceux d'une DRAC.
+       ========================================================================== -->
+
+  <!-- ---------- Les événements ---------- -->
+  <dsfr-data-source id="ev" api-type="tabular"
+    resource="affd17b7-a8a6-4603-859a-1c20603a0889"
+    fetch-mode="export"
+    select="Identifiant, URL, Titre, Résumé horaires, Première date - Début, Dernière date - Début, Coordonnées géographiques, Identifiant du lieu, Nom du lieu, Code INSEE, Ville, Département, Agenda d'origine (titre)">
+  </dsfr-data-source>
+  <!-- split s'exécute AVANT rename : nom d'origine. « lat, lon » → [lat, lon]. -->
+  <dsfr-data-normalize id="ev-n" source="ev"
+    split="Coordonnées géographiques"
+    rename="Identifiant:id | Titre:titre | Résumé horaires:horaires | Première date - Début:d1 | Dernière date - Début:d2 | Coordonnées géographiques:geo | Identifiant du lieu:id_lieu | Nom du lieu:lieu | Code INSEE:insee | Ville:ville | Département:departement | Agenda d'origine (titre):agenda"
+    compute="drac = when contains(agenda, 'Été culturel 2025 : ') then 1 else 0;
+             region = when drac = 1 then replace(agenda, 'Été culturel 2025 : ', '') else 'Autres agendas';
+             idf = when region = 'Île-de-France' then 1 else 0;
+             m = month(d1);
+             mois = when m = 6 then 'Juin' when m = 7 then 'Juillet' when m = 8 then 'Août' else 'Septembre';
+             juillet = when m = 7 then 1 else 0;
+             hors_ja = when m = 6 or m = 9 then 1 else 0;
+             j = when m = 6 then day(d1) when m = 7 then 30 + day(d1) when m = 8 then 61 + day(d1) else 92 + day(d1);
+             s = floor((j - 16) / 7) + 1;
+             lundi = 16 + 7 * (s - 1);
+             semaine = when lundi <= 30 then 'Sem. du ' + lundi + ' juin'
+                       when lundi <= 61 then 'Sem. du ' + (lundi - 30) + ' juil.'
+                       when lundi <= 92 then 'Sem. du ' + (lundi - 61) + ' août'
+                       else 'Sem. du ' + (lundi - 92) + ' sept.';
+             pic = when s = 6 then 1 else 0;
+             multi = when month(d2) != m or day(d2) != day(d1) then 1 else 0;
+             un = 1; k = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Les aides ---------- -->
+  <dsfr-data-source id="aid" api-type="tabular"
+    resource="872361c7-fc90-4257-b96f-64422c0036ea">
+  </dsfr-data-source>
+  <!-- Les libellés de région de ce fichier ne sont pas ceux des agendas
+       (« Ile-de-France », « Grand-Est », « Provence-Alpes-Côtes-d'Azur »…) :
+       recodés vers l'orthographe des agendas pour la jointure. Par
+       `replace-fields` et non par `compute when` : un littéral de `compute`
+       ne peut pas contenir d'apostrophe (aucun échappement), et
+       « Provence-Alpes-Côte d'Azur » en porte une. -->
+  <dsfr-data-normalize id="aid-n" source="aid"
+    replace-fields="Région (DRAC/DAC/MAC/DCJS):Ile-de-France:Île-de-France | Région (DRAC/DAC/MAC/DCJS):Grand-Est:Grand Est | Région (DRAC/DAC/MAC/DCJS):Provence-Alpes-Côtes-d'Azur:Provence-Alpes-Côte d'Azur | Région (DRAC/DAC/MAC/DCJS):Pays-de-la-Loire:Pays de la Loire | Région (DRAC/DAC/MAC/DCJS):Centre-Val-de-Loire:Centre-Val de Loire | Région (DRAC/DAC/MAC/DCJS):Réunion:La Réunion | Région (DRAC/DAC/MAC/DCJS):Saint Pierre et Miquelon:Saint-Pierre-et-Miquelon"
+    rename="Région (DRAC/DAC/MAC/DCJS):region | Eté culturel 2021 (en euros):a21 | Eté culturel 2022 (en euros):a22 | Eté culturel 2023 (en euros):a23"
+    compute="d2123 = a23 - a21;
+             meme = when a22 = a23 then 1 else 0;
+             nul21 = when a21 = 0 then 1 else 0;
+             idf_d = when region = 'Île-de-France' then d2123 else null;
+             hdf_d = when region = 'Hauts-de-France' then d2123 else null;
+             pdl_d = when region = 'Pays de la Loire' then d2123 else null;
+             ge_d = when region = 'Grand Est' then d2123 else null;
+             occ_d = when region = 'Occitanie' then d2123 else null;
+             paca_d = when contains(region, 'Provence') then d2123 else null;
+             un = 1; k = 1">
+  </dsfr-data-normalize>
+  <!-- Totaux par année : les trois colonnes-années dépliées en lignes. -->
+  <dsfr-data-unpivot id="aid-l" source="aid-n" id-cols="region"
+    value-cols="a21:2021, a22:2022, a23:2023" var-name="annee" value-name="montant">
+  </dsfr-data-unpivot>
+  <dsfr-data-query id="aid-an" source="aid-l" group-by="annee" aggregate="montant:sum:total" order-by="annee:asc"></dsfr-data-query>
+
+  <dsfr-data-query id="aid-t" source="aid-n" group-by="k"
+    aggregate="a21:sum:t21, a22:sum:t22, a23:sum:t23, meme:sum:meme, nul21:sum:nul21, un:sum:lignes, idf_d:max:idf_d, hdf_d:max:hdf_d, pdl_d:max:pdl_d, ge_d:max:ge_d, occ_d:max:occ_d, paca_d:max:paca_d">
+  </dsfr-data-query>
+  <!-- Part de chaque région dans les crédits 2023 : `share_percent` (0.33.0). -->
+  <dsfr-data-query id="aid-p" source="aid-n" group-by="region" aggregate="a23:sum:m23, m23:share_percent:p23"></dsfr-data-query>
+
+  <!-- ---------- La synthèse des événements, sur une ligne ---------- -->
+  <dsfr-data-query id="ev-s" source="ev-n" group-by="k"
+    aggregate="un:sum:n, idf:sum:idf, juillet:sum:juillet, hors_ja:sum:hors_ja, drac:sum:drac, multi:sum:multi, pic:sum:pic, insee:distinct:villes, id_lieu:distinct:lieux">
+  </dsfr-data-query>
+  <!-- Part de chaque agenda dans les événements : `share_percent`. -->
+  <dsfr-data-query id="ev-rp" source="ev-n" group-by="region" aggregate="un:sum:nr, nr:share_percent:pev"></dsfr-data-query>
+
+  <!-- Événements ↔ crédits, par région. Jointure complète : les agendas sans
+       crédit (« Autres agendas ») et les territoires financés sans agenda
+       restent tous deux visibles. Clé unique des deux côtés (un group-by à
+       gauche, 21 libellés distincts à droite, vérifié à l'API). -->
+  <dsfr-data-join id="cmp" left="ev-rp" right="aid-p" on="region" type="full"></dsfr-data-join>
+  <dsfr-data-normalize id="cmp-n" source="cmp"
+    compute="pev0 = coalesce(pev, 0);
+             nr0 = coalesce(nr, 0);
+             p230 = coalesce(p23, 0);
+             sans_agenda = when is_null(nr) then 1 else 0;
+             credit_sans_agenda = when is_null(nr) then m23 else 0;
+             hdf = when region = 'Hauts-de-France' then p23 else null;
+             hdf_ev = when region = 'Hauts-de-France' then pev else null;
+             occ = when region = 'Occitanie' then p23 else null;
+             occ_ev = when region = 'Occitanie' then pev else null;
+             ge = when region = 'Grand Est' then p23 else null;
+             ge_ev = when region = 'Grand Est' then pev else null;
+             bfc = when region = 'Bourgogne-Franche-Comté' then p23 else null;
+             bfc_ev = when region = 'Bourgogne-Franche-Comté' then pev else null;
+             idf_p23 = when region = 'Île-de-France' then p23 else null;
+             idf_a23 = when region = 'Île-de-France' then m23 else null;
+             idf_pev = when region = 'Île-de-France' then pev else null;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cmp-s" source="cmp-n" group-by="k"
+    aggregate="sans_agenda:sum:sans_agenda, credit_sans_agenda:sum:credit_sans_agenda, hdf:max:hdf, hdf_ev:max:hdf_ev, occ:max:occ, occ_ev:max:occ_ev, ge:max:ge, ge_ev:max:ge_ev, bfc:max:bfc, bfc_ev:max:bfc_ev, idf_p23:max:idf_p23, idf_a23:max:idf_a23, idf_pev:max:idf_pev">
+  </dsfr-data-query>
+  <!-- La ligne de synthèse : événements + crédits + comparaison, jointe sur k. -->
+  <dsfr-data-join id="syn-a" left="ev-s" right="aid-t" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-join id="syn-b" left="syn-a" right="cmp-s" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="syn" source="syn-b"
+    compute="p_idf = idf / n * 100;
+             p_juillet = juillet / n * 100;
+             autres = n - drac;
+             t23_m = round(t23 / 1000000, 1);
+             idf_m = round(idf_a23 / 1000000, 1);
+             csa_k = round(credit_sans_agenda / 1000, 0);
+             p_multi = multi / n * 100;
+             idf_dp = 0 - idf_d; hdf_dp = 0 - hdf_d; pdl_dp = 0 - pdl_d">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Été culturel</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Été culturel 2025&nbsp;: trois événements publiés sur dix sont franciliens, et l'agenda ne suit pas la carte des crédits</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          L'agenda national de l'Été culturel, l'opération lancée en 2020 par le ministère de la Culture pour soutenir des concerts, spectacles et
+          ateliers gratuits pendant l'été, recense <strong>{{n:number}}&nbsp;événements pour l'été 2025</strong>,
+          dans {{villes:number}}&nbsp;communes. <strong>{{p_idf:number:0}}&nbsp;% sont publiés par la DRAC
+          Île-de-France</strong>, qui reçoit {{idf_m:number:1}}&nbsp;M€ sur {{t23_m:number:1}}&nbsp;M€ de crédits déconcentrés
+          en 2023, dernière année publiée, soit {{idf_p23:number:0}}&nbsp;%. Ailleurs, l'écart va dans les deux sens&nbsp;:
+          les Hauts-de-France et l'Occitanie, dotées chacune de {{hdf:number:0}}&nbsp;% des crédits, publient moins de 3&nbsp;%
+          des événements, et {{sans_agenda:number}}&nbsp;territoires financés n'en publient aucun. L'agenda dit ce que les
+          services régionaux mettent en ligne, pas ce que l'argent finance.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, sur data.gouv.fr&nbsp;:
+      <a href="https://www.data.gouv.fr/datasets/ete-culturel-2024" target="_blank" rel="noopener external">Été culturel
+      2024</a> (fichier mis à jour le 27&nbsp;août&nbsp;2025, dont toutes les dates sont en 2025) et
+      <a href="https://www.data.gouv.fr/datasets/les-aides-deconcentrees-pour-lete-culturel" target="_blank" rel="noopener external">les
+      aides déconcentrées pour l'Été culturel</a> (2021 à 2023), lus à l'ouverture de la page sur l'API Tabular. Les deux
+      fichiers ne portent pas sur la même année&nbsp;: la page les compare en parts, jamais en euros par événement.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="n:max" format="nombre" span="3"
+        heading="Événements publiés" label="agenda Été culturel, 15 juin – 30 septembre 2025"
+        lines='[{"value":"lieux:max","format":"nombre","decimals":0,"suffix":"lieux"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_idf:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Publiés par l'Île-de-France" label="part des événements de l'agenda 2025"
+        lines='[{"value":"idf:max","format":"nombre","decimals":0,"suffix":"événements"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="t23:max" format="compact" unit="€" span="3"
+        heading="Crédits déconcentrés 2023" label="21 DRAC, DAC, MAC et DCJS"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="idf_p23:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Part de l'Île-de-France" label="des crédits 2023"
+        lines='[{"value":"idf_a23:max","format":"compact","unit":"€"}]'></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — qui publie ======================= -->
+  <dsfr-data-query id="reg-q" source="ev-rp" order-by="nr:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-g" source="reg-q" rename="region:Agenda | nr:Événements publiés"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">L'Île-de-France publie près de trois fois plus d'événements que n'importe quelle autre région</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Chaque barre compte les événements publiés dans l'agenda d'une DRAC. L'Île-de-France, mise en évidence, en publie
+          <strong>{{idf:number}}</strong>. Suivent quatre régions entre 220 et 255 événements, puis une chute&nbsp;: la
+          Bretagne, la Corse, les Hauts-de-France, l'Occitanie publient chacune moins de 70 événements. Deux territoires
+          d'outre-mer seulement, la Martinique et la Guadeloupe, ont un agenda. {{autres:number}}&nbsp;événements viennent
+          d'agendas qui ne sont pas ceux d'une DRAC (une ville, un festival, un média local), regroupés en «&nbsp;Autres
+          agendas&nbsp;».
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Événements publiés par agenda régional">
+      <dsfr-data-chart id="g-reg" source="reg-g" type="bar" horizontal
+        label-field="Agenda" value-field="Événements publiés" name="Événements publiés"
+        selected-palette="neutral" highlight-index="[0]" x-min="0"
+        databox databox-title="Événements de l'Été culturel 2025, selon l'agenda régional qui les publie"
+        databox-source="Ministère de la Culture — Été culturel (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-g" label-field="Agenda" value-field="Événements publiés"
+        description="Barres horizontales triées : le nombre d'événements de l'Été culturel 2025 publiés par chaque agenda régional. L'Île-de-France, mise en évidence, dépasse 700 événements, près de trois fois le suivant. Provence-Alpes-Côte d'Azur, les Pays de la Loire, la Bourgogne-Franche-Comté et la Nouvelle-Aquitaine en publient entre 220 et 255 ; le Grand Est et Auvergne-Rhône-Alpes entre 145 et 185 ; la Normandie et l'Occitanie autour de 70 ; le Centre-Val de Loire, les Hauts-de-France, la Corse et la Bretagne entre 35 et 50 ; les autres agendas 26, la Martinique 14, la Guadeloupe 5.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — l'agenda face aux crédits ======================= -->
+  <dsfr-data-query id="cmp-q" source="cmp-n" order-by="p230:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="cmp-g" source="cmp-q"
+    compute="Région = region; ev = round(pev0, 1); cr = round(p230, 1)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-cmp">
+    <h2 id="t-cmp" class="fr-h3">Les Hauts-de-France et l'Occitanie reçoivent chacune 7&nbsp;% des crédits et publient moins de 3&nbsp;% des événements</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Pour chaque région, deux parts&nbsp;: celle des crédits déconcentrés 2023 et celle des événements publiés en 2025.
+          Si l'agenda suivait l'argent, les deux barres seraient de même longueur&nbsp;: c'est à peu près le cas du Grand Est
+          ({{ge:number:1}}&nbsp;% et {{ge_ev:number:1}}&nbsp;%), rarement ailleurs. Les
+          Hauts-de-France ont {{hdf:number:1}}&nbsp;% des crédits et {{hdf_ev:number:1}}&nbsp;% des événements, l'Occitanie
+          {{occ:number:1}}&nbsp;% et {{occ_ev:number:1}}&nbsp;%. À l'inverse, la Bourgogne-Franche-Comté publie
+          <strong>{{bfc_ev:number:1}}&nbsp;% des événements avec {{bfc:number:1}}&nbsp;% des crédits</strong>. En bas du
+          graphique, {{sans_agenda:number}}&nbsp;territoires financés (La Réunion, Mayotte, la Guyane, la Nouvelle-Calédonie,
+          la Polynésie française, Saint-Pierre-et-Miquelon) n'ont aucun événement dans l'agenda&nbsp;: {{csa_k:number}}&nbsp;000&nbsp;€
+          en 2023. Un écart ne mesure ni l'efficacité ni l'activité d'une région&nbsp;: il mesure l'habitude de publier dans
+          l'agenda national.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Part des crédits 2023 et part des événements 2025 par région">
+      <dsfr-data-chart id="g-cmp" source="cmp-g" type="bar" horizontal
+        label-field="Région" value-field="cr" value-fields="ev"
+        name='["Part des crédits déconcentrés 2023 (%)","Part des événements publiés en 2025 (%)"]'
+        x-min="0"
+        databox databox-title="Part de chaque région dans les crédits déconcentrés de l'Été culturel (2023) et dans les événements de l'agenda (2025), en %"
+        databox-source="Ministère de la Culture — aides déconcentrées pour l'Été culturel ; Été culturel (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-cmp" source="cmp-g" label-field="Région" value-field="cr, ev"
+        description="Barres horizontales groupées, triées par part des crédits 2023 décroissante : pour chaque région, la part des crédits déconcentrés de l'Été culturel en 2023 et la part des événements publiés dans l'agenda 2025. L'Île-de-France a 18,5 % des crédits et 30,2 % des événements ; Provence-Alpes-Côte d'Azur 13,8 % et 10,7 % ; Auvergne-Rhône-Alpes 10,1 % et 6,3 % ; les Hauts-de-France et l'Occitanie 7,1 % des crédits chacune pour 1,9 % et 2,8 % des événements ; les Pays de la Loire et la Bourgogne-Franche-Comté, sous 5 % des crédits, publient chacune plus de 10 % des événements. Six territoires d'outre-mer financés n'ont aucun événement ; les autres agendas n'ont aucun crédit.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — les crédits se redistribuent ======================= -->
+  <dsfr-data-query id="dif-q" source="aid-n" order-by="d2123:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="dif-g" source="dif-q" compute="Région = region; Écart = d2123"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dif">
+    <h2 id="t-dif" class="fr-h3">16&nbsp;M€ chaque année depuis 2021, mais redistribués&nbsp;: l'Île-de-France et les Hauts-de-France cèdent 600&nbsp;000&nbsp;€ chacune</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          L'enveloppe totale ne bouge presque pas&nbsp;: {{t21:number}}&nbsp;€ en 2021, {{t22:number}}&nbsp;€ en 2022,
+          {{t23:number}}&nbsp;€ en 2023. Sa répartition, si. Chaque barre donne l'écart de crédits d'une région entre 2021
+          et 2023. <strong>L'Île-de-France perd {{idf_dp:number}}&nbsp;€, les Hauts-de-France {{hdf_dp:number}}&nbsp;€</strong>,
+          les Pays de la Loire {{pdl_dp:number}}&nbsp;€&nbsp;; Provence-Alpes-Côte d'Azur gagne {{paca_d:number}}&nbsp;€, le
+          Grand Est {{ge_d:number}}&nbsp;€ et l'Occitanie {{occ_d:number}}&nbsp;€. La Polynésie française et Saint-Pierre-et-Miquelon, sans crédit en 2021,
+          en reçoivent depuis 2022.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Écart de crédits Été culturel entre 2021 et 2023 par région">
+      <dsfr-data-chart id="g-dif" source="dif-g" type="bar" horizontal
+        label-field="Région" value-field="Écart" name="Écart 2023 − 2021 (€)"
+        selected-palette="neutral" highlight-index="[0, 1, 20]"
+        databox databox-title="Écart des crédits déconcentrés de l'Été culturel entre 2021 et 2023, par région, en euros"
+        databox-source="Ministère de la Culture — aides déconcentrées pour l'Été culturel (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dif" source="dif-g" label-field="Région" value-field="Écart"
+        description="Barres horizontales triées de la plus forte baisse à la plus forte hausse : l'écart de crédits de l'Été culturel entre 2021 et 2023, en euros. Les Hauts-de-France (−608 396 €) et l'Île-de-France (−600 000 €), mises en évidence, perdent le plus, suivies des Pays de la Loire (−331 865 €) et de la Martinique (−40 000 €). Plusieurs régions ne bougent pas (Normandie, La Réunion). Provence-Alpes-Côte d'Azur, mise en évidence, gagne le plus (+600 000 €), devant le Grand Est et l'Occitanie (autour de +200 000 €) et le Centre-Val de Loire (+140 000 €).">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="aid-t">
+      <template>
+        <p class="fr-text--sm fr-hint-text">
+          Les colonnes 2022 et 2023 sont identiques pour {{meme:number}} des {{lignes:number}}&nbsp;lignes&nbsp;: seuls la Guyane
+          et les Pays de la Loire changent. Le fichier ne dit pas si c'est une reconduction à l'euro près ou une colonne recopiée.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= NUANCE — le calendrier ======================= -->
+  <dsfr-data-query id="sem" source="ev-n" group-by="s, semaine" aggregate="un:sum:n" order-by="s:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="sem-g" source="sem" rename="semaine:Semaine | n:Événements"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-sem">
+    <h2 id="t-sem" class="fr-h3">Six événements sur dix commencent en juillet, et la saison culmine la semaine du 21&nbsp;juillet</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Chaque barre compte les événements selon la semaine de leur première date. <strong>{{p_juillet:number:0}}&nbsp;%
+          commencent en juillet</strong>&nbsp;; la semaine du 21&nbsp;juillet, mise en évidence, en ouvre {{pic:number}}. La
+          saison retombe à la mi-août. L'opération est présentée pour juillet et août, mais l'agenda court du 15&nbsp;juin
+          au 30&nbsp;septembre&nbsp;: {{hors_ja:number}}&nbsp;événements commencent en juin ou en septembre. {{multi:number}}&nbsp;événements
+          ({{p_multi:number:0}}&nbsp;%) ont plusieurs dates&nbsp;: ils ne comptent qu'à leur première.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Événements par semaine de première date">
+      <dsfr-data-chart id="g-sem" source="sem-g" type="bar"
+        label-field="Semaine" value-field="Événements" name="Événements"
+        selected-palette="neutral" highlight-index="[6]" y-min="0"
+        databox databox-title="Événements de l'Été culturel 2025, selon la semaine de leur première date"
+        databox-source="Ministère de la Culture — Été culturel (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-sem" source="sem-g" label-field="Semaine" value-field="Événements"
+        description="Barres verticales, une par semaine du lundi 9 juin au lundi 29 septembre 2025 : le nombre d'événements dont la première date tombe dans la semaine. La série monte vite fin juin, dépasse 200 événements par semaine de début juillet à début août, culmine la semaine du 21 juillet, mise en évidence, avec près de 400 événements, redescend vers 120 à 160 par semaine à la mi-août et fin août, puis tombe sous 40 en septembre.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <div class="fr-container">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: les événements de l'été 2025 près de chez vous</h2>
+    <p class="fr-text--sm">Chaque événement à l'emplacement de son lieu, coloré selon le mois de sa première date. La
+      recherche et les filtres pilotent les compteurs, la carte et le tableau&nbsp;; ils ne touchent pas les graphiques
+      ci-dessus.</p>
+  </div>
+  <section class="odv-bandeau" aria-label="Recherche">
+    <div class="fr-container">
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="ev-q" source="ev-n"
+          fields="titre, lieu, ville"
+          label="Rechercher un événement" placeholder="Titre, lieu ou commune : cirque, conte, Marseille…"
+          operator="words" count count-label="événement|événements">
+        </dsfr-data-search>
+      </div>
+    </div>
+  </section>
+
+  <div class="fr-container fr-mb-8w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="ev-f" value="count" format="nombre"
+        heading="Événements" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ev-f" value="insee:distinct" format="nombre"
+        heading="Communes" label="où se tient au moins un événement"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ev-f" value="juillet:sum / un:sum" format="pourcentage"
+        heading="Commencent en juillet" label="part de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- Facettes CLIENT sur le jeu chargé entier (Tabular n'a pas de facettes
+             serveur). `display` : `|` sépare les entrées (PG-022). -->
+        <dsfr-data-facets id="ev-f" source="ev-q"
+          fields="mois, region, departement"
+          labels="mois:Mois de la première date | region:Agenda | departement:Département"
+          display="mois:checkbox | region:select | departement:select">
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des événements de l'Été culturel 2025 colorée par mois">
+          <dsfr-data-map id="carte-ev"
+            name="Événements de l'Été culturel 2025, selon le mois de leur première date"
+            height="620px" tiles="ign-plan" tiles-style="muted"
+            fit-bounds fit-zone="41,-5.5,51.5,10" fit-max-zoom="13">
+            <dsfr-data-map-layer id="couche-ev" source="ev-f" type="circle"
+              geo-field="geo" radius="4" fill-opacity="0.8"
+              color-field="mois"
+              color-map="Juin:#6a6af4,Juillet:#000091,Août:#e1000f,Septembre:#929292"
+              tooltip-field="titre">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-legend for="couche-ev" label="Mois de la première date"></dsfr-data-map-legend>
+            <dsfr-data-map-popup mode="panel-right" title-field="titre" width="360px">
+              <template>
+                <p class="fr-badge fr-badge--sm fr-mb-2v">{{region}}</p>
+                <p class="fr-text--sm fr-mb-1v"><strong>{{lieu}}</strong> — {{ville}} ({{departement}})</p>
+                <p class="fr-text--sm fr-mb-1v">{{horaires|dates non renseignées}}</p>
+                <p class="fr-text--xs fr-mb-0"><a href="{{URL}}" target="_blank" rel="noopener external">Fiche de l'événement sur OpenAgenda</a></p>
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
+          <p class="fr-text--xs fr-hint-text fr-mt-1w">
+            La carte s'ouvre sur la métropole&nbsp;: les événements de Martinique et de Guadeloupe, et celui publié en Grèce
+            par l'agenda de Nouvelle-Aquitaine, sont hors du cadre&nbsp;; faire glisser la carte pour les voir.
+          </p>
+          <dsfr-data-a11y for="carte-ev" source="ev-f" download
+            filename="ete-culturel-2025-selection.csv"
+            label="Données de la carte"
+            description="Carte de France, un point par événement de la sélection à l'emplacement de son lieu, coloré selon le mois de sa première date : bleu clair en juin, bleu foncé en juillet, rouge en août, gris en septembre. Sans filtre, les points se concentrent en Île-de-France, dans les Pays de la Loire, en Bourgogne-Franche-Comté, en Provence-Alpes-Côte d'Azur et en Nouvelle-Aquitaine ; la Bretagne, les Hauts-de-France et l'Occitanie sont clairsemées. Le tableau sous la carte donne les mêmes événements.">
+          </dsfr-data-a11y>
+        </div>
+
+        <h3 class="fr-h5 fr-mt-6w">Les événements de la sélection</h3>
+        <dsfr-data-list source="ev-f"
+          columns="titre:Événement, lieu:Lieu, ville:Commune, horaires:Dates, region:Agenda"
+          sort="d1:asc" pagination="15" count-label="événement|événements" export="csv"
+          caption="Événements de l'Été culturel 2025 de la sélection : lieu, commune, dates, agenda qui les publie">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>Des euros par événement.</strong> Les crédits publiés s'arrêtent à 2023, l'agenda porte sur 2025&nbsp;:
+        diviser l'un par l'autre mêlerait deux années. Et un événement de l'agenda n'est pas forcément un projet financé&nbsp;:
+        le fichier ne relie aucun événement à une subvention.</li>
+      <li><strong>L'activité réelle de l'Été culturel.</strong> L'agenda recense ce que les services régionaux et leurs
+        partenaires ont publié sur OpenAgenda. Une région qui publie peu peut financer beaucoup&nbsp;: l'écart entre les
+        deux barres mesure l'usage de l'agenda, pas la vitalité culturelle.</li>
+      <li><strong>Les éditions précédentes.</strong> Le jeu «&nbsp;Été culturel 2024&nbsp;» ne garde que la dernière édition&nbsp;:
+        son fichier a été remplacé le 27&nbsp;août&nbsp;2025 par l'agenda 2025. Aucune évolution du nombre d'événements ne se
+        tire de ce jeu.</li>
+      <li><strong>La région du lieu.</strong> La page range chaque événement dans l'agenda qui le publie. La colonne
+        «&nbsp;Région&nbsp;» du lieu est vide pour 17&nbsp;événements, écrite en minuscules pour quelques autres, et une
+        trentaine de lieux se trouvent hors de la région de leur agenda (un spectacle en Centre-Val de Loire publié par
+        l'agenda des Pays de la Loire, par exemple).</li>
+      <li><strong>La gratuité et l'accessibilité.</strong> Le champ «&nbsp;Détail des conditions&nbsp;» est vide pour plus
+        d'un événement sur deux, celui de l'accessibilité pour quatre sur cinq&nbsp;: aucune part ne se tire de champs aussi
+        lacunaires.</li>
+      <li><strong>Toutes les dates d'un événement.</strong> Le fichier ne donne que la première et la dernière date&nbsp;; le
+        calendrier compte chaque événement une fois, à sa première date.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création sur deux petits jeux du ministère de la Culture servis par l'API Tabular,
+        2&nbsp;365&nbsp;événements et 21&nbsp;lignes de crédits. Le cadrage annonçait «&nbsp;2&nbsp;365 événements, 3&nbsp;M€ pour
+        l'Île-de-France&nbsp;»&nbsp;; les deux chiffres sont justes, mais l'histoire est dans leur écart&nbsp;: l'agenda et
+        l'argent ne dessinent pas la même carte.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le jeu entier en une lecture.</strong> <code>fetch-mode="export"</code> + <code>select</code>&nbsp;:
+              l'export Parquet, treize colonnes sur 39, sans les descriptions longues. Les noms à apostrophe et parenthèses
+              («&nbsp;Agenda d'origine (titre)&nbsp;») passent dans <code>select</code> et <code>rename</code>.</li>
+            <li><strong>Trois colonnes-années.</strong> <code>dsfr-data-unpivot value-cols="a21:2021, …"</code> les déplie en
+              lignes, l'alias donnant directement l'année&nbsp;: le dépivot que le cadrage demandait existe.</li>
+            <li><strong>Deux jeux aux libellés de région différents.</strong> Un recodage <code>replace-fields</code> de sept
+              libellés, puis une jointure <code>full</code> qui garde à la fois les agendas sans crédit et les territoires
+              financés sans agenda.</li>
+            <li><strong>Des parts en un attribut.</strong> <code>aggregate="un:sum:nr, nr:share_percent:pev"</code>&nbsp;: la
+              part de chaque région, sans source de total ni jointure.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas de semaine d'une date.</strong> <code>compute</code> connaît <code>month()</code> et
+              <code>day()</code>, pas le numéro de semaine ni le jour de l'année&nbsp;: le rang du jour dans l'été se
+              reconstruit mois par mois, et le libellé «&nbsp;Sem. du 21 juil.&nbsp;» par une cascade de <code>when</code>.
+              Juste pour un été, à réécrire pour une autre période.</li>
+            <li><strong>Une apostrophe dans un libellé.</strong> Un littéral de <code>compute</code> ne peut pas contenir
+              d'apostrophe (ni <code>''</code> ni <code>\'</code>&nbsp;: erreur de configuration). Le recodage de
+              «&nbsp;Provence-Alpes-Côtes-d'Azur&nbsp;» passe donc par <code>replace-fields</code>, qui l'accepte.</li>
+            <li><strong>Des chiffres de phrase tirés d'une ligne particulière.</strong> «&nbsp;Les Hauts-de-France ont 7,1&nbsp;%
+              des crédits&nbsp;» s'obtient en créant une colonne non nulle sur cette seule ligne, puis un <code>max</code>&nbsp;:
+              une colonne par chiffre cité.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 2&nbsp;365&nbsp;événements Tabular sans les textes longs</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif</td></tr>
+            <tr><td>Région d'un événement depuis le titre de son agenda</td><td><code>normalize compute replace()</code></td><td>Natif</td></tr>
+            <tr><td>Totaux annuels depuis trois colonnes-années</td><td><code>dsfr-data-unpivot</code> + <code>query group-by</code></td><td>Natif</td></tr>
+            <tr><td>Rapprocher événements et crédits par région</td><td><code>normalize replace-fields</code> (recodage) + <code>dsfr-data-join type="full"</code></td><td>Natif</td></tr>
+            <tr><td>Part de chaque région</td><td><code>query aggregate="…:share_percent"</code></td><td>Natif</td></tr>
+            <tr><td>Semaine de la première date</td><td><code>compute</code> (<code>month</code>, <code>day</code>, <code>floor</code>, <code>when</code>)</td><td>Contournement&nbsp;: pas de fonction semaine</td></tr>
+            <tr><td>Recherche, facettes, carte, tableau</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code> + <code>dsfr-data-map</code> + <code>dsfr-data-list</code></td><td>Natif (client)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Deux petits jeux, une histoire dans leur écart.</strong> Tout tient dans la balise, y compris le dépivot et
+          la jointure complète qui rend visibles les territoires sans agenda. Le coût est dans les calculs de dates (pas de
+          semaine) et dans une apostrophe qu'un littéral de <code>compute</code> ne sait pas écrire. Le vrai travail est éditorial&nbsp;: ne pas diviser des
+          euros de 2023 par des événements de 2025, et dire que l'agenda mesure la publication, pas l'activité.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la carte Leaflet (dsfr-data-map) n'est pas dans `core`. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

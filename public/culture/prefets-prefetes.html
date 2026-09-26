@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Préfets et préfètes depuis 1800 — open-data-viz</title>
+  <meta name="description" content="De 1800 à 1980, pas une femme parmi les préfets nommés en département ; la première, Yvette Chassagne, arrive en 1981, et depuis 2010 une première nomination sur quatre va à une femme — après un pic à plus d'une sur trois en 2015-2019. Création avec dsfr-data à partir de la liste des préfets depuis 1800 (Archives nationales, API Tabular de data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 22 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte « Préfets et préfètes français depuis 1800 »
+       (Archives nationales, ministère de la Culture), servi par Tabular.
+
+       LE CHAMP. Une ligne par personne (3 918), avec ses postes EN DÉPARTEMENT dans
+       « Poste en département (dates) » : « 1928-1929 : Belfort|1929-1930 : Corrèze »,
+       ou « 2024-…. : Dordogne » pour un poste en cours. 313 personnes n'ont aucun poste
+       en département : elles ne sont datées nulle part et sortent des séries.
+
+       LE CHARGEMENT. 3 918 lignes : `fetch-mode="export"` lit l'export Parquet en une
+       requête (sinon 20 pages de 200). Neuf colonnes : pas de `select`.
+
+       LA DATE DE PREMIÈRE NOMINATION (`compute`). Pas de sous-chaîne dans `compute`, et
+       `year()` refuse « 1928-1929 : Belfort » (le « -19 » passe pour un mois, puis rien ne
+       colle). En remplaçant les tirets par des espaces, la cellule devient « 1928 1929 :
+       Belfort… », que `year()` lit comme une date suivie d'une heure : 1928. Tient parce
+       que TOUTES les cellules non vides commencent par l'année (vérifié en Python sur les
+       3 605 lignes datées : zéro échec). Cesserait de marcher sur une cellule qui commence
+       par un mot ou un jour. C'est l'année du PREMIER POSTE LISTÉ : sur 3 lignes, il n'est
+       pas le plus ancien (Python, plus petite année de tous les postes) ; deux changent de
+       décennie, aucune n'est une femme.
+       ========================================================================== -->
+
+  <dsfr-data-source id="pref" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="fdd11c64-06b5-4aa0-9c0d-b4b2d443e129"
+    fetch-mode="export" max-records="5000">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="p-n" source="pref" trim split="Poste en département:|"
+    rename="Nom de famille:nom | Prénom(s):prenom | Sexe:sexe_brut | Wikidata:wikidata | Notice biographique:notice | Poste en département:postes | Poste en département (dates):dates | Année de naissance:naissance | Année de mort:mort"
+    compute="un = 1;
+             k = 1;
+             fem = when sexe_brut = 'féminin' then 1 else 0;
+             pct_f = fem * 100;
+             sexe = when fem = 1 then 'Femme' else 'Homme';
+             annee = year(replace(coalesce(dates, ''), '-', ' '));
+             annee_txt = when is_null(annee) then null else '' + annee;
+             date_ok = when is_null(annee) then 0 else 1;
+             sans_date = 1 - date_ok;
+             f_sans = fem * sans_date;
+             f_an = when fem = 1 then annee else null;
+             d10 = when annee >= 2010 then 1 else 0;
+             f10 = fem * d10;
+             dec = floor(annee / 10) * 10;
+             dec_txt = when is_null(dec) then null else '' + dec;
+             dec_lib = when is_null(dec) then 'Aucun poste daté' else 'Années ' + dec;
+             lus = floor(annee / 5) * 5;
+             lus_lib = when is_null(lus) then null else '' + lus + '-' + (lus + 4);
+             postes_txt = join(postes, ', ');
+             dates_txt = replace(coalesce(dates, ''), '|', ' ; ')">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="p-n" group-by="k"
+    aggregate="un:sum:n, fem:sum:f, date_ok:sum:nd, sans_date:sum:sd, f_sans:sum:fsd, f_an:min:premiere, d10:sum:n10, f10:sum:f10, annee:max:derniere">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="part_f = f / n * 100;
+             part10 = f10 / n10 * 100;
+             attente = premiere - 1800;
+             fd = f - fsd;
+             premiere_txt = '' + premiere;
+             derniere_txt = '' + derniere">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="premiere" source="p-n" where="fem:eq:1, annee:isnotnull" order-by="annee:asc" limit="1"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Préfets et préfètes depuis 1800</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Préfets&nbsp;: aucune femme pendant 180&nbsp;ans, puis une nomination sur quatre depuis 2010</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          Le corps préfectoral naît en 1800. La liste des Archives nationales recense {{n:number}}&nbsp;préfets et préfètes&nbsp;;
+          {{f:number}} sont des femmes, <strong>{{part_f:number:1}}&nbsp;%</strong>. Il faut attendre
+          <strong>{{premiere_txt}}</strong> pour qu'une femme soit nommée à la tête d'un département, {{attente:number}}&nbsp;ans
+          après la création du corps. Depuis 2010, {{f10:number}} des {{n10:number}}&nbsp;premières nominations sont allées à
+          des femmes&nbsp;: <strong>{{part10:number:0}}&nbsp;%</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Archives nationales, ministère de la Culture — <em>Préfets et préfètes français depuis 1800</em>. Une ligne par
+      personne, avec ses postes en département datés. «&nbsp;Première nomination&nbsp;» = année de début du premier poste
+      en département. Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/prefets-et-prefetes-francais-depuis-1800/" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="3"
+        heading="Préfets et préfètes" label="personnes recensées depuis 1800"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_f:max" format="decimal" decimals="1" unit="%" span="3"
+        heading="Femmes" label="part de l'ensemble"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="attente:max" format="nombre" unit="ans" span="3"
+        heading="Avant la première préfète" label="entre la création du corps et la première femme nommée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part10:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Depuis 2010" label="part des femmes parmi les premières nominations"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — deux siècles ======================= -->
+  <!-- Une barre par décennie de première nomination, part des femmes (indicateur 0/100
+       moyenné = proportion). Les deux dernières décennies mises en évidence. La décennie
+       2020 s'arrête à la dernière année présente dans le jeu (dite en page). -->
+  <dsfr-data-query id="dec" source="p-n" where="annee:isnotnull" group-by="dec_txt, dec"
+    aggregate="pct_f:avg:part, un:sum:n, fem:sum:f" order-by="dec:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="dec-g" source="dec" round="part:1"
+    rename="dec_txt:Décennie | part:Part des femmes (%) | n:Premières nominations | f:Femmes"></dsfr-data-normalize>
+  <dsfr-data-query id="dec-zero" source="dec" where="f:eq:0" group-by="k"
+    aggregate="dec:count:nd, n:sum:nh, dec:max:dmax"></dsfr-data-query>
+  <dsfr-data-normalize id="dec-zero-t" source="dec-zero" compute="fin = '' + (dmax + 9)"></dsfr-data-normalize>
+  <dsfr-data-query id="dec-10" source="dec" where="dec:eq:2010"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dec">
+    <h2 id="t-dec" class="fr-h3">Dix-huit décennies de préfets, zéro préfète</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="dec-zero-t"><template>De 1800 à {{fin}}, {{nh:number}}&nbsp;personnes reçoivent leur premier
+        poste de préfet en département, sur {{nd:number}}&nbsp;décennies&nbsp;: pas une femme.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="premiere"><template>La première est {{prenom}} {{nom}}, en {{annee_txt}}
+        ({{dates_txt}}).</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dec-10"><template>Dans les années 2010, {{f:number}} premières nominations sur {{n:number}} vont
+        à une femme, soit {{part:number:0}}&nbsp;%.</template></dsfr-data-repeat>
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Part des femmes parmi les premières nominations de préfet, par décennie">
+      <dsfr-data-chart id="g-dec" source="dec-g" type="bar"
+        label-field="Décennie" value-field="Part des femmes (%)" name="Part des femmes (%)"
+        selected-palette="neutral" highlight-index="[21, 22]" unit-tooltip="%" y-min="0"
+        databox databox-title="Part des femmes parmi les préfets nommés pour la première fois en département, par décennie (%)"
+        databox-source="Archives nationales — Préfets et préfètes français depuis 1800 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dec" source="dec-g" label-field="Décennie" value-field="Part des femmes (%), Femmes, Premières nominations"
+        description="Barres verticales, une par décennie de première nomination, des années 1800 aux années 2020. Les dix-huit barres de 1800 à 1970 sont à zéro. La part des femmes apparaît dans les années 1980, autour de 1 %, puis passe à environ 6 % dans les années 1990 et 9 % dans les années 2000 ; elle atteint un quart dans les années 2010 et 2020, ces deux barres étant mises en évidence.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Chaque personne compte une fois, dans la décennie de son premier poste en département. Les années 2020 s'arrêtent
+          à {{derniere_txt}}, dernière année de nomination présente dans le jeu.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= NUANCE — le pic et le recul ======================= -->
+  <!-- Lustres depuis 1975 : la décennie lisse un pic. Petits effectifs (45 à 91 personnes
+       par lustre) : chaque barre porte ses effectifs dans le tableau et l'infobulle. -->
+  <dsfr-data-query id="lus" source="p-n" where="annee:gte:1975" group-by="lus_lib, lus"
+    aggregate="pct_f:avg:part, un:sum:n, fem:sum:f" order-by="lus:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="lus-g" source="lus" round="part:1"
+    rename="lus_lib:Période | part:Part des femmes (%) | n:Premières nominations | f:Femmes"></dsfr-data-normalize>
+  <dsfr-data-query id="lus-max" source="lus" order-by="part:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="lus-der" source="lus" order-by="lus:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="lus-2005" source="lus" where="lus:eq:2005"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-lus">
+    <h2 id="t-lus" class="fr-h3">Plus d'une sur trois en 2015-2019, puis la part recule</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="lus-2005"><template>La bascule se fait vite&nbsp;: {{part:number:0}}&nbsp;% de femmes parmi les
+        premières nominations de {{lus_lib}},</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="lus-max"><template>{{part:number:0}}&nbsp;% en {{lus_lib}} ({{f:number}} femmes sur
+        {{n:number}}), le sommet de la série.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="lus-der"><template>En {{lus_lib}}, la part redescend à {{part:number:0}}&nbsp;% ({{f:number}}
+        sur {{n:number}}).</template></dsfr-data-repeat>
+      Sur des effectifs de cet ordre, quelques nominations déplacent la barre de plusieurs points&nbsp;: le recul est net,
+      mais il ne dit pas encore une tendance.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Part des femmes parmi les premières nominations de préfet, par période de cinq ans depuis 1975">
+      <dsfr-data-chart id="g-lus" source="lus-g" type="bar"
+        label-field="Période" value-field="Part des femmes (%)" name="Part des femmes (%)"
+        selected-palette="neutral" highlight-index="[8]" unit-tooltip="%" y-min="0"
+        databox databox-title="Part des femmes parmi les préfets nommés pour la première fois en département, par période de cinq ans depuis 1975 (%)"
+        databox-source="Archives nationales — Préfets et préfètes français depuis 1800 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-lus" source="lus-g" label-field="Période" value-field="Part des femmes (%), Femmes, Premières nominations"
+        description="Barres verticales, une par période de cinq ans de 1975-1979 à 2020-2024. La part des femmes reste sous 7 % jusqu'en 2000-2004, passe à 12 % en 2005-2009 et 18 % en 2010-2014, culmine à 35 % en 2015-2019, barre mise en évidence, puis redescend à 24 % en 2020-2024.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LES PRÉFÈTES, UNE PAR UNE ======================= -->
+  <dsfr-data-query id="fem" source="p-n" where="fem:eq:1, annee:isnotnull" order-by="annee:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-fem">
+    <h2 id="t-fem" class="fr-h3">Les préfètes, de la première à la plus récente</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{fd:number}} des {{f:number}}&nbsp;femmes du jeu ont au moins un poste en département daté&nbsp;; les voici dans
+          l'ordre de leur première nomination, avec tous leurs postes. Les {{fsd:number}} autres n'ont aucun poste en
+          département dans la liste.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-list source="fem" pagination="10" count-label="préfète"
+      caption="Préfètes ayant au moins un poste en département daté, par année de première nomination"
+      columns="annee_txt:Première nomination, prenom:Prénom, nom:Nom, dates_txt:Postes en département (dates)"
+      export="csv">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: les préfets d'un département, d'une époque</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Chercher un nom, filtrer par sexe, par décennie de première nomination ou par poste. Chaque fiche renvoie vers la
+      notice des Archives nationales et vers Wikidata.
+    </p>
+
+    <div class="fr-mb-4w">
+      <dsfr-data-search id="p-q" source="p-n"
+        fields="nom, prenom, postes_txt"
+        label="Rechercher un préfet ou une préfète" placeholder="Nom, prénom ou département : Haussmann, Chassagne, Gironde…"
+        operator="words" count count-label="personne">
+      </dsfr-data-search>
+    </div>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="p-fac" value="count" format="nombre"
+        heading="Personnes" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="p-fac" value="fem:sum" format="nombre"
+        heading="Préfètes" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="p-fac" value="fem:sum / un:sum" format="pourcentage" decimals="1"
+        heading="Femmes" label="part de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="p-fac" source="p-q"
+          fields="sexe, dec_lib, postes"
+          labels="sexe:Sexe | dec_lib:Décennie de première nomination | postes:Poste en département"
+          display="sexe:checkbox | dec_lib:multiselect | postes:multiselect"
+          disjunctive="sexe, dec_lib, postes"
+          searchable="dec_lib, postes"
+          sort="dec_lib:alpha:asc | postes:alpha:asc"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-display source="p-fac" per-row="2" pagination="12"
+          count-label="personne"
+          empty="Aucun préfet ne correspond à cette recherche.">
+          <template>
+            <div class="fr-card fr-card--sm">
+              <div class="fr-card__body">
+                <div class="fr-card__content">
+                  <h4 class="fr-card__title">{{prenom}} {{nom}}</h4>
+                  <p class="fr-card__desc fr-text--sm">{{#if dates_txt}}{{dates_txt}}{{/if}}{{#unless dates_txt}}Aucun poste en département daté{{/unless}}</p>
+                  <div class="fr-card__start">
+                    <p class="fr-text--xs fr-mb-1v">{{sexe}}{{#if naissance}} · né(e) en {{naissance}}{{/if}}{{#if mort}}, mort(e) en {{mort}}{{/if}}</p>
+                  </div>
+                  <div class="fr-card__end">
+                    {{#if notice}}<p class="fr-text--xs fr-mb-1v"><a href="{{notice:url}}" target="_blank" rel="noopener external">Notice des Archives nationales</a></p>{{/if}}
+                    {{#if wikidata}}<p class="fr-text--xs fr-mb-0"><a href="{{wikidata:url}}" target="_blank" rel="noopener external">Wikidata</a></p>{{/if}}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </dsfr-data-display>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>{{sd:number}}&nbsp;personnes sans poste en département daté</strong>, dont {{fsd:number}} femmes. Elles
+            comptent dans le total et dans la part des femmes de l'en-tête, pas dans les séries par décennie ni par période,
+            faute de date.</li>
+          <li><strong>La part des femmes parmi les préfets en poste une année donnée.</strong> Les graphiques comptent des
+            arrivées (premières nominations), pas un effectif en fonction&nbsp;: le jeu donne les postes en texte
+            («&nbsp;1928-1929&nbsp;: Belfort|1929-1930&nbsp;: Corrèze&nbsp;»), que la page ne déplie pas année par année.</li>
+          <li><strong>La durée en poste.</strong> Même raison&nbsp;: la fin de chaque poste est dans le texte, sans colonne à
+            soustraire. Les postes en cours s'écrivent «&nbsp;2024-….&nbsp;».</li>
+          <li><strong>Les postes hors département</strong>&nbsp;: préfectures de région, administration centrale,
+            sous-préfectures. La liste ne recense que les postes à la tête d'un département (y compris les départements
+            disparus de l'Empire et de l'Algérie française).</li>
+          <li><strong>Une carte.</strong> Les postes mêlent départements actuels («&nbsp;46 - Lot&nbsp;») et libellés sans code
+            («&nbsp;Lot&nbsp;», «&nbsp;Paris (police)&nbsp;», «&nbsp;Zuyderzée&nbsp;») : une même préfecture peut apparaître sous
+            deux noms dans le filtre.</li>
+          <li><strong>Un doublon.</strong> Une préfète figure deux fois sous deux graphies de son nom (même identifiant
+            Wikidata)&nbsp;: les comptes de femmes sont surestimés d'une unité.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'une liste des Archives nationales servie par l'API Tabular. Le
+        cadrage posait la question («&nbsp;quand les femmes arrivent-elles&nbsp;?&nbsp;») sans chiffre&nbsp;; la donnée répond
+        1981, et ajoute ce que le cadrage n'avait pas vu&nbsp;: un pic en 2015-2019, puis un recul.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Tout le jeu en une requête.</strong> <code>fetch-mode="export"</code> lit l'export Parquet&nbsp;:
+              3&nbsp;918 lignes au lieu de 20 pages de 200.</li>
+            <li><strong>Des postes multivalués.</strong> «&nbsp;90 - Territoire de Belfort|19 - Corrèze&nbsp;» devient un tableau
+              par <code>split="Poste en département:|"</code> — le séparateur est configurable, contrairement à ce que craignait le
+              cadrage — et la facette le lit poste par poste.</li>
+            <li><strong>Une part par décennie sans seconde source.</strong> Un indicateur 0/100 par personne et
+              <code>avg</code> donnent une proportion, et la décennie se dérive par <code>floor(annee / 10) * 10</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>L'année dans un texte.</strong> «&nbsp;1928-1929&nbsp;: Belfort&nbsp;»&nbsp;: <code>compute</code> n'a ni
+              sous-chaîne ni regex, et <code>year()</code> refuse la cellule. Remplacer les tirets par des espaces la fait lire
+              comme «&nbsp;date heure&nbsp;»&nbsp;: <code>year(replace(dates, '-', ' '))</code>. Tient parce que chaque cellule
+              commence par l'année&nbsp;; c'est un contournement, pas une fonction prévue pour ça.</li>
+            <li><strong>Le premier poste listé n'est pas toujours le plus ancien</strong> (3 lignes sur 3&nbsp;605)&nbsp;: sans
+              minimum sur les éléments d'un tableau, la page prend le premier. Écart vérifié hors navigateur, sans effet sur
+              les femmes.</li>
+            <li><strong>Une année dans un KPI.</strong> <code>format="nombre"</code> ou <code>decimal</code> rendent 1981 en
+              «&nbsp;1&nbsp;981&nbsp;», et aucun format ne rend un entier sans séparateur&nbsp;: l'année de la première préfète
+              est passée dans le chapeau, le KPI montre l'attente en années.</li>
+            <li><strong>Des effectifs d'actifs, impossibles.</strong> Compter les préfètes en poste une année donnée
+              demanderait de déplier chaque poste en lignes datées&nbsp;: hors de portée de <code>compute</code>.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 3&nbsp;918 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export"</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Postes séparés par «&nbsp;|&nbsp;»</td><td><code>normalize split="Poste en département:|"</code> + facette</td><td>Natif</td></tr>
+            <tr><td>Année de première nomination dans «&nbsp;1928-1929&nbsp;: Belfort|…&nbsp;»</td><td><code>year(replace(dates, '-', ' '))</code></td><td>Contournement (tient sur ce jeu)</td></tr>
+            <tr><td>Décennie, période de cinq ans</td><td><code>compute floor(annee / 10) * 10</code></td><td>Natif</td></tr>
+            <tr><td>Part des femmes par période</td><td><code>compute pct_f = fem * 100</code> + <code>aggregate="pct_f:avg"</code></td><td>Natif</td></tr>
+            <tr><td>Première préfète, sommet de la série</td><td><code>dsfr-data-query order-by limit="1"</code> + <code>dsfr-data-repeat</code></td><td>Natif</td></tr>
+            <tr><td>Recherche par nom, fiche avec liens</td><td><code>dsfr-data-search</code> → facettes → <code>dsfr-data-display</code></td><td>Natif</td></tr>
+            <tr><td>Effectif en poste une année donnée</td><td>—</td><td>Hors de portée (postes en texte)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Une page juste en un chargement, au prix d'un contournement sur la date.</strong> Tout se calcule côté
+          client&nbsp;; la seule friction est une année enfouie dans un texte, que <code>compute</code> n'extrait qu'en détournant
+          <code>year()</code>. Une fonction de sous-chaîne rendrait le geste propre. Ce que la page ne peut pas dire — combien
+          de préfètes en poste une année donnée — tient à la forme du jeu, qui range les postes dans une seule cellule.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
