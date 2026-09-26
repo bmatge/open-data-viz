@@ -76,7 +76,8 @@ c'est la référence de fidélité des données.
   2. Mettre à jour la table `STATUTS` de `scripts/build-registre.mjs`, puis
      `node scripts/build-registre.mjs`.
   3. Reporter l'enseignement transverse dans `public/synthese.html`.
-  4. **`node scripts/build-catalogue.mjs`** — régénère `public/data/dataviz.json`, le catalogue
+  4. **`node scripts/build-catalogue.mjs`**, **après le commit de la page** (la mention « méthode
+     dataviz-metier » se prouve par l'historique git : lancé avant le commit, il ne la voit pas) — régénère `public/data/dataviz.json`, le catalogue
      unique que l'accueil, `/dataviz`, `/demo` et les cinq pages de portail rendent avec la même
      carte `fr-card` (titre-message = `<h1>`, résumé = `<meta name="description">` : les soigner).
      Nature, méthode dataviz-metier (d'après l'historique git), origine (registres), API et
