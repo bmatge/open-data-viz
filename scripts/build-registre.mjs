@@ -31,22 +31,22 @@ const LIBELLES = {
 
 // Cle = champ `lien` du catalogue ODS, tel que renvoye par l'API (a la barre finale pres).
 const STATUTS = {
-  '/pages/visualisation-decp-augmente/': ['reproduite', '/viz/decp-augmente', '4 graphiques agrégés côté serveur sur 994 000 lignes'],
-  '/pages/dataviz-plan-de-relance': ['reproduite', '/viz/plan-de-relance', 'Carte POI + 2 graphiques + facettes sur un seul fetch'],
+  '/pages/visualisation-decp-augmente/': ['reproduite', '/viz/decp-augmente', 'Recréée en récit (2026-09-26) : AWS-Achat s’arrête en 2023, PES Marchés prend le relais ; 994 123 lignes, pas autant de marchés (FP-020)'],
+  '/pages/dataviz-plan-de-relance': ['reproduite', '/viz/plan-de-relance', 'Recréée en récit (2026-09-26) : 61 % de PME, mais 61 % de grandes entreprises sur la décarbonation ; un site = 19,5 % du CO₂'],
 
-  '/pages/dataviz-prix-des-carburants': ['reproduite', '/viz/prix-des-carburants', 'unpivot des 6 colonnes de prix + choroplèthe régionale embarquée'],
+  '/pages/dataviz-prix-des-carburants': ['reproduite', '/viz/prix-des-carburants', 'Recréée en récit (2026-09-26) : la station fait le prix, pas la région ; heures de relevé rendues justes (timezone retiré, FP-019)'],
   '/pages/entreprise-patrimoine-vivant/': ['reproduite', '/viz/entreprise-patrimoine-vivant', '61 600 caractères de template contre une trentaine de lignes'],
-  '/pages/comptabilite-generale/': ['reproduite', '/viz/comptabilite-generale', '517 489 lignes, 6 agrégations serveur, aucune ligne dans le navigateur'],
+  '/pages/comptabilite-generale/': ['reproduite', '/viz/comptabilite-generale', 'Recréée en récit (2026-09-26) : la dette fait 90 % de la hausse du passif ; plus de solde par mission (95 % des produits sans mission, PG-042)'],
   '/pages/qualite-tourisme/': ['reproduite', '/viz/qualite-tourisme', 'Annuaire cartographié : 1 carte au lieu de 6, facettes cherchables'],
   '/pages/annuaire-des-services-dgfip/': ['reproduite', '/viz/annuaire-services-dgfip', '21 761 services — quatrième emploi du gabarit annuaire'],
   '/pages/tourisme-et-handicap/': ['reproduite', '/viz/tourisme-et-handicap', 'Même gabarit que Qualité Tourisme ; facette multivaluée native'],
   '/pages/accompagnements-actions-fnum/': ['analyse', '/viz/formations-france-num', 'Jeu de données à zéro enregistrement : analyse au lieu de reproduction'],
   '/pages/entreprises-restauration-notre-dame': ['reproduite', '/viz/entreprises-restauration-notre-dame', 'Carte à 2 couches issues de 2 portails Opendatasoft'],
-  '/pages/fiscalite-locale-particuliers/?headless=true': ['reproduite', '/viz/fiscalite-locale', 'Choroplèthe départementale + tableau serveur sur 174 668 lignes'],
+  '/pages/fiscalite-locale-particuliers/?headless=true': ['reproduite', '/viz/fiscalite-locale', 'Recréée en récit (2026-09-26) : la surtaxe des résidences secondaires ×7, rupture de 2024 ; moyennes pondérées par la population'],
   '/pages/barometre-france-num/': ['reproduite', '/viz/barometre-france-num', 'Refonte en trois régimes d’accès (profil partagé), relue le 2026-09-26 ; la reproduction fidèle a été retirée le même jour'],
 
   '/pages/comptabilite-etat/': ['analyse', '/viz/non-reproduites', 'Page 404, jeu supprimé — sujet couvert par la page Comptabilité générale'],
-  '/pages/signalconso/': ['reproduite', '/viz/signalconso', 'Page 404 mais jeu vivant : 1,7 M de signalements reconstitués'],
+  '/pages/signalconso/': ['reproduite', '/viz/signalconso', 'Page 404, jeu vivant. Recréée en récit (2026-09-26) : 40 % jamais transmis ; 70,6 % de réponses parmi les transmis, pas 38 % (FP-021)'],
   '/pages/rappelconso/': ['reproduite', '/viz/rappelconso', 'Page 404 et jeu renommé : la v2 existe ; relecture métier du 2026-09-26, compte des fiches (jeu -espaces) et non des codes-barres'],
   '/pages/annuaire-centres-controles-techniques/': ['reproduite', '/viz/centres-controle-technique', 'Page 404 et jeux renommés : 6 113 centres retrouvés'],
   '/pages/livre-d-or/': ['analyse', '/viz/non-reproduites', 'Page 404, aucun jeu associé : rien à reprendre'],

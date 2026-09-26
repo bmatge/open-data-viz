@@ -50,7 +50,7 @@
       "comptabilite-generale"
     ],
     "constat": "Sur un `group_by`, l'API Opendatasoft renvoie un `total_count` égal à la TAILLE DE PAGE (100), pas au nombre réel de groupes. La boucle de `fetchAll` (packages/core/src/adapters/opendatasoft-adapter.ts:143) s'arrête sur `allResults.length >= totalCount` et ne récupère donc que la première page. L'avertissement de pagination incomplète compare lui aussi au totalCount faux : il ne se déclenche pas. Résultat : des agrégats silencieusement tronqués.",
-    "verifie": "Deux cas. (1) DECP : tableau croisé `source × nature × procedure` = 235 groupes réels ; une page bâtie dessus n'émet qu'une requête et affiche 632 062 marchés au lieu de 994 123, sans message. (2) Comptabilité générale : le graphique « postes × année » compte 264 groupes — c'est le premier cas où le bug BLOQUE réellement une reproduction, le graphique principal de la page n'aurait montré qu'un tiers des données.",
+    "verifie": "Deux cas. (1) DECP : tableau croisé `source × nature × procedure` = 235 groupes réels ; une page bâtie dessus n'émet qu'une requête et affiche 632 062 marchés au lieu de 994 123, sans message. (2) Comptabilité générale : le graphique « postes × année » compte 264 groupes — c'est le premier cas où le bug BLOQUE réellement une reproduction, le graphique principal de la page n'aurait montré qu'un tiers des données. — ⚠️ **Rectifié le 2026-09-26 (FP-020)** : « 632 062 marchés au lieu de 994 123 » compte des **lignes**. Le jeu porte 753 320 couples identifiant × acheteur pour 994 123 lignes. Le bug décrit (troncature silencieuse d'un agrégat) reste établi tel quel.",
     "contournement": "**Trouvé au lot 3** : `/exports/json` accepte `group_by` et renvoie TOUS les groupes en une requête — 264 groupes en 0,5 s. Écrire la source en mode générique (`url=` vers `/exports/json` + `params`) contourne donc entièrement le bug. En mode adaptateur, aucun contournement : ni `limit` ni `max-records` ne changent la condition d'arrêt.",
     "demande": "Sur une requête agrégée (présence de `group_by`), ne se fier qu'à `pageResults.length < pageSize` pour arrêter la boucle, et ignorer `total_count`.",
     "statut": "corrige",
@@ -518,10 +518,11 @@
       "demo/cuivre-qui-bascule",
       "demo/ips-college-territoire",
       "rappelconso",
-      "bofip"
+      "bofip",
+      "decp-augmente"
     ],
     "constat": "Deux entrées du catalogue pointent la même page : joindre sur `lien` produit une relation 1-N, deux cartes en double et un total de 28 au lieu de 26. Le composant fait ce qu'on lui demande ; c'est la donnée qui piège.\n\n**Relecture métier du 2026-09-26** — le piège sort de la jointure.** Le même défaut se paie sans aucune `dsfr-data-join`, dès qu'on compte des lignes ou qu'on s'en sert comme identifiant.\n\n- **Compter : une ligne n'est pas forcément l'unité comptée.** `rappelconso-v2-gtin-trie` publie une ligne **par code-barre (GTIN)**, pas par fiche de rappel. Le compte simple gonflait « rappels » de 48,5 % et omettait les produits sans GTIN — un tiers des fiches, dont 97 % des véhicules. Ni erreur, ni valeur aberrante : seul un `group_by` sur l'identifiant métier le révèle. La page compte désormais sur `rappelconso-v2-gtin-espaces`, une ligne par fiche (voir FP-016 pour les chiffres du registre qui en portaient la trace).\n- **Identifier : `uid-field` sur une clé non unique.** `identifiant_juridique` revient 23 fois en double dans `bofip-vigueur` (9 125 distincts pour 9 148 lignes) : pris comme `uid-field`, il donne deux id DOM identiques quand la paire tombe sur la même page. Le permalien est unique.\n\nLa règle ne change pas, elle s'élargit : **avant tout `count`, toute jointure ou tout `uid-field`, `select cle, count(*) group_by cle` à l'API.**",
-    "verifie": "Compteur de résultats passé de 28 à 26 après bascule de `on=\"lien\"` vers `on=\"titre\"`. — **Deux occurrences de plus, le 2026-09-19, sur les deux pages de démonstration, et sous une forme que le constat d'origine ne décrivait pas : ce n'est pas la clé qui est mauvaise, c'est le jeu de DROITE qui publie plusieurs lignes par clé sans que rien ne le dise.** (1) `fermeture-reseau-cuivre` (Bercy) publie **une ligne par couple commune × code postal** : 35 305 lignes pour **34 916 communes**, Nantes y figurant quatre fois. Joint tel quel au référentiel communal, il gonfle la population de **80,3 millions d'habitants pour un pays qui en compte 68**. (2) `data-es-par-commune` (Sports) porte **huit codes communes en double** (69019, 69024, 69066… — des communes du Rhône, `nb_equip` identique). Joint en `left` aux collèges, il affichait **7 001 collèges pour 6 979 réels** — une erreur de 0,3 %, du bon ordre de grandeur, donc **invisible sans recalcul indépendant** (ADR-122 ; c'est l'écart avec le calcul hors ligne qui l'a révélée, pas un message). Dans les deux cas la correction est la même et tient en une balise : un `dsfr-data-query group-by=\"<clé>\"` en amont de la jointure — le `group-by` EST le dédoublonnage. Contrôlé à l'API pour le cuivre : aucune commune ne porte deux dates de bascule différentes, donc le repli ne choisit rien. — **2026-09-26.** (1) API data.economie.gouv.fr : `rappelconso-v2-gtin-trie` `records?limit=0` → 18 472 ; export `group_by=numero_fiche` → 12 435 groupes, jusqu'à 81 lignes pour une fiche (2025-03-0160) ; `rappelconso-v2-gtin-espaces` → 18 699 lignes pour 18 699 fiches. Navigateur : KPI « 18 472 rappels de produits » avant correction, 18 699 après bascule, automobiles 1 756 en deuxième catégorie. Totaux 18 472 et 18 699 recontrôlés à l'API le même jour. (2) API : BOI-BIC-RICI-10-60-10 → 2 lignes (739-PGP et 6493-PGP, 2021-08-25). Navigateur, `uid-field=permalien`, recherche « investissements réalisés et exploités par les PME en Corse », page 2 : l'identifiant juridique apparaît deux fois, zéro id DOM en double. ⚠️ La collision avec l'ancienne clé n'a PAS été rejouée au navigateur dans cette passe.",
+    "verifie": "Compteur de résultats passé de 28 à 26 après bascule de `on=\"lien\"` vers `on=\"titre\"`. — **Deux occurrences de plus, le 2026-09-19, sur les deux pages de démonstration, et sous une forme que le constat d'origine ne décrivait pas : ce n'est pas la clé qui est mauvaise, c'est le jeu de DROITE qui publie plusieurs lignes par clé sans que rien ne le dise.** (1) `fermeture-reseau-cuivre` (Bercy) publie **une ligne par couple commune × code postal** : 35 305 lignes pour **34 916 communes**, Nantes y figurant quatre fois. Joint tel quel au référentiel communal, il gonfle la population de **80,3 millions d'habitants pour un pays qui en compte 68**. (2) `data-es-par-commune` (Sports) porte **huit codes communes en double** (69019, 69024, 69066… — des communes du Rhône, `nb_equip` identique). Joint en `left` aux collèges, il affichait **7 001 collèges pour 6 979 réels** — une erreur de 0,3 %, du bon ordre de grandeur, donc **invisible sans recalcul indépendant** (ADR-122 ; c'est l'écart avec le calcul hors ligne qui l'a révélée, pas un message). Dans les deux cas la correction est la même et tient en une balise : un `dsfr-data-query group-by=\"<clé>\"` en amont de la jointure — le `group-by` EST le dédoublonnage. Contrôlé à l'API pour le cuivre : aucune commune ne porte deux dates de bascule différentes, donc le repli ne choisit rien. — **2026-09-26.** (1) API data.economie.gouv.fr : `rappelconso-v2-gtin-trie` `records?limit=0` → 18 472 ; export `group_by=numero_fiche` → 12 435 groupes, jusqu'à 81 lignes pour une fiche (2025-03-0160) ; `rappelconso-v2-gtin-espaces` → 18 699 lignes pour 18 699 fiches. Navigateur : KPI « 18 472 rappels de produits » avant correction, 18 699 après bascule, automobiles 1 756 en deuxième catégorie. Totaux 18 472 et 18 699 recontrôlés à l'API le même jour. (2) API : BOI-BIC-RICI-10-60-10 → 2 lignes (739-PGP et 6493-PGP, 2021-08-25). Navigateur, `uid-field=permalien`, recherche « investissements réalisés et exploités par les PME en Corse », page 2 : l'identifiant juridique apparaît deux fois, zéro id DOM en double. ⚠️ La collision avec l'ancienne clé n'a PAS été rejouée au navigateur dans cette passe. — **2026-09-26, DECP (FP-020)** : `decp_augmente` compte 994 123 lignes pour 753 320 couples `id × idacheteur`. L'identifiant n'est unique que chez un même acheteur. Rejoué à l'API à la consignation (export groupé, 753 321 lignes CSV avec l'en-tête).",
     "contournement": "Joindre sur un champ réellement unique.",
     "statut": "acte",
     "date": "2026-09-09",
@@ -895,13 +896,13 @@
       "comptabilite-generale"
     ],
     "constat": "La page d'origine calcule dans son template l'écart actif − passif par année, puis son taux d'évolution d'une année sur l'autre. Côté dsfr-data, `dsfr-data-normalize compute` fait de l'arithmétique LIGNE À LIGNE sur des valeurs brutes ; il ne sait ni comparer deux séries, ni accéder à la ligne précédente. Reproduire l'écart demande deux sources, un `dsfr-data-join` sur l'année et un `compute` — quatre balises pour une soustraction. Le taux d'évolution, qui suppose un décalage d'une ligne, reste hors de portée.",
-    "verifie": "Documentation de `compute` : « Hors périmètre : conditions, fonctions, calculs sur valeurs agrégées. » Les KPI d'évolution de la page d'origine n'ont pas été reproduits.",
+    "verifie": "Documentation de `compute` : « Hors périmètre : conditions, fonctions, calculs sur valeurs agrégées. » Les KPI d'évolution de la page d'origine n'ont pas été reproduits. — **2026-09-26, /viz/comptabilite-generale recréée** : `aggregate=\"solde:sum:solde, solde:diff:variation\"` sur `cg-annuel` rend la colonne variation −58, −35, −74, −166, −121, −100, −117, −112, −129 (2017 → 2025), relue dans le tableau équivalent de `g-sn`. `diff` et `running_sum` figurent dans `AGGREGATE_FUNCTIONS` (`packages/core/src/utils/aggregates.ts`).",
     "contournement": "Deux sources + `dsfr-data-join` + `compute` pour une différence. Rien pour une variation temporelle.",
     "demande": "Des colonnes calculées portant sur des séries : différence entre deux séries d'un même group-by, et accès décalé (`lag`) pour les évolutions — le besoin le plus fréquent d'un tableau de bord financier ou statistique.",
     "statut": "corrige",
     "date": "2026-09-09",
     "correction": "Corrigé par #675 et #671, livrés en 0.24.0. #671 donne à `compute` une grammaire v2 (ADR-105) : fonctions en liste blanche, conditions `when … then … else`, comparaisons et booléens. #675 ajoute l'agrégat `evolution` sur `dsfr-data-kpi` (`value=\"recettes:evolution\" format=\"pourcentage\"` = (dernière − première) / première), rendu aussi dans `trend` et `lines`. #255 (`dsfr-data-pivot`, 0.24.0) replie un tableau long en tableau croisé : la soustraction entre deux séries se fait alors en une colonne calculée, sans jointure.",
-    "reste_vrai": "`lag` — l'accès à la ligne précédente — est explicitement différé, et le cumul est hors périmètre de #671 (« ni fenêtre, ni cumul, ni ligne précédente »). Une somme cumulée le long d'une série reste sans voie native (AM-046)."
+    "reste_vrai": "`lag` — l'accès à la ligne précédente — est explicitement différé, et le cumul est hors périmètre de #671 (« ni fenêtre, ni cumul, ni ligne précédente »). Une somme cumulée le long d'une série reste sans voie native (AM-046). — ⚠️ **Rectifié le 2026-09-26** : ce reste-vrai est périmé. `diff` (#775, publié en 0.29.0) donne l'écart avec la ligne précédente, et `running_sum` (#738, 0.27.0) le cumul, tous deux en `aggregate` de `dsfr-data-query`. La variation N/N-1 n'est donc plus hors de portée. Seul le taux d'évolution d'une ligne à l'autre demande encore un `compute` après le `diff`."
   },
   {
     "id": "AM-019",
@@ -1508,12 +1509,13 @@
     ],
     "dataviz": [
       "prix-des-carburants",
-      "bofip"
+      "bofip",
+      "comptabilite-generale"
     ],
     "constat": "Le tableau rend `${row[col] ?? ''}` sans format : « 2.2665920000000006 » là où le graphique dit 2,27. J'avais écrit « aucune fonction d'arrondi » : faux, `dsfr-data-normalize round=\"champ:2\"` existe (voie native ratée, lot 11). Ce qui reste vrai : `round` donne « 2.31 » avec un point ; la localisation fr-FR du tableau manque.",
     "contournement": "`dsfr-data-normalize round=\"champ:N\"` en amont du tableau (précision juste, séparateur décimal faux).",
     "proposition": "Formater les nombres du tableau a11y comme le graphique (même locale, mêmes décimales), ou exposer un attribut `decimals`.",
-    "verifie": "Lot 9 : première ligne « Corse | 2.2665920000000006 | 126 ». Lot 11, `round=\"prix_moyen:2\"` sur la source de la carte régionale : « Grand Est | 44 | 2.31 » ; `round=\"prix_moyen:3\"` sur les carburants : « Gazole | 2.294 ». Source : `dsfr-data-a11y.ts:382` ; `dsfr-data-normalize.ts:82-84, 340-352`. — **Revue des findings du 2026-09-19 (complément, faits relevés par le chantier « skill métier »)** : page minimale (`overlays.html`, test `overlays`), 0.29.1 et 0.30.0 — source `an` en nombres : tableau « 2 022 | 100 », « 2 023 | 104 », « 2 024 | 109 » ; source `an` en chaînes : « 2022 | 100 »… Source `dsfr-data-a11y.ts` `formatCellValue` (l. 331-339) : `typeof value === 'number'` → `formatNumberFr`, sans distinction de colonne. — **2026-09-26** : source `dsfr-data-a11y.ts` (`formatCellValue` → `formatNumberFr(value, {decimals})` pour tout number, inchangé sur origin/main en 0.42.0) — ⚠️ lu au source, **`decimals` non essayé au navigateur**. La voie `round` est vérifiée au navigateur sur /viz/bofip : « 16,2 », « 100 », colonnes entières intactes (« 1 478 »).",
+    "verifie": "Lot 9 : première ligne « Corse | 2.2665920000000006 | 126 ». Lot 11, `round=\"prix_moyen:2\"` sur la source de la carte régionale : « Grand Est | 44 | 2.31 » ; `round=\"prix_moyen:3\"` sur les carburants : « Gazole | 2.294 ». Source : `dsfr-data-a11y.ts:382` ; `dsfr-data-normalize.ts:82-84, 340-352`. — **Revue des findings du 2026-09-19 (complément, faits relevés par le chantier « skill métier »)** : page minimale (`overlays.html`, test `overlays`), 0.29.1 et 0.30.0 — source `an` en nombres : tableau « 2 022 | 100 », « 2 023 | 104 », « 2 024 | 109 » ; source `an` en chaînes : « 2022 | 100 »… Source `dsfr-data-a11y.ts` `formatCellValue` (l. 331-339) : `typeof value === 'number'` → `formatNumberFr`, sans distinction de colonne. — **2026-09-26** : source `dsfr-data-a11y.ts` (`formatCellValue` → `formatNumberFr(value, {decimals})` pour tout number, inchangé sur origin/main en 0.42.0) — ⚠️ lu au source, **`decimals` non essayé au navigateur**. La voie `round` est vérifiée au navigateur sur /viz/bofip : « 16,2 », « 100 », colonnes entières intactes (« 1 478 »). — **2026-09-26, /viz/comptabilite-generale** : colonne de libellés d'un `dsfr-data-a11y series-field` → « 2 016 » sur `g-charges-postes` et `g-mission` avant correction. Contournement : un `group-by` client, qui fait de l'année une clé texte.",
     "statut": "corrige",
     "date": "2026-09-09",
     "correction": "Corrigé par #666, livré en 0.22.0 : `dsfr-data-list` et `dsfr-data-a11y` rendent les nombres en français (`2.27` → « 2,27 », au plus deux décimales), avec un attribut `decimals` optionnel ; les chaînes (codes INSEE, SIREN) restent intactes et l'export CSV reste brut. Le `dsfr-data-normalize round=\"champ:2\"` posé en amont pour l'arrondi n'est plus nécessaire à la lecture du tableau.",
@@ -1739,8 +1741,8 @@
     ],
     "constat": "Ce que je croyais (AM-036) : impossible d'afficher « 03/09/2026 à 09:42 » sans script, le moteur de template ne connaissant que `:number`.",
     "correction": "Ce qui est vrai : `date_format(champ, \"'€ ('dd/MM/yyyy 'à' HH:mm')'\") as champ_txt` dans le `select` de l'export, avec `timezone=Europe/Paris` dans les `params`, renvoie la chaîne prête à afficher ; un carburant absent donne null côté serveur, donc `{{champ_txt|Indisponible}}` fait le repli sans conditionnelle.",
-    "reste_vrai": "Un format `:date` natif dans le template (AM-036) éviterait de déléguer la mise en forme au serveur, et ne vaut que pour Opendatasoft. Sans `timezone`, l'heure sort en UTC.",
-    "verifie": "Panneau de la station de Liernais : « 2,43 € (03/09/2026 à 09:42) » ; portail : « 2,430 € (03/09/2026 à 09:42) ». Sans `timezone` : 07:42.",
+    "reste_vrai": "Un format `:date` natif dans le template (AM-036) éviterait de déléguer la mise en forme au serveur, et ne vaut que pour Opendatasoft. Sans `timezone`, l'heure sort en UTC. ⚠️ Rectifié le 2026-09-26 (FP-019) : « Sans `timezone`, l'heure sort en UTC » est faux sur ce jeu, dont les dates sont en heure de Paris marquées `+00:00`.",
+    "verifie": "Panneau de la station de Liernais : « 2,43 € (03/09/2026 à 09:42) » ; portail : « 2,430 € (03/09/2026 à 09:42) ». Sans `timezone` : 07:42. — ⚠️ **Rectifié le 2026-09-26 (FP-019)** : la moitié « fuseau » de ce constat est fausse. Les horodatages du flux sont en heure de Paris mais marqués `+00:00` ; `date_format` sans `timezone` rend donc déjà l'heure de Paris, et `timezone=Europe/Paris` ajoute deux heures. Le « Sans `timezone` : 07:42 » relevé ici ne se reproduit pas (rejeu 2026-09-26 : sans le paramètre, l'heure rendue égale le `@maj` brut) et contredit la mesure d'AM-064 le lendemain. Ce qui reste vrai : `date_format` dans le `select` formate bien une date côté serveur.",
     "statut": "retire",
     "date": "2026-09-09"
   },
@@ -2204,7 +2206,7 @@
     "constat": "Sept pages portent des `<select>` générés hors ligne (56 missions, 101 départements, 119 questions…). J'avais écrit qu'aucun moyen déclaratif ne peuplait un `<select>` depuis une source ni ne faisait de cascade. Voie native ratée, et c'est la plus coûteuse du rapport (lot 11) : `dsfr-data-facets display=\"champ:select\"` *est* un `<select>` peuplé depuis la donnée, avec compteurs ; et en `server-facets` la cascade existe — chaque facette est refetchée avec le `where` des autres. Ce qui reste vrai, et qui explique les listes en dur : une facette ne pilote que sa propre source, elle ne sait pas parler à un `dsfr-data-context` qui en pilote sept. C'est exactement AM-001.",
     "contournement": "Options générées hors ligne depuis un `group_by` de l'API ; ou, quand une seule source est à piloter, `facets display=\"champ:select\" server-facets`.",
     "proposition": "Un `dsfr-data-context-filter` capable de peupler son `ui` depuis une source (`options-source`, `options-field`), avec restriction par les autres filtres du contexte.",
-    "verifie": "Lot 11, page de test (réseau cuivre, `server-facets`, `display=\"region:select | departement:select\"`) : 21 régions et 95 départements peuplés avec compteurs ; choisir « Bretagne » refetch `facets?facet=departement&where=region = \"Bretagne\"` et le second select tombe à 4 départements (Côtes-d'Armor 345, Ille-et-Vilaine 337, Finistère 279, Morbihan 251). Source : `dsfr-data-facets.ts:1517` (select), l.755-767 (`whereToFields`).",
+    "verifie": "Lot 11, page de test (réseau cuivre, `server-facets`, `display=\"region:select | departement:select\"`) : 21 régions et 95 départements peuplés avec compteurs ; choisir « Bretagne » refetch `facets?facet=departement&where=region = \"Bretagne\"` et le second select tombe à 4 départements (Côtes-d'Armor 345, Ille-et-Vilaine 337, Finistère 279, Morbihan 251). Source : `dsfr-data-facets.ts:1517` (select), l.755-767 (`whereToFields`). — **2026-09-26, /viz/comptabilite-generale recréée** : les 56 `<option>` en dur sont remplacées par `dsfr-data-facets context` avec `hide-counts`. Il sort 72 options (« Tous » et 71 missions tirées de la donnée). /viz/decp-augmente aussi n'a plus aucune des 106 `<option>` écrites à la main.",
     "statut": "corrige",
     "date": "2026-09-09",
     "demande": "Non pas un `options-source` sur `dsfr-data-context-filter`, mais un `dsfr-data-facets context=\"ctx\"` : les facettes (select, cases, cascade) diffusent dans le contexte, qui pilote toutes les sources. Un seul bus.",
@@ -2372,10 +2374,11 @@
     "dataviz": [
       "rappelconso",
       "prix-des-carburants",
-      "entreprises-restauration-notre-dame"
+      "entreprises-restauration-notre-dame",
+      "edu/dataviz-ips-colleges"
     ],
     "constat": "`labels` et `display` de `dsfr-data-facets` séparent leurs entrées par `|` ; `split`, `round` et `fields` par `,` ; `name` de `dsfr-data-chart` accepte une chaîne simple ou un tableau JSON. Rien ne le rappelle d'une fiche à l'autre, et une grammaire fausse ne produit aucune erreur : `display=\"a:select, b:select\"` rend zéro `<select>`, `split=\"champ:|\"` que je croyais impossible marche. Quatre constats du banc (ex-AM-028, AM-031, AM-033, ex-AM-042) tombaient à la lecture du JSDoc de l'attribut plutôt que de la fiche du composant.",
-    "verifie": "Page de test (réseau cuivre, `server-facets`) : `display=\"region:select, departement:select\"` → 0 select rendu ; `display=\"region:select | departement:select\"` → 2 selects, 21 et 95 options. `split=\"risques_encourus:|\"` → tableau (FP-010). `round=\"prix_moyen:2\"` (virgule pour plusieurs champs) → 2.31 (AM-033). — **Rejoué contre dsfr-data 0.27.0 le 2026-09-10** : PARTIELLEMENT CORRIGÉ, et sur le point qui comptait : l'échec n'est plus muet. `display=\"type_etablissement:select, libelle_region:select\"` (virgules au lieu de barres) rend toujours zéro liste déroulante, mais émet désormais en console : « dsfr-data-facets[f1] : attribut \"display\" — les entrées semblent séparées par une virgule, or le séparateur attendu est la barre verticale. Forme attendue : \"champ:valeur | champ2:valeur2\" ». Le message nomme le composant, l'attribut, la valeur reçue et la forme attendue (#731, 0.26.0). Le piège subsiste sur les attributs non couverts par l'avertissement, mais le cas le plus fréquent est désormais visible. — **Passe de revérification du 2026-09-11, contre 0.28.0** : MOITIÉ LIVRÉE (#731, 0.26.0). `dsfr-data-facets` avertit désormais en console, une fois par instance, quand `display` ou `labels` sépare ses entrées par une virgule au lieu d'une barre verticale ; le message nomme l'attribut, la valeur reçue et la forme attendue — vérifié en page. ⚠️ Reste demandé, et le constat est maintenu là-dessus : l'avertissement ne couvre QUE ces deux attributs, sur ce seul composant. `rename` et `fold` de `dsfr-data-normalize` — qui ont des séparateurs OPPOSÉS l'un de l'autre sur la même balise — restent silencieux, et c'est précisément le couple qui a coûté le plus cher à ce banc. — **Relecture du mainteneur dsfr-data, 2026-09-11 (épic #781)** : retenue et déposée en issue #772. — **Revérifié contre `dsfr-data@0.29.0` publiée (CDN jsDelivr), le 2026-09-12** : les 66 pages du dépôt rejouées à la recette, 64 identiques, aucune régression ; les deux écarts de KPI viennent de données republiées, pas de la version.\n\n— **Rejeu du 2026-09-19 (dette de preuve, open-data-viz#39)**, harnais `scripts/rejeu-findings/`, page minimale servie par interception, bundle **`dsfr-data@0.31.0` du CDN** : constat CONNEXE, releve trois fois pendant le rejeu : la 0.31.0 avertit desormais sur **tout attribut inconnu**, quel que soit le composant — « dsfr-data-facets: attribut \"value-labels\" inconnu de la version chargee de dsfr-data — il sera ignore en silence. Verifiez l'orthographe, ou mettez la bibliotheque a jour », et trois avertissements du meme genre sur `dsfr-data-chart` pour `log`, `y-scale` et `scale`. L'element porte en plus un `data-dsfr-unknown-attrs`. **C'est la moitie la plus utile de PG-022 : une faute d'attribut n'est plus muette.** Reste ouvert, et c'est autre chose : une grammaire FAUSSE dans un attribut CONNU (`display=\"a:select, b:select\"` avec la mauvaise virgule, `labels` nourri d'une valeur au lieu d'un champ — voir AM-081 forme 2) ne declenche rien, puisque l'attribut existe.",
+    "verifie": "Page de test (réseau cuivre, `server-facets`) : `display=\"region:select, departement:select\"` → 0 select rendu ; `display=\"region:select | departement:select\"` → 2 selects, 21 et 95 options. `split=\"risques_encourus:|\"` → tableau (FP-010). `round=\"prix_moyen:2\"` (virgule pour plusieurs champs) → 2.31 (AM-033). — **Rejoué contre dsfr-data 0.27.0 le 2026-09-10** : PARTIELLEMENT CORRIGÉ, et sur le point qui comptait : l'échec n'est plus muet. `display=\"type_etablissement:select, libelle_region:select\"` (virgules au lieu de barres) rend toujours zéro liste déroulante, mais émet désormais en console : « dsfr-data-facets[f1] : attribut \"display\" — les entrées semblent séparées par une virgule, or le séparateur attendu est la barre verticale. Forme attendue : \"champ:valeur | champ2:valeur2\" ». Le message nomme le composant, l'attribut, la valeur reçue et la forme attendue (#731, 0.26.0). Le piège subsiste sur les attributs non couverts par l'avertissement, mais le cas le plus fréquent est désormais visible. — **Passe de revérification du 2026-09-11, contre 0.28.0** : MOITIÉ LIVRÉE (#731, 0.26.0). `dsfr-data-facets` avertit désormais en console, une fois par instance, quand `display` ou `labels` sépare ses entrées par une virgule au lieu d'une barre verticale ; le message nomme l'attribut, la valeur reçue et la forme attendue — vérifié en page. ⚠️ Reste demandé, et le constat est maintenu là-dessus : l'avertissement ne couvre QUE ces deux attributs, sur ce seul composant. `rename` et `fold` de `dsfr-data-normalize` — qui ont des séparateurs OPPOSÉS l'un de l'autre sur la même balise — restent silencieux, et c'est précisément le couple qui a coûté le plus cher à ce banc. — **Relecture du mainteneur dsfr-data, 2026-09-11 (épic #781)** : retenue et déposée en issue #772. — **Revérifié contre `dsfr-data@0.29.0` publiée (CDN jsDelivr), le 2026-09-12** : les 66 pages du dépôt rejouées à la recette, 64 identiques, aucune régression ; les deux écarts de KPI viennent de données republiées, pas de la version.\n\n— **Rejeu du 2026-09-19 (dette de preuve, open-data-viz#39)**, harnais `scripts/rejeu-findings/`, page minimale servie par interception, bundle **`dsfr-data@0.31.0` du CDN** : constat CONNEXE, releve trois fois pendant le rejeu : la 0.31.0 avertit desormais sur **tout attribut inconnu**, quel que soit le composant — « dsfr-data-facets: attribut \"value-labels\" inconnu de la version chargee de dsfr-data — il sera ignore en silence. Verifiez l'orthographe, ou mettez la bibliotheque a jour », et trois avertissements du meme genre sur `dsfr-data-chart` pour `log`, `y-scale` et `scale`. L'element porte en plus un `data-dsfr-unknown-attrs`. **C'est la moitie la plus utile de PG-022 : une faute d'attribut n'est plus muette.** Reste ouvert, et c'est autre chose : une grammaire FAUSSE dans un attribut CONNU (`display=\"a:select, b:select\"` avec la mauvaise virgule, `labels` nourri d'une valeur au lieu d'un champ — voir AM-081 forme 2) ne declenche rien, puisque l'attribut existe. — **2026-09-26, /education/dataviz-ips-colleges, 0.42.0** : `value-field` de `dsfr-data-a11y` sépare ses colonnes par des virgules. Un libellé renommé qui en contient une (« IPS moyen, public ») fait disparaître la colonne, avec des cellules vides et sans erreur. Les cellules se remplissent après renommage en « IPS moyen public ».",
     "contournement": "Lire le JSDoc de l'attribut (source ou `get_skill(id, section)`) avant de conclure ; ne pas transposer la grammaire d'un attribut à un autre.",
     "demande": "Une règle unique documentée en tête de chaque fiche (« entrées séparées par … »), et un avertissement console quand une valeur de `display` ou `labels` ne contient aucun séparateur reconnu alors qu'elle en contient un autre.",
     "statut": "corrige",
@@ -3067,7 +3070,7 @@
       "prix-des-carburants"
     ],
     "constat": "`fetch-mode=\"export\"` (#689) doit permettre de retirer les contournements par source générique. Il ne le permet pas partout : le mode adaptateur ne transmet que des **clauses** (`select`, `where`, `group-by`, `order-by`, `limit`), et `this.params` n'est lu que sur le chemin URL générique. Or l'API Opendatasoft accepte des **paramètres de requête** qui ne sont pas des clauses, dont `timezone`, indispensable dès qu'un `date_format` ODSQL rend une heure. Une page qui en a besoin ne peut donc pas être migrée — et si on la migre sans s'en apercevoir, elle affiche des heures **justes en apparence et fausses de deux heures**.",
-    "verifie": "Établi au source le 2026-09-10 : `AdapterParams` (`dsfr-data-source.ts`, `getAdapterParams()` l. 923) ne porte ni `timezone` ni passe-plat ; `this.params` n'apparaît qu'aux lignes 988, 1034 et 1057, toutes sur le chemin générique ; aucune occurrence de `timezone` dans `dsfr-data-source.ts` ni dans `opendatasoft-adapter.ts`. Contournement par la clause écarté par test à l'API : `date_format(champ, \"…\", \"Europe/Paris\")` renvoie une ODSQLSyntaxError. Conséquence mesurée sur la page des prix des carburants : sans `timezone=Europe/Paris`, une même station rend « 09:23 » au lieu de « 11:23 », sur les six dates de mise à jour et 9 807 stations. La page est donc **restée en mode générique** au lot 13, seule des quinze. — **Passe de revérification du 2026-09-11, contre dsfr-data 0.28.0** : CORRIGÉ (#726, 0.26.0). L'attribut `params` de `dsfr-data-source` vit désormais en mode adaptateur : ses paires sont ajoutées à l'URL construite, en chargement paginé comme en `fetch-mode=\"export\"` et en `server-side`. Les clés que la bibliothèque construit elle-même sont réservées et refusées avec une erreur de configuration. Vérifié en page sur /viz/prix-des-carburants, qui était **la dernière source générique du dépôt** : repassée en mode adaptateur avec `params='{\"timezone\":\"Europe/Paris\"}'`, une seule requête au réseau, KPI inchangés, et le fuseau bien appliqué (la même station rend 11:23 avec, 09:23 sans).",
+    "verifie": "Établi au source le 2026-09-10 : `AdapterParams` (`dsfr-data-source.ts`, `getAdapterParams()` l. 923) ne porte ni `timezone` ni passe-plat ; `this.params` n'apparaît qu'aux lignes 988, 1034 et 1057, toutes sur le chemin générique ; aucune occurrence de `timezone` dans `dsfr-data-source.ts` ni dans `opendatasoft-adapter.ts`. Contournement par la clause écarté par test à l'API : `date_format(champ, \"…\", \"Europe/Paris\")` renvoie une ODSQLSyntaxError. Conséquence mesurée sur la page des prix des carburants : sans `timezone=Europe/Paris`, une même station rend « 09:23 » au lieu de « 11:23 », sur les six dates de mise à jour et 9 807 stations. La page est donc **restée en mode générique** au lot 13, seule des quinze. — **Passe de revérification du 2026-09-11, contre dsfr-data 0.28.0** : CORRIGÉ (#726, 0.26.0). L'attribut `params` de `dsfr-data-source` vit désormais en mode adaptateur : ses paires sont ajoutées à l'URL construite, en chargement paginé comme en `fetch-mode=\"export\"` et en `server-side`. Les clés que la bibliothèque construit elle-même sont réservées et refusées avec une erreur de configuration. Vérifié en page sur /viz/prix-des-carburants, qui était **la dernière source générique du dépôt** : repassée en mode adaptateur avec `params='{\"timezone\":\"Europe/Paris\"}'`, une seule requête au réseau, KPI inchangés, et le fuseau bien appliqué (la même station rend 11:23 avec, 09:23 sans). — ⚠️ **Rectifié le 2026-09-26 (FP-019)** : la « conséquence mesurée » était lue à l'envers. « 11:23 avec, 09:23 sans » est exact, mais c'est 09:23 qui est l'heure du relevé : le flux publie l'heure de Paris marquée `+00:00`, et le paramètre ajoutait deux heures à chaque relevé. La capacité, elle, reste vraie et utile : `params` passe bien en mode adaptateur (#726) — c'est son cas d'usage cité au JSDoc (`timezone=Europe/Paris`) qui est faux sur ce jeu.",
     "contournement": "Rester en source générique (`url=` + `params`) — c'est-à-dire renoncer au mode adaptateur, ce que #689 était censé rendre inutile.",
     "demande": "Un attribut `timezone` sur `dsfr-data-source` en mode adaptateur, ou plus généralement un passe-plat de paramètres de requête pour ce que le portail accepte hors clauses.",
     "statut": "corrige",
@@ -3282,10 +3285,11 @@
       "dsfr-data-source"
     ],
     "dataviz": [
-      "edu/fei-chiffres-cles"
+      "edu/fei-chiffres-cles",
+      "edu/patronymes-des-ecoles"
     ],
     "constat": "Quand plusieurs sources agrégées partagent un alias commun (`… as an`), il est tentant de poser un seul `dsfr-data-context-filter field=\"an\"` pour les filtrer toutes d'un geste : c'est le sens même de l'alias. Mais le filtre du contexte est diffusé aux sources comme une clause `where`, et `where` s'applique AVANT `group_by` côté serveur — l'alias n'existe pas encore. L'API répond « Unknown field » / HTTP 400 sur chacune des sources visées. Il faut donc écrire un filtre par typage de champ d'origine (`year-of` sur une date, `eq` sur un texte ou un entier), chacun ciblant ses sources par `apply-to` — c'est-à-dire écrire trois fois ce que l'alias promettait d'unifier une fois.",
-    "verifie": "Rencontré et corrigé au navigateur le 2026-09-10 sur /education/fei-chiffres-cles. Avec `<dsfr-data-context-filter field=\"an\" operator=\"eq\" default=\"2025\">` sur les sept sources agrégées : sept requêtes `…&where=an = \"2025\"&group_by=…` → sept HTTP 400, sept messages `dsfr-data-source[<id>]: Erreur de chargement Error: HTTP 400` en console. Remplacé par trois filtres partageant le même `ui` — `field=\"annee\" operator=\"year-of\" apply-to=\"delf tcf belc mob\"`, `field=\"annee\" operator=\"eq\" apply-to=\"enic\"`, `field=\"periode\" operator=\"eq\" apply-to=\"asfr aslve\"` — : zéro erreur, et les sept KPI rendent les chiffres de référence de l'original (513 435, 310 473, 1 146, 50 477, 1 486, 4 376, 522). — **Relecture du mainteneur dsfr-data, 2026-09-11 (épic #781)** : retenue et déposée en issue #779. — **Revérifié contre `dsfr-data@0.29.0` publiée (CDN jsDelivr), le 2026-09-12** : les 66 pages du dépôt rejouées à la recette, 64 identiques, aucune régression ; les deux écarts de KPI viennent de données republiées, pas de la version.",
+    "verifie": "Rencontré et corrigé au navigateur le 2026-09-10 sur /education/fei-chiffres-cles. Avec `<dsfr-data-context-filter field=\"an\" operator=\"eq\" default=\"2025\">` sur les sept sources agrégées : sept requêtes `…&where=an = \"2025\"&group_by=…` → sept HTTP 400, sept messages `dsfr-data-source[<id>]: Erreur de chargement Error: HTTP 400` en console. Remplacé par trois filtres partageant le même `ui` — `field=\"annee\" operator=\"year-of\" apply-to=\"delf tcf belc mob\"`, `field=\"annee\" operator=\"eq\" apply-to=\"enic\"`, `field=\"periode\" operator=\"eq\" apply-to=\"asfr aslve\"` — : zéro erreur, et les sept KPI rendent les chiffres de référence de l'original (513 435, 310 473, 1 146, 50 477, 1 486, 4 376, 522). — **Relecture du mainteneur dsfr-data, 2026-09-11 (épic #781)** : retenue et déposée en issue #779. — **Revérifié contre `dsfr-data@0.29.0` publiée (CDN jsDelivr), le 2026-09-12** : les 66 pages du dépôt rejouées à la recette, 64 identiques, aucune régression ; les deux écarts de KPI viennent de données republiées, pas de la version. — **2026-09-26, /education/patronymes-des-ecoles, 0.42.0 : même mur, sans contexte.** Une `dsfr-data-query where=\"annee:eq:2009\"` posée sur une source ODS `group-by=\"year(rentree_scolaire) as annee\"` est déléguée au portail : `…where=patronyme = 'SAMUEL PATY' AND annee = \"2009\"` → HTTP 400. Le même filtre dans le `where` de la source, sur le champ d'origine → 200. Proche de BUG-025 (délégation d'une clause qui vise un alias).",
     "contournement": "Un filtre de contexte par champ d'origine et par typage, ciblé avec `apply-to`, tous sur le même `ui`. Plusieurs `dsfr-data-context-filter` peuvent partager un même élément d'UI : un seul contrôle à l'écran.",
     "demande": "Rien à demander sur le comportement, qui est celui d'ODSQL. En revanche, le mentionner dans le JSDoc de `dsfr-data-context-filter` et dans celui de `group-by` : c'est le premier réflexe qu'on a devant plusieurs sources agrégées partageant un alias.",
     "statut": "corrige",
@@ -3953,10 +3957,11 @@
       "sports/portrait-federation",
       "revue-critique (42 pages)",
       "impot-sur-le-revenu",
-      "bofip"
+      "bofip",
+      "fiscalite-locale"
     ],
     "constat": "Le compteur de `dsfr-data-search` a été corrigé en trois temps (accent en 0.21.1, séparateur de milliers en 0.26.0, `count-label` en 0.29) ; celui de `dsfr-data-display` n'a reçu aucun des trois. Il rend « 12 resultats » sur une liste de cartes (page /sports), et surtout « 1 resultat » devant chaque mise en forme d'UNE ligne — l'usage le plus courant du composant après la grille de cartes : un nom de territoire dans une phrase, une fiche signalétique, une boîte « valeur + comparaison ». Le portrait de fédération en porte neuf, le portrait de territoire deux, dans une même phrase (« Territoire : 1 resultat Nouvelle-Aquitaine 1 resultat › Gironde »). \n\nAfficher le nom d'un territoire dans une phrase (« Territoire : Nouvelle-Aquitaine › Gironde ») passe par un `dsfr-data-display` sur une source d'une ligne, puisque `dsfr-data-context-value` rend la VALEUR du filtre (le code « 33 »), pas le libellé de l'option. Le display insère alors « 1 resultat » devant le nom : le compteur est inconditionnel, sans accent, et `count-label` n'existe que sur `dsfr-data-search` (#779). Dans une phrase, il n'a aucun sens.\n\nDès qu'il a au moins une ligne, le composant rend un paragraphe visible « 1 resultat » / « 12345 resultats » avant la grille : sans accent, sans séparateur de milliers, et sans aucun attribut pour le retirer ou le libeller. C'était pertinent pour une liste de cartes ; c'est du bruit pour l'usage le plus courant après elle, la mise en forme d'UNE ligne (fiche signalétique, phrase avec un chiffre, boîte « valeur + comparaison »). La page en porte neuf, donc neuf « 1 resultat ». Le même compteur sur `dsfr-data-search` a reçu le formateur fr-FR, l'accent (0.21.1, 0.26.0) et `count-label` (#779, sur main) ; celui de `display` est resté en l'état.\n\n**Revue critique du 2026-09-13** — le défaut n'est pas propre à `dsfr-data-display` : les facettes portent le même mot sans accent (« resultats se mettent a jour automatiquement » et `resultat${e > 1 ? ...}` dans le bundle publié, texte des cases et annonce sr-only). Relevé sur **42 pages**, jusqu'à 54 occurrences sur /retours et 44 sur /viz/entreprise-patrimoine-vivant.",
-    "verifie": "Trois relevés indépendants au navigateur le 2026-09-11 (0.28.0) : « 12 resultats » sur /sports ; « 1 resultat » ×2 dans une phrase (portrait de territoire) ; « 1 resultat » ×9 (portrait de fédération). Source origin/main : `dsfr-data-display.ts:559` (`${totalItems} resultat${…}`, sans `formatNumber`), `:534` (`aria-label` « Liste de resultats »), `:90` (`empty` « Aucun resultat ») — inchangés depuis 0.28.0. Relevé de page : « Territoire : 1 resultat Nouvelle-Aquitaine 1 resultat › Gironde (33) ». Lu au source : `dsfr-data-display.ts:558` (0.28.0) rend `${totalItems} resultat${…}` sans condition ; identique sur origin/main (ligne 559). Navigateur, /sports/portrait-federation, dsfr-data 0.28.0 : « 1 resultat » au-dessus des neuf `dsfr-data-display` (capture de l'onglet 1 avant correctif). Source : `dsfr-data-display.ts:558` en v0.28.0, inchangé en l.559 sur origin/main ; la liste des propriétés sur main (source, cols, pagination, empty, gap, uid-field, url-sync, url-page-param, idle-message, refine-on-click, context, label) n'en contient aucune pour le compteur. — **Revue du 2026-09-12, contre la 0.29.0 publiée** : Toujours absent de la 0.29.0 : le bundle publié rend `${totalItems} resultat${…}` sans accent ni formateur, et `empty` vaut « Aucun resultat ». `count-label` n'existe que sur `dsfr-data-search`. — **2026-09-13**, `scripts/metriques-pages.mjs` (compteur `\\d+ resultats?` dans le texte rendu) : 42 pages sur 66 ; bundle 0.29.1 : trois chaînes `resultat…` sans accent hors `dsfr-data-search`. — **Revue des findings du 2026-09-19** : paquet npm 0.30.0, `dist/dsfr-data.esm.js` : `${totalItems} resultat${…` sans accent ni formateur, `empty` « Aucun resultat » ; source `dsfr-data-display.ts` l. 596-607 sur `origin/main`. Rejoué en page minimale (BUG-015) : « 1 resultat Bretagne 63 » au-dessus d’une ligne. **Reste vrai.** — **2026-09-19** : `count-label` posé sur les 28 compteurs de `dsfr-data-search count` du dépôt (28 balises, 28 pages) ; vérifié dans le bundle 0.31.0, `_countNoun()` lit `this.countLabel.trim() || 'résultat'` et accepte la forme `singulier|pluriel`. Le défaut est accentué depuis la 0.21.1. **La moitié `dsfr-data-search` de cette demande est close côté bibliothèque ET consommée côté banc.** Reste ouverte, inchangée : `dsfr-data-display` et `dsfr-data-list` rendent le même compteur sans aucun attribut pour le nommer ou le taire (voir AM-080).\n\n— **Déposé le 2026-09-19 chez la bibliothèque : [bmatge/dsfr-data#925](https://github.com/bmatge/dsfr-data/issues/925)**, avec le bloc de cadrage (impact, objectif métier, pérennité, critères d'acceptation) et la preuve datée ci-dessus. — **Contourné autrement, et sans CSS, sur le Baromètre v2 le 2026-09-19** : la page masquait le compteur par une règle de page (`.odv-sans-compteur > .dsfr-data-display > p.fr-text--sm { display: none }`). En passant les douze répéteurs de `dsfr-data-display` à `dsfr-data-repeat`, la règle est devenue **sans objet** plutôt qu'inutile : `repeat` est transparent par contrat — aucun compteur, aucun `role`, aucun `aria-live`. Mesuré : **11 compteurs → 0**, et la règle CSS retirée. Cela ne clôt pas le constat pour les 42 pages où la ligne répétée est du CONTENU et où `display` reste le bon composant : là, `count-label` (dsfr-data#939, non publié) reste la réponse attendue. — **Consommé le 2026-09-20 (0.33.0, dsfr-data#939)** : `count-label` posé sur les **42** `dsfr-data-display` et `dsfr-data-list` du dépôt, avec un mot CHOISI pour chacun depuis son titre de section, ses colonnes et son message `empty` — internat, ressource, dispositif, rappel, tarif, station, aide, constat, visualisation… Vérifié au navigateur, pluriels irréguliers compris : « 1 932 bureaux des entreprises », « 29 types d'équipement », « 3 604 établissements », « 9 800 stations », « 196 constats ». **Le point résiduel de #925 reste ouvert** et la bibliothèque le dit : sur un `display` d'UNE SEULE LIGNE — les phrases des portraits Sports —, le compteur n'a pas de sens et `count-label` le renomme sans le taire. Ces pages le masquent encore par une règle CSS visant le DOM interne du composant. La voie native est `dsfr-data-repeat`, transparent par contrat.\n\n**Relecture métier du 2026-09-26, deux pages de plus, une de chaque côté du point résiduel.** (1) **impot-sur-le-revenu**, fiche d'une ligne (bornes d'une série par une query sans `group-by`) : `dsfr-data-display` rendait « 1 resultat 19 années couvertes… » ; avec `dsfr-data-repeat` (présent dans le bundle 0.33.0, 4 occurrences au grep de `dsfr-data.core.umd.js`), « 19 années couvertes, de 2006 à 2024… » et une chaîne vide en `idle`. Sur une ligne, la voie native tient. (2) **bofip**, liste paginée de 9 148 documents sous un `dsfr-data-search count` : « 9 148 documents » s'affichait deux fois, et `repeat` n'est pas une réponse (il faut la pagination de `display`). Masquage visuel du `p[role=status]` par CSS de page : un seul compteur visible à chaque état (9 148 / 2 791 / 26 / 206), l'élément restant présent. C'est le point résiduel de #925, sous une forme nouvelle : taire un compteur **redondant**, pas seulement un compteur d'une ligne.",
+    "verifie": "Trois relevés indépendants au navigateur le 2026-09-11 (0.28.0) : « 12 resultats » sur /sports ; « 1 resultat » ×2 dans une phrase (portrait de territoire) ; « 1 resultat » ×9 (portrait de fédération). Source origin/main : `dsfr-data-display.ts:559` (`${totalItems} resultat${…}`, sans `formatNumber`), `:534` (`aria-label` « Liste de resultats »), `:90` (`empty` « Aucun resultat ») — inchangés depuis 0.28.0. Relevé de page : « Territoire : 1 resultat Nouvelle-Aquitaine 1 resultat › Gironde (33) ». Lu au source : `dsfr-data-display.ts:558` (0.28.0) rend `${totalItems} resultat${…}` sans condition ; identique sur origin/main (ligne 559). Navigateur, /sports/portrait-federation, dsfr-data 0.28.0 : « 1 resultat » au-dessus des neuf `dsfr-data-display` (capture de l'onglet 1 avant correctif). Source : `dsfr-data-display.ts:558` en v0.28.0, inchangé en l.559 sur origin/main ; la liste des propriétés sur main (source, cols, pagination, empty, gap, uid-field, url-sync, url-page-param, idle-message, refine-on-click, context, label) n'en contient aucune pour le compteur. — **Revue du 2026-09-12, contre la 0.29.0 publiée** : Toujours absent de la 0.29.0 : le bundle publié rend `${totalItems} resultat${…}` sans accent ni formateur, et `empty` vaut « Aucun resultat ». `count-label` n'existe que sur `dsfr-data-search`. — **2026-09-13**, `scripts/metriques-pages.mjs` (compteur `\\d+ resultats?` dans le texte rendu) : 42 pages sur 66 ; bundle 0.29.1 : trois chaînes `resultat…` sans accent hors `dsfr-data-search`. — **Revue des findings du 2026-09-19** : paquet npm 0.30.0, `dist/dsfr-data.esm.js` : `${totalItems} resultat${…` sans accent ni formateur, `empty` « Aucun resultat » ; source `dsfr-data-display.ts` l. 596-607 sur `origin/main`. Rejoué en page minimale (BUG-015) : « 1 resultat Bretagne 63 » au-dessus d’une ligne. **Reste vrai.** — **2026-09-19** : `count-label` posé sur les 28 compteurs de `dsfr-data-search count` du dépôt (28 balises, 28 pages) ; vérifié dans le bundle 0.31.0, `_countNoun()` lit `this.countLabel.trim() || 'résultat'` et accepte la forme `singulier|pluriel`. Le défaut est accentué depuis la 0.21.1. **La moitié `dsfr-data-search` de cette demande est close côté bibliothèque ET consommée côté banc.** Reste ouverte, inchangée : `dsfr-data-display` et `dsfr-data-list` rendent le même compteur sans aucun attribut pour le nommer ou le taire (voir AM-080).\n\n— **Déposé le 2026-09-19 chez la bibliothèque : [bmatge/dsfr-data#925](https://github.com/bmatge/dsfr-data/issues/925)**, avec le bloc de cadrage (impact, objectif métier, pérennité, critères d'acceptation) et la preuve datée ci-dessus. — **Contourné autrement, et sans CSS, sur le Baromètre v2 le 2026-09-19** : la page masquait le compteur par une règle de page (`.odv-sans-compteur > .dsfr-data-display > p.fr-text--sm { display: none }`). En passant les douze répéteurs de `dsfr-data-display` à `dsfr-data-repeat`, la règle est devenue **sans objet** plutôt qu'inutile : `repeat` est transparent par contrat — aucun compteur, aucun `role`, aucun `aria-live`. Mesuré : **11 compteurs → 0**, et la règle CSS retirée. Cela ne clôt pas le constat pour les 42 pages où la ligne répétée est du CONTENU et où `display` reste le bon composant : là, `count-label` (dsfr-data#939, non publié) reste la réponse attendue. — **Consommé le 2026-09-20 (0.33.0, dsfr-data#939)** : `count-label` posé sur les **42** `dsfr-data-display` et `dsfr-data-list` du dépôt, avec un mot CHOISI pour chacun depuis son titre de section, ses colonnes et son message `empty` — internat, ressource, dispositif, rappel, tarif, station, aide, constat, visualisation… Vérifié au navigateur, pluriels irréguliers compris : « 1 932 bureaux des entreprises », « 29 types d'équipement », « 3 604 établissements », « 9 800 stations », « 196 constats ». **Le point résiduel de #925 reste ouvert** et la bibliothèque le dit : sur un `display` d'UNE SEULE LIGNE — les phrases des portraits Sports —, le compteur n'a pas de sens et `count-label` le renomme sans le taire. Ces pages le masquent encore par une règle CSS visant le DOM interne du composant. La voie native est `dsfr-data-repeat`, transparent par contrat.\n\n**Relecture métier du 2026-09-26, deux pages de plus, une de chaque côté du point résiduel.** (1) **impot-sur-le-revenu**, fiche d'une ligne (bornes d'une série par une query sans `group-by`) : `dsfr-data-display` rendait « 1 resultat 19 années couvertes… » ; avec `dsfr-data-repeat` (présent dans le bundle 0.33.0, 4 occurrences au grep de `dsfr-data.core.umd.js`), « 19 années couvertes, de 2006 à 2024… » et une chaîne vide en `idle`. Sur une ligne, la voie native tient. (2) **bofip**, liste paginée de 9 148 documents sous un `dsfr-data-search count` : « 9 148 documents » s'affichait deux fois, et `repeat` n'est pas une réponse (il faut la pagination de `display`). Masquage visuel du `p[role=status]` par CSS de page : un seul compteur visible à chaque état (9 148 / 2 791 / 26 / 206), l'élément restant présent. C'est le point résiduel de #925, sous une forme nouvelle : taire un compteur **redondant**, pas seulement un compteur d'une ligne. — **2026-09-26, /viz/fiscalite-locale** : « 1 resultat » visible au-dessus d'une phrase de lecture sur la taxe foncière, disparu en passant la phrase sur `dsfr-data-repeat`. Pour une phrase calculée, c'est la voie native : `repeat` n'a pas de compteur.",
     "contournement": "Masquer le paragraphe par CSS de page (`.dsfr-data-display > p[role=\"status\"] { display:none }`), ce que font les deux portraits. Fragile : dépend du DOM interne, et retire aussi l'annonce aux lecteurs d'écran.",
     "demande": "Passer le compteur par le formateur fr-FR avec l'accent, comme `dsfr-data-search` ; accepter `count-label` (même grammaire que la recherche) et un moyen de le taire — par défaut absent sur une source d'une ligne, ou opt-in explicite. Corriger au passage `aria-label` et `empty` par défaut.",
     "statut": "corrige",
@@ -3990,10 +3995,11 @@
       "dsfr-data-normalize"
     ],
     "dataviz": [
-      "sports/portrait-federation"
+      "sports/portrait-federation",
+      "plan-de-relance"
     ],
     "constat": "Une répartition (« part des licences par type de communes » face à « part de la population ») divise chaque groupe par le total de tous les groupes. Aucun agrégat de `dsfr-data-query` ne produit ce total à côté des lignes groupées (fonctions : count, sum, avg, min, max, distinct, running_sum, et diff sur main) ; `compute` ne voit que la ligne courante ; le ratio du KPI (#673) rend UN nombre, pas une colonne. Le chemin natif qui marche : une seconde source sans `group-by` (`limit=\"1\"`), `compute=\"k = 1\"` sur les deux, `dsfr-data-join on=\"k\"`, puis `compute=\"part = l / lt * 100\"`. Quatre composants et une requête de plus par répartition ; la page le paie trois fois (licences, établissements, population). C'est le pendant « colonne » du ratio de KPI, et le besoin de toute page de répartition en open data (part par tranche d'âge, par statut, par type de territoire).",
-    "verifie": "Construit et rendu au navigateur le 2026-09-11 sur /sports/portrait-federation (dsfr-data 0.28.0) : typologie des licences 101 = 33,4 / 36 / 19,8 / 10,7 % pour 37,2 / 30,6 / 18,8 / 13,4 % de population, identique à l'original (33/37 · 36/31 · 20/19 · 11/13) et aux sommes de l'API (`lics_clubs_dep_ruralurbain`, 101 304 / 303 536 licences). Suit le filtre de région (Bretagne : 16,3 / 38,2 / 29,8 / 15,7 %). Liste des agrégats lue dans `dsfr-data-query.ts` (0.28.0 et origin/main, l.1275-1285). — **Revue du 2026-09-12, contre la 0.29.0 publiée** : Toujours absent : aucun agrégat de part du total dans le bundle publié (`running_sum` et `diff` seulement). — **Revue des findings du 2026-09-19** : `dsfr-data-query.ts` sur `origin/main` (après 0.30.0) : `running_sum` et `diff` sont toujours les seuls agrégats de fenêtre, aucune part du total.\n\n— **Déposé le 2026-09-19 chez la bibliothèque : [bmatge/dsfr-data#926](https://github.com/bmatge/dsfr-data/issues/926)**, avec le bloc de cadrage (impact, objectif métier, pérennité, critères d'acceptation) et la preuve datée ci-dessus. — **Consommé le 2026-09-20 (0.33.0, dsfr-data#946)** sur `sports/portrait-federation`. Les deux répartitions de la page passent de « source d'agrégat du total + clé constante des deux côtés + jointure + division » à `aggregate=\"l:sum, l__sum:share_percent:pl\"`. **Huit composants retirés** — deux `dsfr-data-source` de total devenues orphelines, quatre `dsfr-data-normalize`, deux `dsfr-data-join` — et deux requêtes d'API en moins à chaque changement de fédération. **Pourcentages rigoureusement identiques**, relevés dans les tableaux équivalents avant et après : 33,4 / 36,0 / 19,8 / 10,7 pour les licences, 31,0 / 45,4 / 12,6 / 11,0 pour les établissements. Zéro erreur, zéro erreur de configuration.",
+    "verifie": "Construit et rendu au navigateur le 2026-09-11 sur /sports/portrait-federation (dsfr-data 0.28.0) : typologie des licences 101 = 33,4 / 36 / 19,8 / 10,7 % pour 37,2 / 30,6 / 18,8 / 13,4 % de population, identique à l'original (33/37 · 36/31 · 20/19 · 11/13) et aux sommes de l'API (`lics_clubs_dep_ruralurbain`, 101 304 / 303 536 licences). Suit le filtre de région (Bretagne : 16,3 / 38,2 / 29,8 / 15,7 %). Liste des agrégats lue dans `dsfr-data-query.ts` (0.28.0 et origin/main, l.1275-1285). — **Revue du 2026-09-12, contre la 0.29.0 publiée** : Toujours absent : aucun agrégat de part du total dans le bundle publié (`running_sum` et `diff` seulement). — **Revue des findings du 2026-09-19** : `dsfr-data-query.ts` sur `origin/main` (après 0.30.0) : `running_sum` et `diff` sont toujours les seuls agrégats de fenêtre, aucune part du total.\n\n— **Déposé le 2026-09-19 chez la bibliothèque : [bmatge/dsfr-data#926](https://github.com/bmatge/dsfr-data/issues/926)**, avec le bloc de cadrage (impact, objectif métier, pérennité, critères d'acceptation) et la preuve datée ci-dessus. — **Consommé le 2026-09-20 (0.33.0, dsfr-data#946)** sur `sports/portrait-federation`. Les deux répartitions de la page passent de « source d'agrégat du total + clé constante des deux côtés + jointure + division » à `aggregate=\"l:sum, l__sum:share_percent:pl\"`. **Huit composants retirés** — deux `dsfr-data-source` de total devenues orphelines, quatre `dsfr-data-normalize`, deux `dsfr-data-join` — et deux requêtes d'API en moins à chaque changement de fédération. **Pourcentages rigoureusement identiques**, relevés dans les tableaux équivalents avant et après : 33,4 / 36,0 / 19,8 / 10,7 pour les licences, 31,0 / 45,4 / 12,6 / 11,0 pour les établissements. Zéro erreur, zéro erreur de configuration. — **2026-09-26, /viz/plan-de-relance** : `share_percent` (calculé avant le `limit`) suivi de `running_sum` donne la « part du premier site » et le « poids des dix premiers » en une seule requête, sans script : 19,5 % et 42,0 % affichés. Ce sont les valeurs du calcul Python sur l'export complet.",
     "contournement": "Deux sources (groupée et totale), clé constante des deux côtés par `compute=\"k = 1\"`, `dsfr-data-join on=\"k\"`, division par `compute`.",
     "demande": "Un agrégat de part du total dans `dsfr-data-query` — `aggregate=\"l:sum, l__sum:share\"` produisant `l__sum__share = l__sum / Σ l__sum` après `group-by` —, calculé côté client comme `running_sum`, avec les mêmes règles de nommage.",
     "statut": "corrige",
@@ -4475,10 +4481,12 @@
     "dataviz": [
       "rejeu-findings (page minimale)",
       "skill-metier (page de démonstration)",
-      "rappelconso"
+      "rappelconso",
+      "fiscalite-locale",
+      "signalconso"
     ],
     "constat": "Un `type=\"line\"` sur trois millésimes (2022, 2023, 2024) rend un axe X gradué 2022, 2022.2, 2022.4 … 2024 : DSFR Chart `line-chart` interprète des libellés qui ressemblent à des nombres comme une échelle continue. **Ce n’est pas `dsfr-data`** : le composant transmet `x` = `[\"2022\",\"2023\",\"2024\"]` (des chaînes) que la source publie des nombres ou des chaînes — la variable isolée ne change rien. La graduation est le fait de `GouvernementFR/dsfr-chart` (règle n° 4 du lot 11 : une limite de `line-chart` se remonte là-bas).\n\n**Relecture métier du 2026-09-26** — confirmé hors page minimale.** Sur rappelconso, `group-by=\"date_format(date_publication, 'yyyy') as an\"` rend bien des chaînes « 2021 » — le tableau a11y n'affiche plus « 2 021 » — mais l'axe de `type=\"line\"` reste continu. La piste « libellé en texte » laissée ouverte au contournement ne suffit donc pas. Contournement retenu : `type=\"bar\"`.",
-    "verifie": "2026-09-19, page minimale (`overlays.html`, test `overlays`), 0.29.1 et 0.30.0 : deux sources, `an` en nombres (2022) et en chaînes (\"2022\") ; `line-chart` reçoit dans les deux cas `x` = `[[\"2022\",\"2023\",\"2024\"]]` ; captures des deux graphiques : axe gradué 2022, 2022.2, 2022.4, 2022.6, 2022.8, 2023 … 2024 dans les deux cas. — **2026-09-26, /viz/rappelconso, capture Playwright** : axe X « 2021 2021.5 2022 2022.5 … 2025 » avec `an` en texte ; après passage en `bar`, axe 2021…2025.",
+    "verifie": "2026-09-19, page minimale (`overlays.html`, test `overlays`), 0.29.1 et 0.30.0 : deux sources, `an` en nombres (2022) et en chaînes (\"2022\") ; `line-chart` reçoit dans les deux cas `x` = `[[\"2022\",\"2023\",\"2024\"]]` ; captures des deux graphiques : axe gradué 2022, 2022.2, 2022.4, 2022.6, 2022.8, 2023 … 2024 dans les deux cas. — **2026-09-26, /viz/rappelconso, capture Playwright** : axe X « 2021 2021.5 2022 2022.5 … 2025 » avec `an` en texte ; après passage en `bar`, axe 2021…2025. — **2026-09-26, recréation** : /viz/fiscalite-locale, `line` sur des exercices numériques 2021…2025 → graduations 2021.5, 2022.5 au survol ; /viz/signalconso, année passée en texte par `compute` (`concat(an, '')`) → axe 2021,5… et infobulle titrée « 2,023 ». Les deux pages sont passées en `bar`. Même symptôme observé une fois sur decp-augmente et patronymes-des-ecoles, non rejoué.",
     "contournement": "Non trouvé sans quitter `type=\"line\"` : `dsfr-data` ne peut pas forcer une échelle catégorielle qu’il ne contrôle pas. Non exploré : un libellé non numérique (« 2022 » suffixé). Un `type=\"bar\"` gradue par catégorie.",
     "statut": "acte",
     "date": "2026-09-19"
@@ -4557,14 +4565,16 @@
     ],
     "dataviz": [
       "demo/cuivre-qui-bascule",
-      "rejeu-findings (page minimale)"
+      "rejeu-findings (page minimale)",
+      "decp-augmente",
+      "plan-de-relance"
     ],
     "constat": "Troisième surface de la famille BUG-016. Le correctif #815 (0.29.0) a rendu à la LÉGENDE les couleurs de `color-map` ; l'**infobulle**, elle, garde la palette par défaut. Sur un graphique multisérie dont les barres sont vertes et bleu marine, le survol affiche deux pastilles violet et bleu clair. La couleur est le seul lien entre une valeur de l'infobulle et la barre qu'elle décrit : fausse, elle ne désoriente pas seulement, elle **apparie la mauvaise valeur à la mauvaise série**. Différence avec BUG-016, et elle compte : le défaut ne demande **pas** `databox` — il se produit sur un graphique nu.",
-    "verifie": "Rejoué le 2026-09-20 contre `dsfr-data@0.42.0` sur une page minimale du harnais (`scripts/rejeu-findings/pages/tooltip-series.html`), trois cas nourris par la MÊME donnée en ligne : **A** `series-field` + `color-map`, **B** `series-field` sans `color-map`, **C** `value-fields` (format large). Couleurs relevées de trois façons indépendantes : pastilles de la légende (`getComputedStyle`), **pixels réellement peints dans le canvas** (échantillonnage de `getImageData`), et `data-color` des `.tooltip_dot`. **Cas A** (`color-map=\"Commune rurale:#00a95f,Commune urbaine:#000091\"`) : pastilles de légende `rgb(0,169,95)` et `rgb(0,0,145)` ✔, pixels peints `0,169,95` (96 échantillons) et `0,0,145` (102) ✔, **pastilles d'infobulle `#5C68E5` et `#82B5F2` ✘** — la palette `categorical` par défaut. **Cas B** (sans `color-map`) : les trois relevés concordent sur `#5C68E5` / `#82B5F2`. Le défaut est donc bien l'application de `color-map`, et non l'infobulle en général. Observé d'abord au navigateur sur la page réelle `/demo/cuivre-qui-bascule` (`data-color=\"#5C68E5\"` dans le HTML de l'infobulle, quand `color-map` demande `#00a95f`), puis isolé sur la page minimale. — **Déposé le 2026-09-20 en dsfr-data#968**, avec la page minimale, le tableau des trois relevés et les quatre critères d'acceptation.",
+    "verifie": "Rejoué le 2026-09-20 contre `dsfr-data@0.42.0` sur une page minimale du harnais (`scripts/rejeu-findings/pages/tooltip-series.html`), trois cas nourris par la MÊME donnée en ligne : **A** `series-field` + `color-map`, **B** `series-field` sans `color-map`, **C** `value-fields` (format large). Couleurs relevées de trois façons indépendantes : pastilles de la légende (`getComputedStyle`), **pixels réellement peints dans le canvas** (échantillonnage de `getImageData`), et `data-color` des `.tooltip_dot`. **Cas A** (`color-map=\"Commune rurale:#00a95f,Commune urbaine:#000091\"`) : pastilles de légende `rgb(0,169,95)` et `rgb(0,0,145)` ✔, pixels peints `0,169,95` (96 échantillons) et `0,0,145` (102) ✔, **pastilles d'infobulle `#5C68E5` et `#82B5F2` ✘** — la palette `categorical` par défaut. **Cas B** (sans `color-map`) : les trois relevés concordent sur `#5C68E5` / `#82B5F2`. Le défaut est donc bien l'application de `color-map`, et non l'infobulle en général. Observé d'abord au navigateur sur la page réelle `/demo/cuivre-qui-bascule` (`data-color=\"#5C68E5\"` dans le HTML de l'infobulle, quand `color-map` demande `#00a95f`), puis isolé sur la page minimale. — **Déposé le 2026-09-20 en dsfr-data#968**, avec la page minimale, le tableau des trois relevés et les quatre critères d'acceptation. — **Rejoué le 2026-09-26 contre le paquet publié `dsfr-data@0.42.0`** (`npm pack`, bundle substitué au CDN), même page minimale, **infobulle lue DANS le conteneur de chaque graphique** : cas A (`color-map`) → pastilles `#00a95f` / `#000091`, égales à la légende et aux pixels peints ✔. Cas B et C (sans `color-map`) → `#5C68E5` / `#82B5F2`, égales à leur tracé ✔. Contre 0.33.0 (CDN épinglé par la page de test) : cas A `#5C68E5` / `#82B5F2` ✘, le défaut est donc toujours là. Correctif #968 (commit 391f8d2), premier tag qui le contient : `dsfr-data@0.35.0`. Observé aussi en page le même jour, sur /viz/decp-augmente (#g-canaux) et /viz/plan-de-relance (#g-mesures). ⚠️ **Le harnais `run.mjs tooltip` ment en 0.42.0** : il prend la première `.tooltip` non vide du document, et les trois graphiques en ont chacun une. Il relève donc pour B et C l'infobulle de A (`#00a95f`), ce qui simule une fuite de couleur. À corriger dans le harnais : chercher l'infobulle sous `#<id>`.",
     "contournement": "Aucun depuis la page : la pastille est posée par le rendu de DSFR Chart, que `color-map` recolore après coup pour le canvas et la légende. Renoncer à `color-map` rend l'infobulle cohérente — au prix des couleurs voulues.",
     "demande": "Étendre l'application de `color-map` aux `.tooltip_dot`, comme #815 l'a fait pour les pastilles de légende. Le point de sortie est le même objet de données ; c'est la troisième surface qui le consomme.",
     "reste_vrai": "Une recette qui ne compare que des nombres ne voit ni une légende qui ment (BUG-016), ni un overlay invisible (BUG-019), ni une pastille d'infobulle fausse : ces trois-là n'ont été vus qu'à l'œil, au survol ou à la capture. Le compteur était vert dans les trois cas.",
-    "statut": "depose",
+    "statut": "corrige",
     "date": "2026-09-20",
     "cadrage": {
       "priorite": "P2",
@@ -4580,7 +4590,8 @@
         "Un contrôle rejoue les trois relevés sur la même donnée : pastille de légende, pixels peints du canvas, `data-color` de l'infobulle. Les trois concordent."
       ]
     },
-    "issue": 968
+    "issue": 968,
+    "correction": "dsfr-data#968 (commit 391f8d2), publié en 0.35.0 : les `.tooltip_dot` suivent `color-map`. Rejoué contre 0.42.0 le 2026-09-26 : les trois relevés (légende, pixels, infobulle) concordent, avec et sans `color-map`."
   },
   {
     "id": "AM-086",
@@ -4593,10 +4604,12 @@
     "dataviz": [
       "demo/cuivre-qui-bascule",
       "demo/ips-college-territoire",
-      "rejeu-findings (page minimale)"
+      "rejeu-findings (page minimale)",
+      "decp-augmente",
+      "plan-de-relance"
     ],
     "constat": "Sur un graphique à plusieurs séries, l'infobulle rend une ligne par série, chacune réduite à sa VALEUR : « 13 200 000 habitants » puis « 17 200 000 habitants », sans dire laquelle est rurale et laquelle est urbaine. Seule la pastille de couleur les distingue — et quand `color-map` est posé, cette pastille est fausse (BUG-022), de sorte que l'infobulle ne porte alors **aucune** information de série. Les noms sont pourtant connus et transmis : la balise `<bar-chart>` reçoit `name='[\"Commune rurale\",\"Commune urbaine\"]'`, et la légende les affiche correctement.",
-    "verifie": "Rejoué le 2026-09-20 contre `dsfr-data@0.42.0` sur une page minimale du harnais (`scripts/rejeu-findings/pages/tooltip-series.html`), trois cas nourris par la MÊME donnée en ligne : **A** `series-field` + `color-map`, **B** `series-field` sans `color-map`, **C** `value-fields` (format large). Couleurs relevées de trois façons indépendantes : pastilles de la légende (`getComputedStyle`), **pixels réellement peints dans le canvas** (échantillonnage de `getImageData`), et `data-color` des `.tooltip_dot`. Les trois cas rendent `.tooltip_place` = valeur seule : `[\"13 200 000 habitants\", \"17 200 000 habitants\"]`. Le manque ne dépend donc ni de `color-map`, ni du choix `series-field` contre `value-fields` — il est celui du gabarit d'infobulle. L'attribut `name` porte bien les deux libellés sur la balise `<bar-chart>` (relevé au DOM), et la légende du même graphique les affiche : l'information est disponible au moment du rendu.",
+    "verifie": "Rejoué le 2026-09-20 contre `dsfr-data@0.42.0` sur une page minimale du harnais (`scripts/rejeu-findings/pages/tooltip-series.html`), trois cas nourris par la MÊME donnée en ligne : **A** `series-field` + `color-map`, **B** `series-field` sans `color-map`, **C** `value-fields` (format large). Couleurs relevées de trois façons indépendantes : pastilles de la légende (`getComputedStyle`), **pixels réellement peints dans le canvas** (échantillonnage de `getImageData`), et `data-color` des `.tooltip_dot`. Les trois cas rendent `.tooltip_place` = valeur seule : `[\"13 200 000 habitants\", \"17 200 000 habitants\"]`. Le manque ne dépend donc ni de `color-map`, ni du choix `series-field` contre `value-fields` — il est celui du gabarit d'infobulle. L'attribut `name` porte bien les deux libellés sur la balise `<bar-chart>` (relevé au DOM), et la légende du même graphique les affiche : l'information est disponible au moment du rendu. — **Toujours vrai en 0.42.0 (2026-09-26)** : sur /viz/decp-augmente (#g-canaux, quatre séries), l'infobulle rend « 2022 58 249 lignes 72 511 lignes 22 662 lignes 81 100 lignes », sans aucun nom de série. Même constat sur /viz/plan-de-relance (#g-mesures). Rejoué sur la page minimale contre le paquet 0.42.0 : `.tooltip_place` = `[\"13 200 000 habitants\",\"17 200 000 habitants\"]` dans les trois cas.",
     "contournement": "Aucun depuis la page. Le tableau équivalent (`dsfr-data-a11y series-field`) porte, lui, une colonne par série — c'est la lecture de repli, et elle est accessible.",
     "demande": "Préfixer chaque ligne de l'infobulle par le nom de sa série. ⚠️ À remonter chez `GouvernementFR/dsfr-chart` et non chez `dsfr-data` : le gabarit `.tooltip_place` est rendu par DSFR Chart, qui reçoit déjà les libellés dans `name` (règle 4 du lot 11).",
     "reste_vrai": "Un graphique à une seule série n'est pas concerné : l'infobulle y est non ambiguë par construction.",
@@ -5076,6 +5089,330 @@
     "constat": "Le 12 septembre 2012 est le `min(debut_de_validite)` de `bofip-vigueur` : 1 354 documents datés de ce seul jour (la date suivante en compte 119), soit 91,6 % de la barre 2012. La barre se lit comme une année féconde ; c'est la date de mise en ligne du corpus. Même famille que PG-038 : le champ date la version, pas l'événement. L'annotation passe par une phrase calculée.",
     "verifie": "API 2026-09-26 : `where debut_de_validite = date'2012-09-12'` → 1 354 ; `group_by date_format(…,'yyyy')` → 2012 = 1 478. Navigateur, /viz/bofip : la phrase rend « 1 354 documents » depuis la source `bofip-j0`.",
     "contournement": "Une phrase calculée sous le graphique (source `count(*)` filtrée sur la date) qui dit ce que la barre contient.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "FP-019",
+    "titre": "« `timezone=Europe/Paris` corrige l'heure des relevés de carburant » : il la décalait de deux heures",
+    "type": "faux-probleme",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-source"
+    ],
+    "dataviz": [
+      "prix-des-carburants"
+    ],
+    "constat": "**Ce que je croyais.** FP-003 (lot 1) et AM-064 (lot 13) : sans `timezone=Europe/Paris`, `date_format` rend l'heure en UTC ; le paramètre, passé en mode adaptateur depuis 0.26.0 (#726), la remet à l'heure de Paris. Le lot 18 l'a posé sur la page comme une correction. **Ce qui est vrai.** Le flux instantané publie l'heure de **Paris** en la marquant `+00:00`. `date_format` sans paramètre rend donc déjà l'heure du relevé ; avec `timezone=Europe/Paris`, chaque heure affichée avait **deux heures d'avance**. La preuve est dans le jeu lui-même : des relevés datés **après** l'heure de la requête. **Ce qui reste vrai.** `date_format` dans le `select` formate bien une date côté serveur (FP-003), et `params` en mode adaptateur est une vraie capacité (AM-064). Le pipe `{{:datetime}}` convertirait dans le fuseau du navigateur et reproduirait le même décalage : sur ce jeu, il ne faut **aucune** conversion. **La leçon.** Une heure plausible ne prouve rien. On contrôle un fuseau avec une borne qu'on connaît : la date de la requête. La comparaison avec le portail (FP-003) ne pouvait rien établir, puisque le portail lit le même champ mal marqué.",
+    "correction": "Paramètre retiré de /viz/prix-des-carburants lors de la recréation du 2026-09-26. La station 89100001 affiche 09:07, comme son `@maj` brut. FP-003 et AM-064 portent une rectification datée, sans effacement.",
+    "verifie": "API data.economie.gouv.fr, `prix-des-carburants-en-france-flux-instantane-v2`. Agent de recréation, export à 14:37 UTC : 102 prix datés après l'heure de la requête, jusqu'à 16:19 « +00:00 ». **Rejoué à la consignation le 2026-09-26 à 15:06 UTC** : `where gazole_maj > now()` → **26 stations**, `max(gazole_maj)` = `2026-09-26T16:47:30+00:00`, soit 1 h 41 dans le futur. Station 89100001 : champ brut `prix` → `\"@maj\": \"2026-09-18 09:07:28\"`, `gazole_maj` = `2026-09-18T09:07:28+00:00` ; `date_format(gazole_maj,\"HH:mm\")` → **09:07** sans paramètre, **11:07** avec `timezone=Europe/Paris`.",
+    "reste_vrai": "Deux traces restent à reprendre hors de ce registre. (1) Le piège « Date dans un template » du `CLAUDE.md` du dépôt recommande encore `timezone=Europe/Paris` (FP-003). (2) Le JSDoc de `params` dans `dsfr-data-source.ts` donne ce paramètre comme cas d'usage type d'un jeu ODS à dates. Il est légitime en général, mais faux sur le jeu qui l'a motivé. Le signaler au mainteneur.",
+    "statut": "retire",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "FP-020",
+    "titre": "« 994 123 marchés publics » (DECP) : 994 123 lignes, pour 753 320 couples identifiant × acheteur",
+    "type": "faux-probleme",
+    "severite": "haute",
+    "composants": [],
+    "dataviz": [
+      "decp-augmente"
+    ],
+    "constat": "**Ce que je croyais.** La page DECP du lot 1 annonçait « 994 123 marchés », et BUG-001 comparait « 632 062 marchés » à ce total. **Ce qui est vrai.** `decp_augmente` n'a pas une ligne par marché. L'identifiant `id` n'est unique que chez un même acheteur, et plusieurs lignes peuvent décrire le même couple : 753 320 couples identifiant × acheteur pour 994 123 lignes. 9 360 lignes portent en plus des identifiants de remplissage (`0000000000000000`, `00`). Une ligne est une **déclaration**. La recréation compte donc en « lignes » et le dit dans une section « Ce que compte une ligne ». **Ce qui reste vrai.** Les agrégats par canal, par procédure ou par mois sont justes en lignes. Les montants, eux, ne s'additionnent pas : 712 lignes à 1 Md€ ou plus font 99,9 % de la somme. **La leçon** est celle de PG-001 et de FP-016 : sans `group_by` sur l'identifiant métier, un `total_count` ne dit pas ce qu'il compte.",
+    "correction": "Page recréée le 2026-09-26 avec l'unité « ligne » partout. BUG-001 porte une rectification datée. La note du registre des statuts parle de lignes.",
+    "verifie": "API data.economie.gouv.fr, 2026-09-26. Agent de recréation : export groupé `id, idacheteur` = 753 320 couples, dont 9 360 lignes sur `0000000000000000` et `00`. **Rejoué à la consignation** : `records?limit=0` → `total_count` 994 123 ; `exports/csv?select=id,idacheteur&group_by=id,idacheteur` → **753 321 lignes, en-tête compris**, soit 753 320 couples.",
+    "statut": "retire",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "FP-021",
+    "titre": "SignalConso : « 38 % de taux de réponse », « statut NA non documenté », « pas de suivi avant 2021 ». Trois lectures fausses du jeu",
+    "type": "faux-probleme",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-kpi"
+    ],
+    "dataviz": [
+      "signalconso"
+    ],
+    "constat": "**Ce que je croyais.** La page du lot 6 affichait un « taux de réponse » de 38 % (`reponse:sum / n:sum`), disait le statut `NA` non documenté, et affirmait qu'aucun suivi n'existait avant 2021. **Ce qui est vrai.** (1) Le dénominateur était faux. Une entreprise ne peut répondre qu'à un signalement **transmis**, et 40 % des dépôts de 2025 ne l'ont jamais été. Rapportées aux transmis, les réponses font **70,6 %** en 2025 (212 237 sur 300 517) et 66,8 % sur toute la période. (2) `NA` est défini dans la description du champ `status` : non transmis. (3) Le suivi de 2018 à 2020 n'a pas manqué, il a été **effacé** : les 50 625 signalements de ces trois années sont tous au statut `SuppressionRGPD`, comme 40 151 de ceux de 2021. **Ce qui reste vrai.** Le ratio de KPI (#673) calcule exactement ce qu'on lui demande. L'erreur était de choisir le dénominateur d'après le nom du champ, sans lire sa définition.",
+    "correction": "Page recréée le 2026-09-26. Les statuts sont lus parmi les transmis. Les non-transmis sont décomptés à part, par catégorie. Les volumes par année séparent suivi conservé et suivi effacé (RGPD).",
+    "verifie": "API data.economie.gouv.fr `signalconso`. Agent de recréation, 2026-09-26 : `sum(signalement_transmis)` vaut n pour les sept statuts transmis et 0 ailleurs. **Rejoué à la consignation** : `where year(creationdate)=2025 group_by status` → 497 375 dépôts, transmis 300 517 (PromesseAction 112 088, Infonde 79 262, MalAttribue 20 887, NonConsulte 67 498, ConsulteIgnore 20 773, Transmis 9), `NA` 190 432. Réponses = 112 088 + 79 262 + 20 887 = 212 237, soit 70,6 % des transmis. L'ancien KPI, toutes années : `sum(signalement_reponse)` 666 552 / `count(*)` 1 733 022 = **38,5 %** ; sur les transmis (998 440) : 66,8 %. `where year(creationdate)<2021 group_by status` → une seule ligne, `SuppressionRGPD` 50 625. `SuppressionRGPD` en 2021 : 40 151.",
+    "statut": "retire",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "FP-022",
+    "titre": "Patronymes des écoles : les rentrées 2009 à 2018 portent les noms d'aujourd'hui, recopiés en arrière",
+    "type": "faux-probleme",
+    "severite": "haute",
+    "composants": [],
+    "dataviz": [
+      "edu/patronymes-des-ecoles"
+    ],
+    "constat": "**Ce que je croyais.** L'original et la reproduction proposaient un filtre par rentrée de 2009 à 2024. La page se lisait donc comme une histoire des baptêmes d'écoles sur quinze ans. **Ce qui est vrai.** Dans `effectifs-deleves-par-ecole-copie0`, les patronymes de 2009 à 2018 sont une copie d'un instantané récent, reportée sur les années antérieures. Samuel Paty, mort en octobre 2020, nomme 5 écoles chaque année de 2009 à 2018, aucune de 2019 à 2021, puis 3, 6 et 7. Simone Veil compte 133 écoles dès 2009, puis 120 en 2019. Seule la série 2019-2024 décrit des noms datés. Choisir « 2009 » ou « 2015 » faisait lire une évolution qui n'existe pas. **Ce qui reste vrai.** Les effectifs et les autres champs de ces rentrées ne sont pas mis en cause par cette mesure : elle ne porte que sur le patronyme. La recréation raisonne sur 2019-2024 et nomme la plage écartée dans « Ce qu'on ne montre pas ». **La leçon** est la même qu'en FP-020 : une série présente dans un jeu n'est pas pour autant une série.",
+    "correction": "Page recréée le 2026-09-26 : filtre d'année retiré, stock et flux calculés entre 2019 et 2024, rentrées antérieures nommées comme écartées.",
+    "verifie": "API data.education.gouv.fr, 2026-09-26. Agent de recréation : SAMUEL PATY = 5 écoles par an de 2009 à 2018, 0 de 2019 à 2021, puis 3, 6, 7 ; école 0030697S nommée dès 2009. **Rejoué à la consignation** : `where patronyme=\"SAMUEL PATY\" group_by year(rentree_scolaire)` → 2009 à 2018 : 5 chaque année, 2019 à 2021 absents, 2022 : 3, 2023 : 6, 2024 : 7. École `0030697S` : patronyme SAMUEL PATY de 2009 à 2018, null de 2019 à 2021, SAMUEL PATY de 2022 à 2024. SIMONE VEIL : 133 écoles en 2009, 149 en 2018, 120 en 2019, 193 en 2024.",
+    "statut": "retire",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "BUG-026",
+    "titre": "Une source groupée perd son `group_by` quand un `dsfr-data-normalize` s'intercale devant une `dsfr-data-query group-by` seule lectrice",
+    "type": "bug",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-query",
+      "dsfr-data-normalize",
+      "dsfr-data-source"
+    ],
+    "dataviz": [
+      "decp-augmente"
+    ],
+    "constat": "Chaîne : source `select=\"procedure, count(*) as n\" group-by=\"procedure\"`, puis `normalize replace-fields`, puis `query group-by=\"procedure\" aggregate=\"n:sum:n\"`, seule lectrice. La requête part **sans `group_by`**, avec `select=procedure, count(*) as n` et `order_by=n DESC&limit=101`. Le KPI en aval affiche 96 667 200 au lieu de 966 672 (5 groupes au lieu de 19), avec un simple avertissement en console. Sans le `normalize`, la même chaîne envoie bien `group_by=procedure`. Le chiffre faux est plausible et rien ne le signale. Même famille que BUG-009 et BUG-025 : la délégation dépend de la topologie de la chaîne, et ici elle traverse un transformateur qu'elle ne devrait pas traverser.",
+    "verifie": "Page minimale, dsfr-data 0.42.0, 2026-09-26 (agent de recréation DECP). Requête relevée au réseau : `exports/json?select=procedure, count(*) as n&where=…&order_by=n DESC&limit=101`, sans `group_by`. KPI 96 667 200. Sans `normalize` : `group_by=procedure`, KPI 966 672. Le contournement est appliqué sur /viz/decp-augmente.",
+    "contournement": "Donner un second lecteur au `normalize`. La query cesse alors de déléguer et calcule côté client.",
+    "demande": "Ne pas déléguer `group-by` à travers un transformateur (`normalize`, `pivot`…) ; à défaut, ne jamais retirer le `group_by` que la source porte déjà.",
+    "statut": "a-deposer",
+    "date": "2026-09-26",
+    "cadrage": {
+      "priorite": "P1",
+      "effort": "S",
+      "decision": "Déposer chez dsfr-data",
+      "impact": "Un compte faux de deux ordres de grandeur, sans erreur, dès qu'on nettoie des libellés (`replace-fields`) entre une source agrégée et une query : c'est le geste qu'appellent les doublons d'écriture du champ `procedure` (LIM-003).",
+      "objectif": "Qu'insérer un `normalize` dans une chaîne ne change pas le résultat d'un agrégat.",
+      "perennite": "Structurel : le nettoyage de libellés avant agrégation est un motif courant sur les jeux publics.",
+      "acceptation": [
+        "La chaîne source groupée → `normalize replace-fields` → `query group-by` seule lectrice envoie `group_by=procedure` ou calcule côté client, et le KPI rend 966 672.",
+        "La même chaîne sans `normalize` garde son comportement.",
+        "Un test couvre la délégation à travers un transformateur."
+      ]
+    }
+  },
+  {
+    "id": "LIM-018",
+    "titre": "DSFR Chart : sur un `bar` horizontal, `x-max=\"100\"` est transmis mais l'axe monte à 120, et `y-max` ajoute une catégorie « 100 »",
+    "type": "limite-dure",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-chart"
+    ],
+    "dataviz": [
+      "plan-de-relance"
+    ],
+    "constat": "Un graphique en barres horizontales empilées à 100 % doit s'arrêter à 100. `x-max=\"100\"` arrive bien sur la balise `<bar-chart>`, mais l'axe est gradué jusqu'à 120. Essayer `y-max=\"100\"` à la place ajoute « 100 » comme catégorie sur l'axe des libellés. **Ce n'est pas `dsfr-data`** : l'attribut est transmis tel quel, et le rendu relève de `GouvernementFR/dsfr-chart` (règle 4 du lot 11).",
+    "verifie": "/viz/plan-de-relance, #g-mesures, 0.42.0, 2026-09-26 : attribut `x-max=100` relevé au DOM sur `<bar-chart>` au navigateur, axe à 120 sur la capture. Avec `y-max=\"100\"` : une catégorie « 100 » en plus sur l'axe des libellés.",
+    "contournement": "Aucun depuis la page. La barre de repère « Ensemble des projets », placée en tête, donne l'échelle.",
+    "demande": "À remonter chez `GouvernementFR/dsfr-chart` : respecter `x-max` sur l'axe de valeur d'un `bar` horizontal.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "PG-040",
+    "titre": "`highlight-index` : sans `selected-palette=\"neutral\"` il ne distingue rien, et avec `neutral` la pastille de légende ne représente plus la série",
+    "type": "piege",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-chart"
+    ],
+    "dataviz": [
+      "signalconso",
+      "plan-de-relance",
+      "edu/dataviz-ips-colleges"
+    ],
+    "constat": "Pour mettre une barre en évidence, trois pages recréées ont posé `highlight-index`, et ont rencontré deux défauts. (1) Sur un `bar` horizontal à une seule série, toutes les barres restent de la même couleur : rien n'est distingué sans `selected-palette=\"neutral\"`. (2) Avec `neutral`, la pastille de la légende ne représente plus la série. Sur plan-de-relance, elle prend la couleur de mise en avant alors que 9 barres sur 10 sont grises. Sur IPS, elle reste grise sous des barres bleues. Dans les deux cas, la légende dit autre chose que le graphique. C'est la famille de BUG-016 et BUG-022. `highlight-index` est transmis tel quel à DSFR Chart (`dsfr-data-chart.ts` l. 1310) : le rendu relève probablement de `GouvernementFR/dsfr-chart`, à trancher avant tout dépôt.",
+    "verifie": "Captures du 2026-09-26, 0.42.0 : /viz/signalconso (barres identiques sans `neutral`, barre de tête colorée et autres grisées avec), /viz/plan-de-relance #g-co2 (légende à la couleur de mise en avant, 9 barres grises sur 10), /education/dataviz-ips-colleges #g-ecart (pastille grise sous des barres bleues ; mise en évidence retirée de la page).",
+    "contournement": "Masquer la légende quand elle ne porte qu'une série, et dire la mise en évidence dans le titre ou dans la phrase de lecture. Ou renoncer à la mise en évidence.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "AM-091",
+    "titre": "Pas de médiane dans `dsfr-data-query` ni dans `dsfr-data-kpi`, et la médiane d'Opendatasoft est approchée : elle change d'un appel à l'autre",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-query",
+      "dsfr-data-kpi"
+    ],
+    "dataviz": [
+      "prix-des-carburants",
+      "decp-augmente"
+    ],
+    "constat": "Deux recréations avaient besoin d'une valeur « typique » que la moyenne trahit. Pour les écarts de prix entre stations, une seule station aberrante déplace la moyenne. Pour les montants des marchés, 712 lignes à 1 Md€ ou plus font 99,9 % de la somme. Côté client, aucun agrégat de médiane ni de centile : `AGGREGATE_FUNCTIONS` s'arrête à count, sum, avg, min, max, distinct, running_sum, diff, share et share_percent, et la skill classe `median` en « erreur de configuration ». L'écart typique entre stations doit donc se dire en min–max, sensible au point isolé. Côté serveur, `median()` d'ODSQL existe mais rend une valeur **approchée, différente à chaque appel**. Un chiffre du texte qui change au rechargement ne peut pas être une référence.",
+    "verifie": "Source `packages/core/src/utils/aggregates.ts` (liste blanche) et fiche `dsfr-data-query` de la skill (« median… erreur de configuration »), relues le 2026-09-26. API `decp_augmente` : deux appels de l'agent le 2026-09-26 → 93 075,63 puis 93 044,09. **Rejoué à la consignation** : trois appels `select=median(montant)` → 93 098,60 ; 93 139,71 ; 93 115,10.",
+    "contournement": "Écrire « autour de 93 000 € » en arrondissant au-delà de la variation observée (choix de la page DECP), ou dire l'écart en min–max.",
+    "demande": "Un agrégat `median` (et `percentile:p`) calculé côté client, exact. Le signaler au JSDoc s'il était délégué à un serveur qui ne rend qu'une approximation.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "AM-092",
+    "titre": "Pas d'agrégat `first` / `last` dans `dsfr-data-query` : réunir le début et la fin d'une période coûte deux queries, un renommage et une jointure",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-query"
+    ],
+    "dataviz": [
+      "comptabilite-generale"
+    ],
+    "constat": "Le titre calculé de la comptabilité de l'État compare le premier et le dernier exercice (« de 1 647 à 2 787 Md€ »). `first` et `last` existent sur le KPI (AM-076) mais pas dans l'`aggregate` de la query. Pour avoir les deux bornes sur une ligne, il faut deux queries `limit=1` (tri montant et descendant), un `rename` champ par champ, puis un `dsfr-data-join` sur une clé constante `k = 1`.",
+    "verifie": "Pipeline `cg-fin` / `cg-deb-r` / `cg-bornes` de /viz/comptabilite-generale, 2026-09-26 : titre et chapô rendus au navigateur, chiffres rejoués à l'API. `first` et `last` sont absents de `AGGREGATE_FUNCTIONS` (`aggregates.ts`, relu à la consignation). La fiche KPI les dit « propres au KPI : absentes de l'aggregate ».",
+    "contournement": "Deux queries `limit=1` + `rename` + `join` sur une clé constante.",
+    "demande": "`first` et `last` en agrégat de `dsfr-data-query`, avec la même sémantique que sur le KPI.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "AM-093",
+    "titre": "`dsfr-data-repeat` enveloppe chaque ligne dans un `<div>` : un chiffre calculé ne peut pas s'insérer au milieu d'une phrase",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-repeat"
+    ],
+    "dataviz": [
+      "edu/patronymes-des-ecoles"
+    ],
+    "constat": "`repeat` est devenu la voie des phrases de lecture calculées : les huit pages recréées l'emploient, et il n'a pas le compteur de `display` (AM-077). Mais chaque ligne est rendue dans un `<div>`, sous un conteneur `<div>`. Un nombre qu'on voudrait glisser dans une phrase écrite à la main part donc à la ligne. Il faut écrire la phrase entière dans le gabarit, ce qui oblige à rédiger une phrase par source.",
+    "verifie": "Capture du 2026-09-26, /education/patronymes-des-ecoles, 0.42.0 : « 35 952 » et « 10 354 » rendus chacun sur sa propre ligne. Source `dsfr-data-repeat.ts` relue à la consignation : `document.createElement('div')` pour le conteneur des lignes et pour chaque ligne.",
+    "contournement": "Une phrase entière par gabarit.",
+    "demande": "Un rendu en ligne (`inline`, ou des `<span>`) quand `per-row` est vide et que le gabarit ne contient que du texte.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "AM-094",
+    "titre": "L'avertissement #765 part même quand la délégation est impossible par construction : neuf `console.warn` sur une page juste",
+    "type": "amelioration",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-query"
+    ],
+    "dataviz": [
+      "fiscalite-locale",
+      "edu/patronymes-des-ecoles",
+      "signalconso",
+      "comptabilite-generale",
+      "plan-de-relance",
+      "edu/dataviz-ips-colleges"
+    ],
+    "constat": "Les six pages recréées qui calculent leurs phrases côté client émettent toutes l'avertissement #765 (« group-by, aggregate et order-by restent calculés côté client »). Il part pour des queries qui ne pourraient **jamais** être déléguées : en aval d'un `pivot` ou d'un `normalize compute`, ou même sans aucun `group-by` ni `aggregate`. Il part aussi pour une source de dix lignes déjà agrégée par le portail, où le calcul client est voulu. Le message n'est pas faux, mais il est émis là où il n'y a rien à corriger, et il couvre les avertissements utiles. BUG-020 (ré-émission quadratique) est corrigé : c'est la condition d'émission qui reste trop large.",
+    "verifie": "2026-09-26, 0.42.0, Playwright : /education/patronymes-des-ecoles 9 `console.warn` au chargement, dont `flux-top`, qui n'a ni `group-by` ni `aggregate`. /viz/fiscalite-locale 5 (`fl-fr`, 10 lignes, lue par `fl-maj-ans` et `fl-tfb-ans` ; `fl-dep-part` ; `fl-taux-t`). /viz/signalconso et /viz/comptabilite-generale 7 chacune. Résultats exacts dans tous les cas.",
+    "contournement": "Aucun depuis la page. L'avertissement ne gêne pas le rendu.",
+    "demande": "N'émettre #765 que si la query aurait pu être déléguée : source adaptateur en amont direct, sans transformateur, avec au moins un `group-by` ou un `aggregate`.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "PG-041",
+    "titre": "Double arrondi : `round(x, 1)` dans `compute` puis `{{x:number:0}}` dans le gabarit décale le chiffre affiché",
+    "type": "piege",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-normalize",
+      "dsfr-data-repeat"
+    ],
+    "dataviz": [
+      "signalconso"
+    ],
+    "constat": "Une part de 22,46 % arrondie au dixième dans `compute` (22,5) puis à l'unité dans le gabarit donne « 23 », alors que l'arrondi direct donne « 22 ». Chaque arrondi est correct séparément. Rien ne signale l'erreur, et le chiffre reste plausible. Même famille que PG-031 : un arrondi fait pour l'affichage ne doit pas nourrir un autre calcul.",
+    "verifie": "/viz/signalconso, 2026-09-26 : la phrase affichait « 23 % jamais lus » pour 67 498 / 300 517 = 22,46 %. Garder la colonne brute pour la phrase et n'arrondir qu'au gabarit rend « 22 ». Dénominateur et numérateur rejoués à l'API à la consignation (voir FP-021).",
+    "contournement": "Une seule opération d'arrondi, au dernier moment : garder la colonne brute pour les phrases, n'arrondir que dans le gabarit.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "PG-042",
+    "titre": "Comptes de l'État : 95 % des produits ne sont rattachés à aucune mission, et un « déficit par mission » n'est qu'un effet de nomenclature",
+    "type": "piege",
+    "severite": "moyenne",
+    "composants": [],
+    "dataviz": [
+      "comptabilite-generale"
+    ],
+    "constat": "L'original, reproduit à l'identique, mettait face à face les charges et les produits d'une mission. Or en 2025, 500,6 Md€ des 525,8 Md€ de produits (95,2 %) ont un `libellemission` nul : l'impôt n'est pas affecté à une mission. Chaque mission apparaît donc « en déficit », ce qui ne dit rien de sa gestion. Le jeu ne signale rien. La recréation ne montre plus que les charges par mission.",
+    "verifie": "API data.economie.gouv.fr, 2026-09-26 : `exports/json` `where categorie=\"Produits\" and year(annee)=2025 group_by libellemission` → groupe null 500,6 Md€ sur 525,8 Md€. **Rejoué à la consignation** (`balances_des_comptes_etat`, `sum(balance_sortie_3)`) : `libellemission is null` → 500,559 ; toutes missions → 525,818, soit 95,2 %.",
+    "contournement": "Ne comparer charges et produits qu'au niveau de l'État. Par mission, montrer les charges seules.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "PG-043",
+    "titre": "IPS des collèges : la rupture de méthode de 2022 n'est décrite que dans la fiche d'un jeu frère",
+    "type": "piege",
+    "severite": "moyenne",
+    "composants": [],
+    "dataviz": [
+      "edu/dataviz-ips-colleges"
+    ],
+    "constat": "`donnees-ips-colleges` couvre neuf rentrées sans signaler que la DEPP a changé sa méthode de calcul en 2022. La rupture n'est décrite que dans la description de `fr-en-ips-colleges-ap2022`. Une série tracée d'un seul tenant compare donc deux méthodes. La recréation mesure l'écart public-privé **à l'intérieur** de chaque méthode (13,1 → 14,3 de 2016 à 2021 ; 17,0 → 20,0 de 2022 à 2024) et marque la rupture d'une ligne verticale. Même famille que LIM-006 : l'information existe au portail, mais pas là où on la cherche.",
+    "verifie": "Métadonnées lues à l'API data.education.gouv.fr le 2026-09-26 : aucune mention de la rupture dans `donnees-ips-colleges`, décrite dans `fr-en-ips-colleges-ap2022`. Les écarts par méthode ont été recalculés à l'API (regroupement rentrée × secteur).",
+    "contournement": "Lire les descriptions des jeux voisins avant de tracer une série longue. Couper la série à la rupture et le dire.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "PG-044",
+    "titre": "L'infobulle de DSFR Chart arrondit à une décimale, le tableau équivalent en montre trois : « 2,4 €/L » contre 2,397",
+    "type": "piege",
+    "severite": "basse",
+    "composants": [
+      "dsfr-data-chart"
+    ],
+    "dataviz": [
+      "prix-des-carburants"
+    ],
+    "constat": "Sur le graphique des prix moyens par carburant, l'infobulle affiche « Gazole 2,4 €/L » alors que le tableau accessible en dessous donne 2,397. Pour un prix au litre, la décimale perdue est l'information : deux carburants à 2,35 et 2,44 se lisent pareil. À qualifier avant dépôt : arrondi de DSFR Chart ou format passé par `dsfr-data` (règle 4 du lot 11).",
+    "verifie": "/viz/prix-des-carburants, #g-carb, survol au navigateur le 2026-09-26, 0.42.0 : infobulle « Gazole 2,4 €/L », tableau a11y 2,397.",
+    "contournement": "Le tableau équivalent porte la précision. Le titre et la phrase de lecture donnent les prix à trois décimales.",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "AV-034",
+    "titre": "Une ligne de référence calculée depuis la donnée : `reference-lines` interpolé par un `dsfr-data-repeat` d'une ligne",
+    "type": "avantage",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-repeat",
+      "dsfr-data-chart"
+    ],
+    "dataviz": [
+      "prix-des-carburants"
+    ],
+    "constat": "`reference-lines` attend un JSON littéral. En plaçant le graphique dans le gabarit d'un `dsfr-data-repeat` qui lit une source d'**une seule ligne**, la valeur est interpolée dans le JSON (`{{ecart_regions}}`) : la ligne de référence suit la donnée. Sur carburants, c'est l'écart entre régions (0,12 €) tracé sur les écarts à l'intérieur de chaque région. ⚠️ Le même jour, la recréation IPS a jugé la chose impossible d'après la grammaire de la skill, et a écrit son repère (23,8 %) en dur et daté. C'est un cas de la règle 1 du lot 11 : la grammaire d'un attribut ne dit pas tout ce que sa composition permet.",
+    "verifie": "/viz/prix-des-carburants, 0.42.0, 2026-09-26 : `bar horizontal`, `axis:\"x\"`, trait dessiné à 0,12 au navigateur, zéro erreur. Le `dsfr-data-a11y` doit être dans le même gabarit, sinon la console signale « cible introuvable ».",
+    "contournement": "",
+    "statut": "acte",
+    "date": "2026-09-26"
+  },
+  {
+    "id": "AV-035",
+    "titre": "Un chapô entièrement calculé, sans script : `pivot` → `compute` → `dsfr-data-repeat`, sur huit pages",
+    "type": "avantage",
+    "severite": "haute",
+    "composants": [
+      "dsfr-data-pivot",
+      "dsfr-data-normalize",
+      "dsfr-data-repeat",
+      "dsfr-data-kpi"
+    ],
+    "dataviz": [
+      "prix-des-carburants",
+      "fiscalite-locale",
+      "plan-de-relance",
+      "decp-augmente",
+      "signalconso",
+      "comptabilite-generale",
+      "edu/dataviz-ips-colleges",
+      "edu/patronymes-des-ecoles"
+    ],
+    "constat": "Les huit pages recréées ouvrent sur un titre-message et un chapô dont chaque chiffre est calculé au chargement. Aucun n'est écrit en dur. Le motif est toujours le même : une source agrégée par le portail, un `dsfr-data-pivot` qui met les années ou les catégories en colonnes, un `compute` qui fait la différence ou la part, puis un `dsfr-data-repeat` qui écrit la phrase. Deux variantes ont servi. Sur fiscalité locale, une moyenne pondérée par la population sans script : `sum(taux*mpoid)` dans le `select`, puis `value=\"x:sum / habitants:sum\"` sur le KPI. Un `coalesce` après le pivot garde les départements à zéro. Sur IPS, le suivi collège par collège de deux rentrées donne +3,07 dans le privé et +0,12 dans le public. Conséquence éditoriale : un chiffre du texte ne vieillit plus sans bruit (PG-036).",
+    "verifie": "Recette du 2026-09-26, 0.42.0, huit pages : 0 erreur console. Chaque chiffre du texte a été rejoué à l'API par l'agent de la page. Fiscalité : 43,13 % et 25,4 % à l'écran, identiques à l'API ; 101 lignes dans le tableau accessible, dont 40 à 0 %, et un résumé pondéré de 25,36 % égal au KPI. IPS : 3,07 et 0,12, identiques au calcul Python sur l'export apparié par UAI.",
+    "contournement": "",
     "statut": "acte",
     "date": "2026-09-26"
   }
