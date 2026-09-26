@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Baromètre France Num — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du Baromètre France Num de data.economie.gouv.fr : 119 questions lues dans la table de correspondance, vue nationale et vue filtrée région × secteur × taille.">
+  <title>Baromètre France Num — refonte — open-data-viz</title>
+  <meta name="description" content="Refonte du Baromètre France Num : la page répond avant le premier clic. Quatre repères, les écarts au national, ce qui bouge le plus, et les cent questions de l'édition 2025 par chapitre.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -14,7 +14,38 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
+  <link rel="stylesheet" href="/assets/demo.css">
   <script src="/assets/cles.js"></script>
+
+  <style>
+    /* ------------------------------------------------------------------
+       CSS complémentaire réduit au strict nécessaire.
+       Tout le reste est rendu par DSFR (fr-accordion, fr-sidemenu, fr-callout,
+       fr-grid-row) et par les composants dsfr-data (kpi, chart, a11y).
+       Les trois règles qui suivent compensent des manques identifiés au
+       registre, pas des choix de mise en forme.
+       ------------------------------------------------------------------ */
+
+    /* Deux règles ont disparu d'ici le 2026-09-19, et pour deux raisons opposées.
+       La rustine BUG-018 (`dsfr-data-a11y summary { box-sizing: border-box }`)
+       est devenue inutile : le composant pose la règle lui-même depuis la 0.32.0.
+       Le masquage du compteur « N resultats » (AM-034/AM-044) est devenu SANS
+       OBJET : les douze `dsfr-data-display` de cette page sont des
+       `dsfr-data-repeat`, et `repeat` est transparent — aucun compteur, aucun
+       `role`, aucun `aria-live`. On ne masque plus ce qui n'est plus émis. */
+
+    /* PG-011 : ce composant n'a pas de style d'hôte. */
+    dsfr-data-chart { display: block; }
+
+    /* `lazy` n'estampe le graphique d'une ligne qu'a son approche du viewport, et
+       il NE RESERVE PAS la hauteur a la place de l'auteur (JSDoc de l'attribut).
+       Sans cette reserve, chaque ligne mesure la hauteur de son seul titre --
+       24 px mesures --, la page est fausse de bout en bout, et le defilement
+       depasse les lignes avant qu'elles aient grandi : 4 graphiques estampes sur
+       103 apres un defilement complet. La reserve est posee sur NOTRE conteneur
+       de gabarit, pas sur le DOM interne du composant (la lecon de BUG-018). */
+    .odv-question { min-height: 24rem; }
+  </style>
 </head>
 <body>
 <div id="site-header"></div>
@@ -33,617 +64,1330 @@
     </nav>
 
     <h1>Baromètre France Num</h1>
-
-    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <a href="https://data.economie.gouv.fr/explore/dataset/questions-reponses/" target="_blank" rel="noopener external"><code>questions-reponses</code></a>
-        — 479&nbsp;405 lignes, la table de calcul des scores de l'enquête annuelle sur la
-        numérisation des TPE et PME, de 2020 à 2025. Elle ne contient que des <em>codes</em> de
-        question. Les libellés, les chapitres et les descriptifs viennent de
-        <a href="https://data.economie.gouv.fr/explore/dataset/bfn-table-de-correspondance/" target="_blank" rel="noopener external"><code>bfn-table-de-correspondance</code></a>
-        — 119 questions, le jeu que la page d'origine lit elle-même. Une première version de cette
-        page avait joint un autre jeu, <code>bfn-2022-resultats-2022</code>, au référentiel de codes
-        différent&nbsp;: l'analyse en garde la trace.
-      </p>
-    </details>
-  </div>
-
-  <div class="fr-container fr-mb-4w">
-    <div class="fr-alert fr-alert--info fr-alert--sm">
-      <p class="fr-text--sm">
-        Cette page <strong>reproduit</strong> l'original&nbsp;: c'est sa fidélité qui est le livrable.
-        Une <a href="/viz/barometre-france-num-v2.html">refonte de la même donnée</a> pose l'autre
-        question — trois régimes d'accès reliés par un profil partagé, et le «&nbsp;Score moyen&nbsp;»
-        remplacé plutôt que réparé.
-      </p>
-    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Direction générale des Entreprises — 5<sup>e</sup> édition, septembre 2025.
+      <strong>Refonte</strong>&nbsp;: la page répond avant qu'on ait cliqué.
+    </p>
   </div>
 
   <!-- ==========================================================================
-       Trois régimes, à dessein :
-       1. L'EXPLORATEUR (bas de page) : les scores nationaux agrégés côté serveur
-          (1 065 lignes : question × réponse × année, /exports/json), JOINTS à la
-          table de correspondance du portail (119 questions) sur `code_unifie`.
-          La jointure est complète : 119 codes sur 119 sont communs aux deux jeux.
-       2. LA QUESTION (haut de page) : un <dsfr-data-context> pousse question,
-          région, secteur et taille dans trois sources en mode adaptateur —
-          vue nationale, vue filtrée, fiche de la question. Une question à la
-          fois = au plus 12 réponses × 6 années = 72 groupes, sous le plafond
-          de 100 groupes de /records (BUG-001).
-       3. Une première version joignait `bfn-2022-resultats-2022` : mauvais jeu,
-          référentiel de codes différent (PG-009). Voir l'analyse.
+       ARCHITECTURE
+
+       La vue nationale n'est PAS un agrégat à calculer : c'est une valeur
+       littérale du jeu (`region = "Toutes régions"`). National et profil sont
+       donc deux sous-ensembles du même jeu, appariés par jointure.
+
+       Sept requêtes au chargement (relevé au navigateur le 2026-09-26), toutes en
+       `fetch-mode="export"` :
+       `/records` plafonne une requête groupée à 100 groupes (BUG-001) — vérifié,
+       la requête des écarts y rendait `total_count = 100` pile. `max-records`
+       explicite partout : son défaut de 1 000 tronque en silence.
        ========================================================================== -->
 
-  <!-- Lot 13 — `bfn-corr` et `bfn-scores` étaient écrites en mode générique
-       (`url=` vers /exports/json + `params`), contournement d'AM-011 : le mode
-       adaptateur chargeait par /records, 100 lignes par requête et en série
-       (mesure d'origine : 31 allers-retours, 28,9 s pour 3 080 lignes, contre
-       1 requête et 0,62 s par l'export), au prix du mode adaptateur lui-même.
-       `fetch-mode="export"` (#689, dsfr-data 0.25.0) rend la requête unique EN
-       mode adaptateur. Attention au plafond : en mode export le total serveur
-       est inconnu, la troncature se détecte en demandant une ligne de plus que
-       `max-records`, dont le défaut est 1 000. `bfn-scores` en rend 1 065
-       (relevé à l'API le 2026-09-10) — d'où le `max-records` explicite, sans
-       lequel la jointure retomberait à 1 000 / 1 065 lignes appariées. -->
-
-  <!-- Table de correspondance : la liste des questions, leurs chapitres, leurs descriptifs -->
-  <dsfr-data-source id="bfn-corr" api-type="opendatasoft"
+  <dsfr-data-source id="corr" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="bfn-table-de-correspondance"
-    fetch-mode="export"
-    select="code_unifie, libelle_unifie, chapitre, ordre_chapitre, presentation_2024, descriptif_de_question"
-    order-by="ordre_chapitre, code_unifie"
+    fetch-mode="export" max-records="500"
+    select="code_unifie, libelle_unifie, chapitre, ordre_chapitre, sens_de_l_augmentation, descriptif_de_question"
+    order-by="ordre_chapitre, code_unifie" api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- ---------- Les quatre repères ----------
+       Quatre questions choisies (voir #hypotheses), et une règle de calcul par
+       question, celle du producteur (`descriptif_de_question` de la table de
+       correspondance) : la 501 additionne « Tout à fait d'accord » et « Plutôt
+       d'accord », la 1006 « Très satisfaisant » et « Plutôt satisfaisant ».
+       D'où le filtre sur les libellés de réponse : le `group by code_unifie`
+       somme ce qui reste, ce qui donne la bonne règle pour chacune des quatre
+       en UNE requête.
+       Relecture métier du 2026-09-26 : la 1006 ne retenait que « Très
+       satisfaisant » (29,7 % au national) en l'attribuant à tort au champ
+       `valeurs_dans_calcul` ; le producteur compte les deux niveaux (81,0 %).
+       `max(poids_question) as pop` : la population d'entreprises que le profil
+       représente, constante par profil (relevé à l'API) — c'est elle qui dit si
+       un profil cumulé repose encore sur quelque chose. -->
+  <dsfr-data-source id="reperes-nat" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses"
+    fetch-mode="export" max-records="100"
+    select="sum(score) as v_nat" group-by="code_unifie"
+    where="code_unifie in (501, 801, 923, 1006) and libelle_reponse in (&quot;Tout à fait d&#39;accord&quot;, &quot;Plutôt d&#39;accord&quot;, &quot;Oui&quot;, &quot;J&#39;en ai&quot;, &quot;Très satisfaisant&quot;, &quot;Plutôt satisfaisant&quot;) and region = &quot;Toutes régions&quot; and secteur = &quot;Tous secteurs&quot; and taille = &quot;Toutes tailles&quot; and year(annee) = 2025"
     api-key-ref="ods-mef">
   </dsfr-data-source>
-  <!-- Lot 11 : le `normalize numeric="code_unifie"` qui était ici ne servait à rien —
-       la jointure convertit ses deux clés en chaîne (FP-012, ex-AM-025). Retiré,
-       1 065 / 1 065 lignes appariées, comme avant. -->
+  <dsfr-data-source id="reperes-prof" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses"
+    fetch-mode="export" max-records="100"
+    select="sum(score) as v_prof, max(poids_question) as pop" group-by="code_unifie"
+    where="code_unifie in (501, 801, 923, 1006) and libelle_reponse in (&quot;Tout à fait d&#39;accord&quot;, &quot;Plutôt d&#39;accord&quot;, &quot;Oui&quot;, &quot;J&#39;en ai&quot;, &quot;Très satisfaisant&quot;, &quot;Plutôt satisfaisant&quot;) and year(annee) = 2025"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+  <dsfr-data-join id="reperes-j" left="reperes-prof" right="reperes-nat" on="code_unifie" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="reperes" source="reperes-j" numeric="v_nat, v_prof"
+    compute="libelle = when code_unifie = 501 then 'Le numérique est un bénéfice réel' when code_unifie = 801 then 'Utilisent l’intelligence artificielle' when code_unifie = 923 then 'Authentification multi-facteurs en place' else 'Débit internet satisfaisant';
+             rang = when code_unifie = 501 then 1 when code_unifie = 801 then 2 when code_unifie = 923 then 3 else 4;
+             ecart = v_prof - v_nat;
+             v_prof_txt = when contains(concat(round(v_prof, 1), ''), '.') then replace(concat(round(v_prof, 1), ''), '.', ',') else concat(round(v_prof, 1), ',0');
+             v_nat_txt = when contains(concat(round(v_nat, 1), ''), '.') then replace(concat(round(v_nat, 1), ''), '.', ',') else concat(round(v_nat, 1), ',0');
+             e_txt = replace(concat(when v_prof >= v_nat then '+' else '−', abs(round(v_prof - v_nat, 1))), '.', ',')">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="reperes-q" source="reperes" order-by="rang:asc"></dsfr-data-query>
 
-  <!-- Scores nationaux, toutes questions -->
-  <dsfr-data-source id="bfn-scores" api-type="opendatasoft"
+  <!-- ---------- Tous les écarts de l'édition ----------
+       201 Secteur, 202 Taille et 203 Région sont exclues : elles décrivent
+       l'échantillon, donc filtrer sur la Bretagne y met « Bretagne » à 100 %
+       contre 5,1 % au national — un écart de +94,9 points qui n'est que le
+       reflet du filtre (vérifié à l'API). -->
+  <dsfr-data-source id="nat" api-type="opendatasoft"
     base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses"
     fetch-mode="export" max-records="5000"
-    select="max(score) as score"
-    group-by="code_unifie, libelle_reponse, year(annee) as an"
-    where='region = "Toutes régions" and secteur = "Tous secteurs" and taille = "Toutes tailles"'
+    select="sum(score) as score_nat" group-by="code_unifie, libelle_reponse"
+    where="region = 'Toutes régions' and secteur = 'Tous secteurs' and taille = 'Toutes tailles' and year(annee) = 2025 and libelle_reponse != 'Sans réponse' and not (code_unifie in (201, 202, 203))"
     api-key-ref="ods-mef">
   </dsfr-data-source>
-  <dsfr-data-join id="bfn-scores-lib" left="bfn-scores" right="bfn-corr" on="code_unifie" type="left"></dsfr-data-join>
-
-  <dsfr-data-query id="bfn-questions" source="bfn-f" group-by="code_unifie"
-    aggregate="score:count:nb">
-  </dsfr-data-query>
-
-  <!-- La question choisie : vue nationale, vue filtrée, fiche.
-       `group-by="libelle_reponse, annee"` + `year(annee)` dans le select : ce n'est
-       PAS un groupement par année (PG-014, relecture du lot 11), ça ne coïncide que
-       parce que `annee` n'a qu'une valeur par an dans ce jeu (vérifié à l'API :
-       `group_by=annee` → 6 dates distinctes pour 6 années). -->
-  <dsfr-data-source id="bfn-q-nat" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses" api-key-ref="ods-mef"
-    select="year(annee) as an, sum(score) as score"
-    group-by="libelle_reponse, annee"
-    where='region = "Toutes régions" AND secteur = "Tous secteurs" AND taille = "Toutes tailles" AND libelle_reponse != "Sans réponse"'
-    order-by="an, libelle_reponse">
-  </dsfr-data-source>
-  <dsfr-data-source id="bfn-q-filt" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses" api-key-ref="ods-mef"
-    select="year(annee) as an, sum(score) as score"
-    group-by="libelle_reponse, annee"
-    where='libelle_reponse != "Sans réponse"'
-    order-by="an, libelle_reponse">
-  </dsfr-data-source>
-  <dsfr-data-source id="bfn-q-corr" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="bfn-table-de-correspondance" api-key-ref="ods-mef"
-    select="code_unifie, libelle_unifie, chapitre, presentation_2024, descriptif_de_question" limit="1">
+  <dsfr-data-source id="prof" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses"
+    fetch-mode="export" max-records="5000"
+    select="sum(score) as score_prof" group-by="code_unifie, libelle_reponse"
+    where="year(annee) = 2025 and libelle_reponse != 'Sans réponse' and not (code_unifie in (201, 202, 203))"
+    api-key-ref="ods-mef">
   </dsfr-data-source>
 
-  <dsfr-data-context sources="bfn-q-nat bfn-q-filt bfn-q-corr" url-sync
-    url-param-map="question:code_unifie | region:region | secteur:secteur | taille:taille">
-    <dsfr-data-context-filter field="code_unifie" operator="eq" ui="sel-question" label="Question"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="region"  operator="eq" ui="sel-region"  label="Région"  apply-to="bfn-q-filt"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="secteur" operator="eq" ui="sel-secteur" label="Secteur" apply-to="bfn-q-filt"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="taille"  operator="eq" ui="sel-taille"  label="Taille"  apply-to="bfn-q-filt"></dsfr-data-context-filter>
-  </dsfr-data-context>
+  <!-- Les valeurs des trois axes, lues dans le jeu plutôt que recopiées : un
+       `group-by` sur les trois champs renvoie les combinaisons existantes, et
+       les facettes en tirent leurs options. 31 <option> écrites à la main en
+       moins — et une liste qui ne peut plus diverger du jeu. -->
+  <dsfr-data-source id="axes-profil" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses"
+    fetch-mode="export" max-records="5000"
+    select="count(*) as n" group-by="region, secteur, taille"
+    where="year(annee) = 2025" api-key-ref="ods-mef">
+  </dsfr-data-source>
 
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
-  <section class="odv-bandeau">
+  <!-- Un seul contexte porte l'URL (PG-028).
+       AM-084 consommé (dsfr-data#928/#932, 0.33.0) : `default` sur
+       `dsfr-data-facets` dit « ce filtre porte TOUJOURS une valeur, par défaut
+       X ». C'est ce qu'il fallait ici, où « Toutes régions » est une LIGNE du
+       jeu et non une absence de filtre : sans valeur, la somme porterait sur
+       toutes les régions cumulées, sans avertissement. Les trois <select>
+       écrits en dur et les `context-filter` qui les écoutaient ont disparu.
+       Conséquence voulue du `default` : l'option « Tous » du select n'est plus
+       rendue — elle ne pourrait que revenir au défaut, qui EST la ligne
+       « Toutes régions ». -->
+  <dsfr-data-context id="profil" sources="prof reperes-prof" url-sync></dsfr-data-context>
+
+  <dsfr-data-join id="apparie" left="prof" right="nat" on="code_unifie,libelle_reponse" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="apparie-lib" left="apparie" right="corr" on="code_unifie" type="left"></dsfr-data-join>
+
+  <!-- L'écart, sa largeur de barre et son ton. `compute` (when/then/else) fait
+       tout sans script. Le ton croise le signe avec `sens_de_l_augmentation` :
+       être au-dessus de la moyenne sur « le numérique me fait perdre du temps »
+       n'est pas une bonne nouvelle (5 questions « défav », 17 neutres). -->
+  <dsfr-data-normalize id="ecarts" source="apparie-lib" numeric="score_nat, score_prof"
+    compute="ecart = score_prof - score_nat;
+             ecart_abs = abs(score_prof - score_nat);
+             p_txt = when contains(concat(round(score_prof, 1), ''), '.') then replace(concat(round(score_prof, 1), ''), '.', ',') else concat(round(score_prof, 1), ',0');
+             n_txt = when contains(concat(round(score_nat, 1), ''), '.') then replace(concat(round(score_nat, 1), ''), '.', ',') else concat(round(score_nat, 1), ',0');
+             etiquette = concat(libelle_unifie, ' — ', libelle_reponse);
+             valeurs_txt = concat(p_txt, ' % contre ', n_txt, ' %');
+             ecart_txt = replace(concat(when score_prof >= score_nat then '+' else '−', abs(round(score_prof - score_nat, 1))), '.', ',')">
+  </dsfr-data-normalize>
+  <!-- Des noms de colonnes qui se lisent (R10 de la relecture métier, 2026-09-26).
+       `dsfr-data-a11y` n'a pas d'alias d'en-tête : `value-field` ne prend que des
+       noms de colonnes (JSDoc), et l'en-tête du tableau ET du CSV est ce nom.
+       `rename` accepte un nom avec espace et parenthèses (« Écart (pt) ») ;
+       `compute` ne le pourrait pas (identifiants lettres/chiffres/_). D'où un
+       second `normalize`, APRÈS le calcul, que lisent tous les graphiques et
+       tableaux en aval : « Question | Profil | France | Écart (pt) » au lieu de
+       « etiquette | score_prof | score_nat | ecart ». -->
+  <dsfr-data-normalize id="ecarts-l" source="ecarts"
+    rename="etiquette:Question | libelle_reponse:Réponse | score_prof:Profil | score_nat:France | ecart:Écart (pt)">
+  </dsfr-data-normalize>
+  <!-- Source scopée par `dsfr-data-repeat` (0.32.0, #891). La partition préserve
+       l'ordre des lignes : trier UNE fois par `libelle_reponse` ici vaut le
+       `order-by` que portait chacune des 103 requêtes par question. -->
+  <dsfr-data-query id="ecarts-tri" source="ecarts-l" order-by="Réponse:asc"></dsfr-data-query>
+
+  <dsfr-data-query id="top-ecarts" source="ecarts-l" order-by="ecart_abs:desc" limit="6"></dsfr-data-query>
+
+  <!-- ---------- Ce qui bouge le plus, au national ----------
+       Deux éditions, le pivot met chaque année en colonne, `compute` fait le
+       reste. Le plafond de 50 colonnes du pivot est large : il y en a 2.
+
+       RELECTURE MÉTIER DU 2026-09-26 — deux corrections sur cette chaîne.
+
+       1. Le n° 1 du classement était un artefact. « Oui, en interne » (1401)
+          passait de 46,2 % à 33,0 % : en 2025 le questionnaire SCINDE cette
+          réponse en deux (« Oui, en interne » et « Oui, en interne (dirigeants,
+          salariés…) », 22,1 %). Le pivot appariait le libellé resté identique et
+          ignorait l'autre. Règle posée, et calculée plutôt qu'écrite code par
+          code : UNE QUESTION NE SE COMPARE QUE SI SON JEU DE RÉPONSES EST LE MÊME
+          LES DEUX ANNÉES. `mvt-o` marque les couples orphelins (présents une seule
+          année), `mvt-q` les compte par question, `mvt-qs` en tire un statut —
+          comparable, nouvelle en 2025, modifiée, retirée. Cinq questions tombent
+          en « modifiée » (605, 1311, 1401, 1422, 1425, relevé à l'API le
+          2026-09-26) ; la liste suivra le jeu à la prochaine édition.
+
+       2. Six questions IA (802-807) étaient hors comparaison pour un seul mot :
+          « J'en ai » en 2024, « Oui » en 2025 — que le producteur traite comme un
+          même item (`valeurs_dans_calcul` de la 801 : « J'en ai / Oui »).
+          `libelle_reponse_unifie` ne répare rien (vide sur ces lignes). `mvt-unif`
+          ramène « J'en ai » à « Oui » AVANT le pivot. `compute` n'a pas
+          d'échappement de l'apostrophe dans un littéral (tokenizer : la chaîne
+          s'arrête à la première quote) : le test passe par `contains(…, 'en ai')`,
+          et c'est sûr ici — « J'en ai » est le SEUL libellé 2024-2025 qui contient
+          « en ai », et aucune question ne porte les deux libellés la même année
+          (vérifié à l'API). Sur la 923 et la 607, « J'en ai » les deux années
+          devient « Oui » des deux côtés : delta inchangé. -->
+  <dsfr-data-source id="mvt-src" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="questions-reponses"
+    fetch-mode="export" max-records="5000"
+    select="sum(score) as s" group-by="code_unifie, libelle_reponse, year(annee) as an"
+    where="region = 'Toutes régions' and secteur = 'Tous secteurs' and taille = 'Toutes tailles' and year(annee) >= 2024 and libelle_reponse != 'Sans réponse' and not (code_unifie in (201, 202, 203))"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="mvt-unif" source="mvt-src"
+    compute="libelle_cmp = when contains(libelle_reponse, 'en ai') then 'Oui' else libelle_reponse">
+  </dsfr-data-normalize>
+  <dsfr-data-pivot id="mvt-p" source="mvt-unif" row="code_unifie, libelle_cmp"
+    column="an" column-format="an_{value}" value="s" aggregate="sum">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="mvt-o" source="mvt-p" numeric="an_2024, an_2025"
+    compute="p24 = when is_null(an_2024) then 0 else 1;
+             p25 = when is_null(an_2025) then 0 else 1;
+             orphelin = when p24 + p25 = 1 then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="mvt-q" source="mvt-o" group-by="code_unifie"
+    aggregate="p24:sum, p25:sum, orphelin:sum"></dsfr-data-query>
+  <dsfr-data-normalize id="mvt-qs" source="mvt-q"
+    compute="statut = when p25__sum = 0 then 'retiree' when p24__sum = 0 then 'nouvelle' when orphelin__sum > 0 then 'modifiee' else 'comparable';
+             rang = when statut = 'comparable' then 1 when statut = 'nouvelle' then 2 when statut = 'modifiee' then 3 else 4;
+             statut_txt = when statut = 'comparable' then 'se comparent à 2024, avec les mêmes réponses possibles les deux années' when statut = 'nouvelle' then 'sont nouvelles en 2025 : pas de point de comparaison' else 'ont changé de réponses possibles (réponse scindée, ajoutée ou renommée) : écartées, un écart y mesurerait la réforme du questionnaire'">
+  </dsfr-data-normalize>
+  <!-- Le bilan de la règle, lu dans la donnée : combien de questions de 2025 se
+       comparent, et pourquoi les autres ne le peuvent pas. -->
+  <dsfr-data-query id="mvt-bilan" source="mvt-qs" where="statut:neq:retiree"
+    group-by="statut, rang, statut_txt" aggregate="code_unifie:count" order-by="rang:asc"></dsfr-data-query>
+  <dsfr-data-join id="mvt-st" left="mvt-o" right="mvt-qs" on="code_unifie" type="left"></dsfr-data-join>
+  <dsfr-data-join id="mvt-lib" left="mvt-st" right="corr" on="code_unifie" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="mvt" source="mvt-lib"
+    compute="delta_abs = when is_null(an_2024) then -1 when is_null(an_2025) then -1 else abs(an_2025 - an_2024);
+             delta = an_2025 - an_2024;
+             etiquette = concat(libelle_unifie, ' — ', libelle_cmp);
+             a24 = when contains(concat(round(an_2024, 1), ''), '.') then replace(concat(round(an_2024, 1), ''), '.', ',') else concat(round(an_2024, 1), ',0');
+             a25 = when contains(concat(round(an_2025, 1), ''), '.') then replace(concat(round(an_2025, 1), ''), '.', ',') else concat(round(an_2025, 1), ',0');
+             d_txt = replace(concat(when an_2025 >= an_2024 then '+' else '−', abs(round(an_2025 - an_2024, 1))), '.', ',')">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="mvt-top" source="mvt" where="statut:eq:comparable, delta_abs:gt:0" order-by="delta_abs:desc" limit="3"></dsfr-data-query>
+  <!-- La phrase de lecture du bloc : la première ligne du classement. -->
+  <dsfr-data-query id="mvt-un" source="mvt-top" limit="1"></dsfr-data-query>
+  <!-- Le tableau équivalent, en-têtes lisibles (voir `ecarts-l`). -->
+  <dsfr-data-normalize id="mvt-tab" source="mvt-top"
+    rename="etiquette:Question | an_2024:2024 | an_2025:2025 | delta:Variation (pt)">
+  </dsfr-data-normalize>
+
+  <!-- ====================== BARRE DE FILTRES ====================== -->
+  <div class="fr-background-alt--grey fr-py-3w fr-mb-4w">
     <div class="fr-container">
-      <div class="odv-bandeau__recherche">
-        <dsfr-data-search id="bfn-q" source="bfn-scores-lib"
-          fields="libelle_unifie, libelle_reponse"
-          label="Rechercher une question ou une réponse" placeholder="Site web, réseaux sociaux, cyber…"
-          operator="words" count count-label="question">
-        </dsfr-data-search>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-md-9">
+          <dsfr-data-facets id="f-profil" source="axes-profil" context="profil"
+            fields="region, secteur, taille"
+            labels="region:Région | secteur:Secteur d'activité | taille:Taille de l'entreprise"
+            display="region:select | secteur:select | taille:select"
+            default="region:Toutes régions | secteur:Tous secteurs | taille:Toutes tailles"
+            value-labels='{"secteur":{"Nouvelles technologies - Information - Communication":"Nouvelles technologies","Z - Autre":"Autre"}}'
+            sort="region:alpha | secteur:alpha | taille:alpha"
+            max-values="50" hide-counts cols="3"></dsfr-data-facets>
+        </div>
+        <div class="fr-col-12 fr-col-md-3">
+          <dsfr-data-context-tags for="profil"></dsfr-data-context-tags>
+        </div>
+      </div>
+      <p class="fr-text--xs fr-mt-1w fr-mb-0 fr-hint-text">
+        Vous consultez&nbsp;:
+        <strong><dsfr-data-context-value for="profil" field="region" fallback="la France entière"></dsfr-data-context-value></strong>,
+        <dsfr-data-context-value for="profil" field="secteur" fallback="tous secteurs"></dsfr-data-context-value>,
+        <dsfr-data-context-value for="profil" field="taille" fallback="toutes tailles"></dsfr-data-context-value>
+        — comparé à la France entière.
+      </p>
+      <div class="fr-grid-row fr-grid-row--gutters fr-mt-1w">
+        <div class="fr-col-12 fr-col-md-4 fr-col-lg-3">
+          <!-- Ce que le profil pèse (R4 de la relecture métier, 2026-09-26).
+               `poids_question` est la population d'entreprises que les réponses
+               du profil représentent après pondération : 2,1 M au national,
+               109 k pour la Bretagne, 321 pour Bretagne × Nouvelles technologies
+               × 0 salarié (relevé à l'API le 2026-09-26). Le nombre de
+               RÉPONDANTS d'un profil n'est pas dans le jeu : on ne l'invente pas. -->
+          <dsfr-data-kpi source="reperes" where="code_unifie:eq:501"
+            heading="Poids du profil" value="pop:max" format="compact"
+            label="entreprises représentées (pondération de l'enquête)"></dsfr-data-kpi>
+        </div>
+        <div class="fr-col-12 fr-col-md-8 fr-col-lg-9">
+          <p class="fr-text--sm fr-mb-0">
+            L'enquête (CREDOC, 2025) compte 11&nbsp;021 entreprises répondantes pour toute la France.
+            Le nombre de répondants d'un profil n'est pas publié&nbsp;; le poids ci-contre en donne
+            l'ordre de grandeur. Un profil qui ne représente que quelques centaines d'entreprises
+            repose sur une poignée de réponses&nbsp;: ses parts tombent alors sur des multiples de
+            dix, et ses écarts ne sont pas interprétables.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================== QUATRE REPÈRES ====================== -->
+  <section class="fr-container fr-mb-6w">
+    <h2 class="fr-h4">
+      <dsfr-data-context-value for="profil" field="region" fallback="La France entière"></dsfr-data-context-value>
+      en quatre repères
+    </h2>
+    <p class="fr-text--sm fr-hint-text">
+      Quatre indicateurs de l'édition 2025, un par grand thème. La valeur du profil, puis la
+      référence nationale.
+    </p>
+
+    <!-- Quatre `dsfr-data-kpi` dans un groupe, pas quatre cartes maison :
+         `heading` porte le thème, `format="pourcentage"` le chiffre, `lines`
+         la référence nationale et l'écart signé coloré, `where` (côté client,
+         #674) choisit la ligne parmi les quatre reçues. Zéro CSS. -->
+    <dsfr-data-kpi-group per-row="1 md:2 lg:4" class="fr-mb-4w">
+      <dsfr-data-kpi source="reperes" where="code_unifie:eq:501"
+        heading="Perception du numérique" value="v_prof:max" format="pourcentage" decimals="1"
+        label="Le numérique est un bénéfice réel"
+        lines='[{"value":"v_nat:max","prefix":"France :","decimals":1},{"value":"ecart:max","format":"decimal","decimals":1,"unit":"pt","sign":true,"color":"auto"}]'>
+      </dsfr-data-kpi>
+      <dsfr-data-kpi source="reperes" where="code_unifie:eq:801"
+        heading="Intelligence artificielle" value="v_prof:max" format="pourcentage" decimals="1"
+        label="Utilisent l’intelligence artificielle"
+        lines='[{"value":"v_nat:max","prefix":"France :","decimals":1},{"value":"ecart:max","format":"decimal","decimals":1,"unit":"pt","sign":true,"color":"auto"}]'>
+      </dsfr-data-kpi>
+      <dsfr-data-kpi source="reperes" where="code_unifie:eq:923"
+        heading="Cybersécurité" value="v_prof:max" format="pourcentage" decimals="1"
+        label="Authentification multi-facteurs en place"
+        lines='[{"value":"v_nat:max","prefix":"France :","decimals":1},{"value":"ecart:max","format":"decimal","decimals":1,"unit":"pt","sign":true,"color":"auto"}]'>
+      </dsfr-data-kpi>
+      <dsfr-data-kpi source="reperes" where="code_unifie:eq:1006"
+        heading="Connectivité" value="v_prof:max" format="pourcentage" decimals="1"
+        label="Débit internet satisfaisant ou très satisfaisant"
+        lines='[{"value":"v_nat:max","prefix":"France :","decimals":1},{"value":"ecart:max","format":"decimal","decimals":1,"unit":"pt","sign":true,"color":"auto"}]'>
+      </dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </section>
+
+  <!-- ====================== ÉCARTS AU NATIONAL ====================== -->
+  <section class="fr-container fr-mb-6w">
+    <h2 class="fr-h4">
+      Là où
+      <dsfr-data-context-value for="profil" field="region" fallback="la France entière"></dsfr-data-context-value>
+      s'écarte le plus de la France
+    </h2>
+    <p class="odv-lecture">Les écarts les plus forts entre <strong>votre profil</strong> d'entreprise et la France entière. Trois questions sont volontairement écartées&nbsp;: elles ne font qu'écho au filtre que vous venez de poser.</p>
+    <!-- Phrase de lecture calculée : la première ligne du classement. -->
+    <dsfr-data-query id="top-un" source="top-ecarts" where="ecart_abs:gt:0" limit="1"></dsfr-data-query>
+    <dsfr-data-repeat source="top-un">
+      <template>
+        <p class="fr-text--sm">Le plus fort écart porte sur <strong>{{Question}}</strong>&nbsp;: {{valeurs_txt}} ({{ecart_txt}}&nbsp;points).</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text">
+      Les six plus forts écarts de l'édition 2025, toutes questions confondues. Deux barres par
+      question&nbsp;: la France entière en violet, le profil choisi en rouge — les couleurs de
+      l'original. Le tableau équivalent sous le graphique donne l'écart chiffré.
+    </p>
+
+    <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-2w">
+      <p class="fr-text--sm">Tant que les trois listes restent sur «&nbsp;Toutes&nbsp;», le profil
+      <em>est</em> la France entière&nbsp;: tous les écarts valent alors zéro. Choisissez une
+      région, un secteur ou une taille.</p>
+    </div>
+
+    <!-- Un vrai graphique DSFR Chart, deux séries, enveloppé en DataBox
+         (titre, source, export). Les couleurs sont celles de l'original,
+         posées par `color-map` — grammaire à VIRGULES (PG-022). -->
+    <div class="odv-viz" data-code="Les six plus forts écarts au national (en % des répondants)">
+    <dsfr-data-chart source="top-ecarts" type="bar" horizontal
+      label-field="Question"
+      value-field="France:France entière" value-fields="Profil:Profil filtré"
+      color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+      databox databox-title="Les six plus forts écarts au national (en % des répondants)"
+      databox-source="DGE — questions-reponses" databox-date="Édition 2025" databox-download>
+    </dsfr-data-chart>
+    <dsfr-data-a11y source="top-ecarts" table download
+      label="Les six plus forts écarts au national" label-field="Question" value-field="Profil, France, Écart (pt)"
+      filename="ecarts-barometre-france-num.csv"
+      description="Pour chaque question, la valeur du profil choisi, la valeur nationale et l'écart en points de pourcentage."></dsfr-data-a11y>
+    </div>
+
+    <div class="fr-alert fr-alert--warning fr-alert--sm fr-mt-2w">
+      <p class="fr-text--sm">Les résultats régionaux ne sont pas représentatifs avant l'édition
+      2023&nbsp;; les écarts affichés portent sur 2025. Cumuler région, secteur et taille réduit
+      l'échantillon et fragilise la comparaison.</p>
+    </div>
+
+  </section>
+
+  <!-- ====================== CE QUI BOUGE LE PLUS ====================== -->
+  <section class="fr-container fr-mb-6w">
+    <h2 class="fr-h4">Ce qui bouge le plus dans l'enquête</h2>
+    <!-- Phrase de lecture calculée (R5 de la relecture métier) : la première
+         ligne de `mvt-top`, jamais un chiffre recopié. -->
+    <dsfr-data-repeat source="mvt-un">
+      <template>
+        <p class="odv-lecture">La plus forte variation entre les deux dernières éditions&nbsp;: <strong>{{etiquette}}</strong>, {{a24}}&nbsp;% en 2024, {{a25}}&nbsp;% en 2025 ({{d_txt}}&nbsp;points).</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text">
+      France entière, 2024&nbsp;→&nbsp;2025. Les trois plus fortes variations entre les deux
+      dernières éditions, calculées et non choisies — <strong>parmi les seules questions qui se
+      comparent</strong>. Une question dont les réponses possibles ont changé d'une édition à
+      l'autre est écartée&nbsp;: une réponse scindée en deux y ferait «&nbsp;baisser&nbsp;» ce qui
+      n'a fait que se partager. Sur les questions de l'édition 2025&nbsp;:
+    </p>
+    <!-- Le bilan de la règle, compté dans la donnée (`mvt-bilan`). -->
+    <dsfr-data-repeat source="mvt-bilan" key-field="statut">
+      <template>
+        <p class="fr-text--sm fr-mb-1v">— <strong>{{code_unifie__count}}</strong> {{statut_txt}}.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text fr-mt-1w">
+      «&nbsp;J'en ai&nbsp;» (2024) et «&nbsp;Oui&nbsp;» (2025) sont tenus pour la même réponse,
+      comme le fait le producteur pour l'intelligence artificielle.
+    </p>
+
+    <div class="odv-viz" data-code="Les trois plus fortes variations, France entière (en % des répondants)">
+    <dsfr-data-chart source="mvt-top" type="bar" horizontal
+      label-field="etiquette"
+      value-field="an_2024:2024" value-fields="an_2025:2025"
+      color-map="2024:#929292,2025:#413592" unit-tooltip="%"
+      databox databox-title="Les trois plus fortes variations, France entière (en % des répondants)"
+      databox-source="DGE — questions-reponses" databox-date="Éditions 2024 et 2025" databox-download>
+    </dsfr-data-chart>
+    <dsfr-data-a11y source="mvt-tab" table download
+      label="Trois plus fortes variations entre 2024 et 2025, France entière"
+      label-field="Question" value-field="2024, 2025, Variation (pt)"
+      filename="variations-barometre-france-num.csv"
+      description="Pour chaque question et réponse, la part nationale des répondants en 2024 et en 2025, et la variation en points. Seules concourent les questions dont les réponses possibles sont les mêmes les deux années."></dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ====================== LIRE L'ENQUÊTE, CHAPITRE PAR CHAPITRE ======================
+       La structure de l'original, en composants DSFR : un menu latéral collant
+       (`fr-sidemenu`) et douze accordéons (`fr-accordion`), un par chapitre.
+
+       Ce qui change par rapport à l'original : ses accordéons déclenchent chacun
+       leurs requêtes à l'ouverture (5 à 10 s par chapitre, relevé au portail).
+       Ici les douze `dsfr-data-query` filtrent les 236 lignes DÉJÀ chargées par
+       la section haute — aucune requête supplémentaire, et le graphique se rend
+       à l'ouverture du pli. Le filtre porte sur `ordre_chapitre` et non sur le
+       libellé : celui de « Compétences numériques et accompagnement » contient
+       un retour à la ligne dans le jeu.
+       ========================================================================== -->
+  <section class="fr-container fr-mb-12v">
+    <h2 class="fr-h4">Lire l'enquête, chapitre par chapitre</h2>
+        <p class="odv-lecture">Les cent questions de l'édition 2025 (103 posées, moins les trois questions d'identité — secteur, taille, région), <strong>un graphique chacune</strong>. Les chapitres s'ouvrent un à un, et leurs graphiques ne se dessinent qu'à votre arrivée.</p>
+    <p class="fr-text--sm fr-hint-text">
+      Douze chapitres, dans l'ordre de l'enquête. Chaque pli compare les réponses du profil
+      choisi à la France entière, sur l'édition 2025.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-4 fr-col-lg-3">
+        <nav class="fr-sidemenu fr-sidemenu--sticky" role="navigation" aria-labelledby="titre-sommaire">
+          <div class="fr-sidemenu__inner">
+            <button class="fr-sidemenu__btn" aria-controls="sommaire-chapitres" aria-expanded="false">Les 12 chapitres</button>
+            <div class="fr-collapse" id="sommaire-chapitres">
+              <p class="fr-sidemenu__title" id="titre-sommaire">Les 12 chapitres</p>
+              <ul class="fr-sidemenu__list">
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-2">TPE PME interrogées</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-5">Perception du numérique</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-6">Promotion et développement commercial sur internet</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-7">Gestion et pilotage de l’entreprise avec le numérique</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-8">Intelligence artificielle</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-9">Cybersécurité</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-10">Connectivité</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-11">Sobriété numérique</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-12">Modes d’acquisition et d’installation</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-13">Dépenses et projets numériques</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-14">Compétences numériques et accompagnement</a>
+            </li>
+            <li class="fr-sidemenu__item">
+              <a class="fr-sidemenu__link" href="#chapitre-15">Typologie des entreprises interrogées</a>
+            </li>
+                <li class="fr-sidemenu__item">
+                  <a class="fr-sidemenu__link" href="https://data.economie.gouv.fr/explore/dataset/questions-reponses/" target="_blank" rel="noopener external">Liens vers les données brutes</a>
+                </li>
+                <li class="fr-sidemenu__item">
+                  <a class="fr-sidemenu__link" href="https://www.francenum.gouv.fr/" target="_blank" rel="noopener external">En savoir plus</a>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </nav>
+      </div>
+
+      <div class="fr-col-12 fr-col-md-8 fr-col-lg-9">
+        <div class="fr-accordions-group">
+        <section class="fr-accordion" id="chapitre-2">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-2">TPE PME interrogées</button>
+          </h3>
+          <div class="fr-collapse" id="acc-2">
+            <dsfr-data-query id="q-ch-2" source="ecarts-l" where="ordre_chapitre:eq:2" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-2-liste" source="q-ch-2" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc2`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-2-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc2" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc2}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-2" table download
+              label="TPE PME interrogées — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-2.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-5">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-5">Perception du numérique</button>
+          </h3>
+          <div class="fr-collapse" id="acc-5">
+            <dsfr-data-query id="q-ch-5" source="ecarts-l" where="ordre_chapitre:eq:5" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-5-liste" source="q-ch-5" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc5`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-5-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc5" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc5}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-5" table download
+              label="Perception du numérique — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-5.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-6">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-6">Promotion et développement commercial sur internet</button>
+          </h3>
+          <div class="fr-collapse" id="acc-6">
+            <dsfr-data-query id="q-ch-6" source="ecarts-l" where="ordre_chapitre:eq:6" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-6-liste" source="q-ch-6" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc6`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-6-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc6" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc6}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-6" table download
+              label="Promotion et développement commercial sur internet — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-6.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025. Les questions 602, 605 et 627 publient la réponse « Z - Autre » sur deux lignes du jeu, que la page additionne comme le portail d'origine."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-7">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-7">Gestion et pilotage de l’entreprise avec le numérique</button>
+          </h3>
+          <div class="fr-collapse" id="acc-7">
+            <dsfr-data-query id="q-ch-7" source="ecarts-l" where="ordre_chapitre:eq:7" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-7-liste" source="q-ch-7" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc7`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-7-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc7" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc7}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-7" table download
+              label="Gestion et pilotage de l’entreprise avec le numérique — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-7.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-8">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-8">Intelligence artificielle</button>
+          </h3>
+          <div class="fr-collapse" id="acc-8">
+            <dsfr-data-query id="q-ch-8" source="ecarts-l" where="ordre_chapitre:eq:8" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-8-liste" source="q-ch-8" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc8`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-8-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc8" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc8}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-8" table download
+              label="Intelligence artificielle — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-8.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-9">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-9">Cybersécurité</button>
+          </h3>
+          <div class="fr-collapse" id="acc-9">
+            <dsfr-data-query id="q-ch-9" source="ecarts-l" where="ordre_chapitre:eq:9" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-9-liste" source="q-ch-9" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc9`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-9-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc9" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc9}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-9" table download
+              label="Cybersécurité — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-9.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-10">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-10">Connectivité</button>
+          </h3>
+          <div class="fr-collapse" id="acc-10">
+            <dsfr-data-query id="q-ch-10" source="ecarts-l" where="ordre_chapitre:eq:10" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-10-liste" source="q-ch-10" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc10`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-10-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc10" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc10}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-10" table download
+              label="Connectivité — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-10.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-11">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-11">Sobriété numérique</button>
+          </h3>
+          <div class="fr-collapse" id="acc-11">
+            <dsfr-data-query id="q-ch-11" source="ecarts-l" where="ordre_chapitre:eq:11" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-11-liste" source="q-ch-11" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc11`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-11-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc11" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc11}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-11" table download
+              label="Sobriété numérique — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-11.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-12">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-12">Modes d’acquisition et d’installation</button>
+          </h3>
+          <div class="fr-collapse" id="acc-12">
+            <dsfr-data-query id="q-ch-12" source="ecarts-l" where="ordre_chapitre:eq:12" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-12-liste" source="q-ch-12" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc12`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-12-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc12" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc12}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-12" table download
+              label="Modes d’acquisition et d’installation — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-12.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-13">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-13">Dépenses et projets numériques</button>
+          </h3>
+          <div class="fr-collapse" id="acc-13">
+            <dsfr-data-query id="q-ch-13" source="ecarts-l" where="ordre_chapitre:eq:13" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-13-liste" source="q-ch-13" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc13`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-13-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc13" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc13}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-13" table download
+              label="Dépenses et projets numériques — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-13.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025. La question 1311 publie la réponse « Z - Autre » sur deux lignes du jeu, que la page additionne comme le portail d'origine."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-14">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-14">Compétences numériques et accompagnement</button>
+          </h3>
+          <div class="fr-collapse" id="acc-14">
+            <dsfr-data-query id="q-ch-14" source="ecarts-l" where="ordre_chapitre:eq:14" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-14-liste" source="q-ch-14" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc14`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-14-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc14" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc14}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-14" table download
+              label="Compétences numériques et accompagnement — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-14.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025. Les questions 1414, 1422 et 1425 publient certaines réponses sur deux lignes du jeu (dont « France Num, l'initiative… » pour la 1422 et « Site internet de France Num » pour la 1425), que la page additionne comme le portail d'origine."></dsfr-data-a11y>
+          </div>
+        </section>
+        <section class="fr-accordion" id="chapitre-15">
+          <h3 class="fr-accordion__title">
+            <button class="fr-accordion__btn" aria-expanded="false" aria-controls="acc-15">Typologie des entreprises interrogées</button>
+          </h3>
+          <div class="fr-collapse" id="acc-15">
+            <dsfr-data-query id="q-ch-15" source="ecarts-l" where="ordre_chapitre:eq:15" order-by="code_unifie:asc"></dsfr-data-query>
+            <!-- Une ligne par QUESTION du chapitre : c'est elle qu'on répète. -->
+            <dsfr-data-query id="q-ch-15-liste" source="q-ch-15" group-by="code_unifie, libelle_unifie" order-by="code_unifie:asc"></dsfr-data-query>
+
+            <!-- Un graphique PAR QUESTION, comme l'original — par le répéteur
+                 structurel (`dsfr-data-repeat`, 0.32.0). `scopes` partitionne
+                 `ecarts-tri` par `code_unifie` EN UNE PASSE et émet un id par
+                 ligne répétée, lu par `{{$scope}}` : plus une seule
+                 `dsfr-data-query` interpolée, là où le motif précédent en
+                 instanciait une par question qui refiltrait la source entière.
+                 `key-field` donne l'identité : une ré-émission met les
+                 attributs à jour en place au lieu de détruire les canvas.
+                 Un alias par chapitre (`sc15`) : le bus d'ids est plat, deux
+                 répéteurs qui fabriqueraient le même id se marcheraient dessus.
+                 `lazy` n'estampe les composants d'une ligne qu'à son approche du
+                 viewport ; les titres, eux, sont rendus d'emblée, donc le plan
+                 de la page et sa hauteur ne dépendent pas du défilement. -->
+            <dsfr-data-repeat source="q-ch-15-liste" key-field="code_unifie"
+              scopes="ecarts-tri:code_unifie:sc15" lazy>
+              <template>
+                <div class="odv-question">
+                <h4 class="fr-text--md fr-mt-4v fr-mb-1v">{{libelle_unifie}}</h4>
+                <dsfr-data-chart source="{{$scope.sc15}}" type="bar" horizontal
+                  label-field="Réponse"
+                  value-field="France:France entière" value-fields="Profil:Profil filtré"
+                  color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%"
+                  databox databox-title="{{libelle_unifie}}" databox-source="DGE — questions-reponses"
+                  databox-date="Édition 2025" databox-download></dsfr-data-chart>
+                </div>
+              </template>
+            </dsfr-data-repeat>
+            <dsfr-data-a11y source="q-ch-15" table download
+              label="Typologie des entreprises interrogées — profil et national"
+              label-field="Question" value-field="Profil, France, Écart (pt)"
+              filename="barometre-chapitre-15.csv"
+              description="Pour chaque couple question-réponse du chapitre, la valeur du profil et la valeur nationale, édition 2025."></dsfr-data-a11y>
+          </div>
+        </section>
+        </div>
       </div>
     </div>
   </section>
 
-  <div class="fr-container fr-mb-8w">
 
-    <h2 class="fr-h3" id="question">Une question, six éditions, une vue filtrée</h2>
+  <!-- ====================== DIRECTION C — TROUVER, PUIS COMPARER ======================
+       Le détail d'UNE question : un seul graphique, choisi dans une liste.
+
+       Relecture métier du 2026-09-26 (R7) : la liste était un <select> de 119
+       <option> écrites en dur, piloté par un `context-filter` sur deux sources
+       `require-where` (deux requêtes). 16 de ces 119 questions n'ont AUCUNE ligne
+       en 2025 (503-506, 511, 603, 606, 628, 704, 1001-1005, 1201-1202, relevé à
+       l'API) : les choisir rendait « Aucune donnée disponible », sans un mot —
+       l'option morte que l'ancienne liste des régions portait aussi.
+
+       Voie native, et elle n'était pas possible avant la 0.33.0 : une
+       `dsfr-data-facets` CLIENT sur les lignes déjà chargées (`ecarts-l`), sur le
+       champ de CODE, avec `value-labels="code_unifie:libelle_unifie"` (AM-081,
+       champ compagnon lu dans les mêmes lignes) et `default="code_unifie:923"`
+       (AM-084). La liste est celle des questions qui ont des données pour le
+       profil : elle ne peut plus diverger du jeu, elle suit le filtre de profil,
+       et elle ne coûte aucune requête. La facette n'est pas en mode `context` :
+       elle filtre sa source et redistribue le résultat sous son id (`det`). -->
+  <section class="fr-container fr-mb-6w">
+    <h2 class="fr-h4">Chercher une question, puis comparer</h2>
     <p class="fr-text--sm fr-hint-text">
-      Le motif de chaque section de l'original&nbsp;: la question (lue dans la table de
-      correspondance), son descriptif, le score par année en vue nationale, et la même chose
-      pour la région × le secteur × la taille choisis. Les quatre sélecteurs sont repris dans
-      l'URL. Les réponses «&nbsp;Sans réponse&nbsp;» sont exclues, comme dans l'original.
+      Choisissez une question dans la liste, ou cherchez-la par mots dans le catalogue —
+      «&nbsp;authentification&nbsp;», «&nbsp;site internet&nbsp;», «&nbsp;facture&nbsp;».
+      La liste ne propose que les questions posées en 2025 pour lesquelles le profil choisi a
+      des réponses.
     </p>
 
-    <form class="fr-grid-row fr-grid-row--gutters fr-mb-4w" aria-label="Choisir une question et des filtres">
-      <div class="fr-col-12">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-question">Question (119, par chapitre)</label>
-          <select class="fr-select" id="sel-question">
-          <optgroup label="TPE PME interrogées">
-            <option value="201">201 — Secteur d'activité de l'entreprise</option>
-            <option value="202">202 — Taille de l'entreprise</option>
-            <option value="203">203 — Région</option>
-            <option value="204">204 — Type de l’activité de l'entreprise</option>
-            <option value="205">205 — Durée de vie de l'entreprise au 01/01/N</option>
-            <option value="206">206 — Votre entreprise a-t-elle actuellement des projets en cours de réalisation ?</option>
-          </optgroup>
-          <optgroup label="Perception du numérique">
-            <option value="501" selected>501 — Dans l’ensemble, je trouve que le numérique aujourd’hui représente un bénéfice réel pour mon entreprise</option>
-            <option value="502">502 — Le numérique facilite la communication avec mes clients</option>
-            <option value="503">503 — Le numérique facilite la communication avec mes employés ou collaborateurs</option>
-            <option value="504">504 — Le numérique me fait perdre plus de temps qu’il ne m’en fait gagner</option>
-            <option value="505">505 — Le numérique me permet de faire des économies</option>
-            <option value="506">506 — Le numérique me permet de gagner de l’argent</option>
-            <option value="507">507 — Le numérique me permet d’augmenter mon chiffre d’affaires</option>
-            <option value="508">508 — Le numérique me permet d’augmenter mes bénéfices</option>
-            <option value="509">509 — Le numérique permet de me démarquer de la concurrence</option>
-            <option value="510">510 — J’ai peur de perdre ou de me faire pirater des données quand j’utilise le numérique</option>
-            <option value="511">511 — Je suis en retard sur le numérique par rapport aux autres entreprises du même secteur</option>
-            <option value="512">512 — Le numérique facilite l'externalisation de certaines fonctions</option>
-          </optgroup>
-          <optgroup label="Promotion et développement commercial sur internet">
-            <option value="601">601 — Site internet présentant l'activité de l'entreprise (hors réseaux sociaux) : taux d'équipement</option>
-            <option value="602">602 — Bénéfices d'avoir un site internet</option>
-            <option value="603">603 — Raisons conduisant à ne pas avoir de site internet</option>
-            <option value="604">604 — Compte(s) sur les réseaux sociaux : taux d'équipement</option>
-            <option value="605">605 — Sur quel(s) réseau(x) sociaux votre entreprise est-elle présente ?</option>
-            <option value="606">606 — Raisons conduisant à ne pas utiliser les réseaux sociaux</option>
-            <option value="607">607 — Annuaire gratuit sur internet : taux d'équipement</option>
-            <option value="608">608 — Annuaire payant sur internet : taux d'équipement</option>
-            <option value="611">611 — Solution de gestion de la relation client : taux d'équipement</option>
-            <option value="621">621 — Vente sur son propre site internet marchand : taux d'équipement</option>
-            <option value="622">622 — Vente sur les places de marché : taux d'équipement</option>
-            <option value="623">623 — Vente sur les réseaux sociaux : taux d'équipement</option>
-            <option value="624">624 — Solution de commande en ligne et retrait en magasin : taux d'équipement</option>
-            <option value="625">625 — Part des clients provenant d’internet</option>
-            <option value="626">626 — Part du chiffre d'affaires provenant d’internet</option>
-            <option value="627">627 — Bénéfices de vendre en ligne</option>
-            <option value="628">628 — Raisons conduisant à ne pas vendre en ligne</option>
-          </optgroup>
-          <optgroup label="Gestion et pilotage de l’entreprise avec le numérique">
-            <option value="701">701 — Messagerie instantanée : taux d'équipement</option>
-            <option value="702">702 — Solution de collaboration professionnelle : taux d'équipement</option>
-            <option value="703">703 — Plateforme d'échange de documents en ligne : taux d'équipement</option>
-            <option value="704">704 — Signature électronique : taux d'équipement</option>
-            <option value="705">705 — Intranet ou réseau social de l'entreprise : taux d'équipement</option>
-            <option value="711">711 — Solution de gestion comptable : taux d'équipement</option>
-            <option value="712">712 — Solution de facturation : taux d'équipement</option>
-            <option value="713">713 — Part des factures émises sous un format électronique structuré permettant leur traitement automatique</option>
-            <option value="714">714 — Logiciel de caisse : taux d'équipement</option>
-            <option value="715">715 — Solution de gestion liée au compte bancaire professionnel : taux d'équipement</option>
-            <option value="716">716 — Terminal de paiement classique (TPE) : taux d'équipement</option>
-            <option value="717">717 — Terminal de paiement associé à smartphone / tablette : taux d'équipement</option>
-            <option value="718">718 — Solution de paiement en ligne : taux d'équipement</option>
-            <option value="721">721 — Solution de gestion de production ou de maintenance : taux d'équipement</option>
-            <option value="722">722 — Solution d’automatisation de la production / robots : taux d'équipement</option>
-            <option value="723">723 — Solution de conception / modélisation / d’impression 3D : taux d'équipement</option>
-            <option value="724">724 — Solution de gestion des achats / de l'approvisionnement / des stocks : taux d'équipement</option>
-            <option value="725">725 — Solution de gestion de commandes clients et/ou des expéditions : taux d'équipement</option>
-            <option value="731">731 — ERP : taux d'équipement</option>
-            <option value="733">733 — Solution d’échange de données : taux d'équipement</option>
-            <option value="734">734 — Technologies immersives : taux d'équipement</option>
-            <option value="740">740 — Analyse des données : RH / paie</option>
-            <option value="741">741 — Analyse des données : comptabilité / finances</option>
-            <option value="742">742 — Analyse des données : catalogue de produits / services</option>
-            <option value="743">743 — Analyse des données : clients / ventes</option>
-            <option value="744">744 — Analyse des données : fournisseurs / achats</option>
-            <option value="745">745 — Analyse des données : gestion de production</option>
-            <option value="746">746 — Analyse des données : tableaux de bord transverse</option>
-            <option value="750">750 — Délégué ou responsable de la protection des données personnelles</option>
-            <option value="751">751 — Registre des activités de traitement</option>
-          </optgroup>
-          <optgroup label="Intelligence artificielle">
-            <option value="801">801 — Intelligence artificielle : taux d'utilisation global</option>
-            <option value="802">802 — IA générative : taux d'utilisation</option>
-            <option value="803">803 — Analyse / classification de documents : taux d'utilisation</option>
-            <option value="804">804 — Analyse de données / prévision / optimisation des ressources : taux d'utilisation</option>
-            <option value="805">805 — Chatbot / assistant / recherche d’informations : taux d'utilisation</option>
-            <option value="806">806 — Contrôle qualité / détection : taux d'utilisation</option>
-            <option value="807">807 — Automatisation des tâches : taux d'utilisation</option>
-          </optgroup>
-          <optgroup label="Cybersécurité">
-            <option value="901">901 — Incidents de cybersécurité : taux d'incidents</option>
-            <option value="911">911 — Mesures de cybersécurité : taux de mise en œuvre</option>
-            <option value="921">921 — Antivirus : taux de mise en œuvre</option>
-            <option value="922">922 — Authentification biométrique : taux de mise en œuvre</option>
-            <option value="923">923 — Authentification multi-facteurs : taux de mise en œuvre</option>
-            <option value="924">924 — Assurance : taux de mise en œuvre</option>
-            <option value="925">925 — Plan sécurité / reprise d'activité : taux de mise en œuvre</option>
-            <option value="926">926 — Sauvegarde extérieure : taux de mise en œuvre</option>
-            <option value="927">927 — Référent sécurité : taux de mise en œuvre</option>
-            <option value="928">928 — Formation / sensibilisation : taux de mise en œuvre</option>
-            <option value="929">929 — Protection locaux / matériels : taux de mise en œuvre</option>
-          </optgroup>
-          <optgroup label="Connectivité">
-            <option value="1001">1001 — ADSL/VDSL/SDSL : taux d'équipement</option>
-            <option value="1002">1002 — Fibre optique : taux d'équipement</option>
-            <option value="1003">1003 — 4G/5G mobile : taux d'équipement</option>
-            <option value="1004">1004 — 4G/5G fixe ou boucle locale radio : taux d'équipement</option>
-            <option value="1005">1005 — Satellite : taux d'équipement</option>
-            <option value="1006">1006 — Débit internet : taux de satisfaction</option>
-            <option value="1007">1007 — Fiabilité internet : taux de satisfaction</option>
-            <option value="1008">1008 — Prix internet : taux de satisfaction</option>
-          </optgroup>
-          <optgroup label="Sobriété numérique">
-            <option value="1101">1101 — Achat de matériel reconditionné : taux de mise en œuvre</option>
-            <option value="1102">1102 — Recyclage des équipements : taux de mise en œuvre</option>
-            <option value="1103">1103 — Réduction de la consommation énergétique : taux de mise en œuvre</option>
-            <option value="1104">1104 — Ecoconception des solutions numériques : taux de mise en œuvre</option>
-          </optgroup>
-          <optgroup label="Modes d’acquisition et d’installation">
-            <option value="1201">1201 — Mode d’acquisition majoritaire des solutions logicielles utilisées</option>
-            <option value="1202">1202 — Mode d'installation majoritaire des solutions logicielles utilisées</option>
-          </optgroup>
-          <optgroup label="Dépenses et projets numériques">
-            <option value="1301">1301 — Budget consacré au numérique l'année précédente</option>
-            <option value="1311">1311 — Priorités en matière de numérique dans les 2 prochaines années</option>
-            <option value="1321">1321 — Budget annuel prévu pour les projets numériques (hors recrutements)</option>
-            <option value="1331">1331 — Prêts bancaires : taux de prévision de recours</option>
-            <option value="1332">1332 — Financement participatif : taux de prévision de recours</option>
-            <option value="1333">1333 — Subventions publiques : taux de prévision de recours</option>
-            <option value="1334">1334 — Autres subventions : taux de prévision de recours</option>
-          </optgroup>
-          <optgroup label="Compétences numériques et accompagnement">
-            <option value="1401">1401 — Votre entreprise dispose-t-elle de compétences dans le numérique ?</option>
-            <option value="1411">1411 — Formation, au sein de l'entreprise, spécifiquement sur le numérique : taux de recours</option>
-            <option value="1412">1412 — Formation, au sein de l'entreprise, sur un autre sujet incluant la dimension numérique : taux de recours</option>
-            <option value="1413">1413 — Formation, au sein de l'entreprise, sur un autre sujet (hors numérique) : taux de recours</option>
-            <option value="1414">1414 — Pour les formations sur le numérique, grâce à qui avez-vous identifié la formation ?</option>
-            <option value="1415">1415 — Rencontrez-vous des difficultés à définir vos besoins de formation ?</option>
-            <option value="1416">1416 — Rencontrez-vous des difficultés à trouver une formation adéquate ?</option>
-            <option value="1417">1417 — Rencontrez-vous des difficultés à financer votre formation ?</option>
-            <option value="1418">1418 — Rencontrez-vous des difficultés à trouver le temps nécessaire ?</option>
-            <option value="1421">1421 — Rencontrez-vous des difficultés pour identifier un prestataire de services numériques répondant à vos attentes ?</option>
-            <option value="1422">1422 — Selon vous, qui serait mieux à même de vous conseiller dans votre transformation numérique ?</option>
-            <option value="1423">1423 — Connaissez-vous France Num ?</option>
-            <option value="1425">1425 — Connaissez-vous l'une des actions suivantes de France Num ?</option>
-            <option value="1426">1426 — Quel est votre avis sur ces actions ?</option>
-          </optgroup>
-          <optgroup label="Typologie des entreprises interrogées">
-            <option value="1501">1501 — Typologie des entreprises interrogées (réticentes, en potentiel, dynamiques, matures)</option>
-          </optgroup>
-          </select>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-region">Région</label>
-          <select class="fr-select" id="sel-region">
-            <option>Auvergne-Rhône-Alpes</option>
-            <option>Bourgogne-Franche-Comté</option>
-            <option>Bretagne</option>
-            <option>Centre-Val de Loire</option>
-            <option>Grand Est</option>
-            <option>Hauts-de-France</option>
-            <option>Île-de-France</option>
-            <option>Normandie</option>
-            <option>Nouvelle-Aquitaine</option>
-            <option>Occitanie</option>
-            <option>Pays de la Loire</option>
-            <option>Provence Alpes Côte d’Azur + Corse</option>
-            <option>Provence-Alpes-Côte d'Azur</option>
-            <option selected>Toutes régions</option>
-          </select>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-secteur">Secteur d'activité</label>
-          <select class="fr-select" id="sel-secteur">
-            <option>Activités financières - Assurances</option>
-            <option>Agriculture</option>
-            <option>Bâtiment - Construction</option>
-            <option>Commerce (détail et gros)</option>
-            <option>Hébergement - Restauration</option>
-            <option>Industrie</option>
-            <option>Nouvelles technologies - Information - Communication</option>
-            <option>Services à la personne</option>
-            <option>Services spécialisés - Techniques</option>
-            <option selected>Tous secteurs</option>
-            <option>Transport - Logistique</option>
-            <option>Z - Autre</option>
-          </select>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-taille">Taille de l'entreprise</label>
-          <select class="fr-select" id="sel-taille">
-            <option>0 salarié</option>
-            <option>1 à 9 salariés</option>
-            <option>10 à 49 salariés</option>
-            <option>50 à 249 salariés</option>
-            <option selected>Toutes tailles</option>
-          </select>
-        </div>
-      </div>
-    </form>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mt-2w">
+      <div class="fr-col-12 fr-col-md-5">
+        <dsfr-data-facets id="det" source="ecarts-l"
+          fields="code_unifie" display="code_unifie:select"
+          labels="code_unifie:Question à comparer"
+          value-labels="code_unifie:libelle_unifie"
+          default="code_unifie:923" sort="code_unifie:alpha"
+          max-values="200" hide-counts></dsfr-data-facets>
 
-    <dsfr-data-display source="bfn-q-corr" cols="1" class="fr-mb-4w" count-label="question">
-      <template>
-        <div class="fr-callout fr-icon-question-line">
-          <p class="fr-callout__title fr-text--md">{{libelle_unifie}}</p>
-          <p class="fr-callout__text fr-text--sm">{{descriptif_de_question|Pas de descriptif dans la table de correspondance.}}</p>
-          <p class="fr-text--xs fr-hint-text fr-mb-0">Chapitre «&nbsp;{{chapitre}}&nbsp;» — mode de présentation de l'original&nbsp;: {{presentation_2024|non renseigné}}.</p>
-        </div>
-      </template>
-    </dsfr-data-display>
-
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Vue d'ensemble — score par réponse et par année (%)">
-          <dsfr-data-chart id="g-q-nat" source="bfn-q-nat" type="bar" stacked
-            label-field="an" value-field="score" series-field="libelle_reponse"
-            unit-tooltip=" %" y-min="0" y-max="100"
-            databox databox-title="Vue d'ensemble — score par réponse et par année (%)"
-            databox-source="DGE — questions-reponses, via data.economie.gouv.fr"
-            databox-date="2020-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-q-nat" source="bfn-q-nat" table download></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Vue correspondant aux critères de filtre (%)">
-          <dsfr-data-chart id="g-q-filt" source="bfn-q-filt" type="bar" stacked
-            label-field="an" value-field="score" series-field="libelle_reponse"
-            unit-tooltip=" %" y-min="0" y-max="100" selected-palette="sequentialDescending"
-            databox databox-title="Vue correspondant aux critères de filtre (%)"
-            databox-source="DGE — questions-reponses, via data.economie.gouv.fr"
-            databox-date="2020-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-q-filt" source="bfn-q-filt" table download></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <h2 class="fr-h3" id="explorateur">Toutes les questions, vue nationale</h2>
-    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-
-      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
-        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-          Filtrer<span class="odv-filtres__compte"></span>
-        </summary>
-        <h2 class="fr-h6">Filtrer</h2>
-
-        <h3 class="fr-h6">Rechercher et filtrer</h3>
-
-        <dsfr-data-facets id="bfn-f" source="bfn-q"
-          fields="chapitre, an"
-          labels="chapitre:Chapitre | an:Année"
-          max-values="12"
-          display="chapitre:multiselect">
-        </dsfr-data-facets>
-      </details>
-
-      <div class="fr-col-12 fr-col-lg-9">
-        <dsfr-data-kpi-group class="fr-mb-4w">
-          <dsfr-data-kpi source="bfn-f" value="count" format="nombre"
-            heading="Sélection courante" label="couples question-réponse" col="4"></dsfr-data-kpi>
-          <dsfr-data-kpi source="bfn-questions" value="count" format="nombre"
-            heading="Enquête" label="questions distinctes" col="4"></dsfr-data-kpi>
-          <dsfr-data-kpi source="bfn-f" value="score:avg" format="decimal"
-            heading="Score moyen" label="% des répondants" col="4"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <p class="fr-text--sm">
-          Chaque ligne est une modalité de réponse à une question de l'enquête, et son
-          <strong>score</strong> est la part des répondants qui l'ont choisie, en pourcentage, au
-          niveau national. Les libellés viennent de la table de correspondance publiée par le
-          portail — la même que celle qui pilote la page d'origine.
-        </p>
-
-        <div class="odv-viz" data-code="Graphique">
-        <dsfr-data-list source="bfn-f"
-          columns="chapitre:Chapitre, libelle_unifie:Question, libelle_reponse:Réponse, an:Année, score:Score (%)"
-          sort="an:desc" pagination="25" export="csv" count-label="réponse">
+        <h3 class="fr-text--sm fr-mt-3w fr-mb-1w"><strong>Ou parcourir le catalogue</strong></h3>
+        <!-- Le catalogue des questions de 2025, lu dans les mêmes lignes : une par
+             question (le `group-by` est le dédoublonnage). La recherche filtre côté
+             client ; elle ne pilote pas la liste de gauche. -->
+        <dsfr-data-query id="cat-2025" source="ecarts-l"
+          group-by="code_unifie, libelle_unifie, chapitre" order-by="code_unifie:asc"></dsfr-data-query>
+        <dsfr-data-search id="q-recherche" source="cat-2025" count count-label="question"
+          placeholder="Rechercher — site internet, facture, IA…"
+          label="Rechercher une question">
+        </dsfr-data-search>
+        <div class="odv-viz" data-code="Catalogue des questions">
+        <dsfr-data-list source="q-recherche"
+          columns="code_unifie:Code, libelle_unifie:Question, chapitre:Chapitre"
+          sort pagination="8" class="fr-mt-2w" count-label="question">
         </dsfr-data-list>
         </div>
       </div>
 
-    </div>
-  </div>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Baromètre France Num — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
-      <p class="fr-text--lead">
-        Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/barometre-france-num/"
-        target="_blank" rel="noopener external">barometre-france-num</a> — 28&nbsp;200 caractères,
-        seize <code>ods-chart</code>, un sommaire, des sections dépliables, quatre jeux de données.
-        C'est la page la plus <em>éditoriale</em> du catalogue&nbsp;: un rapport d'enquête mis en
-        pages, pas un tableau de bord.
-      </p>
-
-      <div class="fr-alert fr-alert--warning fr-mb-4w">
-        <h3 class="fr-alert__title">Le constat central, requalifié&nbsp;: une jointure qui réussit et ment — sur le mauvais jeu</h3>
-        <p class="fr-text--sm">
-          La table de calcul ne contient que des <em>codes</em> de question. La première version
-          de cette page les a joints à <code>bfn-2022-resultats-2022</code>, sur une colonne du
-          même nom&nbsp;: le résultat était faux, de façon indétectable à l'œil, et la page
-          concluait qu'aucun libellé n'était affichable. Le relevé du portail a montré que la page
-          d'origine lit <code>bfn-table-de-correspondance</code>&nbsp;: 119 codes sur 119 sont
-          communs, la jointure est exacte. Le constat sur la jointure reste vrai&nbsp;; la
-          conclusion qui en était tirée ne l'était pas.
-        </p>
-      </div>
-
-      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-        <div class="fr-col-12 fr-col-md-6">
-          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
-          <ul>
-            <li><strong>479&nbsp;405 lignes réduites à 1&nbsp;065.</strong> Une agrégation serveur —
-              <code>group_by</code> sur question × réponse × année, filtrée sur les totaux nationaux
-              — suffit à alimenter toute la page. Le plus gros jeu du catalogue après la
-              comptabilité générale tient dans une requête.</li>
-            <li><strong>La table de correspondance fait tout le travail éditorial.</strong> Une
-              source de 119 lignes, un <code>dsfr-data-join</code>&nbsp;: l'explorateur affiche chapitre et libellé unifié
-              pour chacun des 1&nbsp;065 couples question-réponse, et les facettes se font par
-              chapitre. Les douze chapitres et les 119 questions ne sont pas codés en dur dans le
-              tableau&nbsp;: ils sont lus, comme sur l'original.</li>
-            <li><strong>Le motif de l'original tient dans un contexte.</strong> Question, région,
-              secteur, taille&nbsp;: quatre <code>select</code>, un <code>dsfr-data-context
-              url-sync</code>, trois sources en mode adaptateur. La vue nationale et la vue
-              filtrée sont deux graphiques empilés par réponse&nbsp;; la fiche de la question
-              (libellé, descriptif méthodologique, chapitre, mode de présentation) est un
-              <code>dsfr-data-display</code> sur la table de correspondance. Les scores sont ceux
-              de l'original&nbsp;: 68,1 → 77,9&nbsp;% pour «&nbsp;le numérique représente un
-              bénéfice réel&nbsp;» en national, 75,8&nbsp;% en Bretagne 2025, la répartition par
-              secteur à la décimale. Une question à la fois, c'est au plus 72 groupes&nbsp;: sous
-              le plafond de /records (BUG-001).</li>
-          </ul>
-        </div>
-
-        <div class="fr-col-12 fr-col-md-6">
-          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
-          <ul>
-            <li><strong>Premier échec&nbsp;: les types de clé — faux diagnostic.</strong> J'avais
-              écrit que <code>code_unifie</code>, entier dans <code>questions-reponses</code> et chaîne
-              dans <code>bfn-2022-resultats-2022</code>, faisait échouer <code>dsfr-data-join</code> en
-              silence, et j'avais «&nbsp;corrigé&nbsp;» par un <code>normalize numeric</code>. La relecture
-              du lot 11 l'a infirmé&nbsp;: la jointure convertit déjà ses deux clés en chaîne. Rejouée sans
-              le <code>numeric</code>, elle apparie 1&nbsp;065 lignes sur 1&nbsp;065 et 119 codes sur 119 —
-              exactement comme avec. La vraie cause des 0 appariements était le jeu&nbsp;: dans
-              <code>bfn-2022-resultats-2022</code>, les codes sont «&nbsp;001&nbsp;», «&nbsp;002&nbsp;»… sur
-              trois chiffres, et 109&nbsp;441 lignes n'en ont pas du tout. Ce qui reste vrai&nbsp;: en
-              jointure gauche, rien ne signale un appariement nul (AM-026). Registre&nbsp;: FP-012.</li>
-            <li><strong>Second échec&nbsp;: le référentiel de <code>bfn-2022-resultats-2022</code>
-              n'est pas celui de la table de calcul.</strong> Une fois les types alignés, la
-              jointure a fonctionné… et produit des libellés faux. Le code <code>201</code>
-              désigne la <em>question du secteur d'activité</em> dans la table de calcul et
-              «&nbsp;<em>le numérique représente un bénéfice réel</em>&nbsp;» dans ce jeu
-              annuel. Deux référentiels homonymes (PG-009), c'est toujours vrai. Ce qui était
-              faux, c'est d'avoir choisi ce jeu&nbsp;: la page d'origine déclare
-              <code>bfn-table-de-correspondance</code> dans son source, où <code>201</code> est
-              bien «&nbsp;Secteur d'activité de l'entreprise&nbsp;» et <code>501</code> le
-              bénéfice réel. <strong>La jointure a été rétablie sur le bon jeu&nbsp;: 119 codes
-              sur 119 appariés</strong>, vérifié par différence d'ensembles sur l'API.</li>
-            <li><strong>Aucun outil ne peut détecter ça.</strong> C'est le point à retenir. Une
-              jointure ne vérifie que l'égalité des clés&nbsp;; elle ne sait pas si les clés
-              <em>signifient</em> la même chose. Le taux de correspondance était pourtant un
-              indice&nbsp;: 237 lignes appariées sur 1&nbsp;065, et 9 questions sur 119. Un
-              indicateur de couverture affiché par le composant aurait mis la puce à l'oreille
-              (registre&nbsp;: AM-026).</li>
-            <li><strong>Une page pilotée par la donnée n'est pas un tableau de bord.</strong>
-              L'original génère, pour chacune des 119 questions, une section avec un à trois
-              graphiques dont le <em>mode</em> (barres verticales, horizontales groupées,
-              empilées, grille par réponse) est lu dans <code>presentation_2024</code>. Ici, le
-              rendu est unique — empilé par réponse et par année — et une question à la fois.
-              Générer N sections depuis N lignes, ou choisir un type de graphique depuis une
-              valeur de champ, n'a pas d'équivalent déclaratif&nbsp;: <code>dsfr-data-display</code>
-              répète un gabarit HTML, pas un composant de dataviz (registre&nbsp;: LIM-004,
-              requalifié).</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> La première version
-              de cette page couvrait 0 libellé sur 119 (elle affichait des codes) et aucune des
-              trois dimensions de filtrage de l'original — son «&nbsp;constat central&nbsp;»
-              venait d'une jointure sur un jeu que la page d'origine n'utilise pas. Corrigé&nbsp;:
-              libellés, chapitres et descriptifs lus dans <code>bfn-table-de-correspondance</code>
-              (119 sur 119), les trois filtres région (14) × secteur (12) × taille (5) plus la
-              question, synchronisés dans l'URL (<code>?question=501&amp;region=Bretagne…</code>),
-              la vue nationale et la vue filtrée côte à côte, «&nbsp;Sans réponse&nbsp;» exclu.
-              Ce qui manque encore, et pourquoi&nbsp;: <em>(a)</em> les douze accordéons qui
-              déroulent les 119 questions d'un coup — ici une question à la fois, par un
-              <code>select</code> dont les 119 options sont générées depuis la table à la
-              construction de la page, faute d'un moyen déclaratif de remplir un
-              <code>select</code> depuis une source&nbsp;; <em>(b)</em> les quatre modes de
-              présentation et la «&nbsp;vue combinée&nbsp;» (barres nationale et filtrée
-              entrelacées par année) — deux graphiques côte à côte à la place&nbsp;;
-              <em>(c)</em> les seize liens vers les données brutes et les textes «&nbsp;En savoir
-              plus&nbsp;», éditoriaux, non recopiés&nbsp;; <em>(d)</em> les avertissements de
-              représentativité (régions avant 2023). Couverture estimée&nbsp;: questions 119
-              sur 119 (une à la fois), filtres 3 sur 3 dans l'URL, modes de rendu 1 sur 4, liens
-              0 sur 16.</li>
-          </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.23.0</h4>
-            <p class="fr-text--sm">
-              5 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-005</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code>&nbsp;: plus de «&nbsp;Série N&nbsp;» en légende pour un groupe sans valeur.</li>
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>PG-012</strong> — <strong>0.21.1</strong> (#645)&nbsp;: <code>sort="count:desc"</code>&nbsp;: la grammaire <code>critère:sens</code> remplace le <code>-count</code> ambigu, qui est déprécié avec avertissement.</li>
-              <li><strong>AM-026</strong> — <strong>0.22.0</strong> (#660)&nbsp;: <code>dsfr-data-join</code> publie son taux d'appariement dans sa meta et dans le volet Diagnostic, avec alerte sous 50&nbsp;%.</li>
-              <li><strong>AM-043</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="ctx"</code> peuple ses valeurs et diffuse dans le contexte&nbsp;: plus de <code>&lt;select&gt;</code> généré hors ligne.</li>
-            </ul>
+      <div class="fr-col-12 fr-col-md-7">
+        <div class="fr-callout">
+          <h3 class="fr-text--md fr-mb-1w"><strong>La question choisie, France entière contre le profil</strong></h3>
+          <p class="fr-text--xs fr-hint-text">
+            Édition 2025, une barre par réponse possible. Violet&nbsp;: France entière.
+            Rouge&nbsp;: <dsfr-data-context-value for="profil" field="region" fallback="France entière"></dsfr-data-context-value>.
+          </p>
+          <div class="odv-viz" data-code="Graphique (2)">
+          <dsfr-data-chart source="det" type="bar" horizontal
+            label-field="Réponse"
+            value-field="France:France entière" value-fields="Profil:Profil filtré"
+            color-map="France entière:#413592,Profil filtré:#e1000f" unit-tooltip="%">
+          </dsfr-data-chart>
+          <dsfr-data-a11y source="det" table download
+            label="Comparaison France entière / profil pour la question choisie"
+            label-field="Réponse" value-field="France, Profil, Écart (pt)"
+            filename="question-barometre-france-num.csv"
+            description="Pour chaque réponse possible de la question choisie, la part des répondants en France entière et dans le profil filtré, et l'écart en points, édition 2025.">
+          </dsfr-data-a11y>
           </div>
         </div>
       </div>
+    </div>
+  </section>
 
-      <div class="fr-table fr-table--bordered">
-        <table>
-          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
-          <thead>
-            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>questions lues dans <code>bfn-table-de-correspondance</code></td><td><code>dsfr-data-join</code> seul</td><td>Équivalent (119 / 119) — sur le bon jeu</td></tr>
-            <tr><td>3 <code>ods-select</code> région / secteur / taille, synchro URL</td><td><code>dsfr-data-context url-sync</code> + <code>url-param-map</code></td><td>Équivalent</td></tr>
-            <tr><td>vue d'ensemble / vue filtrée par question</td><td>2 sources adaptateur + 2 <code>dsfr-data-chart stacked</code></td><td>Mêmes scores, un seul mode de rendu</td></tr>
-            <tr><td>descriptif de question sous chaque H3</td><td><code>dsfr-data-display</code> + <code>&lt;template&gt;</code></td><td>Équivalent</td></tr>
-            <tr><td>12 accordéons × N questions générés par <code>ng-repeat</code></td><td>un <code>select</code> de 119 options</td><td><strong>Une question à la fois</strong></td></tr>
-            <tr><td>4 modes de graphique selon <code>presentation_2024</code></td><td>—</td><td><strong>Sans équivalent déclaratif</strong></td></tr>
-          </tbody>
-        </table>
+
+  <!-- ====================== ANALYSE ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+      <details class="odv-technique">
+        <summary>Analyse — ce que la reproduction a coûté</summary>
+
+    <p class="fr-text--sm fr-hint-text">
+      Cette page n'est pas une reproduction&nbsp;: son analyse ne mesure pas une fidélité à
+      l'original, mais ce que la bibliothèque permet quand on repart du besoin. Réécrite le
+      2026-09-26 après une relecture métier (lecture <code>dataviz-metier</code>) qui a trouvé un
+      classement faux, un repère mal défini et une analyse qui décrivait une page antérieure.
+    </p>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mt-2w">
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qui a été simple</h3>
+        <ul class="fr-text--sm">
+          <li><strong>Le classement des écarts tient en une requête par côté.</strong> La vue
+            nationale n'est pas un agrégat mais une <em>valeur littérale</em>
+            (<code>region = 'Toutes régions'</code>)&nbsp;: national et profil sont deux
+            sous-ensembles du même jeu, appariés par <code>dsfr-data-join</code>.
+            <strong>516 lignes, une requête d'export, 0,235&nbsp;s</strong> pour les 103 questions
+            de l'édition (relevé à l'API le 2026-09-18).</li>
+          <li><strong>Une règle de calcul par question, en une requête.</strong> Les quatre repères
+            n'ont pas la même définition. Un <code>in (…)</code> sur les libellés de réponse plus un
+            <code>group by code_unifie</code> donnent les quatre valeurs d'un coup, selon la règle
+            que le producteur écrit dans <code>descriptif_de_question</code>.</li>
+          <li><strong>Écart, libellés signés, virgule décimale&nbsp;: aucun JavaScript.</strong>
+            <code>dsfr-data-normalize compute</code> avec <code>when/then/else</code> dérive les
+            colonnes d'affichage en une passe.</li>
+          <li><strong>Le pivot fait l'évolution, et la même chaîne dit ce qui se compare.</strong>
+            <code>dsfr-data-pivot column-format="an_{value}"</code> met chaque édition en colonne&nbsp;;
+            un <code>compute</code> marque les réponses présentes une seule année, une
+            <code>dsfr-data-query group-by="code_unifie" aggregate="orphelin:sum"</code> les compte par
+            question, et un second <code>compute</code> en tire un statut (comparable, nouvelle,
+            modifiée). Le classement et son bilan («&nbsp;67 se comparent, 28 nouvelles, 5
+            modifiées&nbsp;», relevé le 2026-09-26) sortent de la donnée, sans liste de codes
+            écrite à la main.</li>
+          <li><strong>Un graphique par question, natif.</strong> <code>dsfr-data-repeat</code> et son
+            attribut <code>scopes</code> (0.32.0) partitionnent la source en une passe et émettent un
+            id par question&nbsp;; <code>lazy</code> n'estampe un graphique qu'à l'approche du
+            viewport&nbsp;: 100 titres rendus, 3 canevas au chargement (relevé le 2026-09-26).</li>
+          <li><strong>Le sélecteur de question est une facette, enfin.</strong>
+            <code>dsfr-data-facets</code> client sur les lignes déjà chargées, champ de
+            <em>code</em>, <code>value-labels="code_unifie:libelle_unifie"</code> pour afficher le
+            libellé (AM-081) et <code>default="code_unifie:923"</code> pour qu'une question soit
+            toujours choisie (AM-084). La liste suit le profil, ne propose que des questions qui ont
+            des données, et ne coûte aucune requête&nbsp;: deux sources <code>require-where</code>, un
+            contexte, une jointure et 119 <code>&lt;option&gt;</code> écrites en dur ont disparu.</li>
+          <li><strong>Des en-têtes de tableau lisibles par <code>rename</code>.</strong>
+            <code>dsfr-data-a11y</code> n'a pas d'alias d'en-tête (<code>value-field</code> ne prend
+            que des noms de colonnes)&nbsp;; <code>rename</code> accepte un nom avec espace et
+            parenthèses. Un second <code>normalize</code> après le calcul, et tous les tableaux et CSV
+            portent «&nbsp;Question | Profil | France | Écart (pt)&nbsp;».</li>
+        </ul>
       </div>
-
-      <div class="odv-verdict fr-mt-4w">
-        <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Le verdict du premier passage était faux, et la raison est instructive.</strong>
-          La page concluait qu'une reproduction fidèle n'avait pas de sens et que les libellés
-          étaient inaccessibles. Elle avait joint le mauvais jeu. Le relevé visuel du portail —
-          et son source, qui nomme <code>bfn-table-de-correspondance</code> — a suffi à rétablir
-          la jointure&nbsp;: 119 questions sur 119, libellés, chapitres, descriptifs. Le motif
-          de l'original (une question, six éditions, vue nationale contre vue filtrée) se
-          reproduit ensuite avec un contexte et deux graphiques.</p>
-        <p>Ce qui reste vrai, et qui est le constat utile&nbsp;: <strong>une jointure peut réussir
-          et mentir.</strong> Des types de clé incompatibles — la jointure ne rapproche rien et ne
-          le dit pas. Puis un référentiel homonyme — elle apparie, et attribue à chaque score le
-          libellé d'une autre question. Rien dans l'outil ne peut le détecter&nbsp;; mais un
-          <strong>indicateur de couverture</strong> (237 lignes sur 1&nbsp;065, 9 questions sur
-          119) aurait dénoncé le mauvais jeu à la première lecture. Et la règle de méthode qui
-          en découle&nbsp;: <strong>avant de joindre, lire le source de la page d'origine</strong>
-          pour savoir quel jeu elle utilise, plutôt que de prendre le premier jeu qui porte une
-          colonne du bon nom.</p>
-        <p>Le manque qui subsiste est plus étroit que «&nbsp;l'édition&nbsp;»&nbsp;: générer une
-          section par ligne d'une table, et choisir le type de graphique depuis une valeur de
-          champ. Une question à la fois est le maximum déclaratif.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: FP-012 (ex-AM-025&nbsp;: la jointure
-          convertit bien ses clés, faux problème corrigé au lot 11), AM-026 (pas d'indicateur de couverture d'une
-          jointure), PG-008 (alias ODSQL déclaré deux fois), PG-009 (référentiels de codes homonymes
-          entre deux jeux d'un même portail), LIM-004 (mise en page éditoriale hors périmètre).
-        </p>
+      <div class="fr-col-12 fr-col-md-6">
+        <h3 class="fr-h6">Ce qui a coincé</h3>
+        <ul class="fr-text--sm">
+          <li><strong>La première place de «&nbsp;Ce qui bouge le plus&nbsp;» était un artefact —
+            et rien ne l'aurait signalé.</strong> «&nbsp;Oui, en interne&nbsp;» (1401) passait de
+            46,2&nbsp;% à 33,0&nbsp;%&nbsp;: en 2025 le questionnaire scinde cette réponse en deux,
+            la seconde à 22,1&nbsp;%. Le pivot appariait le libellé resté identique et ignorait
+            l'autre. Aucune erreur, aucune valeur aberrante&nbsp;: un chiffre plausible, en tête d'un
+            classement «&nbsp;calculé et non choisi&nbsp;». Ce n'est pas une limite de la
+            bibliothèque, c'est une connaissance du jeu&nbsp;: la règle «&nbsp;même jeu de réponses
+            les deux années&nbsp;» s'écrit en quatre balises (voir ci-contre).</li>
+          <li><strong>Un seul mot séparait six questions de la comparaison.</strong>
+            «&nbsp;J'en ai&nbsp;» en 2024, «&nbsp;Oui&nbsp;» en 2025 sur les usages détaillés de l'IA
+            (802 à 807)&nbsp;; <code>libelle_reponse_unifie</code> est vide sur ces lignes. Unifier
+            demande un <code>compute</code> avant le pivot — et <strong><code>compute</code> n'a pas
+            d'échappement de l'apostrophe</strong>&nbsp;: un littéral s'arrête à la première quote
+            (tokenizer relu dans le source). Le test passe par
+            <code>contains(libelle_reponse, 'en ai')</code>, sûr ici parce que «&nbsp;J'en ai&nbsp;»
+            est le seul libellé 2024-2025 qui contient «&nbsp;en ai&nbsp;» (vérifié à l'API). Sur un
+            autre jeu, ce contournement peut attraper un libellé voisin.</li>
+          <li><strong>Un repère mal défini, justifié par un champ mal lu.</strong> «&nbsp;Connectivité&nbsp;»
+            ne comptait que «&nbsp;Très satisfaisant&nbsp;» (29,7&nbsp;%) au nom de
+            <code>valeurs_dans_calcul</code>&nbsp;; ce champ liste ce qui est <em>possible</em> (les
+            cinq niveaux de Likert pour la 501), et c'est <code>descriptif_de_question</code> qui dit
+            ce qui est <em>compté</em>&nbsp;: les deux niveaux de satisfaction, 81,0&nbsp;%.</li>
+          <li><strong>Des réponses publiées deux fois.</strong> Sept questions de 2025 portent deux
+            lignes pour une même réponse (l'une avec <code>libelle_reponse_unifie</code> vide).
+            <code>sum(score)</code> les additionne, comme l'original&nbsp;: parité respectée, mais la
+            question de fond reste ouverte (hypothèse 8). Aucun attribut ne sépare ce que le jeu
+            publie sous un même libellé.</li>
+          <li><strong>Un profil peut ne plus rien représenter.</strong> Bretagne × Nouvelles
+            technologies × 0 salarié représente 321 entreprises (2,1&nbsp;M au national)&nbsp;; ses
+            parts tombent sur des multiples de dix. Le nombre de répondants n'est pas publié, mais
+            <code>poids_question</code> l'est&nbsp;: un <code>max(poids_question)</code> dans la
+            requête des repères et un KPI de plus le mettent sous les yeux du lecteur.</li>
+          <li><strong>Un classement d'écarts naïf est faux, et spectaculairement.</strong> Le plus
+            fort écart d'un profil breton est <strong>+94,9 points</strong> sur la question
+            «&nbsp;Région&nbsp;»&nbsp;: 201, 202 et 203 sont l'écho du filtre et sont exclues à la
+            main, par un <code>not (code_unifie in (…))</code> — ODSQL n'a pas <code>not in</code>.</li>
+          <li><strong>Trois séparateurs différents dans la même page.</strong>
+            <code>dsfr-data-context sources</code> attend des espaces, <code>color-map</code> des
+            virgules, <code>display</code> et <code>rename</code> des barres verticales&nbsp;; une
+            grammaire fausse est ignorée en silence (PG-022).</li>
+          <li><strong>Deux pièges déjà connus, rencontrés ici au survol.</strong> Les pastilles de
+            l'infobulle gardent la palette par défaut malgré <code>color-map</code> (BUG-022), et
+            l'infobulle ne nomme pas les séries (AM-086) — chez DSFR Chart.</li>
+        </ul>
       </div>
     </div>
-  
+
+    <div class="fr-table fr-table--bordered fr-mt-4w">
+      <table>
+        <caption>Correspondance besoin → composant dsfr-data (état au 2026-09-26)</caption>
+        <thead>
+          <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>profil région × secteur × taille, «&nbsp;Toutes&nbsp;» étant une ligne du jeu</td><td><code>dsfr-data-facets context</code> + <code>default</code> + <code>url-sync</code></td><td>Natif (AM-084, 0.33.0)</td></tr>
+          <tr><td>poids du profil</td><td><code>max(poids_question)</code> dans la source + <code>dsfr-data-kpi format="compact"</code></td><td>Natif — le nombre de répondants, lui, n'est pas dans le jeu</td></tr>
+          <tr><td>4 repères, valeur du profil + référence nationale</td><td><code>dsfr-data-kpi-group</code> + 4 <code>dsfr-data-kpi</code> (<code>heading</code>, <code>lines</code>, <code>where</code>)</td><td>Natif, zéro CSS</td></tr>
+          <tr><td>les six plus forts écarts</td><td><code>dsfr-data-join</code> + <code>normalize compute</code> + <code>dsfr-data-chart</code> horizontal, deux séries, DataBox</td><td>Natif — la couleur désigne la série, pas le sens</td></tr>
+          <tr><td>« Ce qui bouge le plus », seulement ce qui se compare</td><td><code>normalize</code> + <code>dsfr-data-pivot</code> + <code>query aggregate</code> + <code>compute</code> de statut + <code>join</code></td><td>Natif, <strong>calculé</strong>&nbsp;; la règle de comparabilité est une connaissance du jeu</td></tr>
+          <tr><td>phrases de lecture chiffrées</td><td><code>dsfr-data-query limit="1"</code> + <code>dsfr-data-repeat</code> à gabarit</td><td>Natif</td></tr>
+          <tr><td>rail des 12 chapitres</td><td><code>fr-sidemenu</code> statique</td><td>DSFR pur, sans donnée</td></tr>
+          <tr><td>un graphique par question d'un chapitre</td><td><code>dsfr-data-repeat scopes lazy</code> dans douze <code>fr-accordion</code></td><td>Natif (0.32.0) — LIM-004 requalifié</td></tr>
+          <tr><td>choisir une question, la comparer</td><td><code>dsfr-data-facets</code> client, <code>value-labels</code> + <code>default</code>, lue par <code>dsfr-data-chart</code></td><td>Natif (AM-081, AM-084)&nbsp;; plus d'option morte</td></tr>
+          <tr><td>catalogue cherchable</td><td><code>dsfr-data-query group-by</code> + <code>dsfr-data-search</code> + <code>dsfr-data-list</code></td><td>Natif&nbsp;; la recherche ne pilote pas le sélecteur</td></tr>
+          <tr><td>tableaux équivalents et CSV</td><td><code>dsfr-data-a11y</code> sur un <code>normalize rename</code></td><td>Natif&nbsp;; pas d'alias d'en-tête sur l'a11y lui-même</td></tr>
+          <tr><td>bascule Colonnes / Barres / Tableau (maquette)</td><td>tableau par <code>dsfr-data-a11y</code> et bascule de la DataBox</td><td><strong>Partiel</strong> — pas de bascule de type sans script</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="odv-verdict fr-mt-4w">
+      <p class="fr-text--lead fr-mb-1v">Verdict</p>
+      <p><strong>La contrainte qui pesait sur la reproduction venait du modèle, pas de la
+        bibliothèque.</strong> En repartant du besoin — «&nbsp;où se situe mon entreprise&nbsp;?&nbsp;» —
+        la page se rend en <strong>sept requêtes au chargement</strong> (relevé au navigateur le
+        2026-09-26&nbsp;; dix avant la relecture), et le classement des écarts, que l'original ne
+        propose pas, s'obtient sans une ligne de JavaScript.</p>
+      <p>Ce que la relecture a montré&nbsp;: <strong>la connaissance du jeu ne se délègue pas, et
+        une page juste en syntaxe peut être fausse en sens.</strong> Une réponse scindée, un mot
+        changé d'une édition à l'autre, un champ de métadonnées mal lu, des réponses publiées deux
+        fois, un profil qui ne représente plus que 321 entreprises&nbsp;: rien de cela ne produit
+        d'erreur. Les composants ont suffi à chaque correction — encore fallait-il savoir quoi leur
+        demander.</p>
+    </div>
+
       </details></section>
+
+  <!-- ====================== HYPOTHÈSES ÉDITORIALES ====================== -->
+  <section class="fr-container fr-mb-6w" id="hypotheses">
+    <h2 class="fr-h4">Notes — les hypothèses éditoriales</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Ces données se présentent de beaucoup de façons. Voici les choix faits ici, et pourquoi.
+      Ils sont discutables&nbsp;: ils sont écrits pour pouvoir l'être.
+    </p>
+
+    <ol class="fr-text--sm">
+      <li class="fr-mb-2w"><strong>Quatre repères nommés, pas un indice de synthèse.</strong>
+        Ils remplacent le «&nbsp;Score moyen&nbsp;» de la reproduction, qui moyennait 1&nbsp;065
+        parts de répondants à des questions différentes — une moyenne de pourcentages sans
+        signification. Les quatre choisis couvrent quatre thèmes&nbsp;: perception (501), IA (801),
+        cybersécurité (923), connectivité (1006). <strong>C'est un choix éditorial assumé</strong>,
+        celui de la maquette de phase 2&nbsp;: quatre questions parmi les cent de 2025, retenues pour leur
+        lisibilité. <strong>L'alternative écartée&nbsp;:</strong> un «&nbsp;indice de maturité
+        numérique&nbsp;», qui supposerait de pondérer des questions hétérogènes selon une échelle
+        que personne n'a définie.</li>
+
+      <li class="fr-mb-2w"><strong>Chaque repère suit la règle de calcul du producteur.</strong>
+        La table de correspondance la donne en toutes lettres dans son champ
+        <code>descriptif_de_question</code>&nbsp;: la 501 compte «&nbsp;Tout à fait d'accord&nbsp;» et
+        «&nbsp;Plutôt d'accord&nbsp;», la 1006 «&nbsp;Très satisfaisant&nbsp;» et «&nbsp;Plutôt
+        satisfaisant&nbsp;», la 801 et la 923 la seule réponse positive. <strong>Corrigé le
+        2026-09-26.</strong> Le repère «&nbsp;Connectivité&nbsp;» ne retenait que «&nbsp;Très
+        satisfaisant&nbsp;» (29,7&nbsp;% au national, 22,9&nbsp;% en Bretagne) et affirmait que c'était
+        «&nbsp;la logique du champ <code>valeurs_dans_calcul</code>&nbsp;». C'était faux deux fois&nbsp;:
+        ce champ liste pour la 1006 les deux niveaux de satisfaction, et pour la 501 les cinq niveaux
+        de l'échelle — il dit ce qui est <em>possible</em>, pas ce qui est <em>compté</em>. Le repère
+        suit désormais le producteur (81,0&nbsp;% au national, 75,2&nbsp;% en Bretagne, relevé le
+        2026-09-26). <strong>L'alternative écartée&nbsp;:</strong> ne garder que la satisfaction
+        franche, plus exigeante — un choix défendable, à condition de l'écrire comme un choix contre
+        la règle du producteur, et non comme cette règle.</li>
+
+      <li class="fr-mb-2w"><strong>Deux barres par question, pas une barre d'écart.</strong> Une
+        barre divergente centrée sur l'écart met en avant la différence et cache les niveaux&nbsp;:
+        −8,8&nbsp;pt se lit pareil qu'on parte de 37&nbsp;% ou de 8&nbsp;%. Le graphique montre les
+        deux valeurs, France et profil&nbsp;: on voit l'écart <em>et</em> ce sur quoi il porte.
+        <strong>Prix payé pour la conformité&nbsp;:</strong> une première version dessinait ces
+        barres en CSS, ce qui permettait de <em>colorer chaque ligne selon
+        <code>sens_de_l_augmentation</code></em>. DSFR Chart colore des <em>séries</em>, pas des
+        barres individuelles&nbsp;: le sens reste dans la donnée et dans le tableau équivalent, mais
+        il ne pilote plus la couleur. On perd une nuance pour gagner un composant conforme,
+        accessible, exportable et infobullé. C'est un arbitrage assumé, pas un oubli.</li>
+
+      <li class="fr-mb-2w"><strong>Le sens déclaré, jamais le signe.</strong> Le jeu porte
+        <code>sens_de_l_augmentation</code>&nbsp;: 97 questions où monter est favorable, 5 où c'est
+        défavorable, 17 neutres. Les quatre repères sont tous «&nbsp;favorables&nbsp;»&nbsp;: la ligne
+        d'écart de leurs KPI peut donc se colorer par son signe (<code>color:"auto"</code>) sans
+        féliciter un territoire de trouver que le numérique lui fait perdre du temps. Sur les
+        graphiques, la couleur désigne la <em>série</em> (France, profil), pas le jugement —
+        voir l'hypothèse 3&nbsp;: le sens reste dans la donnée.</li>
+
+      <li class="fr-mb-2w"><strong>Trois questions sont exclues du classement&nbsp;: 201 Secteur,
+        202 Taille, 203 Région.</strong> Elles décrivent l'échantillon, donc filtrer sur la Bretagne
+        y met «&nbsp;Bretagne&nbsp;» à 100&nbsp;% contre 5,1&nbsp;% — un écart de +94,9 points qui
+        n'est que le reflet du filtre. <strong>Ce qui n'est pas exclu&nbsp;:</strong> 204 à 206
+        (type d'activité, durée de vie, projets), qui sont de vraies questions&nbsp;: qu'une région
+        ait des entreprises plus anciennes est un résultat, pas une tautologie.</li>
+
+      <li class="fr-mb-2w"><strong>«&nbsp;Ce qui bouge le plus&nbsp;» est calculé, pas choisi —
+        mais seulement parmi ce qui se compare.</strong> La maquette y plaçait trois cartes retenues à
+        la main. Ici les trois plus fortes variations 2024&nbsp;→&nbsp;2025 sortent d'un
+        <code>order-by</code>, sous une règle écrite&nbsp;: <strong>une question ne concourt que si
+        ses réponses possibles sont les mêmes les deux années.</strong> Sans elle, la première place
+        revenait à «&nbsp;Oui, en interne&nbsp;» (compétences numériques, 1401)&nbsp;: 46,2&nbsp;% →
+        33,0&nbsp;%, «&nbsp;la plus forte baisse de l'enquête&nbsp;» — alors qu'en 2025 le
+        questionnaire scinde cette réponse en deux, la seconde à 22,1&nbsp;% (relevé à l'API le
+        2026-09-26). La règle écarte cinq questions dans ce cas (réponse scindée, ajoutée ou
+        renommée&nbsp;: 605, 1311, 1401, 1422, 1425) et les questions nouvelles en 2025&nbsp;; le bilan
+        est compté en page, sous le titre. <strong>Une exception, assumée&nbsp;:</strong>
+        «&nbsp;J'en ai&nbsp;» (2024) et «&nbsp;Oui&nbsp;» (2025) sont tenus pour la même réponse, comme
+        le fait le producteur (<code>valeurs_dans_calcul</code> de la 801&nbsp;: «&nbsp;J'en ai /
+        Oui&nbsp;»)&nbsp;; sans cela, six questions d'IA (802 à 807) restaient hors comparaison pour un
+        mot. <strong>Conséquence assumée&nbsp;:</strong> le classement peut remonter une réponse peu
+        parlante — «&nbsp;part des factures électroniques&nbsp;: 0&nbsp;%&nbsp;» — qu'un éditeur humain
+        aurait peut-être écartée.</li>
+
+      <li><strong>Six écarts affichés.</strong> Assez pour voir où la série s'aplatit, ce qui
+        empêche de lire le premier comme une anomalie isolée&nbsp;; assez peu pour rester lisible
+        sous les quatre repères.</li>
+
+      <li class="fr-mt-2w"><strong>Des réponses publiées deux fois, additionnées comme sur le
+        portail.</strong> Sept questions de 2025 (602, 605, 627, 1311, 1414, 1422, 1425) portent,
+        pour un même profil, deux lignes pour une même réponse — l'une avec
+        <code>libelle_reponse_unifie</code> vide, l'autre rempli. La page les additionne, comme
+        l'original (<code>function-y="SUM"</code> sur <code>field-x="libelle_reponse"</code>)&nbsp;:
+        «&nbsp;France Num, l'initiative…&nbsp;» (1422) vaut ainsi 14,1&nbsp;% au national, somme de
+        1,9 et 12,1&nbsp;; «&nbsp;Site internet de France Num&nbsp;» (1425) 9,0&nbsp;%, somme de 5,3 et
+        3,7 (relevé à l'API le 2026-09-26). <strong>Ce qu'on ne sait pas&nbsp;:</strong> s'il s'agit
+        de deux items du questionnaire ou d'une double publication — si ce sont deux items non
+        exclusifs, la somme surcompte. La question est à poser au producteur (DGE)&nbsp;; aucun
+        attribut ne sépare ce que le jeu publie sous un même libellé.</li>
+    </ol>
+  </section>
 
 </main>
 

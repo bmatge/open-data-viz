@@ -134,7 +134,7 @@ Au 9 septembre 2026 — 26 visualisations au catalogue officiel :
   [Fiscalité locale](public/viz/fiscalite-locale.html) ·
   [Entreprises du patrimoine vivant](public/viz/entreprise-patrimoine-vivant.html) ·
   [Annuaire DGFiP](public/viz/annuaire-services-dgfip.html) ·
-  [Baromètre France Num](public/viz/barometre-france-num.html) ·
+  [Baromètre France Num](public/viz/barometre-france-num.html) (refonte) ·
   **[Signal Conso](public/viz/signalconso.html)** · **[Rappel Conso](public/viz/rappelconso.html)** ·
   **[Centres de contrôle technique](public/viz/centres-controle-technique.html)**
 - **4 analyses détaillées** au lieu d'une reproduction —

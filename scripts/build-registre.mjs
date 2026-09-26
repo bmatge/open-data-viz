@@ -43,7 +43,7 @@ const STATUTS = {
   '/pages/accompagnements-actions-fnum/': ['analyse', '/viz/formations-france-num', 'Jeu de données à zéro enregistrement : analyse au lieu de reproduction'],
   '/pages/entreprises-restauration-notre-dame': ['reproduite', '/viz/entreprises-restauration-notre-dame', 'Carte à 2 couches issues de 2 portails Opendatasoft'],
   '/pages/fiscalite-locale-particuliers/?headless=true': ['reproduite', '/viz/fiscalite-locale', 'Choroplèthe départementale + tableau serveur sur 174 668 lignes'],
-  '/pages/barometre-france-num/': ['reproduite', '/viz/barometre-france-num', 'Explorateur des 6 millésimes ; jointure des libellés retirée (référentiels homonymes)'],
+  '/pages/barometre-france-num/': ['reproduite', '/viz/barometre-france-num', 'Refonte en trois régimes d’accès (profil partagé) ; la reproduction fidèle a été retirée le 2026-09-26'],
 
   '/pages/comptabilite-etat/': ['analyse', '/viz/non-reproduites', 'Page 404, jeu supprimé — sujet couvert par la page Comptabilité générale'],
   '/pages/signalconso/': ['reproduite', '/viz/signalconso', 'Page 404 mais jeu vivant : 1,7 M de signalements reconstitués'],
