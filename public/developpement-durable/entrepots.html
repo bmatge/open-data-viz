@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrepôts et plateformes logistiques — open-data-viz</title>
+  <meta name="description" content="Plus d'un tiers des surfaces d'entrepôts de France métropolitaine tiennent en Île-de-France et dans les Hauts-de-France, sur moins d'un dixième du territoire ; la Seine-et-Marne à elle seule en compte plus que sept régions. Création avec dsfr-data sur le répertoire des entrepôts du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — deuxième vague (§ 5) du cadrage
+       docs/portail-developpement-durable/proposition.md, jeu 32 « Entrepôts et
+       plateformes logistiques » (675c0ad59718fa4d74fc907c), millésime 2025-11.
+
+       LE CHAMP. Entrepôts et plateformes logistiques (EPL) de 10 000 m² ou plus,
+       couverts et fermés, France métropolitaine. Deux années dans le fichier
+       (2023, 2024) : pas de tendance, un écart d'un an.
+
+       LE CADRAGE disait « 40 % des surfaces » : la donnée dit 37 %. Le titre suit
+       la donnée (« plus d'un tiers »).
+
+       L'ANNÉE n'est écrite nulle part : chaque fichier est joint à sa propre année
+       maximale (group-by sur une clé constante + join), et `dern`/`prec` marquent
+       la dernière année et la précédente. Au prochain millésime, la page suit.
+
+       LES TRANCHES. Seul le fichier régional publie des valeurs. Départements,
+       EPCI et aires logistiques sont en tranches textuelles
+       (« ] 6 500 000 ; 6 600 000 ] m² ») ou « secret ». La borne basse se lit par
+       compute : on retire espaces, crochets et « m² », le « ; » devient un point,
+       et floor() garde la partie entière (« 6500000.6600000 » → 6 500 000).
+       « secret » donne null (jamais 0). Tranches de 100 000 m² au-delà de
+       100 000, de 50 000 en dessous.
+
+       LES RÉGIONS NOMMÉES. Île-de-France (11), Hauts-de-France (32) et
+       Auvergne-Rhône-Alpes (84) sont nommées par leur code dans `duo`/`trio` ;
+       le titre les nomme. Si l'ordre des régions change, c'est ici qu'il faut
+       revenir (le graphique, lui, trie seul).
+
+       DIDO : 3 connexions simultanées au maximum. Trois sources au montage
+       (régions, départements, aires) ; les EPCI sont en `lazy`.
+       ========================================================================== -->
+
+  <!-- ---------- Régions : 13 régions × 2 années (26 lignes), valeurs publiées ---------- -->
+  <dsfr-data-source id="reg"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/df9d1941-5832-4732-8fae-8181ed6c8fd3/json">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="reg-k" source="reg" compute="an = ANNEE + 0; k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-max" source="reg-k" group-by="k" aggregate="an:max:an_max"></dsfr-data-query>
+  <dsfr-data-join id="reg-j" left="reg-k" right="reg-max" on="k"></dsfr-data-join>
+  <!-- aire = superficie de la région en km², déduite de la densité publiée
+       (surface d'entreposage / densité) ; null pour la Corse (densité 0). -->
+  <dsfr-data-normalize id="reg-t" source="reg-j"
+    compute="dern = when an = an_max then 1 else 0;
+             prec = when an = an_max - 1 then 1 else 0;
+             duo = when REGION_CODE = '11' then 1 when REGION_CODE = '32' then 1 else 0;
+             trio = when duo = 1 then 1 when REGION_CODE = '84' then 1 else 0;
+             aire = when DENSITE > 0 then SURFACE * 1000000 / DENSITE else null;
+             s_d = when dern = 1 then SURFACE else 0;
+             s_p = when prec = 1 then SURFACE else 0;
+             n_d = when dern = 1 then NB_EPL else 0;
+             n_p = when prec = 1 then NB_EPL else 0;
+             a_d = when dern = 1 and DENSITE > 0 then aire else 0;
+             duo_s = when dern = 1 and duo = 1 then SURFACE else 0;
+             duo_n = when dern = 1 and duo = 1 then NB_EPL else 0;
+             duo_a = when dern = 1 and duo = 1 then aire else 0;
+             trio_s = when dern = 1 and trio = 1 then SURFACE else 0;
+             idf_dens = when dern = 1 and REGION_CODE = '11' then DENSITE else 0;
+             hdf_dens = when dern = 1 and REGION_CODE = '32' then DENSITE else 0;
+             aires_d = when dern = 1 then NB_AIRES else 0;
+             vide = when dern = 1 and NB_EPL = 0 then 1 else 0;
+             logist = PART_ENTREPOSAGE + PART_TRANSPORT_LOGISTIQUE;
+             detail = PART_COMMERCE_DETAIL_AUTO + PART_AUTRE">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="reg-syn" source="reg-t" group-by="k"
+    aggregate="an_max:max:an, s_d:sum:s_d, s_p:sum:s_p, n_d:sum:n_d, n_p:sum:n_p, a_d:sum:a_d, duo_s:sum:duo_s, duo_n:sum:duo_n, duo_a:sum:duo_a, trio_s:sum:trio_s, idf_dens:sum:idf_dens, hdf_dens:sum:hdf_dens, aires_d:sum:aires_d, vide:sum:vide">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn" source="reg-syn"
+    compute="an_prec = an - 1;
+             part_duo = duo_s / s_d * 100;
+             part_duo_n = duo_n / n_d * 100;
+             part_trio = trio_s / s_d * 100;
+             part_terr = duo_a / a_d * 100;
+             dens = s_d * 1000000 / a_d;
+             idf_x = idf_dens / dens;
+             hdf_x = hdf_dens / dens;
+             evol = (s_d / s_p - 1) * 100;
+             delta = s_d - s_p;
+             n_delta = n_d - n_p;
+             moy = s_d * 1000000 / n_d;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- Dernière année, une ligne par région -->
+  <dsfr-data-query id="reg-dern" source="reg-t" where="dern:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="reg-surf" source="reg-dern" order-by="SURFACE:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-surf-g" source="reg-surf" rename="REGION_LIBELLE:Région | SURFACE:Surface"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-dens" source="reg-dern" order-by="DENSITE:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-dens-g" source="reg-dens" rename="REGION_LIBELLE:Région | DENSITE:Densité"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-act" source="reg-dern" where="NB_EPL:gt:0" order-by="PART_COMMERCE_GROS:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-act-g" source="reg-act"
+    rename="REGION_LIBELLE:Région | PART_COMMERCE_GROS:Commerce de gros | logist:Entreposage et transport | PART_INDUSTRIE:Industrie | detail:Commerce de détail et autres">
+  </dsfr-data-normalize>
+  <!-- Les extrêmes de chaque activité, pour la phrase de lecture -->
+  <dsfr-data-query id="act-gros" source="reg-act" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="act-ind" source="reg-act" order-by="PART_INDUSTRIE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="act-log" source="reg-act" order-by="logist:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="act-j1" left="act-gros" right="act-ind" on="k" prefix-right="i_"></dsfr-data-join>
+  <dsfr-data-join id="act-syn" left="act-j1" right="act-log" on="k" prefix-right="l_"></dsfr-data-join>
+
+  <!-- ---------- Départements : 96 × 2 années (192 lignes), en tranches ---------- -->
+  <dsfr-data-source id="dep"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/1bc6fe23-5b60-4e86-b8ab-699ff0d64b65/json">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="dep-k" source="dep" compute="an = ANNEE + 0; k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-max" source="dep-k" group-by="k" aggregate="an:max:an_max"></dsfr-data-query>
+  <dsfr-data-join id="dep-j" left="dep-k" right="dep-max" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="dep-t" source="dep-j"
+    compute="dern = when an = an_max then 1 else 0;
+             bas = floor(replace(replace(replace(replace(SURFACE_TRANCHES, ' ', ''), ']', ''), 'm²', ''), ';', '.'));
+             haut = when is_null(bas) then null when SURFACE_TRANCHES = '0' then 0 when bas >= 100000 then bas + 100000 else bas + 50000;
+             bas_m = round(bas / 1000000, 1);
+             sec = when SURFACE_TRANCHES = 'secret' then 1 else 0;
+             zero = when SURFACE_TRANCHES = '0' then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-dern" source="dep-t" where="dern:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="dep-carte" source="dep-dern" where="bas:isnotnull"></dsfr-data-query>
+  <dsfr-data-query id="dep-top" source="dep-dern" where="bas:isnotnull" order-by="bas:desc" limit="12"></dsfr-data-query>
+  <dsfr-data-normalize id="dep-top-g" source="dep-top" rename="DEP_LIBELLE:Département | bas_m:Au moins"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-syn" source="dep-dern" group-by="k"
+    aggregate="bas:sum:bas, haut:sum:haut, sec:sum:sec, zero:sum:zero, dern:sum:n"></dsfr-data-query>
+  <dsfr-data-normalize id="dep-syn-t" source="dep-syn" compute="bas_m = bas / 1000000; haut_m = haut / 1000000"></dsfr-data-normalize>
+  <!-- « Le premier département pèse plus que N régions » : régions de la dernière
+       année jointes au premier département (clé constante), puis comptées. -->
+  <dsfr-data-query id="dep-un" source="dep-top" limit="1"></dsfr-data-query>
+  <!-- prefix-right ne s'applique qu'aux champs en COLLISION : `bas_m` (absent des
+       régions) garde son nom, `DEP_LIBELLE` aussi ; `dern`, `an`… prennent `d_`. -->
+  <dsfr-data-join id="reg-vs-dep" left="reg-dern" right="dep-un" on="k" prefix-right="d_"></dsfr-data-join>
+  <dsfr-data-normalize id="reg-vs-dep-t" source="reg-vs-dep"
+    compute="moins = when NB_EPL > 0 and SURFACE < bas_m then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-vs-dep-n" source="reg-vs-dep-t" group-by="k" aggregate="moins:sum:n_moins"></dsfr-data-query>
+  <dsfr-data-join id="dep-phrase" left="dep-un" right="reg-vs-dep-n" on="k"></dsfr-data-join>
+  <dsfr-data-query id="dep-deux" source="dep-top" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="dep-deux-s" source="dep-deux" group-by="k" aggregate="bas:sum:bas2"></dsfr-data-query>
+  <dsfr-data-join id="dep-phrase2" left="dep-phrase" right="dep-deux-s" on="k"></dsfr-data-join>
+  <dsfr-data-query id="dep-second" source="dep-deux" order-by="bas:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="dep-phrase2b" left="dep-phrase2" right="dep-second" on="k" prefix-right="s_"></dsfr-data-join>
+  <dsfr-data-join id="dep-phrase3" left="dep-phrase2b" right="syn" on="k" prefix-right="r_"></dsfr-data-join>
+  <dsfr-data-normalize id="dep-phrase-t" source="dep-phrase3"
+    compute="part2 = bas2 / 1000000 / s_d * 100"></dsfr-data-normalize>
+
+  <!-- ---------- Aires logistiques : 171 aires la dernière année, en tranches ---------- -->
+  <dsfr-data-source id="aires"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/7f468d42-37dd-44c9-b5f0-b594d5f17fba/json">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="aires-k" source="aires" compute="an = ANNEE + 0; k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="aires-max" source="aires-k" group-by="k" aggregate="an:max:an_max"></dsfr-data-query>
+  <dsfr-data-join id="aires-j" left="aires-k" right="aires-max" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="aires-t" source="aires-j"
+    compute="dern = when an = an_max then 1 else 0;
+             bas = floor(replace(replace(replace(replace(SURFACE_TRANCHES, ' ', ''), ']', ''), 'm²', ''), ';', '.'));
+             haut = when bas >= 100000 then bas + 100000 else bas + 50000;
+             bas_m = bas / 1000000;
+             haut_m = haut / 1000000;
+             million = when bas >= 1000000 then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="aires-dern" source="aires-t" where="dern:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="aires-un" source="aires-dern" order-by="bas:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="aires-syn" source="aires-dern" group-by="k" aggregate="dern:sum:n, million:sum:n_million"></dsfr-data-query>
+  <dsfr-data-join id="aires-phrase" left="aires-un" right="aires-syn" on="k"></dsfr-data-join>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Entrepôts et plateformes logistiques</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Entrepôts&nbsp;: plus d'un tiers des surfaces en Île-de-France et dans les Hauts-de-France</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          En {{an}}, la France métropolitaine compte {{n_d:number}}&nbsp;entrepôts et plateformes logistiques de
+          10&nbsp;000&nbsp;m² ou plus, pour {{s_d:number:1}}&nbsp;millions de m². L'Île-de-France et les Hauts-de-France en
+          réunissent {{duo_s:number:1}}&nbsp;millions&nbsp;: <strong>{{part_duo:number:0}}&nbsp;% des surfaces, sur
+          {{part_terr:number:0}}&nbsp;% du territoire</strong>. Avec Auvergne-Rhône-Alpes, trois régions sur treize
+          en tiennent la moitié ({{part_trio:number:0}}&nbsp;%).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      SDES, répertoire national des entrepôts et plateformes logistiques — entrepôts couverts et fermés de
+      10&nbsp;000&nbsp;m² ou plus, France métropolitaine. Données lues à l'ouverture de la page sur
+      <a href="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/" target="_blank" rel="noopener external">l'API DiDo</a>.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="s_d:max" format="decimal" decimals="1" unit="M m²" span="4"
+        heading="Surface d'entreposage" label="entrepôts de 10 000 m² ou plus, dernière année"
+        lines='[{"value":"evol:max","decimals":1,"sign":true,"suffix":"en un an"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="part_duo:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Part de l'Île-de-France et des Hauts-de-France" label="dans la surface totale"
+        lines='[{"value":"part_terr:max","decimals":0,"prefix":"sur","suffix":"du territoire"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="idf_x:max" format="decimal" decimals="1" unit="fois" span="4"
+        heading="Densité de l'Île-de-France" label="rapportée à la moyenne métropolitaine (m² d'entrepôt par km²)"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les régions ======================= -->
+  <!-- highlight-index="[0, 1]" : les deux premières barres du tri décroissant, qui
+       sont l'Île-de-France et les Hauts-de-France (11,5 M m² pour la troisième). -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-regions">
+    <h2 id="t-regions" class="fr-h3">Deux régions devant, loin devant les autres</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Les Hauts-de-France et l'Île-de-France sont au coude-à-coude, autour de 17&nbsp;millions de m² chacune&nbsp;;
+          la troisième région, Auvergne-Rhône-Alpes, en a un tiers de moins. Les deux premières comptent
+          {{duo_n:number}}&nbsp;entrepôts, {{part_duo_n:number:0}}&nbsp;% du total. À l'autre bout, la Corse n'en a aucun
+          de cette taille.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Surface d'entreposage par région, dernière année">
+      <dsfr-data-chart id="g-regions" source="reg-surf-g" type="bar" horizontal
+        label-field="Région" value-field="Surface" name="Surface d'entreposage (millions de m²)"
+        selected-palette="neutral" highlight-index="[0, 1]" unit-tooltip="millions de m²"
+        databox databox-title="Surface des entrepôts de 10 000 m² ou plus, par région, dernière année publiée (millions de m²)"
+        databox-source="SDES — répertoire des entrepôts et plateformes logistiques, données régionales (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-regions" table download source="reg-surf-g" label-field="Région" value-field="Surface"
+        description="Barres horizontales triées de la plus grande à la plus petite : la surface d'entreposage de chaque région métropolitaine, en millions de mètres carrés. Les Hauts-de-France et l'Île-de-France, mises en évidence, dépassent 17 millions chacune ; Auvergne-Rhône-Alpes suit autour de 11 millions, Grand Est autour de 9, puis les autres régions entre 3 et 7 millions. La Corse est à zéro.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — rapporté au territoire ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-densite">
+    <h2 id="t-densite" class="fr-h3">Rapportée à sa superficie, l'Île-de-France est hors norme</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          En moyenne, la métropole compte {{dens:number:0}}&nbsp;m² d'entrepôt par km². L'Île-de-France en a
+          {{idf_dens:number}}, <strong>{{idf_x:number:1}}&nbsp;fois plus</strong>&nbsp;; les Hauts-de-France {{hdf_dens:number}}
+          ({{hdf_x:number:1}}&nbsp;fois). Aucune autre région n'atteint le double de la moyenne. Les grandes régions
+          du Sud-Ouest, Nouvelle-Aquitaine et Occitanie, en ont trois fois moins que la moyenne.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Densité d'entreposage par région">
+      <dsfr-data-chart id="g-densite" source="reg-dens-g" type="bar" horizontal
+        label-field="Région" value-field="Densité" name="Densité d'entreposage (m² par km²)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="m² par km²"
+        databox databox-title="Densité d'entreposage par région, dernière année publiée (m² d'entrepôt par km² de territoire)"
+        databox-source="SDES — répertoire des entrepôts et plateformes logistiques, données régionales (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-densite" table download source="reg-dens-g" label-field="Région" value-field="Densité"
+        description="Barres horizontales triées : la densité d'entreposage de chaque région, en mètres carrés d'entrepôt par kilomètre carré. L'Île-de-France, mise en évidence, dépasse 1 400 ; les Hauts-de-France suivent autour de 540 ; toutes les autres régions sont sous 180, et la Nouvelle-Aquitaine et l'Occitanie autour de 55.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Densité publiée par le SDES. La moyenne métropolitaine est calculée ici&nbsp;: surface totale divisée par la
+      superficie totale, elle-même déduite de chaque région (surface ÷ densité) — une moyenne pondérée par la
+      superficie, jamais la moyenne des treize densités.
+    </p>
+  </section>
+
+  <!-- ======================= QUI — les exploitants ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-activite">
+    <h2 id="t-activite" class="fr-h3">Pas les mêmes entrepôts partout&nbsp;: grossistes dans l'Ouest, industriels en Bourgogne-Franche-Comté</h2>
+    <dsfr-data-repeat source="act-syn">
+      <template>
+        <p class="odv-lecture">
+          Le répertoire classe chaque entrepôt selon l'activité principale de l'entreprise qui l'exploite. En
+          {{REGION_LIBELLE}}, {{PART_COMMERCE_GROS:number:0}}&nbsp;% des entrepôts sont tenus par le commerce de gros.
+          L'industrie en exploite {{i_PART_INDUSTRIE:number:0}}&nbsp;% en {{i_REGION_LIBELLE}}.
+          Les spécialistes de l'entreposage et du transport pèsent le plus en {{l_REGION_LIBELLE}}
+          ({{l_logist:number:0}}&nbsp;%).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Répartition des entrepôts par activité de l'exploitant, par région">
+      <dsfr-data-chart id="g-activite" source="reg-act-g" type="bar" horizontal stacked
+        label-field="Région"
+        value-field="Commerce de gros"
+        value-fields="Entreposage et transport, Industrie, Commerce de détail et autres"
+        unit-tooltip="% des entrepôts" x-max="100"
+        databox databox-title="Activité principale de l'exploitant des entrepôts, par région, dernière année publiée (% du nombre d'entrepôts)"
+        databox-source="SDES — répertoire des entrepôts et plateformes logistiques, données régionales (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-activite" table download source="reg-act-g" label-field="Région"
+        value-field="Commerce de gros,Entreposage et transport,Industrie,Commerce de détail et autres"
+        description="Barres horizontales empilées à 100 %, une par région, triées par la part du commerce de gros. La Bretagne, les Pays de la Loire et la Nouvelle-Aquitaine ont la plus forte part d'entrepôts tenus par des grossistes (de 37 à 46 %) ; la Bourgogne-Franche-Comté la plus forte part industrielle (un tiers) ; Provence-Alpes-Côte d'Azur, la Normandie et Auvergne-Rhône-Alpes les plus fortes parts d'entreposage et de transport (40 à 45 %).">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Parts en nombre d'entrepôts, pas en surface. «&nbsp;Entreposage et transport&nbsp;» réunit deux catégories
+      du SDES (entreposage&nbsp;; transport et autres activités logistiques)&nbsp;; «&nbsp;Commerce de détail et
+      autres&nbsp;» en réunit deux autres (commerce de détail ou automobile&nbsp;; autre activité). Les parts
+      publiées sont arrondies au dixième et leur somme peut s'écarter de 100 d'un dixième.
+    </p>
+  </section>
+
+  <!-- ======================= OÙ — les départements ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dep">
+    <h2 id="t-dep" class="fr-h3">Un seul département pèse plus que la plupart des régions</h2>
+    <dsfr-data-repeat source="dep-phrase-t">
+      <template>
+        <p class="odv-lecture">
+          À lui seul, le premier département, {{DEP_LIBELLE}}, compte au moins {{bas_m:number:1}}&nbsp;millions de m² d'entrepôts&nbsp;: plus que
+          <strong>{{n_moins:number}}&nbsp;régions entières</strong>. Avec le deuxième ({{s_DEP_LIBELLE}}, au moins {{s_bas_m:number:1}}&nbsp;millions), c'est au moins
+          {{part2:number:0}}&nbsp;% de la surface nationale sur deux départements. Les grands départements d'entrepôts
+          dessinent un axe&nbsp;: de Lille à Paris, puis vers Lyon et Marseille.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les douze départements aux plus grandes surfaces d'entreposage">
+      <dsfr-data-chart id="g-dep" source="dep-top-g" type="bar" horizontal
+        label-field="Département" value-field="Au moins" name="Surface d'entreposage, borne basse de la tranche (millions de m²)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="millions de m² au moins"
+        databox databox-title="Les douze départements aux plus grandes surfaces d'entreposage, dernière année publiée (millions de m², borne basse de la tranche publiée)"
+        databox-source="SDES — répertoire des entrepôts et plateformes logistiques, données départementales en tranches (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dep" table download source="dep-top-g" label-field="Département" value-field="Au moins"
+        description="Barres horizontales triées : les douze départements aux plus grandes surfaces d'entreposage, en millions de mètres carrés (borne basse de la tranche de 100 000 m² publiée). La Seine-et-Marne, mise en évidence, dépasse 6,5 millions ; le Nord suit à 5,8 ; puis le Pas-de-Calais, les Bouches-du-Rhône, l'Oise, le Val-d'Oise, l'Essonne, l'Isère, le Loiret, entre 2,9 et 4,4 millions.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Le SDES ne publie pas la surface d'un département, mais une tranche de 100&nbsp;000&nbsp;m²
+      («&nbsp;] 6 500 000 ; 6 600 000 ] m²&nbsp;»). Les barres en montrent la borne basse&nbsp;: la vraie valeur est au
+      plus 100&nbsp;000&nbsp;m² au-dessus.
+    </p>
+  </section>
+
+  <!-- ======================= OÙ — les aires logistiques ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-aires">
+    <h2 id="t-aires" class="fr-h3">Les plus grandes aires logistiques sont aux portes de Paris et de Lyon</h2>
+    <dsfr-data-repeat source="aires-phrase">
+      <template>
+        <p class="odv-lecture">
+          Le SDES délimite {{n:number}}&nbsp;aires logistiques, des grappes d'au moins cinq entrepôts proches les uns des
+          autres. {{n_million:number}} dépassent le million de m². La plus vaste, autour de {{NOM_AIRE}}, compte entre
+          {{bas_m:number:1}} et {{haut_m:number:1}}&nbsp;millions de m² ({{NB_EPL_TRANCHES}}&nbsp;entrepôts).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-list source="aires-dern"
+      columns="NOM_AIRE:Communes de l'aire, NB_EPL_TRANCHES:Entrepôts, SURFACE_TRANCHES:Surface d'entreposage"
+      sort="bas:desc" search pagination="10" count-label="aire logistique|aires logistiques" export="csv"
+      caption="Aires logistiques, nombre d'entrepôts et surface (tranches publiées), dernière année">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: et dans votre département, dans votre intercommunalité&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Plus le département est foncé, plus sa surface d'entreposage est grande (borne basse de la tranche publiée).
+      Les départements sous secret statistique ne sont pas colorés&nbsp;: ils apparaissent dans un bleu uni qui
+      n'appartient pas à la légende. L'outre-mer n'est pas couvert par le répertoire.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Carte de la surface d'entreposage par département">
+      <dsfr-data-chart id="g-carte" source="dep-carte" type="map"
+        code-field="DEP_CODE" value-field="bas_m" name="Surface d'entreposage (millions de m², borne basse)"
+        unit-tooltip="millions de m² au moins" map-summary="none" selected-palette="sequentialAscending"
+        databox databox-title="Surface des entrepôts de 10 000 m² ou plus, par département, dernière année publiée (millions de m², borne basse de la tranche)"
+        databox-source="SDES — répertoire des entrepôts et plateformes logistiques, données départementales en tranches (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="dep-carte" label-field="DEP_LIBELLE" value-field="bas_m"
+        description="Carte des départements métropolitains colorés selon leur surface d'entreposage, du plus clair (aucun entrepôt ou très peu) au plus foncé (plus de 4 millions de m²). Les départements foncés forment un axe du Nord à l'Île-de-France, avec des taches autour de Lyon, de Marseille et d'Orléans ; le Massif central, les Alpes du Sud, les Pyrénées et la Corse sont clairs ou sous secret.">
+      </dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">Tous les départements</h3>
+    <dsfr-data-list source="dep-dern"
+      columns="DEP_CODE:Code, DEP_LIBELLE:Département, NB_EPL_TRANCHES:Entrepôts, SURFACE_TRANCHES:Surface d'entreposage, DENSITE_TRANCHES:Densité (m² par km²)"
+      sort="bas:desc" search pagination="15" count-label="département|départements" export="csv"
+      caption="Entrepôts de 10 000 m² ou plus par département : nombre, surface et densité (tranches publiées), dernière année">
+    </dsfr-data-list>
+    <dsfr-data-repeat source="dep-syn-t">
+      <template>
+        <p class="fr-text--xs fr-hint-text fr-mt-2w">
+          {{sec:number}}&nbsp;départements sur {{n:number}} sont sous secret statistique (le SDES n'en publie ni le nombre ni la
+          surface d'entrepôts) et {{zero:number}} n'ont aucun entrepôt de cette taille. Les départements
+          publiés totalisent entre {{bas_m:number:1}} et {{haut_m:number:1}}&nbsp;millions de m²&nbsp;: la somme des régions
+          tombe dans cette fourchette.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <!-- ---------- EPCI : 1 233 × 2 années (2 466 lignes) — lazy (limite DiDo) ---------- -->
+    <dsfr-data-source id="epci" lazy
+      url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/c23ceaf6-afe3-4087-abc5-7d97e2218c7c/json">
+    </dsfr-data-source>
+    <dsfr-data-normalize id="epci-k" source="epci" compute="an = ANNEE + 0; k = 1"></dsfr-data-normalize>
+    <dsfr-data-query id="epci-max" source="epci-k" group-by="k" aggregate="an:max:an_max"></dsfr-data-query>
+    <dsfr-data-join id="epci-j" left="epci-k" right="epci-max" on="k"></dsfr-data-join>
+    <dsfr-data-normalize id="epci-t" source="epci-j"
+      compute="dern = when an = an_max then 1 else 0;
+               bas = floor(replace(replace(replace(replace(SURFACE_TRANCHES, ' ', ''), ']', ''), 'm²', ''), ';', '.'));
+               sec = when SURFACE_TRANCHES = 'secret' then 1 else 0;
+               zero = when SURFACE_TRANCHES = '0' then 1 else 0;
+               publie = when sec = 0 and zero = 0 then 1 else 0">
+    </dsfr-data-normalize>
+    <dsfr-data-query id="epci-dern" source="epci-t" where="dern:eq:1"></dsfr-data-query>
+    <dsfr-data-query id="epci-syn" source="epci-dern" group-by="k"
+      aggregate="dern:sum:n, sec:sum:sec, zero:sum:zero, publie:sum:publie"></dsfr-data-query>
+
+    <h3 class="fr-h5 fr-mt-6w">Toutes les intercommunalités</h3>
+    <dsfr-data-repeat source="epci-syn">
+      <template>
+        <p class="fr-text--sm">
+          Sur {{n:number}}&nbsp;intercommunalités, {{zero:number}} n'ont aucun entrepôt de 10&nbsp;000&nbsp;m² ou plus et
+          {{publie:number}} ont des chiffres publiés. <strong>{{sec:number}} sont sous secret statistique</strong>&nbsp;: le SDES
+          ne publie ni leur nombre d'entrepôts ni leur surface, et la liste les classe en fin de tri.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-list source="epci-dern"
+      columns="EPCI_LIBELLE:Intercommunalité, NB_EPL_TRANCHES:Entrepôts, SURFACE_TRANCHES:Surface d'entreposage, DENSITE_TRANCHES:Densité (m² par km²)"
+      sort="bas:desc" search pagination="15" count-label="intercommunalité|intercommunalités" export="csv"
+      caption="Entrepôts de 10 000 m² ou plus par intercommunalité : nombre, surface et densité (tranches publiées), dernière année">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Une tendance.</strong> Le fichier ne couvre que {{an_prec}} et {{an}}&nbsp;: la surface a gagné
+            {{delta:number:1}}&nbsp;millions de m² ({{evol:number:1}}&nbsp;%) et le parc {{n_delta:number}}&nbsp;entrepôts en un an.
+            Un écart d'un an ne fait pas une croissance&nbsp;; la page ne trace pas de courbe.</li>
+          <li><strong>Les entrepôts de moins de 10&nbsp;000&nbsp;m²</strong>, hors du champ du répertoire. Un entrepôt
+            du champ fait en moyenne {{moy:number:0}}&nbsp;m².</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Les valeurs exactes sous la région.</strong> Départements, intercommunalités et aires logistiques
+        ne sont publiés qu'en tranches&nbsp;; la page en lit la borne basse et le dit à chaque fois.</li>
+      <li><strong>Les surfaces régionales au m² près</strong>&nbsp;: elles sont publiées en millions de m² arrondis au
+        dixième. Le total métropolitain est la somme de ces arrondis, à quelques centaines de milliers de m² près.</li>
+      <li><strong>L'outre-mer</strong>, que le répertoire ne couvre pas.</li>
+      <li><strong>Les flux.</strong> Le répertoire compte des bâtiments, pas les marchandises qui y passent ni les
+        emplois qui y travaillent.</li>
+      <li><strong>Les contours des aires logistiques</strong>, publiés par le SDES en GeoPackage (projection UTM)&nbsp;:
+        un format que la page ne lit pas.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir des quatre fichiers du répertoire des entrepôts du SDES
+        servis par DiDo (régions, départements, EPCI, aires logistiques). Le cadrage annonçait «&nbsp;40&nbsp;% des
+        surfaces&nbsp;» pour les deux premières régions&nbsp;; la donnée dit 37&nbsp;%, et le titre a suivi.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Des fichiers petits.</strong> 26, 192, 338 et 2&nbsp;466&nbsp;lignes&nbsp;: chargés en entier en mode URL,
+              sans filtre serveur, tout le reste côté client.</li>
+            <li><strong>L'année lue dans la donnée.</strong> Une clé constante, un <code>group-by</code> qui prend le maximum,
+              un <code>dsfr-data-join</code>&nbsp;: chaque ligne sait si elle est de la dernière année, sans année écrite
+              dans la page.</li>
+            <li><strong>Une densité moyenne honnête.</strong> La superficie de chaque région se déduit de la densité
+              publiée (<code>compute</code>), et la moyenne métropolitaine est pondérée par la superficie.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Des tranches en texte.</strong> «&nbsp;] 6 500 000 ; 6 600 000 ] m²&nbsp;» n'est pas un nombre, et
+              <code>compute</code> n'a ni découpage ni sous-chaîne. La borne basse passe par quatre <code>replace()</code>
+              imbriqués qui font du «&nbsp;;&nbsp;» un point décimal («&nbsp;6500000.6600000&nbsp;»), puis
+              <code>floor()</code> qui jette la borne haute. Ça tient parce que les bornes sont entières et séparées par un
+              seul «&nbsp;;&nbsp;»&nbsp;; une tranche «&nbsp;50 à 99&nbsp;» ou «&nbsp;Moins de 171&nbsp;» demanderait un autre bricolage.</li>
+            <li><strong>Comparer un département à des régions</strong> demande une jointure sur clé constante, un compte,
+              puis trois jointures en chaîne pour une seule phrase.</li>
+            <li><strong>Les territoires sans valeur ont une couleur.</strong> Sur la carte, un département sous secret est
+              peint d'un bleu uni hors légende (DSFR Chart)&nbsp;; il faut le dire en texte.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Lire DiDo</td><td><code>dsfr-data-source url=".../datafiles/{rid}/json"</code></td><td>Natif (mode URL)</td></tr>
+            <tr><td>Dernière année sans l'écrire</td><td><code>query group-by="k" aggregate="an:max"</code> + <code>join</code></td><td>Natif, verbeux</td></tr>
+            <tr><td>Part de deux régions, densité moyenne pondérée</td><td><code>normalize compute</code> + <code>query group-by</code></td><td>Natif</td></tr>
+            <tr><td>Borne basse d'une tranche textuelle</td><td><code>floor(replace(…))</code></td><td>Contournement (pas de découpage de chaîne)</td></tr>
+            <tr><td>Activités empilées</td><td><code>type="bar" horizontal stacked</code> + <code>value-fields</code></td><td>Natif</td></tr>
+            <tr><td>Carte départementale</td><td><code>type="map"</code> + <code>where bas:isnotnull</code></td><td>Natif&nbsp;; secret peint d'un bleu hors légende (DSFR Chart)</td></tr>
+            <tr><td>Quatre sources, trois connexions</td><td><code>lazy</code> sur la source EPCI</td><td>Natif</td></tr>
+            <tr><td>Tableaux exportables</td><td><code>dsfr-data-list</code> (recherche, tri sur un champ calculé, CSV)</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Une histoire de concentration qui se raconte à trois échelles.</strong> La région donne le chiffre,
+          la densité le rend frappant, le département le localise. <code>dsfr-data</code> tient les trois sans script&nbsp;;
+          le seul vrai coût vient de la donnée elle-même, publiée en tranches textuelles sous la région, qu'il faut
+          relire en nombres avec des <code>replace()</code> en cascade.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; la carte départementale est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

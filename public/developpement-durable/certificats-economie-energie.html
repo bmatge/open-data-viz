@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Où l'on rénove : les CEE par habitant — open-data-viz</title>
+  <meta name="description" content="De 2015 à 2022, les certificats d'économies d'énergie ont financé cinq fois plus de rénovation par habitant dans la Meuse qu'à Paris, et l'écart entre départements tient surtout aux primes réservées aux ménages modestes. Création avec dsfr-data à partir des fichiers CEE et ITDD du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — deuxième vague (§ 5) du cadrage
+       docs/portail-developpement-durable/proposition.md : « Où l'on rénove : les CEE
+       par habitant ».
+
+       LA MAILLE. Le cadrage annonçait « 75 % de lignes sous secret » au département.
+       Rejoué le 2026-09-27 sur le fichier par année d'engagement : 3 852 lignes sur
+       20 352 (18,9 %), et le secret frappe les lignes de MOINS DE 3 DOSSIERS — il ne
+       peut cacher que 2 dossiers par ligne. Au département, la perte est bornée à
+       quelques milliers de dossiers sur 7,4 millions : la maille tient. À l'EPCI, le
+       fichier équivalent a 29,1 % de lignes secrètes et sa somme nationale est
+       inférieure de 59 TWh cumac (2,6 %) à celle des départements : c'est la maille
+       qui ne tient pas, et elle pèse 26 Mo. D'où : DÉPARTEMENT.
+
+       DEUX COLONNES D'ÉCONOMIES, DISJOINTES. ECO_NRJ_KWHCUMAC = CEE « classiques »,
+       ECO_NRJ_PRECARITE_KWHCUMAC = CEE « précarité » (ménages modestes). Le total est
+       leur SOMME : les chiffres du cadrage (172 TWhc en 2019…) ne comptaient que la
+       première colonne.
+
+       LE SECRET. Chaque cellule sous secret vaut la chaîne « secret », sur les trois
+       colonnes de la ligne à la fois. Dans `compute`, `+` CONCATÈNE dès qu'un côté
+       n'est pas numérique : on recode donc « secret » en 0 AVANT toute arithmétique,
+       et on compte les lignes.
+
+       DEUX SOURCES DiDo (sous la limite de trois connexions simultanées) :
+       - `cee` : CEE par département, fiche et année d'engagement (20 352 lignes, 5 Mo) ;
+       - `pop` : ITDD départemental, population (VARIABLE=pop, NO_INDIC=i017 : la
+         population est répétée sous cinq indicateurs, un seul est gardé), 2022.
+       ========================================================================== -->
+
+  <!-- ---------- CEE : département × fiche × année d'engagement ---------- -->
+  <dsfr-data-source id="cee"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/e38710ac-c731-433f-b3c7-c2dfa175746c/json?columns=FICHE,LIBELLE_FICHE,SECTEUR,DEP_CODE,ANNEE_ENGAGEMENT,NB_DOSSIERS,ECO_NRJ_KWHCUMAC,ECO_NRJ_PRECARITE_KWHCUMAC">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="cee-n" source="cee"
+    compute="sec = when NB_DOSSIERS = 'secret' then 1 else 0;
+             cl0 = when ECO_NRJ_KWHCUMAC = 'secret' then 0 else ECO_NRJ_KWHCUMAC;
+             pr0 = when ECO_NRJ_PRECARITE_KWHCUMAC = 'secret' then 0 else ECO_NRJ_PRECARITE_KWHCUMAC;
+             dos0 = when sec = 1 then 0 else NB_DOSSIERS;
+             res = when SECTEUR = 'Résidentiel' then 1 else 0;
+             cl = cl0 * res; pr = pr0 * res; dos = dos0 * res; sec_r = sec * res;
+             tout = cl0 + pr0;
+             isol = when contains(FICHE, 'BAR-EN') then cl + pr else 0;
+             k = 1; un = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Population des départements (ITDD, 2022) ---------- -->
+  <dsfr-data-source id="pop"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/aa011e5d-e888-469d-8e72-a8af4f73d123/json?VARIABLE=eq:pop&amp;NO_INDIC=eq:i017&amp;columns=CODGEO_CODE,CODGEO_LIBELLE,A2022">
+  </dsfr-data-source>
+
+  <!-- ---------- Une ligne par département ---------- -->
+  <!-- group-by AVANT la jointure : une ligne par département du côté droit (ADR-122). -->
+  <dsfr-data-query id="dep-a" source="cee-n" group-by="DEP_CODE"
+    aggregate="cl:sum:cl, pr:sum:pr, dos:sum:dos, sec_r:sum:nsec, res:sum:nlig">
+  </dsfr-data-query>
+  <!-- pop à gauche, jointure interne : les codes sans population (« NA », 975, 977,
+       988 : 0,05 TWhc) tombent ; Mayotte (population 2022 absente) est écartée ensuite. -->
+  <dsfr-data-join id="dep-j" left="pop" right="dep-a" on="CODGEO_CODE=DEP_CODE" type="inner"></dsfr-data-join>
+  <dsfr-data-query id="dep-ok" source="dep-j" where="A2022:isnotnull"></dsfr-data-query>
+  <dsfr-data-normalize id="dep" source="dep-ok"
+    rename="CODGEO_LIBELLE:Département"
+    compute="popu = A2022;
+             mwh_x = (cl + pr) / popu / 1000;
+             mwh = round(mwh_x, 1);
+             mwh_cl = round(cl / popu / 1000, 1);
+             mwh_pr = round(pr / popu / 1000, 1);
+             dos1000 = round(dos / popu * 1000, 0);
+             ppr = round(pr / (cl + pr) * 100, 0);
+             twh = round((cl + pr) / 1000000000, 1);
+             metro = when len(CODGEO_CODE) = 2 then 1 else 0;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse nationale ---------- -->
+  <dsfr-data-query id="nat-a" source="cee-n" group-by="k"
+    aggregate="cl:sum:cl, pr:sum:pr, dos:sum:dos, tout:sum:tout, isol:sum:isol, sec:sum:nsec, un:sum:nlig, sec_r:sum:nsec_r, res:sum:nlig_r">
+  </dsfr-data-query>
+  <dsfr-data-query id="nat-d" source="dep" group-by="k"
+    aggregate="cl:sum:d_cl, pr:sum:d_pr, dos:sum:d_dos, popu:sum:d_pop, popu:count:n_dep">
+  </dsfr-data-query>
+  <dsfr-data-join id="nat-j" left="nat-a" right="nat-d" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="nat" source="nat-j"
+    compute="twh = (cl + pr) / 1000000000;
+             ppr = pr / (cl + pr) * 100;
+             pres = (cl + pr) / tout * 100;
+             pisol = isol / (cl + pr) * 100;
+             mwh = (d_cl + d_pr) / d_pop / 1000;
+             dos1000 = d_dos / d_pop * 1000;
+             dos_m = dos / 1000000;
+             psec = nsec / nlig * 100;
+             psec_r = nsec_r / nlig_r * 100;
+             cache = nsec_r * 2;
+             pcache = cache / dos * 100">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Le plus haut, le plus bas, Paris (métropole) ---------- -->
+  <dsfr-data-query id="met" source="dep" where="metro:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="met-max" source="met" order-by="mwh_x:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="met-min" source="met" order-by="mwh_x:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="paris" source="dep" where="CODGEO_CODE:eq:75"></dsfr-data-query>
+  <dsfr-data-join id="mp-j" left="met-max" right="paris" on="k" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-join id="mp-j2" left="mp-j" right="met-min" on="k" prefix-right="m_"></dsfr-data-join>
+  <dsfr-data-join id="mp-j3" left="mp-j2" right="nat" on="k" prefix-right="n_"></dsfr-data-join>
+  <dsfr-data-normalize id="mp" source="mp-j3" compute="ratio = mwh_x / p_mwh_x"></dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Où l'on rénove&nbsp;: les CEE par habitant</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Rénovation aidée&nbsp;: cinq fois plus par habitant dans la Meuse qu'à Paris, un écart fait surtout des primes aux ménages modestes</h1>
+
+    <dsfr-data-repeat source="mp">
+      <template>
+        <p class="fr-text--lead">
+          De 2015 à 2022, les certificats d'économies d'énergie (CEE) — les primes que les fournisseurs d'énergie sont
+          obligés de financer — ont soutenu dans les logements des travaux évalués à {{n_twh:number:0}}&nbsp;TWh cumac
+          d'économies, soit {{n_mwh:number:1}}&nbsp;MWh cumac par habitant. Mais pas partout pareil&nbsp;: la {{Département}}
+          en a reçu <strong>{{mwh:number:1}}&nbsp;MWh cumac par habitant</strong>, Paris {{p_mwh:number:1}}, <strong>{{ratio:number:1}}&nbsp;fois
+          moins</strong>. Les départements ruraux du Nord-Est et du Massif central sont en tête&nbsp;;
+          les métropoles et le littoral méditerranéen ferment la marche. Et {{n_ppr:number:0}}&nbsp;% de ces économies relèvent
+          des CEE «&nbsp;précarité&nbsp;», réservés aux ménages modestes.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      SDES, certificats d'économies d'énergie délivrés par département du lieu des travaux, par fiche et par année
+      d'engagement des travaux (2015-2022), secteur résidentiel&nbsp;; population 2022 des indicateurs territoriaux de
+      développement durable (Insee-SDES). Données lues à l'ouverture de la page sur
+      <a href="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/" target="_blank" rel="noopener external">l'API DiDo</a>.
+      Le kWh cumac est une unité conventionnelle, pas une économie mesurée&nbsp;: voir plus bas.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="nat" value="twh:max" format="nombre" unit="TWh cumac" span="4"
+        heading="Économies d'énergie financées dans les logements" label="travaux engagés de 2015 à 2022"
+        lines='[{"value":"dos_m:max","format":"decimal","decimals":1,"suffix":"millions de dossiers"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="nat" value="mwh:max" format="decimal" decimals="1" unit="MWh cumac" span="4"
+        heading="Par habitant" label="en moyenne nationale (population 2022, hors Mayotte)"
+        lines='[{"value":"dos1000:max","format":"nombre","suffix":"dossiers pour 1 000 habitants"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="nat" value="ppr:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Au titre de la précarité" label="des économies relèvent des CEE réservés aux ménages modestes"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — la carte ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-carte">
+    <h2 id="t-carte" class="fr-h3">Le Nord-Est et le Massif central en tête, les métropoles et la Méditerranée en queue</h2>
+    <dsfr-data-repeat source="mp">
+      <template>
+        <p class="odv-lecture">
+          Rapportées à la population, les économies financées vont de {{m_mwh:number:1}}&nbsp;MWh cumac par habitant en
+          {{m_Département}} à {{mwh:number:1}} dans la {{Département}}, pour {{n_mwh:number:1}} en moyenne nationale.
+          Paris ({{p_mwh:number:1}}), ville d'appartements, est parmi les plus bas. Les départements d'outre-mer, où l'on ne
+          chauffe presque pas, sont plus bas encore.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Carte des économies d'énergie financées par les CEE dans les logements, par habitant">
+      <dsfr-data-chart id="g-carte" source="dep" type="map"
+        code-field="CODGEO_CODE" value-field="mwh" name="Économies CEE par habitant (MWh cumac)" unit-tooltip="MWh cumac/hab"
+        selected-palette="sequentialAscending"
+        map-summary="weighted" map-summary-weight="popu" map-summary-field="mwh_x"
+        databox databox-title="Économies d'énergie financées par les certificats d'économies d'énergie dans les logements, par habitant, travaux engagés de 2015 à 2022 (MWh cumac par habitant)"
+        databox-source="SDES — CEE par département et année d'engagement ; Insee-SDES — ITDD, population 2022 (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="dep" label-field="Département" value-field="mwh"
+        description="Carte des départements colorés selon les économies d'énergie financées par les CEE dans les logements, en MWh cumac par habitant, cumul 2015-2022. Les teintes les plus foncées couvrent le Nord-Est (Meuse, Vosges, Haute-Marne, Ardennes, Moselle, Haute-Saône) et le Massif central (Haute-Loire, Loire, Corrèze, Creuse), ainsi que le Lot-et-Garonne et le Tarn ; les plus claires Paris et les Hauts-de-Seine, la Haute-Savoie, la côte méditerranéenne, la Corse et les départements d'outre-mer. Mayotte n'a pas de valeur mais apparaît dans un bleu uni hors échelle. Le résumé national est pondéré par la population. Le tableau plus bas donne toutes les valeurs.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Cumul des travaux engagés de 2015 à 2022, rapporté à la population de 2022. Le résumé affiché sous le titre est la
+      moyenne pondérée par la population, c'est-à-dire le ratio national. Mayotte, sans population 2022 dans le fichier,
+      n'a pas de valeur&nbsp;: la carte la peint pourtant d'un bleu uni qui n'appartient pas à l'échelle et ne porte
+      aucun chiffre.
+    </p>
+  </section>
+
+  <!-- ======================= L'ÉCART — précarité ou classique ======================= -->
+  <!-- Les 10 plus hauts et les 10 plus bas de métropole ; l'outre-mer est écarté du
+       classement (besoins de chauffage sans commune mesure). -->
+  <dsfr-data-query id="top10" source="met" order-by="mwh_x:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-query id="bot10" source="met" order-by="mwh_x:asc" limit="10"></dsfr-data-query>
+  <dsfr-data-concat id="tb" sources="top10, bot10"></dsfr-data-concat>
+  <dsfr-data-query id="tb-o" source="tb" order-by="mwh_x:desc"></dsfr-data-query>
+  <dsfr-data-query id="t10" source="top10" group-by="k" aggregate="cl:sum:cl, pr:sum:pr, popu:sum:popu"></dsfr-data-query>
+  <dsfr-data-query id="b10" source="bot10" group-by="k" aggregate="cl:sum:cl, pr:sum:pr, popu:sum:popu"></dsfr-data-query>
+  <dsfr-data-join id="tb-j" left="t10" right="b10" on="k" prefix-right="b_"></dsfr-data-join>
+  <dsfr-data-normalize id="tb-s" source="tb-j"
+    compute="t_cl = cl / popu / 1000; t_pr = pr / popu / 1000;
+             b_mcl = b_cl / b_popu / 1000; b_mpr = b_pr / b_popu / 1000;
+             r_cl = t_cl / b_mcl; r_pr = t_pr / b_mpr; r_tot = (t_cl + t_pr) / (b_mcl + b_mpr)">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ecart">
+    <h2 id="t-ecart" class="fr-h3">L'écart tient aux primes «&nbsp;précarité&nbsp;» bien plus qu'aux primes classiques</h2>
+    <dsfr-data-repeat source="tb-s">
+      <template>
+        <p class="odv-lecture">
+          Les dix départements métropolitains qui rénovent le plus par habitant reçoivent {{r_tot:number:1}}&nbsp;fois plus
+          d'économies CEE que les dix qui rénovent le moins. Côté CEE classiques, l'écart n'est que de
+          {{r_cl:number:1}}&nbsp;fois ({{t_cl:number:1}} contre {{b_mcl:number:1}}&nbsp;MWh cumac par habitant). Côté CEE
+          précarité, il est de <strong>{{r_pr:number:1}}&nbsp;fois</strong> ({{t_pr:number:1}} contre {{b_mpr:number:1}}).
+          L'écart entre départements est donc fait, pour l'essentiel, des primes réservées aux ménages modestes.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les dix départements qui rénovent le plus et les dix qui rénovent le moins, CEE classiques et précarité par habitant">
+      <dsfr-data-chart id="g-ecart" source="tb-o" type="bar" horizontal stacked
+        label-field="Département" value-field="mwh_pr:CEE précarité" value-fields="mwh_cl:CEE classiques"
+        unit-tooltip="MWh cumac/hab"
+        databox databox-title="Économies CEE par habitant dans les logements, CEE précarité et CEE classiques, dans les dix départements métropolitains les plus hauts et les dix plus bas, 2015-2022 (MWh cumac par habitant)"
+        databox-source="SDES — CEE par département ; Insee-SDES — ITDD, population 2022 (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ecart" source="tb-o" label-field="Département" value-field="mwh_pr, mwh_cl"
+        description="Barres horizontales empilées, une par département, triées de haut en bas : les dix départements métropolitains aux économies CEE par habitant les plus hautes (de la Meuse à la Haute-Saône), puis les dix plus basses (des Hauts-de-Seine à la Corse-du-Sud). Chaque barre additionne les CEE précarité et les CEE classiques. En haut, la part précarité domine largement ; en bas, les deux parts sont d'une taille voisine et la barre entière est trois à dix fois plus courte.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      CEE précarité&nbsp;: travaux chez des ménages sous plafond de ressources, qui ouvrent droit à des primes plus
+      élevées. Écarts calculés sur les sommes de chaque groupe (économies du groupe / population du groupe), pas sur une
+      moyenne de ratios. L'outre-mer est hors classement&nbsp;: ses besoins de chauffage n'ont pas de commune mesure.
+    </p>
+  </section>
+
+  <!-- ======================= LE TEMPS — le pic et la chute ======================= -->
+  <dsfr-data-query id="an" source="cee-n" group-by="ANNEE_ENGAGEMENT"
+    aggregate="cl:sum:cl, pr:sum:pr" order-by="ANNEE_ENGAGEMENT:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="an-t" source="an"
+    rename="ANNEE_ENGAGEMENT:Année"
+    compute="cl_t = round(cl / 1000000000, 1); pr_t = round(pr / 1000000000, 1);
+             tot = (cl + pr) / 1000000000; k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="an-max" source="an-t" order-by="tot:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-der" source="an-t" order-by="Année:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-prem" source="an-t" order-by="Année:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="an-j" left="an-max" right="an-der" on="k" prefix-right="d_"></dsfr-data-join>
+  <dsfr-data-join id="an-j2" left="an-j" right="an-prem" on="k" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-normalize id="an-s" source="an-j2"
+    compute="baisse = (1 - d_tot / tot) * 100;
+             baisse_pr = (1 - d_pr / pr) * 100;
+             fois = tot / p_tot">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-temps">
+    <h2 id="t-temps" class="fr-h3">Un pic de 2019 à 2021, porté par la précarité, puis la chute</h2>
+    <dsfr-data-repeat source="an-s">
+      <template>
+        <p class="odv-lecture">
+          Les économies financées dans les logements ont été multipliées par {{fois:number:0}} entre {{p_Année}} et
+          {{Année}}, année du maximum&nbsp;: {{tot:number:0}}&nbsp;TWh cumac. En {{d_Année}}, dernière année du fichier, elles
+          retombent à {{d_tot:number:0}}&nbsp;TWh cumac, <strong>{{baisse:number:0}}&nbsp;% de moins</strong>&nbsp;; la part
+          précarité, elle, recule de {{baisse_pr:number:0}}&nbsp;%. Les années du pic sont celles des offres d'isolation et de
+          chauffage «&nbsp;à 1&nbsp;euro&nbsp;» (programme «&nbsp;Coup de pouce&nbsp;»), dont le volet isolation a pris fin mi-2021.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Économies CEE dans les logements par année d'engagement, précarité et classiques">
+      <dsfr-data-chart id="g-temps" source="an-t" type="bar" stacked
+        label-field="Année" value-field="pr_t:CEE précarité" value-fields="cl_t:CEE classiques"
+        unit-tooltip="TWh cumac" y-min="0"
+        databox databox-title="Économies d'énergie financées par les CEE dans les logements, par année d'engagement des travaux, CEE précarité et CEE classiques (TWh cumac)"
+        databox-source="SDES — CEE par département et année d'engagement (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-temps" source="an-t" label-field="Année" value-field="pr_t, cl_t"
+        description="Barres verticales empilées, une par année d'engagement de 2015 à 2022 : les économies CEE dans les logements, en TWh cumac, précarité en bas, classiques au-dessus. Les barres montent de 2015 à 2018, doublent en 2019, restent hautes en 2020 et atteignent leur maximum en 2021, puis retombent de plus de moitié en 2022, où la part précarité devient minoritaire.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Année d'engagement des travaux. Le fichier s'arrête aux travaux engagés en 2022&nbsp;; le SDES n'a pas publié les
+      années suivantes à cette maille.
+    </p>
+  </section>
+
+  <!-- ======================= CE QU'ON FINANCE — les fiches ======================= -->
+  <dsfr-data-query id="fi" source="cee-n" where="res:eq:1" group-by="FICHE, LIBELLE_FICHE"
+    aggregate="cl:sum:cl, pr:sum:pr" >
+  </dsfr-data-query>
+  <dsfr-data-normalize id="fi-n" source="fi" compute="tot = cl + pr; k = 1"></dsfr-data-normalize>
+  <dsfr-data-join id="fi-j" left="fi-n" right="nat" on="k" prefix-right="n_"></dsfr-data-join>
+  <dsfr-data-normalize id="fi-t" source="fi-j" compute="part = round(tot / (n_cl + n_pr) * 100, 1)"></dsfr-data-normalize>
+  <!-- rename s'exécute AVANT compute : le renommage pour le graphique se fait donc en aval. -->
+  <dsfr-data-query id="fi-8" source="fi-t" order-by="tot:desc" limit="8"></dsfr-data-query>
+  <dsfr-data-normalize id="fi-top" source="fi-8" rename="LIBELLE_FICHE:Travaux | part:Part des économies (%)"></dsfr-data-normalize>
+  <dsfr-data-query id="fi-1" source="fi-t" order-by="tot:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="fi-1j" left="fi-1" right="nat" on="k" prefix-right="n_"></dsfr-data-join>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-fiches">
+    <h2 id="t-fiches" class="fr-h3">Ce qu'on finance&nbsp;: l'isolation d'abord, les combles en tête</h2>
+    <dsfr-data-repeat source="fi-1j">
+      <template>
+        <p class="odv-lecture">
+          L'isolation (combles et toitures, murs, planchers, fenêtres) représente <strong>{{pisol:number:0}}&nbsp;%</strong>
+          des économies financées dans les logements. À elle seule, l'«&nbsp;{{LIBELLE_FICHE}}&nbsp;» en fait
+          {{part:number:0}}&nbsp;%. Viennent ensuite les pompes à chaleur et les chaudières performantes.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les huit types de travaux qui portent le plus d'économies CEE dans les logements">
+      <dsfr-data-chart id="g-fiches" source="fi-top" type="bar" horizontal
+        label-field="Travaux" value-field="Part des économies (%)" name="Part des économies CEE des logements"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Les huit types de travaux (fiches CEE) qui portent le plus d'économies d'énergie dans les logements, part du total 2015-2022 (%)"
+        databox-source="SDES — CEE par département, fiche et année d'engagement (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-fiches" source="fi-top" label-field="Travaux" value-field="Part des économies (%)"
+        description="Barres horizontales triées : la part des économies CEE des logements portée par chacun des huit types de travaux les plus importants. L'isolation des combles ou toitures, mise en évidence, vient en tête avec un peu plus d'un quart ; suivent l'isolation des murs, l'isolation d'un plancher et les pompes à chaleur air/eau, autour de 13 à 14 % chacune, puis l'isolation des réseaux de chauffage, les chaudières performantes, la rénovation globale et les chaudières biomasse.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Une fiche CEE est un type de travaux standardisé, auquel l'État attribue un montant forfaitaire de kWh cumac.
+      Isolation = fiches de la famille «&nbsp;enveloppe&nbsp;» du résidentiel (BAR-EN).
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: et dans votre département&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Une ligne par département, cumul des travaux engagés de 2015 à 2022 dans les logements, rapporté à la population
+      de 2022. «&nbsp;Lignes sous secret&nbsp;»&nbsp;: nombre de couples fiche × année du département où moins de 3&nbsp;dossiers
+      ont été déposés, et dont les chiffres ne sont pas publiés.
+    </p>
+    <dsfr-data-list source="dep"
+      columns="Département:Département, CODGEO_CODE:Code, mwh:MWh cumac par habitant, mwh_pr:dont précarité, dos1000:Dossiers pour 1 000 habitants, ppr:Part précarité (%), twh:Total (TWh cumac), nsec:Lignes sous secret"
+      sort="mwh:desc" search pagination="15" count-label="département|départements" export="csv"
+      caption="Économies d'énergie financées par les CEE dans les logements, par département, travaux engagés de 2015 à 2022">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm fr-mb-0">
+      <li><strong>Des économies réelles.</strong> Le kWh cumac («&nbsp;cumulé actualisé&nbsp;») est un forfait conventionnel
+        par type de travaux, additionné sur la durée de vie supposée de l'équipement. Il ne dit pas combien un ménage a
+        effectivement économisé, ni si les travaux ont été bien faits.</li>
+      <li><strong>Toute la rénovation.</strong> Seuls les travaux aidés par des CEE sont ici&nbsp;: ni MaPrimeRénov' seule, ni
+        les travaux sans aide.</li>
+      <li><strong>Les causes.</strong> La carte suit la part de maisons, les besoins de chauffage et les revenus, mais
+        aucune de ces variables n'est dans le fichier&nbsp;: les explications de cette page sont des pistes, pas des
+        mesures.</li>
+      <li><strong>Une carte des intercommunalités.</strong> Le SDES publie le même fichier par intercommunalité, mais le
+        secret y frappe 29&nbsp;% des lignes et sa somme nationale est inférieure de 2,6&nbsp;% à celle des départements
+        (mesuré le 27&nbsp;septembre 2026). La maille départementale tient, pas celle-là.</li>
+      <li><strong>Les années après 2022</strong>, absentes du fichier.</li>
+      <li><strong>L'effet de la population sur huit ans.</strong> Un cumul 2015-2022 est rapporté à la seule population
+        de 2022&nbsp;: une approximation, sans effet sur le classement.</li>
+    </ul>
+    <dsfr-data-repeat source="nat">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Le tertiaire</strong>, écarté&nbsp;: les logements portent {{pres:number:0}}&nbsp;% des économies du
+            fichier.</li>
+          <li><strong>Le secret statistique.</strong> {{nsec:number}}&nbsp;lignes sur {{nlig:number}} ({{psec:number:1}}&nbsp;%)
+            valent «&nbsp;secret&nbsp;» au lieu d'un nombre, dont {{nsec_r:number}} dans le résidentiel ({{psec_r:number:1}}&nbsp;%)&nbsp;;
+            elles comptent pour zéro. Le secret ne frappe que les lignes de moins de 3&nbsp;dossiers&nbsp;: il cache au plus
+            {{cache:number}}&nbsp;dossiers sur {{dos:number}} ({{pcache:number:2}}&nbsp;%). Beaucoup de lignes, peu de
+            rénovation&nbsp;: le secret ne change pas la carte.</li>
+          <li><strong>Mayotte et quelques codes hors département</strong> («&nbsp;NA&nbsp;», collectivités du Pacifique et de
+            l'Atlantique)&nbsp;: sans population dans le fichier, ils restent hors des ratios. La moyenne nationale porte
+            sur {{n_dep:number}}&nbsp;départements.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir du fichier CEE départemental du SDES et de la population des
+        indicateurs territoriaux, tous deux servis par DiDo. Le cadrage redoutait «&nbsp;75&nbsp;% de lignes sous
+        secret&nbsp;»&nbsp;: rejoué, c'est 18,9&nbsp;%, sur des lignes de moins de 3&nbsp;dossiers. La maille départementale
+        tient&nbsp;; c'est l'intercommunale qui ne tient pas.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Deux fichiers DiDo, une jointure.</strong> Agrégat par département puis <code>dsfr-data-join</code>
+              sur <code>CODGEO_CODE=DEP_CODE</code>&nbsp;: le ratio par habitant sans script.</li>
+            <li><strong>Un résumé de carte honnête.</strong> <code>map-summary="weighted"</code> pondéré par la population
+              et calculé sur la valeur non arrondie (<code>map-summary-field</code>)&nbsp;: le chiffre sous le titre est le
+              ratio national, pas une moyenne de ratios.</li>
+            <li><strong>Dix en haut, dix en bas.</strong> Deux <code>limit</code> empilés par <code>dsfr-data-concat</code>,
+              puis retriés.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Le secret dans une addition.</strong> Dans <code>compute</code>, <code>+</code> concatène dès qu'un
+              côté n'est pas un nombre&nbsp;: «&nbsp;classique + précarité&nbsp;» sur une ligne secrète donnerait du texte. Il
+              faut recoder le secret en 0 <em>avant</em> d'additionner. Les agrégats de <code>query</code>, eux, l'ignorent
+              sans rien dire.</li>
+            <li><strong>Deux colonnes qui se complètent.</strong> Rien dans les noms ne dit que classique et précarité
+              s'additionnent&nbsp;: c'est la documentation du jeu qui l'établit, et le cadrage s'y était trompé.</li>
+            <li><strong>Les phrases de synthèse demandent des jointures</strong> sur une clé constante&nbsp;: plus haut, plus
+              bas et Paris dans une même phrase, trois jointures.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Lire DiDo filtré</td><td><code>dsfr-data-source url=".../json?COL=eq:v&amp;columns=…"</code></td><td>Natif (mode URL)</td></tr>
+            <tr><td>Recoder et compter le secret</td><td><code>normalize compute when … = 'secret'</code></td><td>Natif, à faire avant toute addition</td></tr>
+            <tr><td>Ratio par habitant</td><td><code>query group-by</code> puis <code>join</code> sur la population</td><td>Natif</td></tr>
+            <tr><td>Carte départementale et moyenne nationale</td><td><code>type="map"</code>, <code>map-summary="weighted"</code></td><td>Natif</td></tr>
+            <tr><td>Dix plus hauts et dix plus bas</td><td><code>query limit</code> ×&nbsp;2 + <code>dsfr-data-concat</code></td><td>Natif</td></tr>
+            <tr><td>Deux composantes d'un total</td><td><code>chart stacked</code> + <code>value-fields</code></td><td>Natif</td></tr>
+            <tr><td>Phrase de lecture calculée</td><td><code>dsfr-data-repeat</code> sur des jointures à clé constante</td><td>Natif, verbeux</td></tr>
+            <tr><td>Tableau exportable</td><td><code>dsfr-data-list</code> (recherche, tri, CSV)</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Le secret faisait peur, il ne pèse rien&nbsp;; le vrai piège était l'addition.</strong> Au département, les
+          lignes secrètes sont nombreuses mais minuscules, et la page le prouve en calculant la borne. Ce qui aurait faussé
+          la page, c'est d'additionner une cellule «&nbsp;secret&nbsp;» dans un <code>compute</code>, ou de ne lire qu'une des
+          deux colonnes d'économies. Le reste est un pipeline <code>dsfr-data</code> ordinaire.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; type="map" est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

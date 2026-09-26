@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sites patrimoniaux remarquables — open-data-viz</title>
+  <meta name="description" content="Dix ans après la loi qui a fondu tous les régimes dans les sites patrimoniaux remarquables, près de deux communes protégées sur trois le sont au titre d'une ancienne ZPPAUP, et plus de quatre sur dix en appliquent encore le règlement ; le plan de valorisation créé en 2016 n'en couvre que 3 %. Création avec dsfr-data à partir de la liste des SPR du ministère de la Culture (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 14 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte la « Liste des sites patrimoniaux remarquables »
+       du ministère de la Culture, servie par Tabular (ressource b916f51e…).
+
+       L'UNITÉ. Une ligne = une commune dans un SPR. Un SPR à cheval sur trois communes
+       fait trois lignes ; une commune qui porte cinq SPR (Montpellier, Saint-Étienne)
+       en fait cinq. Le régime d'origine et le plan en vigueur sont saisis PAR LIGNE, et
+       ils diffèrent parfois entre les communes d'un même SPR (13 numéros incohérents) :
+       la page compte donc des communes-sites, pas des SPR, et le dit.
+
+       LA BASE. 1 145 lignes, dont 58 sans numéro de SPR (46 « AVAP à l'étude », des
+       lignes vides) : des projets, pas des sites. Tous les pourcentages portent sur les
+       1 087 lignes numérotées (flag `spr`). Le cadrage disait « six sur dix nés ZPPAUP »
+       sur les 1 145 lignes (693, 60,5 %) ; sur la base propre, c'est 63,8 %.
+
+       LE CHARGEMENT. `fetch-mode="export"` : l'export Parquet en une requête (pas de
+       where/group-by sur la source). `select` : 13 colonnes sur 19.
+       ========================================================================== -->
+
+  <dsfr-data-source id="spr" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="b916f51e-7252-41c2-8a0e-eb47e0c9292b"
+    fetch-mode="export" max-records="5000"
+    select="region, departement, commune, code_insee, population, numero_du_spr, spr_initial_regime_de_creation, spr_initial_date_de_creation, type_de_plan_en_vigueur, evolution_type_de_plan, date_du_plan_en_vigueur, coordonnees_geo_lat_commune_spr, coordonnees_geo_long_commune_spr">
+  </dsfr-data-source>
+
+  <!-- Régime d'origine : cinq modalités brutes (ZPPAUP, AVAP, secteur S, LCAP,
+       secteur S + LCAP) et le vide. Plan en vigueur : ZPPAUP, AVAP, PSMV, PVAP,
+       « PSMV + PVAP » (rangé en PVAP : la commune a un PVAP), et trois restes
+       (vide, « LCAP », « rien ») rangés en « Aucun plan renseigné ». -->
+  <dsfr-data-normalize id="spr-n" source="spr" trim
+    rename="spr_initial_regime_de_creation:regime | spr_initial_date_de_creation:date_creation | type_de_plan_en_vigueur:plan_brut | evolution_type_de_plan:evolution | numero_du_spr:numero | coordonnees_geo_lat_commune_spr:lat | coordonnees_geo_long_commune_spr:lon"
+    compute="spr = when is_empty(numero) then 0 else 1;
+             o_s = when regime = 'secteur S' or regime = 'secteur S + LCAP' then 1 else 0;
+             o_z = when regime = 'ZPPAUP' then 1 else 0;
+             o_a = when regime = 'AVAP' then 1 else 0;
+             o_l = when regime = 'LCAP' then 1 else 0;
+             o_n = when o_s + o_z + o_a + o_l = 0 then 1 else 0;
+             ordre_o = when o_s = 1 then 1 when o_z = 1 then 2 when o_a = 1 then 3 when o_l = 1 then 4 else 5;
+             origine = when ordre_o = 1 then 'Secteur sauvegardé (1962)' when ordre_o = 2 then 'ZPPAUP (1983)'
+                       when ordre_o = 3 then 'AVAP (2010)' when ordre_o = 4 then 'Créé comme SPR (2016)' else 'Origine non renseignée';
+             p_z = when plan_brut = 'ZPPAUP' then 1 else 0;
+             p_a = when plan_brut = 'AVAP' then 1 else 0;
+             p_s = when plan_brut = 'PSMV' then 1 else 0;
+             p_v = when plan_brut = 'PVAP' or plan_brut = 'PSMV + PVAP' then 1 else 0;
+             p_n = when p_z + p_a + p_s + p_v = 0 then 1 else 0;
+             plan = when p_z = 1 then 'Règlement de ZPPAUP' when p_a = 1 then 'Règlement d’AVAP'
+                    when p_s = 1 then 'Plan de sauvegarde (PSMV)' when p_v = 1 then 'Plan de valorisation (PVAP)' else 'Aucun plan renseigné';
+             z_reste = o_z * p_z;
+             z_etude = when p_z = 1 and (contains(evolution, 'étude') or contains(evolution, 'venir')) then 1 else 0;
+             l_sans = o_l * p_n;
+             annee = year(date_creation);
+             dec = floor(annee / 10) * 10;
+             decennie = when is_null(dec) then 'Non datée' else 'Années ' + dec;
+             datee = when is_null(dec) then 0 else 1;
+             petite = when population &lt; 2000 then 1 else 0;
+             un = 1;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- La base : les lignes qui portent un numéro de SPR. -->
+  <dsfr-data-query id="base" source="spr-n" where="spr:eq:1"></dsfr-data-query>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <!-- Les sommes portent sur la BASE numérotée ; le total brut (projets compris)
+       vient d'une query sur toutes les lignes, jointe sur la clé constante. -->
+  <dsfr-data-query id="syn-b" source="base" group-by="k"
+    aggregate="un:sum:n, o_s:sum:o_s, o_z:sum:o_z, o_a:sum:o_a, o_l:sum:o_l, o_n:sum:o_n,
+               p_z:sum:p_z, p_a:sum:p_a, p_s:sum:p_s, p_v:sum:p_v, p_n:sum:p_n,
+               z_reste:sum:z_reste, z_etude:sum:z_etude, l_sans:sum:l_sans, datee:sum:datee, petite:sum:petite">
+  </dsfr-data-query>
+  <dsfr-data-query id="syn-tout" source="spr-n" group-by="k" aggregate="un:sum:lignes"></dsfr-data-query>
+  <dsfr-data-join id="syn-j" left="syn-b" right="syn-tout" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="syn-t" source="syn-j"
+    compute="projets = lignes - n;
+             part_z = o_z / n * 100;
+             part_pz = p_z / n * 100;
+             part_pv = p_v / n * 100;
+             part_reste = z_reste / o_z * 100;
+             z_passe = o_z - z_reste;
+             non_datee = n - datee;
+             part_petite = petite / n * 100">
+  </dsfr-data-normalize>
+
+  <!-- Nombre de SPR distincts et de communes distinctes (base numérotée). -->
+  <dsfr-data-query id="nums" source="base" group-by="numero" aggregate="un:sum:n"></dsfr-data-query>
+  <dsfr-data-query id="communes" source="base" group-by="code_insee" aggregate="un:sum:n"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Sites patrimoniaux remarquables</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Sites patrimoniaux remarquables&nbsp;: près de deux sur trois sont nés ZPPAUP, et plus de quatre sur dix en appliquent encore le règlement</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          En 2016, la loi «&nbsp;liberté de la création, architecture et patrimoine&nbsp;» a fondu les secteurs
+          sauvegardés, les ZPPAUP et les AVAP en un seul label, le site patrimonial remarquable. Le registre compte
+          {{n:number}}&nbsp;communes couvertes par un SPR numéroté&nbsp;: <strong>{{part_z:number:0}}&nbsp;%</strong>
+          le sont au titre d'une ancienne ZPPAUP, et {{p_z:number}} ({{part_pz:number:0}}&nbsp;%) vivent toujours sous
+          son règlement. Le plan de valorisation créé par la loi pour les remplacer n'en couvre que
+          {{p_v:number}}, soit {{part_pv:number:1}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture — <em>Liste des sites patrimoniaux remarquables</em>. Une ligne par commune et par SPR&nbsp;;
+      les pourcentages portent sur les lignes qui ont un numéro de SPR. Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/628da9ff836d8bf454c7fd48/" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="nums" value="count" format="nombre" span="3"
+        heading="Sites patrimoniaux" label="numéros de SPR distincts"></dsfr-data-kpi>
+      <dsfr-data-kpi source="communes" value="count" format="nombre" span="3"
+        heading="Communes" label="couvertes par au moins un SPR"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_z:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Nés ZPPAUP" label="des communes-sites, par leur régime d'origine"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_pz:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Encore sous règlement de ZPPAUP" label="des communes-sites aujourd'hui"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE 1 — l'héritage ======================= -->
+  <!-- Ordre chronologique des régimes (ordre_o 1 à 5) ; highlight-index="[1]" = ZPPAUP. -->
+  <dsfr-data-query id="ori" source="base" group-by="origine, ordre_o" aggregate="un:sum:n" order-by="ordre_o:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="ori-g" source="ori" rename="origine:Régime d'origine | n:Communes-sites"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ori">
+    <h2 id="t-ori" class="fr-h3">Les ZPPAUP ont fourni près de deux sites patrimoniaux sur trois</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{o_z:number}}&nbsp;communes-sites sont d'anciennes zones de protection du patrimoine architectural, urbain et
+          paysager (ZPPAUP, créées à partir de 1983), plus de trois fois le nombre des AVAP qui leur ont succédé en 2010
+          ({{o_a:number}}). Les secteurs sauvegardés de la loi Malraux, les plus anciens, en fournissent {{o_s:number}}&nbsp;;
+          les SPR créés directement depuis 2016, {{o_l:number}}. {{o_n:number}}&nbsp;lignes n'ont pas de régime d'origine
+          renseigné&nbsp;: elles ont leur barre, en dernier.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Communes-sites par régime d'origine du SPR">
+      <dsfr-data-chart id="g-ori" source="ori-g" type="bar" horizontal
+        label-field="Régime d'origine" value-field="Communes-sites" name="Communes-sites"
+        selected-palette="neutral" highlight-index="[1]" unit-tooltip="communes-sites"
+        databox databox-title="Communes couvertes par un SPR, selon le régime de protection d'origine (ordre chronologique)"
+        databox-source="Ministère de la Culture — Liste des sites patrimoniaux remarquables (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ori" source="ori-g" label-field="Régime d'origine" value-field="Communes-sites"
+        description="Barres horizontales dans l'ordre chronologique des régimes : secteur sauvegardé (1962), ZPPAUP (1983), AVAP (2010), SPR créé directement (2016), puis origine non renseignée. La barre ZPPAUP, mise en évidence, dépasse 650 communes-sites ; les autres restent sous 200.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= PREUVE 2 — le règlement en vigueur ======================= -->
+  <dsfr-data-query id="op" source="base" group-by="origine, ordre_o"
+    aggregate="p_z:sum:p_z, p_a:sum:p_a, p_s:sum:p_s, p_v:sum:p_v, p_n:sum:p_n" order-by="ordre_o:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-plan">
+    <h2 id="t-plan" class="fr-h3">Deux ZPPAUP sur trois n'ont jamais changé de règlement</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Sur les {{o_z:number}}&nbsp;communes-sites nées ZPPAUP, {{z_reste:number}} ({{part_reste:number:0}}&nbsp;%)
+          appliquent encore le règlement d'origine, adopté pour l'essentiel dans les années 1990 ou 2000. Les autres sont passées à une
+          AVAP ou, plus rarement, à un plan de valorisation. Tous régimes confondus, le PVAP ne couvre que
+          {{p_v:number}}&nbsp;communes-sites, et {{l_sans:number}} des {{o_l:number}}&nbsp;SPR créés depuis 2016 n'ont
+          encore aucun plan renseigné.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Plan en vigueur selon le régime d'origine">
+      <dsfr-data-chart id="g-plan" source="op" type="bar" horizontal stacked
+        label-field="origine"
+        value-field="p_z:Règlement de ZPPAUP"
+        value-fields="p_a:Règlement d’AVAP, p_s:Plan de sauvegarde (PSMV), p_v:Plan de valorisation (PVAP), p_n:Aucun plan renseigné"
+        unit-tooltip="communes-sites"
+        databox databox-title="Plan en vigueur aujourd'hui, selon le régime d'origine du SPR (communes-sites)"
+        databox-source="Ministère de la Culture — Liste des sites patrimoniaux remarquables (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-plan" source="op" label-field="origine" value-field="p_z, p_a, p_s, p_v, p_n"
+        description="Barres horizontales empilées, une par régime d'origine, découpées selon le plan en vigueur : règlement de ZPPAUP, règlement d'AVAP, plan de sauvegarde, plan de valorisation, aucun plan renseigné. La barre ZPPAUP est aux deux tiers occupée par le règlement de ZPPAUP, le reste surtout par l'AVAP. Les secteurs sauvegardés sont presque tous sous plan de sauvegarde ; les SPR créés depuis 2016 sont presque tous sans plan renseigné. Le plan de valorisation n'apparaît qu'en fines tranches.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      La loi de 2016 laisse le règlement d'une ZPPAUP ou d'une AVAP s'appliquer tant qu'un plan de sauvegarde ou un plan
+      de valorisation ne l'a pas remplacé&nbsp;: un règlement de ZPPAUP en vigueur n'est pas une anomalie, c'est une
+      transition qui dure.
+    </p>
+  </section>
+
+  <!-- ======================= LE RYTHME — les décennies ======================= -->
+  <dsfr-data-query id="dec" source="base" where="datee:eq:1" group-by="decennie, dec"
+    aggregate="o_s:sum:o_s, o_z:sum:o_z, o_a:sum:o_a, o_l:sum:o_l, o_n:sum:o_n, un:sum:n" order-by="dec:asc"></dsfr-data-query>
+  <dsfr-data-query id="dec-90" source="dec" where="dec:eq:1990"></dsfr-data-query>
+  <dsfr-data-query id="dec-00" source="dec" where="dec:eq:2000"></dsfr-data-query>
+  <dsfr-data-query id="dec-10" source="dec" where="dec:eq:2010"></dsfr-data-query>
+  <dsfr-data-query id="dec-20" source="dec" where="dec:eq:2020"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dec">
+    <h2 id="t-dec" class="fr-h3">Les années 1990 et 2000 ont été celles des ZPPAUP&nbsp;; depuis, on protège moins</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="dec-90"><template><p class="fr-mb-1v">Années 1990&nbsp;: {{o_z:number}} des {{n:number}}&nbsp;communes-sites protégées l'ont été par une ZPPAUP.</p></template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dec-00"><template><p class="fr-mb-1v">Années 2000&nbsp;: {{o_z:number}} sur {{n:number}}, le sommet.</p></template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dec-10"><template><p class="fr-mb-1v">Années 2010&nbsp;: {{n:number}} seulement, dont {{o_a:number}} AVAP.</p></template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dec-20"><template><p class="fr-mb-0">Années 2020, sur six ans&nbsp;: {{n:number}}, dont {{o_l:number}} SPR créés directement.</p></template></dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Communes-sites par décennie de création et régime d'origine">
+      <dsfr-data-chart id="g-dec" source="dec" type="bar" stacked
+        label-field="decennie"
+        value-field="o_s:Secteur sauvegardé"
+        value-fields="o_z:ZPPAUP, o_a:AVAP, o_l:Créé comme SPR, o_n:Origine non renseignée"
+        unit-tooltip="communes-sites"
+        databox databox-title="Communes-sites selon la décennie de création de leur protection d'origine, par régime"
+        databox-source="Ministère de la Culture — Liste des sites patrimoniaux remarquables (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dec" source="dec" label-field="decennie" value-field="o_s, o_z, o_a, o_l, o_n, n"
+        description="Barres verticales empilées, une par décennie de création, des années 1960 aux années 2020, découpées par régime d'origine. Les années 1960 à 1980 sont basses, faites surtout de secteurs sauvegardés. Les années 1990 et 2000 sont les plus hautes, presque entièrement des ZPPAUP. Les années 2010 redescendent et sont surtout des AVAP ; les années 2020, incomplètes, surtout des SPR créés directement.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Date de création de la protection d'origine, telle que saisie pour chaque commune. La décennie 2020 ne couvre que
+      six années (2020 à 2025). Les lignes sans date ne sont pas dans ce graphique (comptées plus bas).
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-nuance">
+    <h2 id="t-nuance" class="fr-h3">Mais un règlement ancien n'est pas un site oublié</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <div class="fr-callout fr-icon-information-line">
+          <p class="fr-callout__text">
+            Sur les {{p_z:number}}&nbsp;communes-sites encore sous règlement de ZPPAUP, {{z_etude:number}} déclarent un
+            remplacement à l'étude ou à venir (AVAP ou PVAP). Le registre ne dit pas depuis quand ces études sont
+            ouvertes, et une «&nbsp;AVAP à l'étude&nbsp;» ne peut plus aboutir que si elle avait été engagée avant 2016.
+            Surtout, un vieux règlement protège&nbsp;: il ne dit pas si le site est bien ou mal entretenu. Ce que montre
+            la page, c'est l'âge des règles, pas l'état du patrimoine.
+          </p>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: sous quel règlement vit votre commune&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Un point par commune-site, placé sur la commune et coloré selon le plan en vigueur. Les filtres agissent sur la carte,
+      les chiffres et la liste. Une commune qui porte plusieurs SPR a plusieurs points superposés.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="f-fac" value="count" format="nombre"
+        heading="Communes-sites" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="f-fac" value="o_z:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Nées ZPPAUP" label="par leur régime d'origine"></dsfr-data-kpi>
+      <dsfr-data-kpi source="f-fac" value="p_z:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Encore sous règlement de ZPPAUP" label="aujourd'hui"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="f-fac" source="base"
+          fields="plan, origine, region, departement"
+          labels="plan:Plan en vigueur | origine:Régime d'origine | region:Région | departement:Département"
+          display="plan:checkbox | origine:checkbox | region:multiselect | departement:multiselect"
+          disjunctive="plan, origine, region, departement"
+          searchable="region, departement"
+          sort="region:alpha:asc | departement:alpha:asc"
+          max-values="6" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des communes-sites, par plan en vigueur">
+          <!-- Encarts : seuls les trois territoires ultramarins présents dans le jeu au
+               2026-09-27 (Guyane 3, Martinique 2, La Réunion 2). Guadeloupe et Mayotte
+               n'y ont aucun SPR : pas d'encart vide. -->
+          <dsfr-data-map id="carte-spr"
+            name="Communes couvertes par un site patrimonial remarquable, selon le plan en vigueur"
+            height="620px" tiles="ign-plan" tiles-style="muted"
+            insets="martinique,guyane,la-reunion"
+            fit-bounds fit-max-zoom="12">
+            <dsfr-data-map-layer id="couche-spr" source="f-fac" type="circle"
+              lat-field="lat" lon-field="lon" radius="5" fill-opacity="0.85"
+              color-field="plan"
+              color-map="Règlement de ZPPAUP:#000091,Règlement d’AVAP:#e4794a,Plan de sauvegarde (PSMV):#009081,Plan de valorisation (PVAP):#a558a0,Aucun plan renseigné:#929292"
+              tooltip-field="commune">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-legend for="couche-spr" label="Plan en vigueur"></dsfr-data-map-legend>
+            <dsfr-data-map-popup mode="panel-right" title-field="commune" width="360px">
+              <template>
+                <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{plan}}</p>
+                <p class="fr-text--sm fr-mb-1v"><strong>{{departement}}</strong> — {{region}}</p>
+                <p class="fr-text--sm fr-mb-1v">SPR n° {{numero}}</p>
+                <p class="fr-text--sm fr-mb-1v">Régime d'origine&nbsp;: {{origine}}</p>
+                {{#if date_creation}}<p class="fr-text--sm fr-mb-1v">Protection d'origine créée le {{date_creation}}</p>{{/if}}
+                {{#if evolution}}<p class="fr-text--sm fr-mb-0">Évolution déclarée&nbsp;: {{evolution}}</p>{{/if}}
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
+
+          <dsfr-data-normalize id="f-tableau" source="f-fac"
+            rename="commune:Commune | departement:Département | region:Région | numero:SPR | origine:Origine | plan:Plan en vigueur"></dsfr-data-normalize>
+          <dsfr-data-a11y source="f-tableau" for="carte-spr" table download
+            filename="sites-patrimoniaux-remarquables.csv"
+            label="Données de la carte"
+            description="Une commune-site par ligne pour la sélection courante : commune, département, région, numéro de SPR, régime d'origine et plan en vigueur."
+            label-field="Commune"
+            value-field="Département, Région, SPR, Origine, Plan en vigueur">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">La liste</h3>
+    <dsfr-data-list source="f-fac"
+      columns="commune:Commune, departement:Département, numero:SPR, origine:Régime d'origine, date_creation:Créé le, plan:Plan en vigueur, evolution:Évolution déclarée"
+      search sort="commune:asc" pagination="20" count-label="commune-site|communes-sites" export="csv"
+      caption="Communes couvertes par un site patrimonial remarquable (sélection courante)">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>{{projets:number}}&nbsp;lignes sans numéro de SPR</strong> sur les {{lignes:number}} du registre&nbsp;:
+            pour l'essentiel des «&nbsp;AVAP à l'étude&nbsp;», des projets et non des sites. Elles sont écartées de tous les
+            chiffres, de la carte et de la liste. Sur les {{lignes:number}}&nbsp;lignes, la part des ZPPAUP serait de
+            six sur dix au lieu de près de deux sur trois.</li>
+          <li><strong>Les SPR eux-mêmes, en tant que tels.</strong> Le registre décrit chaque commune d'un SPR séparément,
+            et il arrive que les communes d'un même SPR n'aient ni le même régime d'origine, ni la même date, ni le même
+            plan. La page compte donc des communes-sites&nbsp;; le nombre de SPR distincts est donné à part.</li>
+          <li><strong>Le périmètre et la surface protégée.</strong> Le registre ne publie qu'un point par commune&nbsp;: un
+            SPR qui couvre un quartier et un SPR qui couvre toute la commune y pèsent autant.</li>
+          <li><strong>La population.</strong> Elle est donnée sans millésime&nbsp;; la page ne s'en sert pas, sinon pour
+            dire que {{petite:number}}&nbsp;communes-sites ({{part_petite:number:0}}&nbsp;%) ont moins de 2&nbsp;000 habitants.</li>
+          <li><strong>{{non_datee:number}}&nbsp;communes-sites sans date de création</strong>, absentes du graphique par
+            décennie, présentes partout ailleurs.</li>
+          <li><strong>La date du plan en vigueur.</strong> Elle manque souvent, et vaut parfois «&nbsp;1900-01-01&nbsp;»,
+            une date de remplissage&nbsp;: la page ne calcule pas l'âge des règlements.</li>
+          <li><strong>Les monuments historiques de ces communes.</strong> Le croisement avec la liste des immeubles
+            protégés est possible par code commune, mais pas fait ici&nbsp;: voir la page
+            <a href="/culture/monuments-historiques">Monuments historiques</a>.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'un seul fichier du ministère de la Culture servi par l'API
+        Tabular de data.gouv.fr. Le titre provisoire du cadrage («&nbsp;six SPR sur dix héritent d'une ZPPAUP&nbsp;»)
+        tient à peu près, mais il comptait des lignes et non des SPR, et projets compris. Sur les seules lignes
+        numérotées, c'est près de deux sur trois&nbsp;; et l'histoire la plus forte était ailleurs&nbsp;: la plupart de
+        ces ZPPAUP n'ont jamais changé de règlement.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Tout le jeu en une requête.</strong> <code>fetch-mode="export"</code> lit l'export Parquet&nbsp;:
+              1&nbsp;145 lignes au lieu de six pages de 200, treize colonnes sur dix-neuf.</li>
+            <li><strong>Les recodages en une passe.</strong> Régime d'origine, plan en vigueur, décennie
+              (<code>floor(year(d) / 10) * 10</code>) et drapeaux 0/1&nbsp;: un seul <code>compute</code>.</li>
+            <li><strong>Des empilements qui racontent la transition.</strong> Origine × plan et décennie × origine sont
+              deux <code>dsfr-data-query</code> de sommes de drapeaux, tracées en <code>stacked</code>.</li>
+            <li><strong>La carte sans transformation.</strong> Latitude et longitude en colonnes séparées&nbsp;:
+              <code>lat-field</code> et <code>lon-field</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>L'unité du fichier.</strong> Une ligne n'est ni un SPR ni une commune, mais leur couple, et les
+              attributs d'un même SPR divergent parfois d'une commune à l'autre. Rien dans l'outil ne le signale&nbsp;:
+              il a fallu compter les numéros et les codes à part avant de choisir l'unité.</li>
+            <li><strong>Des lignes qui ne sont pas des sites.</strong> Les projets sans numéro gonflent le dénominateur
+              sans erreur visible&nbsp;; un drapeau <code>spr</code> et une <code>dsfr-data-query where</code> les écartent,
+              à condition de les avoir vus.</li>
+            <li><strong>Des modalités à rassembler.</strong> «&nbsp;PSMV + PVAP&nbsp;», «&nbsp;rien&nbsp;», «&nbsp;LCAP&nbsp;»
+              comme plan en vigueur, «&nbsp;secteur S + LCAP&nbsp;» comme origine&nbsp;: un choix éditorial par modalité,
+              écrit dans le source.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 1&nbsp;145 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Recoder régimes et plans, dériver la décennie</td><td><code>normalize compute</code> (<code>when</code>, <code>year</code>, <code>floor</code>)</td><td>Natif</td></tr>
+            <tr><td>Écarter les projets sans numéro</td><td><code>dsfr-data-query where="spr:eq:1"</code></td><td>Natif</td></tr>
+            <tr><td>Compter les SPR et les communes distincts</td><td><code>query group-by</code> + KPI <code>value="count"</code></td><td>Natif</td></tr>
+            <tr><td>Toutes les sommes sur une ligne, total brut compris</td><td><code>query group-by</code> sur une clé constante + <code>dsfr-data-join</code></td><td>Natif</td></tr>
+            <tr><td>Origine × plan en vigueur</td><td>graphique <code>stacked horizontal</code> à cinq séries</td><td>Natif</td></tr>
+            <tr><td>Carte des communes-sites</td><td><code>dsfr-data-map-layer lat-field lon-field color-map</code>, encarts nommés</td><td>Natif</td></tr>
+            <tr><td>Filtres, chiffres et liste liés</td><td><code>dsfr-data-facets</code> (mode client) + KPI + <code>dsfr-data-list</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>L'outil a suivi, le fichier a demandé de la lecture.</strong> Tout se construit côté client sur un
+          export chargé en une requête. Le travail a été de décider ce qu'on compte&nbsp;: des couples commune × SPR,
+          sans les projets, et de le dire. L'histoire que le cadrage n'avait pas vue, celle d'une transition légale
+          restée à mi-chemin, est sortie d'un simple croisement de deux colonnes.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la carte des communes-sites est une dsfr-data-map (Leaflet). -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

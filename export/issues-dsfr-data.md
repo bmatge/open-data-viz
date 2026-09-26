@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 12 demandes cadrées — 5 bugs,
-> 4 améliorations,
+> 17 demandes cadrées — 8 bugs,
+> 6 améliorations,
 > 3 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -42,7 +42,7 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-43 critiques ont été **retirées** au fil du
+52 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
 `faux-probleme` du registre), et 109
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
@@ -70,7 +70,7 @@ version du dépôt, qui établit qu'il tient encore.
 | PG-033 | API Tabular : un tri serveur combiné à la pagination **perd des lignes en silence** — 177 distinctes sur 180 rendues, et une courbe qui plonge à zéro | piege | S | 1 | Déposer chez dsfr-data |
 | BUG-026 | Une source groupée perd son `group_by` quand un `dsfr-data-normalize` s'intercale devant une `dsfr-data-query group-by` seule lectrice | bug | S | 1 | Déposer chez dsfr-data |
 | BUG-027 | Un `where` de `dsfr-data-query` sur un alias d'agrégat est délégué au portail (HTTP 400), et l'échec de l'export fait passer les autres sources du même jeu en pagination | bug | S | 1 | Déposer chez dsfr-data |
-| BUG-028 | `dsfr-data-query` : `avg`, `sum`, `min` et `max` rendent 0 pour un groupe dont toutes les valeurs sont nulles, au lieu de null | bug | S | 2 | Déposer chez dsfr-data |
+| BUG-028 | `dsfr-data-query` : `avg`, `sum`, `min` et `max` rendent 0 pour un groupe dont toutes les valeurs sont nulles, au lieu de null | bug | S | 3 | Déposer chez dsfr-data |
 
 _4 demandes — S 4, M 0, L 0._
 
@@ -78,23 +78,28 @@ _4 demandes — S 4, M 0, L 0._
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
-| PG-032 | `dsfr-data-a11y` n'accepte pas la grammaire `champ:Libellé` de son propre graphique : les en-têtes gardent le nom de colonne, et écrire le libellé **vide le tableau** sans un mot | piege | S | 3 | Déposer chez dsfr-data |
+| PG-032 | `dsfr-data-a11y` n'accepte pas la grammaire `champ:Libellé` de son propre graphique : les en-têtes gardent le nom de colonne, et écrire le libellé **vide le tableau** sans un mot | piege | S | 4 | Déposer chez dsfr-data |
 | PG-034 | API Tabular : `__in` **ignore toute valeur contenant une parenthèse**, avec un HTTP 200 et zéro ligne — là où `__exact` accepte la même valeur | piege | S | 1 | Déposer chez dsfr-data et signaler à data.gouv.fr |
-| BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 1 | Déposer chez dsfr-data |
+| BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 3 | Déposer chez dsfr-data |
 | AM-089 | `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro | amelioration | S | 1 | Déposer chez dsfr-data |
-| BUG-029 | `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul | bug | S | 3 | Déposer chez dsfr-data |
+| BUG-029 | `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul | bug | S | 7 | Déposer chez dsfr-data |
+| AM-103 | `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune | amelioration | S | 2 | Déposer chez dsfr-data |
+| BUG-033 | `color-map` sur `type="line"` recolore le trait et la légende, pas les points : quatrième surface de la famille BUG-016 / BUG-022 | bug | S | 3 | Déposer chez dsfr-data |
+| BUG-035 | La vue tableau de la DataBox ne montre que `label-field` et `value-field` : les séries de `value-fields` en sont absentes, et les lignes sont coupées à 100 | bug | S | 1 | Déposer chez dsfr-data |
+| BUG-034 | Un encart de carte clone la couche entière : chaque encart dessine tous les points, parfois en double, et garde les anciens après un filtre | bug | M | 2 | Déposer chez dsfr-data |
 | AM-087 | La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-_6 demandes — S 5, M 0, L 0._
+_10 demandes — S 8, M 1, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
 | AM-088 | `subtitle-field` du podium affiche le nombre brut : ni séparateur de milliers, ni format, ni suffixe | amelioration | S | 1 | Déposer chez dsfr-data |
-| AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 2 | Déposer chez dsfr-data |
+| AM-102 | Préréglages d'encart : La Réunion (zoom 9) coupe le sud de l'île, et Wallis-et-Futuna (zoom 7) laisse ses deux îles hors cadre | amelioration | S | 2 | Déposer chez dsfr-data |
+| AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 3 | Déposer chez dsfr-data |
 
-_2 demandes — S 1, M 0, L 0._
+_3 demandes — S 2, M 0, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -242,11 +247,13 @@ Ne pas déléguer un `where` qui porte sur un alias d'agrégat ; et ne pas éten
 
 **Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-query`
-**Rencontré sur** 2 page(s) : edu/dataviz-ips-lycees, edu/capytale-usages
+**Rencontré sur** 3 page(s) : edu/dataviz-ips-lycees, edu/capytale-usages, developpement-durable/logements-neufs
 
 ### Constat
 
 Un groupe sans aucune valeur numérique sort à 0 : « voie professionnelle 0,0 » pour les lycées à voie générale seule ; sur Capytale, l'AEFE, sans correspondance dans la jointure gauche, sort avec `eleves: 0`, reste en queue du classement et verse ses visites dans la moyenne nationale. Un 0 plausible là où il fallait un vide : exactement ce que la règle #301 interdit ailleurs (`pivot`, `compute`). Un groupe partiellement nul, lui, donne la bonne moyenne.
+
+**Vague 1 de création (2026-09-26)** : `sum` aussi. Les mises en chantier 2025 de Sitadel valent `null` dans les 101 départements ; la somme nationale sortait à 0, soit « 0 logement commencé en 2025 ». La page compte les départements renseignés puis remet `null`. Cela tranche la question laissée ouverte (« `sum`, à trancher ») : un zéro fabriqué par `sum` se lit comme un effondrement.
 
 ### Impact de l'erreur ou du manque
 
@@ -263,6 +270,8 @@ Structurel : les jointures gauches et les champs optionnels produisent ces group
 ### Comment ça a été vérifié
 
 Page minimale 0.42.0 (agent IPS lycées, 2026-09-26) : groupe `b` à `v: null, null` → `m: 0, s: 0, mi: 0` ; groupe mixte → moyenne 10, juste. Capytale : `aggregate="eleves:max"` → AEFE `eleves: 0`, relevé dans le pipeline le même jour. **Lu au source à la consignation** (`dsfr-data` main, `packages/core/src/components/dsfr-data-query.ts` l. 1851-1858) : `sum` réduit depuis 0, et `avg`, `min`, `max` rendent `0` quand `values.length === 0`.
+
+/developpement-durable/logements-neufs, 0.42.0, 2026-09-26 (agent).
 
 ### Contournement actuel
 
@@ -284,7 +293,7 @@ Rendre `null` pour `avg`, `min`, `max` (et `sum`, à trancher) quand le groupe n
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement, dx`, `severity:moyenne`, `dsfr-data-a11y`, `dsfr-data-chart`
-**Rencontré sur** 3 page(s) : sports/portrait-federation, aides-de-minimis, barometre-france-num
+**Rencontré sur** 4 page(s) : sports/portrait-federation, aides-de-minimis, barometre-france-num, developpement-durable/fret-ports
 
 ### Constat
 
@@ -296,6 +305,8 @@ Sur un graphique multi-séries, `dsfr-data-chart` nomme ses séries dans l'attri
 Le piège est d'autant plus facile à payer que les deux balises sont adjacentes et que l'une des deux accepte la forme. Il ne s'agit pas d'un attribut manquant mais d'une **asymétrie de grammaire entre deux composants appariés par conception** — le `for="g-base100"` de l'`a11y` déclare explicitement l'appariement.
 
 **Relecture métier du 2026-09-26** — le piège payé sur deux pages, et la voie `rename` éprouvée.** Sur aides-de-minimis, le tableau équivalent du graphique des instruments porte en en-tête `instrument_aide | total | part`. Sur le Baromètre, un `dsfr-data-normalize rename` placé **après** le calcul donne des en-têtes lisibles — avec espaces et parenthèses (« Écart (pt) », « Variation (pt) »), que `compute` ne peut pas produire (identifiants `[A-Za-zÀ-ÿ0-9_]`). Le tableau et le CSV portent ces en-têtes, et graphiques et query en aval lisent les nouveaux noms (`order-by="Réponse:asc"` fonctionne). Le coût annoncé par le contournement se confirme : le libellé vit désormais dans le pipeline.
+
+**Vague 2 de création (2026-09-26)** : contourné par `rename` sur fret-ports.
 
 ### Impact de l'erreur ou du manque
 
@@ -314,6 +325,8 @@ Structurel. Tout graphique multi-séries de la bibliothèque appelle un `a11y` a
 Relevé au navigateur le 2026-09-20 contre la 0.33.0 (`node scripts/rejeu-findings/run.mjs am082`, page `pages/am082.html`, cas 4). Deux `dsfr-data-a11y` sur la même source `q` : celui en grammaire nue rend les en-têtes `["dep_nom", "dep_nom__count"]` et un corps rempli ; celui en grammaire du chart (`label-field="dep_nom:Departement" value-field="dep_nom__count:Nombre d'equipements"`) rend les en-têtes `["dep_nom:Departement", "dep_nom__count:Nombre d'equipements"]` et une première ligne `["", ""]` — **cellules vides**. Console : aucun message pour ce cas (le seul message émis concerne le garde-fou de `series-field`, qui lui est bien dit). JSDoc de l'attribut relu au source (`packages/core/src/components/dsfr-data-a11y.ts`) : « Colonne(s) utilisée(s) pour les valeurs du tableau (séparées par des virgules) » — la grammaire à libellés n'y figure pas, ce qui confirme que c'est une absence assumée et non un bug de parsing.
 
 **Le banc est sain** : `grep` sur les 70 pages, **zéro** `dsfr-data-a11y` ne porte la grammaire à deux-points. Le piège est donc documenté avant d'avoir été payé — pour une fois. — **2026-09-26, 0.33.0.** Navigateur, /viz/aides-de-minimis : première ligne du `dsfr-data-a11y` de #g-instrument = « instrument_aide | total | part ». Navigateur, /viz/barometre-france-num : en-têtes « Question | Profil | France | Écart (pt) », « Question | 2024 | 2025 | Variation (pt) », « Réponse | France | Profil | Écart (pt) », valeurs inchangées (923 Bretagne 28,25 / 37,03 / −8,78), zéro erreur console.
+
+/developpement-durable/fret-ports, 2026-09-26 (agent).
 
 ### Contournement actuel
 
@@ -379,11 +392,13 @@ Avertir en console quand une valeur de `in` / `notin` déléguée à Tabular con
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-query`, `dsfr-data-kpi`
-**Rencontré sur** 1 page(s) : aides-de-minimis
+**Rencontré sur** 3 page(s) : aides-de-minimis, edu/passe-ton-hack-dabord, culture/entrepreneurs-spectacles
 
 ### Constat
 
 `aggregate="d:max:dmax"` sur une colonne de dates ISO rend **2026**, avec ou sans `group-by`. La même expression `d:max` sur `dsfr-data-kpi` rend **25/09/2026** : le KPI compare les dates en texte (#667, `computeExtremum`, branche ISO), la query passe par `toNumber` (`_computeAggregate`), qui garde l'année. Deux résultats pour la même expression, sans avertissement. Conséquence : impossible de porter une date de fraîcheur jusqu'aux lignes groupées d'un graphique, donc `databox-date-field` (livré pour AM-021) est inutilisable sur tout graphique alimenté par un `group-by`.
+
+**Lot 6 et vague 2 (2026-09-26)** : deux pages de plus. Passe ton hack : `aggregate="cree_a:max"` rend 2026, alors que le KPI `cree_a:max format="date"` rend bien 20/09/2026. Entrepreneurs de spectacles : `aggregate="date_depot_dossier:min"` rend 2020, que le gabarit formate en « Depuis le 01/01/1970 » dans le chapô. La troncature ne se voit plus comme une année : elle devient une **date fausse**. Contournement : `order-by` ascendant et `limit="1"`.
 
 ### Impact de l'erreur ou du manque
 
@@ -400,6 +415,8 @@ Permanent : toute page qui date ses données par un `max` sur un jeu groupé.
 ### Comment ça a été vérifié
 
 Page minimale le 2026-09-26, dsfr-data 0.33.0 du CDN. Source en ligne [{g:A,d:2026-09-01},{g:A,d:2026-09-25},{g:B,d:2026-08-10}] : `group-by="g" aggregate="d:max:dmax"` rend dmax=2026 pour A et pour B ; l'agrégat global rend 2026 ; `dsfr-data-kpi value="d:max" format="date"` rend 25/09/2026. Aucun message console hors #765. Source : `dsfr-data-query.ts` `_computeAggregate` (`toNumber` strict), `utils/aggregations.ts` `computeExtremum`. **Toujours présent sur origin/main (0.42.0)** le 2026-09-26 : `_computeAggregate` passe toujours par `toNumber`.
+
+Passe ton hack : query injectée au navigateur, `max=2026 min=2026`, 2026-09-26. Entrepreneurs : page minimale, 0.42.0 du CDN, query `min=2020 max=2026`, KPI `d:min` 23/04/2020 (agents). **Toujours présent sur origin/main le 2026-09-27** : `toNumber` (`packages/shared/src/utils/number-parser.ts`) se termine par `parseFloat(cleaned)`, qui lit « 2026-09-20 » comme 2026.
 
 ### Contournement actuel
 
@@ -427,6 +444,8 @@ Aligner `min`/`max` de `dsfr-data-query` sur `computeExtremum` : une colonne de 
 
 Le pivot long → large (`_processTidyData`) remplit par 0 toute cellule absente, contre la règle « donnée manquante ≠ zéro ». Sur `ir-declarations-2042-nat`, séparer les courbes d'un code réattribué par libellé (1BI) prolonge la série « pension capital PER dec2 » (2019-2020) à zéro jusqu'en 2024, et fait naître l'autre série à zéro en 2019-2020. Deux fins de série fabriquées, qui se lisent comme des effondrements. ⚠️ La demande suppose que DSFR Chart accepte `null` dans `y` — non vérifié : si ce n'est pas le cas, la moitié du correctif se remonte chez `GouvernementFR/dsfr-chart` (règle n° 4).
 
+**Consignation du 2026-09-27** : doublon de BUG-029, qui porte le même défaut (`_processTidyData`, l. 650 et 674) et son extension au format large. Les deux entrées sont à réunir avant tout dépôt.
+
 ### Impact de l'erreur ou du manque
 
 Une série qui commence ou s'arrête dans la fenêtre est dessinée comme une chute à zéro : un événement fabriqué, sans erreur ni avertissement. Tout jeu dont les séries n'ont pas les mêmes bornes est concerné (codes réattribués, nomenclatures qui changent).
@@ -442,6 +461,8 @@ Structurel : le pivot est le chemin de tout graphique multi-séries en format lo
 ### Comment ça a été vérifié
 
 2026-09-26, page minimale, 0.33.0 du CDN. Source générique `/records where nom="1BI"`, query `where annee:gte:2019`, chart `type="line" label-field="annee" value-field="nombre" series-field="libelle"` → attribut rendu `y='[[409,2321,0,0,0,0],[0,0,8618,15772,20436,25815]]'`, zéro erreur console. Source `dsfr-data-chart.ts` l. 650 (« Missing (label, series) cells are 0 ») et l. 674 (`new Array(labels.length).fill(0)`), identiques sur origin/main (0.42.0) le 2026-09-26.
+
+Comparaison des deux entrées à la consignation : mêmes lignes de source citées.
 
 ### Contournement actuel
 
@@ -463,11 +484,13 @@ Remplir par `null` (que Chart.js interrompt) au lieu de 0, ou un attribut `missi
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-chart`
-**Rencontré sur** 3 page(s) : edu/gar-ressources-numeriques, tourisme-et-handicap, edu/capytale-usages
+**Rencontré sur** 7 page(s) : edu/gar-ressources-numeriques, tourisme-et-handicap, edu/capytale-usages, developpement-durable/logements-neufs, developpement-durable/qualite-air, developpement-durable/portrait-odd, culture/livre-trente-ans
 
 ### Constat
 
 En format long (`series-field`), le graphique pivote lui-même les lignes en séries, et toute cellule (libellé, série) absente vaut 0. Sur GAR, l'infobulle de Nancy-Metz affiche « 12,7 accès par accédant / 0 accès par accédant ». Sur Tourisme & Handicap, « 0 établissements » pour la série absente d'une région, que la valeur calculée soit 0 ou `null`. **Règle 4 tranchée** : l'agent se demandait si c'était DSFR Chart ; c'est `dsfr-data`, le `bar-chart` reçoit déjà `y=[[12.7,11.6,10.9,0,0,…],[0,0,0,8.4,…]]`. Contraire à la règle #301 que `dsfr-data-pivot` applique (« une cellule sans observation vaut `null`, jamais 0 »). Même symptôme sur une courbe en format large (Capytale) : un mois sorti de la fenêtre glissante tracé à 0 — observé à la capture, cause non isolée.
+
+**Vagues 1 et 2 de création (2026-09-26) : le contournement de ce constat était faux.** Le format large trace lui aussi une valeur absente à 0. Dans `_processData`, chaque valeur de `value-field` / `value-fields` passe par `toNumber` **non strict** (`dsfr-data-chart.ts` l. 728), qui rend 0 pour `null`. « Pré-pivoter avec `dsfr-data-pivot` et passer en `value-fields` » ne fait donc que déplacer le zéro : le pivot rend bien `null`, et le graphique le redessine à 0. Relevé trois fois : livre (Internet à 0 de 1993 à 2001, `y=[0,0,0,0,0,0,0,0,0,2,3,…]`), qualité de l'air (PM10 à 0 de 2000 à 2006, `y=[0,0,0,0,0,0,0,27.3,…]`), logements neufs (courbe « Logements commencés » à 0 en 2025). Et une fois de plus en format long : sur Portrait ODD, Paris, sans surface bio, reçoit une barre à 0. Même mécanisme sur les cartes (l. 833). ⚠️ AM-089 décrit le même défaut que ce constat (format long, `_processTidyData`, mêmes lignes de source) : les deux entrées sont à réunir.
 
 ### Impact de l'erreur ou du manque
 
@@ -485,19 +508,187 @@ Structurel : `series-field` est la voie documentée du format long.
 
 GAR, `#g-aca`, 0.42.0, 2026-09-26 : attribut `y` relevé au DOM sur `<bar-chart>`, infobulle au survol. Tourisme, `#g-reg`, survol d'Auvergne-Rhône-Alpes avec `else 0` puis `else null` : même rendu. **Lu au source à la consignation** : `dsfr-data-chart.ts` l. 649-675, `_processTidyData` — « Missing (label, series) cells are 0 », `new Array(labels.length).fill(0)`. Capytale : capture du 2026-09-26, septembre 2023 à 0.
 
+Attributs `y` relevés au DOM par les agents, 0.42.0, 2026-09-26 (livre `g-internet` ; qualité de l'air ; Portrait ODD `y=[[0,90,83,43,…],[100,35,1,0,100,98,3]]`). **Lu au source à la consignation** (origin/main, 2026-09-27) : `dsfr-data-chart.ts` l. 728, `allSeries[i].push(toNumber(getByPath(record, allFields[i])))` sans `strict` ; `number-parser.ts` : `if (typeof val !== 'string') return strict ? null : 0`.
+
 ### Contournement actuel
 
-Pré-pivoter avec `dsfr-data-pivot` (cellules nulles) et passer en `value-fields` ; ou écarter la série incomplète.
+**Corrigé le 2026-09-27.** L'ancien contournement (« pré-pivoter avec `dsfr-data-pivot` et passer en `value-fields` ») ne marche pas : le format large trace aussi `null` à 0. Voies qui marchent : des petits multiples où chaque graphique ne reçoit que les années de sa série (livre, qualité de l'air), deux graphiques d'une série à la même échelle (logements neufs), ou ne garder que les indicateurs publiés partout (Portrait ODD).
 
 ### Demande
 
-Remplir de `null` dans `_processTidyData`, comme `dsfr-data-pivot`.
+Remplir de `null` dans `_processTidyData`, comme `dsfr-data-pivot`. Même règle pour le format large : `toNumber(…, true)` et `null` conservé dans `y` (l. 728), comme dans les valeurs de carte (l. 833).
 
 ### Critères d'acceptation
 
 - [ ] `_processTidyData` remplit de null les cellules absentes.
 - [ ] L'infobulle n'affiche pas de ligne pour une série absente (ou l'affiche vide).
 - [ ] Un test aligne `series-field` sur `dsfr-data-pivot`.
+- [ ] Une valeur `null` en format large (`value-field`, `value-fields`) rend `null` dans `y`.
+
+---
+
+## AM-103 — `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-normalize`
+**Rencontré sur** 2 page(s) : culture/entrepreneurs-spectacles, culture/depenses-culturelles-collectivites
+
+### Constat
+
+Entrepreneurs de spectacles : impossible de tirer le SIREN (les 9 premiers caractères) du SIRET. Le renouvellement des licences est donc mesuré au SIRET (45 %), alors qu'il vaut 58 % au SIREN : une entreprise qui change d'établissement n'est pas une nouvelle entreprise. Dépenses culturelles : impossible de filtrer les communes par département, faute de lire les deux premiers caractères du code INSEE. La liste blanche de `compute` compte `lower`, `upper`, `trim`, `len`, `concat`, `replace` et `contains`, mais ni `left` ni `substr`. Distinct d'AM-038 (`replace-fields` sans motif).
+
+### Impact de l'erreur ou du manque
+
+Un identifiant composite (SIRET, code commune) ne se ramène pas à son parent : 45 % au lieu de 58 %, sans avertissement possible.
+
+### Objectif métier de la correction
+
+Dériver un code parent d'un code enfant dans le pipeline.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : SIRET/SIREN et commune/département sont les deux hiérarchies de codes les plus courantes des jeux publics.
+
+### Comment ça a été vérifié
+
+Liste blanche relue à la consignation (origin/main, `packages/shared/src/utils/compute.ts`, objet `FUNCTIONS`, 2026-09-27). 45 % et 58 % : DuckDB, agent, 2026-09-26, non rejoués.
+
+### Contournement actuel
+
+Aucun dans la page ; mesurer à la maille disponible et le dire.
+
+### Demande
+
+`left(s, n)` et `substr(s, debut, n)` dans `compute`.
+
+### Critères d'acceptation
+
+- [ ] `left(siret, 9)` rend le SIREN.
+- [ ] `substr(code_insee, 1, 2)` rend le département (hors DROM à trois caractères, à documenter).
+
+---
+
+## BUG-033 — `color-map` sur `type="line"` recolore le trait et la légende, pas les points : quatrième surface de la famille BUG-016 / BUG-022
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-chart`
+**Rencontré sur** 3 page(s) : developpement-durable/qualite-air, culture/entrepreneurs-spectacles, culture/livre-trente-ans
+
+### Constat
+
+Sur une courbe, `color-map` pose `borderColor` et `backgroundColor` du jeu de données, mais ni `pointBackgroundColor` ni `pointBorderColor` : les points gardent la palette par défaut. Qualité de l'air : trait gris, points violets. Entrepreneurs : courbe orange, points bleu clair. Livre : de 603 à 790 pixels par couleur demandée, contre 2 796 à 2 981 par couleur de la palette par défaut (`#5c68e5`, `#82b5f2`, `#29598f`, `#31a7ae`, `#81eef5`, `#b478f1`). Le défaut se produit avec et sans `databox`. **Règle 4 : c'est `dsfr-data`.** Le recoloriage est fait par `utils/color-map.ts` sur les jeux de données Chart.js, après le rendu de DSFR Chart, et c'est lui qui omet les propriétés des points.
+
+### Impact de l'erreur ou du manque
+
+Sur une courbe à plusieurs séries, le point d'une série prend la couleur d'une autre : la même confusion que BUG-022, sur le graphique lui-même.
+
+### Objectif métier de la correction
+
+Qu'une série ait une seule couleur, trait et points compris.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : toute courbe multisérie avec `color-map`.
+
+### Comment ça a été vérifié
+
+Agents, 0.42.0, 2026-09-26 : capture (qualité de l'air), page minimale à deux séries avec et sans `databox` (entrepreneurs, `rejeu-colormap-points-ligne.png`), pixels du canvas comptés (livre). **Source relu à la consignation** (origin/main, `packages/core/src/utils/color-map.ts` l. 90-112) : seules `backgroundColor`, `borderColor`, `hoverBackgroundColor` et `hoverBorderColor` sont posées ; aucune occurrence de `pointBackgroundColor`.
+
+### Contournement actuel
+
+Retirer `color-map` des courbes (qualité de l'air) ou garder la palette par défaut.
+
+### Demande
+
+Poser aussi `pointBackgroundColor`, `pointBorderColor` (et leurs variantes `hover`) dans `applyColorMap` pour `type="line"`.
+
+### Critères d'acceptation
+
+- [ ] Sur `type="line"`, les points prennent la couleur de `color-map` de leur série.
+- [ ] Un test compare les pixels des points à ceux du trait, comme `scripts/rejeu-findings/run.mjs tooltip`.
+
+---
+
+## BUG-035 — La vue tableau de la DataBox ne montre que `label-field` et `value-field` : les séries de `value-fields` en sont absentes, et les lignes sont coupées à 100
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-chart`
+**Rencontré sur** 1 page(s) : developpement-durable/fret-ports
+
+### Constat
+
+Sur un graphique multisérie en format large avec `databox`, l'onglet tableau de la DataBox n'a que deux colonnes : « Port / Vracs liquides » sur 6 séries (fret), et 1 série sur 2 sur un second graphique. La DataBox propose donc un tableau qui ne contient pas ce que montre le graphique. Il est en outre tronqué à 100 lignes sans le dire (même plafond que LIM-012 pour `dsfr-data-a11y`).
+
+### Impact de l'erreur ou du manque
+
+Le tableau que la DataBox présente comme équivalent au graphique en omet les séries : un défaut d'accessibilité.
+
+### Objectif métier de la correction
+
+Que le tableau de la DataBox porte toutes les séries du graphique.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : tout graphique multisérie avec `databox`.
+
+### Comment ça a été vérifié
+
+Agent, 0.42.0, 2026-09-26 : tableaux `databox-g-compo-table-default` et `databox-g-cc-table-default` sur /developpement-durable/fret-ports. **Source relu à la consignation** (origin/main, `dsfr-data-chart.ts` l. 2035-2060, `_injectDataboxTable`) : colonnes = `labelField` et `parseAliasedColumn(this.valueField)` seulement ; `rows = this._data.slice(0, 100)`.
+
+### Contournement actuel
+
+Un `dsfr-data-a11y table` à côté du graphique, qui porte toutes les séries.
+
+### Demande
+
+Prendre les colonnes de `_getAllValueFields()` (et les séries de `series-field` après pivot) dans le tableau de la DataBox, et signaler la troncature.
+
+### Critères d'acceptation
+
+- [ ] Avec `value-fields`, le tableau a une colonne par série, avec les libellés d'alias.
+- [ ] La troncature à 100 lignes est dite, ou supprimée.
+
+---
+
+## BUG-034 — Un encart de carte clone la couche entière : chaque encart dessine tous les points, parfois en double, et garde les anciens après un filtre
+
+**Priorité** P2 · **Effort estimé** M (un à trois jours) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-map-inset`, `dsfr-data-map-layer`
+**Rencontré sur** 2 page(s) : culture/festivals, culture/bibliotheques
+
+### Constat
+
+`dsfr-data-map-inset` crée sa carte interne et y clone chaque couche par ses attributs (`cloneNode(false)`). La couche de l'encart recharge et redessine donc **tous** les points, pas seulement ceux de son emprise. Festivals : 7 250 cercles dans chacune des 6 cartes (la principale et 5 encarts). Avec 9 encarts, cela fait 10 cartes, et un clic de filtre met 2,4 s à rafraîchir la liste (de 0,7 à 1,4 s avec 5 encarts). Bibliothèques, sur une page minimale de 4 points : certains encarts dessinent 8 cercles au lieu de 4, puis 6 au lieu de 2 après un filtre. Sur la page, un clic de facette figeait l'affichage 7 s, contre 0,5 s sans encarts. Conséquence, dite en page : une fois les encarts retirés, un filtre sur un département d'outre-mer ne recentre pas la carte.
+
+### Impact de l'erreur ou du manque
+
+Coût multiplié par le nombre d'encarts à chaque filtre (jusqu'à 7 s de gel), et points doublés ou périmés dans les encarts.
+
+### Objectif métier de la correction
+
+Qu'un encart ne dessine que ses points, une fois, à jour.
+
+### Pérennité et reproductibilité du besoin
+
+Permanent : `insets="drom"` est le motif recommandé pour toute carte nationale.
+
+### Comment ça a été vérifié
+
+Agents, 0.42.0, 2026-09-26 : festivals, cercles comptés au DOM et chronométrage ; bibliothèques, page minimale (`scratchpad/culture-bibliotheques/min/`), 3 exécutions avec et sans facettes. **Source relu à la consignation** (origin/main, `packages/core/src/components/dsfr-data-map-inset.ts` l. 240-246) : boucle `for (const layer of layers)` → `layer.cloneNode(false)`, sans filtre d'emprise. Le doublement et la persistance après filtre n'ont pas été rejoués à la consignation.
+
+### Contournement actuel
+
+Limiter les encarts aux territoires qui portent des points (festivals : de 9 à 5), ou les retirer (bibliothèques).
+
+### Demande
+
+Filtrer la couche clonée à l'emprise de l'encart, et remplacer (au lieu d'ajouter) ses entités à chaque nouvelle donnée.
+
+### Critères d'acceptation
+
+- [ ] Un encart ne contient que les entités de son emprise.
+- [ ] Après un filtre, chaque encart a exactement les entités filtrées de son emprise.
+- [ ] Le temps de refiltre ne croît pas avec le nombre d'encarts vides.
 
 ---
 
@@ -585,17 +776,60 @@ Un `subtitle-format` (nombre, euro, pourcentage) avec suffixe, ou un `subtitle-t
 
 ---
 
+## AM-102 — Préréglages d'encart : La Réunion (zoom 9) coupe le sud de l'île, et Wallis-et-Futuna (zoom 7) laisse ses deux îles hors cadre
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map-inset`, `dsfr-data-map`
+**Rencontré sur** 2 page(s) : edu/implantation-ulis-tfv, edu/hybridation-enseignement-lycee
+
+### Constat
+
+Dans un encart de 10 rem × 160 px (largeur posée par `site.css`, AM-032), deux préréglages de `utils/territories.ts` ne montrent pas leur territoire. `la-reunion` (centre −21,115 / 55,53, zoom 9) : Saint-Pierre (−21,347) sort du cadre, et l'encart ULIS-TFV, dont l'unique point ultramarin est le Collège Terre Sainte, était vide. `wallis-et-futuna` (centre −13,80 / −177,15, zoom 7) : Wallis (≈ −176,2) et Futuna (≈ −178,1) sont chacune à près d'un degré de longitude du centre, au-delà d'une demi-largeur de 80 px, et l'encart de l'hybridation était vide. Règle 4 : c'est bien `dsfr-data` (préréglages de la bibliothèque), pas DSFR Chart.
+
+### Impact de l'erreur ou du manque
+
+Un encart vide se lit comme « aucune donnée outre-mer » : c'est l'erreur qu'ULIS-TFV avait écrite (FP-045).
+
+### Objectif métier de la correction
+
+Que chaque préréglage montre son territoire entier dans l'encart par défaut.
+
+### Pérennité et reproductibilité du besoin
+
+Permanent : toute carte qui pose ces deux encarts.
+
+### Comment ça a été vérifié
+
+Agents, 0.42.0, 2026-09-26 : captures des encarts vides ; `zoom="8"` (La Réunion) et `center="-13.75,-177.15" zoom="6"` (Wallis-et-Futuna) font apparaître les points. **Préréglages relus et calculés à la consignation** (origin/main, `packages/core/src/utils/territories.ts` l. 10 et 21). En Web Mercator, une carte fait 256·2^z px pour 360°. Au zoom 9, cela donne 364 px par degré de longitude, soit ≈ 390 px par degré de latitude à −21° : Saint-Pierre, à 0,23° au sud du centre, tombe à ≈ 90 px, hors d'une demi-hauteur de 80 px. Au zoom 7, 91 px par degré : Wallis et Futuna, à ≈ 0,97° du centre, tombent à ≈ 88 px, hors d'une demi-largeur de 80 px.
+
+### Contournement actuel
+
+`<dsfr-data-map-inset>` avec `zoom` ou `center` explicites.
+
+### Demande
+
+Recaler les deux préréglages pour une emprise de 160 px : La Réunion au zoom 8, Wallis-et-Futuna au zoom 6 (ou dériver centre et zoom de l'emprise du territoire).
+
+### Critères d'acceptation
+
+- [ ] Un point à Saint-Pierre de La Réunion est visible dans l'encart `la-reunion` de 160 px.
+- [ ] Wallis et Futuna sont visibles dans l'encart `wallis-et-futuna` de 160 px.
+
+---
+
 ## AM-090 — `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible
 
 **Priorité** P3 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-normalize`
-**Rencontré sur** 2 page(s) : barometre-france-num, entreprises-restauration-notre-dame
+**Rencontré sur** 3 page(s) : barometre-france-num, entreprises-restauration-notre-dame, edu/cactus-hameconnage
 
 ### Constat
 
 Le tokenizer de `compute` (`packages/shared/src/utils/compute.ts`) termine un littéral texte à la première quote, sans accepter `''` ni `\'`. On ne peut donc pas écrire `when libelle = 'J''en ai'`, alors que les libellés à apostrophe ASCII sont courants dans les jeux publics. Le JSDoc ne mentionne pas la limite.
 
 **Lot 4 de recréation (2026-09-26)** : la famille « Métiers d'art et du patrimoine » de /viz/entreprises-restauration-notre-dame ne s'écrit pas en littéral ; contournée par `contains(…, 'art et du patrimoine')`. Deuxième jeu public qui bute sur la même apostrophe.
+
+**Lot 6 de recréation (2026-09-26)** : Cactus contourne l'apostrophe de « heure de vie de classe » par `contains(join(…), 'heure de vie de classe')`, sans essayer d'échappement. C'est cohérent avec ce constat.
 
 ### Impact de l'erreur ou du manque
 
@@ -612,6 +846,8 @@ Permanent : l'apostrophe est partout dans les nomenclatures françaises.
 ### Comment ça a été vérifié
 
 Source `compute.ts` l. 330-340 (boucle jusqu'à `input[j] !== "'"`) relue le 2026-09-26, grammaire identique dans le bundle 0.33.0 du CDN et sur origin/main (0.42.0). Contournement appliqué sur /viz/barometre-france-num : 802-807 unifiées, 802 9,46 → 21,91 affichée au navigateur. — Lot 4 (2026-09-26) : page Notre-Dame, 0.42.0, chiffres de la famille identiques au recalcul sur l'export (103 entreprises).
+
+Contournement lu dans /education/cactus-hameconnage (agent, 2026-09-26).
 
 ### Contournement actuel
 

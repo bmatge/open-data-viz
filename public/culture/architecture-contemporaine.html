@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Architecture contemporaine remarquable — open-data-viz</title>
+  <meta name="description" content="L'architecture « contemporaine » que l'État labellise a surtout soixante ans : plus d'un édifice labellisé sur deux a été construit entre 1945 et 1974, moins d'un sur vingt après 2000. Création avec dsfr-data sur la liste des 1 811 édifices « Architecture contemporaine remarquable » du ministère de la Culture (API Tabular de data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 15 de docs/portail-culture/proposition.md.
+
+       LE JEU. « Liste des édifices labellisés Architecture contemporaine
+       remarquable (ACR) », ministère de la Culture, ressource 80b6ac20… :
+       1 824 lignes, 45 colonnes, mise à jour chaque jeudi. Petit : chargé en
+       entier par l'export Parquet (`fetch-mode="export"`), douze colonnes
+       projetées par `select` — les descriptions historiques (plusieurs Ko par
+       ligne) ne sont jamais lues.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué le 2026-09-27) :
+       - « 1 824 édifices » compte aussi 13 édifices « Anciennement labellisés » :
+         le stock est de 1 811. Et 3 seulement des 13 portent une référence
+         Mérimée `PA…` (monument historique) : « souvent devenus MH » ne tient pas.
+       - « Date_de_Label vide sur une part » : 5 lignes sur 1 811.
+       - L'histoire n'est pas « depuis 2000 » (la date du label) mais la date
+         de CONSTRUCTION : 56 % des édifices datés sont nés entre 1945 et 1974.
+
+       ANNÉE DE CONSTRUCTION. `Datation_de_l_edifice` est multivaluée
+       (« 1966;1967 », 655 libellés). Découpée (`split`), éclatée (`explode`),
+       convertie en nombre, puis la PLUS PETITE année par édifice (`min`) : la
+       première date connue du chantier. Les rares intervalles écrits en toutes
+       lettres (« 1922-1930 », une phrase) ne sont pas des nombres : ces
+       édifices restent sans année, et la page les compte.
+       ========================================================================== -->
+
+  <dsfr-data-source id="acr" api-type="tabular"
+    resource="80b6ac20-41b1-400c-8860-af201ff7dcb6"
+    fetch-mode="export"
+    select="Reference_de_la_notice, Cadre_de_l_etude, Ancienne_reference_de_la_notice_RENV, Region, Departement_en_lettres, Commune_forme_editoriale, Coordonnees, Titre_courant, Denominations, Datation_de_l_edifice, Auteur_de_l_edifice, Date_de_Label">
+  </dsfr-data-source>
+  <!-- split et numeric s'exécutent AVANT rename : noms d'origine. -->
+  <dsfr-data-normalize id="acr-n" source="acr"
+    split="Datation_de_l_edifice:;, Auteur_de_l_edifice:;, Denominations:;, Coordonnees"
+    numeric="Date_de_Label"
+    rename="Reference_de_la_notice:ref | Cadre_de_l_etude:cadre | Ancienne_reference_de_la_notice_RENV:renv | Departement_en_lettres:departement | Commune_forme_editoriale:commune | Titre_courant:titre | Denominations:denominations | Datation_de_l_edifice:datation | Auteur_de_l_edifice:auteurs | Date_de_Label:label"
+    compute="stock = when contains(cadre, 'Anciennement') then 0 else 1;
+             ancien = 1 - stock;
+             ancien_pa = when stock = 0 and contains(renv, 'PA') then 1 else 0;
+             un = 1; k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="acr-s" source="acr-n" where="stock:eq:1"></dsfr-data-query>
+
+  <!-- Première année connue de chaque édifice : un (édifice × année) par ligne,
+       en nombre, puis le minimum par édifice. Côté droit de la jointure unique
+       par construction (un group-by sur ref). -->
+  <dsfr-data-query id="dat-x" source="acr-s" group-by="ref, datation" explode="datation" aggregate="un:sum:k"></dsfr-data-query>
+  <!-- Le `rename` n'est pas cosmétique : sans lui (numeric seul), dat-m était
+       DÉLÉGUÉE à l'API Tabular avec les noms renommés (`ref__groupby&datation__min`),
+       l'export abandonné, et toute la page tombait en « Failed to fetch »
+       (rejoué sur page minimale, 0.42.0 — constat candidat). -->
+  <dsfr-data-normalize id="dat-n" source="dat-x" numeric="datation" rename="datation:an"></dsfr-data-normalize>
+  <dsfr-data-query id="dat-m" source="dat-n" group-by="ref" aggregate="an:min:annee"></dsfr-data-query>
+  <dsfr-data-join id="acr-j" left="acr-s" right="dat-m" on="ref" type="left"></dsfr-data-join>
+
+  <dsfr-data-normalize id="acr-t" source="acr-j"
+    compute="date_ok = when annee > 1000 then 1 else 0;
+             periode = when date_ok = 0 then 'Date non exploitable'
+                       when annee < 1945 then 'Avant 1945'
+                       when annee <= 1974 then '1945-1974'
+                       when annee < 2000 then '1975-1999'
+                       else '2000 et après';
+             tg = when periode = '1945-1974' then 1 else 0;
+             av45 = when periode = 'Avant 1945' then 1 else 0;
+             d5060 = when date_ok = 1 and annee >= 1950 and annee < 1970 then 1 else 0;
+             ap2000 = when periode = '2000 et après' then 1 else 0;
+             cent = when date_ok = 1 and annee <= 1926 then 1 else 0;
+             ord = when date_ok = 0 then null when annee < 1920 then 1910 when annee >= 2010 then 2010 else floor(annee / 10) * 10;
+             decennie = when is_null(ord) then null when ord = 1910 then 'Avant 1920' when ord = 2010 then '2010 et après' else 'Années ' + ord;
+             age = when date_ok = 1 and label > 1000 then label - annee else null;
+             label_ok = when label > 1000 then 1 else 0;
+             geo_ok = when is_empty(Coordonnees) then 0 else 1;
+             todt = when contains(auteurs, 'Organisation Todt') then 1 else 0;
+             y2003 = when label = 2003 then 1 else 0;
+             ara2003 = when label = 2003 and Region = 'Auvergne-Rhône-Alpes' then 1 else 0;
+             y2017 = when label = 2017 then 1 else 0;
+             occ2017 = when label = 2017 and Region = 'Occitanie' then 1 else 0;
+             auteurs_txt = join(auteurs, ' ; ');
+             datation_txt = join(datation, ', ');
+             annee_txt = when date_ok = 1 then '' + annee else null;
+             label_txt = when label_ok = 1 then '' + label else null">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse, sur une ligne ---------- -->
+  <dsfr-data-query id="syn-q" source="acr-t" group-by="k"
+    aggregate="un:sum:n, date_ok:sum:dates, tg:sum:tg, d5060:sum:d5060, av45:sum:av45, ap2000:sum:ap2000, cent:sum:cent, age:avg:age, annee:max:annee_max, label_ok:sum:labels, label:min:label_min, label:max:label_max, geo_ok:sum:geo, todt:sum:todt, y2003:sum:y2003, ara2003:sum:ara2003, y2017:sum:y2017, occ2017:sum:occ2017">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn" source="syn-q"
+    compute="p_tg = tg / dates * 100;
+             p_av45 = av45 / dates * 100;
+             p_d5060 = d5060 / dates * 100;
+             p_ap2000 = ap2000 / dates * 100;
+             sans_date = n - dates;
+             sans_label = n - labels;
+             sans_geo = n - geo;
+             p_ara2003 = ara2003 / y2003 * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="anc-q" source="acr-n" group-by="k"
+    aggregate="un:sum:lignes, ancien:sum:ancien, ancien_pa:sum:ancien_pa">
+  </dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Architecture contemporaine remarquable</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>L'architecture «&nbsp;contemporaine&nbsp;» labellisée par l'État a surtout soixante ans&nbsp;: un édifice sur deux date des Trente Glorieuses</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          {{n:number}}&nbsp;édifices portent aujourd'hui le label «&nbsp;Architecture contemporaine remarquable&nbsp;», attribué
+          depuis {{label_min}} aux constructions de moins de cent ans qui ne sont pas monuments historiques. Contemporaine, cette
+          architecture l'est au sens du siècle, pas de l'actualité&nbsp;: <strong>{{p_tg:number:0}}&nbsp;% des édifices datés ont
+          été commencés entre 1945 et 1974</strong>, les années de la reconstruction et des grands ensembles. Ceux d'après 2000
+          ne pèsent que {{p_ap2000:number:0}}&nbsp;%. Un édifice reçoit son label, en moyenne, {{age:number:0}}&nbsp;ans après le
+          début de son chantier.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture&nbsp;:
+      <a href="https://www.data.gouv.fr/datasets/liste-des-edifices-labellises-architecture-contemporaine-remarquable-acr" target="_blank" rel="noopener external">liste
+      des édifices labellisés «&nbsp;Architecture contemporaine remarquable&nbsp;» (ACR)</a>, mise à jour chaque jeudi, lue à
+      l'ouverture de la page sur l'API Tabular de data.gouv.fr. Année de construction&nbsp;: la plus ancienne année citée
+      dans la datation de l'édifice (voir «&nbsp;Ce que cette page ne montre pas&nbsp;»).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="n:max" format="nombre" span="3"
+        heading="Édifices labellisés" label="label en vigueur, toute la France"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_tg:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Commencés entre 1945 et 1974" label="part des édifices datés"
+        lines='[{"value":"tg:max","format":"nombre","decimals":0,"suffix":"édifices"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_ap2000:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Commencés en 2000 ou après" label="part des édifices datés"
+        lines='[{"value":"ap2000:max","format":"nombre","decimals":0,"suffix":"édifices"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="age:max" format="decimal" decimals="0" unit="ans" span="3"
+        heading="Âge moyen au label" label="entre le début du chantier et l'année du label"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les décennies de construction ======================= -->
+  <!-- Onze classes fixes (avant 1920, 1920…2000, 2010 et après) : les indices de
+       highlight-index restent stables (1950 = 4, 1960 = 5). -->
+  <dsfr-data-query id="dec" source="acr-t" where="ord:isnotnull" group-by="ord, decennie"
+    aggregate="un:sum:n" order-by="ord:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="dec-g" source="dec" rename="decennie:Décennie | n:Édifices labellisés"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dec">
+    <h2 id="t-dec" class="fr-h3">Deux décennies, les années 1950 et 1960, fournissent quatre édifices labellisés sur dix</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Chaque barre compte les édifices labellisés selon la décennie où commence leur chantier. Les deux barres mises en
+          évidence, les années 1950 et 1960, réunissent <strong>{{d5060:number}}&nbsp;édifices, {{p_d5060:number:0}}&nbsp;% des
+          édifices datés</strong>&nbsp;: c'est l'architecture de la reconstruction, des églises en béton,
+          des écoles, des piscines et des grands ensembles. Les années 1930 forment un premier sommet. Après les années 1970, les barres
+          retombent&nbsp;: <strong>{{ap2000:number}}&nbsp;édifices seulement ont été commencés en 2000 ou après</strong>, le plus
+          récent en {{annee_max}}. {{sans_date:number}}&nbsp;édifices sans année exploitable ne figurent sur aucune barre.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Édifices labellisés selon la décennie de début de construction">
+      <dsfr-data-chart id="g-dec" source="dec-g" type="bar"
+        label-field="Décennie" value-field="Édifices labellisés" name="Édifices labellisés"
+        selected-palette="neutral" highlight-index="[4, 5]" y-min="0"
+        databox databox-title="Édifices labellisés Architecture contemporaine remarquable, selon la décennie où commence leur construction"
+        databox-source="Ministère de la Culture — liste des édifices labellisés ACR (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dec" source="dec-g" label-field="Décennie" value-field="Édifices labellisés"
+        description="Barres verticales dans l'ordre chronologique, d'avant 1920 à 2010 et après : le nombre d'édifices labellisés selon la décennie où commence leur construction. Les années 1950 et 1960, mises en évidence, sont les plus hautes, avec environ 320 et 420 édifices ; les années 1930 et 1970 suivent, autour de 250 à 280 ; les années 1920 et 1940 comptent entre 120 et 140 édifices ; à partir des années 1980, chaque décennie reste sous la centaine, et les années 2000 et 2010 en comptent chacune une trentaine.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — le label avance par campagnes régionales ======================= -->
+  <dsfr-data-query id="lab" source="acr-t" where="label_ok:eq:1" group-by="label"
+    aggregate="un:sum:n" order-by="label:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="lab-g" source="lab" rename="label:Année du label | n:Édifices labellisés"></dsfr-data-normalize>
+  <dsfr-data-query id="reg" source="acr-t" group-by="Region" aggregate="un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-g" source="reg" rename="Region:Région | n:Édifices labellisés"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-lab">
+    <h2 id="t-lab" class="fr-h3">Le label n'avance pas au rythme de l'architecture, mais par campagnes régionales</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Le label est attribué en région, et une année chargée est souvent celle où une région examine d'un coup tout un
+          inventaire. En 2003, <strong>{{ara2003:number}} des {{y2003:number}}&nbsp;édifices labellisés sont en
+          Auvergne-Rhône-Alpes</strong>&nbsp;; en 2017, {{occ2017:number}} sur {{y2017:number}} sont en Occitanie. Les deux autres
+          pics mis en évidence, 2015 et 2023, additionnent plusieurs régions la même année. Aucun ne suit une vague de
+          construction. L'année {{label_max}} est en
+          cours&nbsp;; {{sans_label:number}}&nbsp;édifices n'ont pas d'année de label.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Édifices labellisés selon l'année d'attribution du label">
+      <dsfr-data-chart id="g-lab" source="lab-g" type="bar"
+        label-field="Année du label" value-field="Édifices labellisés" name="Édifices labellisés"
+        selected-palette="neutral" highlight-index="[3, 15, 23]" y-min="0"
+        databox databox-title="Édifices portant aujourd'hui le label, selon l'année où il leur a été attribué"
+        databox-source="Ministère de la Culture — liste des édifices labellisés ACR (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-lab" source="lab-g" label-field="Année du label" value-field="Édifices labellisés"
+        description="Barres verticales, une par année d'attribution du label, de 2000 à l'année en cours : le nombre d'édifices portant aujourd'hui le label qui l'ont reçu cette année-là. La série est très irrégulière : trois pics, mis en évidence, en 2003 (150, presque tous en Auvergne-Rhône-Alpes), 2015 (plus de 200) et 2023 (plus de 150), ces deux derniers répartis sur plusieurs régions, entre des années à quelques dizaines d'édifices, et une douzaine seulement en 2009 et 2010. La dernière barre, l'année en cours, est incomplète.">
+      </dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-4w">L'Île-de-France compte le plus d'édifices labellisés, la Bretagne six fois moins</h3>
+    <p class="odv-lecture">
+      La répartition par région reflète autant l'activité des commissions régionales que la richesse du patrimoine du
+      20e&nbsp;siècle&nbsp;: elle dit où l'on a labellisé, pas où l'on a le mieux construit.
+    </p>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Édifices labellisés par région">
+      <dsfr-data-chart id="g-reg" source="reg-g" type="bar" horizontal
+        label-field="Région" value-field="Édifices labellisés" name="Édifices labellisés"
+        selected-palette="neutral" highlight-index="[0]" x-min="0"
+        databox databox-title="Édifices labellisés Architecture contemporaine remarquable, par région"
+        databox-source="Ministère de la Culture — liste des édifices labellisés ACR (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-g" label-field="Région" value-field="Édifices labellisés"
+        description="Barres horizontales triées : le nombre d'édifices labellisés par région. L'Île-de-France, mise en évidence, arrive en tête avec environ 260 édifices ; Provence-Alpes-Côte d'Azur, le Grand Est, l'Occitanie, le Centre-Val de Loire et Auvergne-Rhône-Alpes en comptent entre 180 et 210 ; la Bretagne une quarantaine ; la Martinique et La Réunion une vingtaine chacune ; la Guadeloupe et la Guyane un seul.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — ce que l'on labellise ======================= -->
+  <!-- Une ligne par (édifice × dénomination), recodée en onze familles par mots,
+       puis compte d'édifices DISTINCTS par famille : deux dénominations de la
+       même famille (« édifice scolaire », « groupe scolaire ») ne comptent qu'une fois. -->
+  <dsfr-data-query id="den-x" source="acr-t" group-by="ref, denominations" explode="denominations" aggregate="un:sum:k"></dsfr-data-query>
+  <dsfr-data-normalize id="den-n" source="den-x"
+    compute="t = denominations;
+             famille = when contains(t, 'culture recherche sport ou loisir') then 'Culture, sport et loisirs'
+                       when contains(t, 'domestique') then 'Logement'
+                       when contains(t, 'secteur urbain') or t = 'agglomération' then 'Quartiers et ensembles urbains'
+                       when contains(t, 'religieux') then 'Édifices religieux'
+                       when contains(t, 'scolaire') then 'Enseignement'
+                       when contains(t, 'administration ou de la vie publique') then 'Administration et vie publique'
+                       when contains(t, 'commercial ou tertiaire') then 'Commerce et bureaux'
+                       when contains(t, 'usine') or contains(t, 'industriel') then 'Industrie'
+                       when contains(t, 'ouvrage d') or contains(t, 'génie civil') then 'Ouvrages d’art et génie civil'
+                       when contains(t, 'hospitalier') or contains(t, 'protection sociale') then 'Santé et action sociale'
+                       when contains(t, 'militaire') then 'Ouvrages militaires'
+                       else null">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="fam" source="den-n" where="famille:isnotnull" group-by="famille"
+    aggregate="ref:distinct:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="fam-g" source="fam" rename="famille:Famille d'édifices | n:Édifices labellisés"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-fam">
+    <h2 id="t-fam" class="fr-h3">Moins des monuments que la vie quotidienne&nbsp;: quartiers, loisirs, logements, églises et écoles, à parts presque égales</h2>
+    <p class="odv-lecture">
+      Cinq familles font l'essentiel du label, chacune entre 230 et 300&nbsp;édifices environ&nbsp;: les quartiers et
+      ensembles urbains (grands ensembles, lotissements, cités), les équipements de culture, de sport et de loisirs
+      (piscines, stades, salles), les logements, les édifices religieux et les écoles. Aucune ne domine. Viennent
+      ensuite l'administration, les ouvrages d'art, l'industrie et le commerce, autour de la centaine chacun.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Édifices labellisés par famille de dénomination">
+      <dsfr-data-chart id="g-fam" source="fam-g" type="bar" horizontal
+        label-field="Famille d'édifices" value-field="Édifices labellisés" name="Édifices labellisés"
+        selected-palette="neutral" highlight-index="[0, 1, 2, 3, 4]" x-min="0"
+        databox databox-title="Édifices labellisés selon la famille de leur dénomination (un édifice peut relever de deux familles)"
+        databox-source="Ministère de la Culture — liste des édifices labellisés ACR (data.gouv.fr, API Tabular) ; familles regroupées par la page" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-fam" source="fam-g" label-field="Famille d'édifices" value-field="Édifices labellisés"
+        description="Barres horizontales triées : le nombre d'édifices labellisés dans chaque famille de dénomination. Les cinq premières, mises en évidence, sont proches, entre 230 et 300 édifices : quartiers et ensembles urbains, culture, sport et loisirs, logement, édifices religieux, enseignement. L'administration, les ouvrages d'art et le génie civil, l'industrie et le commerce comptent chacun autour de 90 à 100 édifices ; la santé et l'action sociale une quarantaine, les ouvrages militaires une trentaine.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — qui a construit ======================= -->
+  <!-- Auteurs multivalués « Nom Prénom (rôle) » : éclatés, puis gardés seulement
+       s'ils portent le rôle exact « (architecte) » ; compte d'édifices distincts. -->
+  <dsfr-data-query id="arch-x" source="acr-t" group-by="auteurs" explode="auteurs" aggregate="ref:distinct:n"></dsfr-data-query>
+  <dsfr-data-query id="arch-t" source="arch-x" where="auteurs:contains:(architecte), n:gte:10" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="arch-g" source="arch-t"
+    compute="Architecte = replace(auteurs, ' (architecte)', ''); Édifices = n">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-arch">
+    <h2 id="t-arch" class="fr-h3">Trois signatures reviennent plus de vingt fois&nbsp;: Andrault et Parat, en duo, et Fernand Pouillon</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Les architectes qui signent au moins dix édifices labellisés. Michel Andrault et Pierre Parat, associés, signent
+          ensemble les mêmes édifices, tous cités à deux noms&nbsp;; Fernand Pouillon les suit de près, surtout en Provence
+          (Marseille, Aix-en-Provence) et, pour quelques édifices, en proche banlieue parisienne. Le label n'a pas que des architectes pour auteurs&nbsp;: <strong>{{todt:number}}&nbsp;ouvrages ont pour
+          auteur l'Organisation Todt</strong>, le génie de l'occupant — bases sous-marines de Lorient, Saint-Nazaire et Bordeaux,
+          batteries et blockhaus du mur de l'Atlantique.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Architectes signant au moins dix édifices labellisés">
+      <dsfr-data-chart id="g-arch" source="arch-g" type="bar" horizontal
+        label-field="Architecte" value-field="Édifices" name="Édifices labellisés"
+        selected-palette="neutral" highlight-index="[0, 1, 2]" x-min="0"
+        databox databox-title="Architectes cités comme auteurs d'au moins dix édifices labellisés"
+        databox-source="Ministère de la Culture — liste des édifices labellisés ACR (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-arch" source="arch-g" label-field="Architecte" value-field="Édifices"
+        description="Barres horizontales triées : les architectes cités comme auteurs d'au moins dix édifices labellisés. Les trois premiers, mis en évidence, Pierre Parat et Michel Andrault (associés, à égalité) puis Fernand Pouillon, dépassent vingt édifices ; Maurice Novarina en compte environ seize, Armand Pellier treize ; Jean Dubuisson, Bernard Schoeller, Émile Aillaud et Georges Candilis une dizaine chacun.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — les centenaires ======================= -->
+  <dsfr-data-query id="cent-l" source="acr-t" where="cent:eq:1" order-by="annee:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-cent">
+    <h2 id="t-cent" class="fr-h3">Un label pour les moins de cent ans, que des dizaines d'édifices ont déjà dépassés</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Le producteur présente le label comme réservé aux édifices de moins de cent ans. Or <strong>{{cent:number}}&nbsp;édifices
+          encore labellisés ont un chantier commencé en 1926 ou avant</strong>&nbsp;: ils ont cent ans ou plus en 2026. Ils
+          ont été labellisés jeunes, et le temps a passé&nbsp;; le fichier ne dit pas s'ils sortiront du label. La liste, du plus
+          ancien au plus récent&nbsp;:
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz" data-code="Édifices labellisés dont le chantier a commencé en 1926 ou avant">
+      <dsfr-data-list source="cent-l"
+        columns="titre:Édifice, commune:Commune, departement:Département, annee_txt:Première année de construction, label_txt:Année du label"
+        pagination="10" count-label="édifice|édifices"
+        caption="Édifices labellisés dont la première année de construction est 1926 ou avant">
+      </dsfr-data-list>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <div class="fr-container">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: les édifices labellisés près de chez vous</h2>
+    <p class="fr-text--sm">Chaque édifice géolocalisé, coloré selon la période où commence son chantier&nbsp;: en bleu
+      foncé, 1945-1974. La recherche et les filtres pilotent les compteurs, la carte et le tableau&nbsp;; ils ne touchent pas
+      les graphiques ci-dessus, qui portent sur toute la France.</p>
+  </div>
+  <section class="odv-bandeau" aria-label="Recherche">
+    <div class="fr-container">
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="acr-q" source="acr-t"
+          fields="titre, commune, auteurs_txt"
+          label="Rechercher un édifice" placeholder="Nom, commune ou architecte : piscine, Royan, Prouvé…"
+          operator="words" count count-label="édifice|édifices">
+        </dsfr-data-search>
+      </div>
+    </div>
+  </section>
+
+  <div class="fr-container fr-mb-8w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="acr-f" value="count" format="nombre"
+        heading="Édifices" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="acr-f" value="tg:sum / date_ok:sum" format="pourcentage"
+        heading="Commencés entre 1945 et 1974" label="part des édifices datés de la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="acr-f" value="age:avg" format="decimal" decimals="0" unit="ans"
+        heading="Âge moyen au label" label="édifices datés de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- Facettes CLIENT sur le jeu chargé entier (Tabular n'a pas de facettes
+             serveur). `display` : `|` sépare les entrées (PG-022). -->
+        <dsfr-data-facets id="acr-f" source="acr-q"
+          fields="periode, Region, departement"
+          labels="periode:Début du chantier | Region:Région | departement:Département"
+          display="periode:checkbox | Region:select | departement:select">
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des édifices labellisés colorée par période de construction">
+          <!-- Coordonnees = « lat,lon » : `split` en fait un tableau [lat, lon],
+               que `geo-field` lit tel quel. Le fit est clippé à la métropole :
+               l'outre-mer ne dézoome pas la vue. -->
+          <dsfr-data-map id="carte-acr"
+            name="Édifices labellisés Architecture contemporaine remarquable, selon la période de construction"
+            height="620px" tiles="ign-plan" tiles-style="muted"
+            fit-bounds fit-zone="41,-5.5,51.5,10" fit-max-zoom="13">
+            <dsfr-data-map-layer id="couche-acr" source="acr-f" type="circle"
+              geo-field="Coordonnees" radius="4" fill-opacity="0.85"
+              color-field="periode"
+              color-map="Avant 1945:#929292,1945-1974:#000091,1975-1999:#6a6af4,2000 et après:#e1000f,Date non exploitable:#dddddd"
+              tooltip-field="titre">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-legend for="couche-acr" label="Début du chantier"></dsfr-data-map-legend>
+            <dsfr-data-map-popup mode="panel-right" title-field="titre" width="360px">
+              <template>
+                <p class="fr-badge fr-badge--sm fr-mb-2v">Label {{label_txt|année non renseignée}}</p>
+                <p class="fr-text--sm fr-mb-1v"><strong>{{commune}}</strong> — {{departement}}</p>
+                <ul class="fr-text--sm fr-mb-1v">
+                  <li>Construction&nbsp;: {{datation_txt|non renseignée}}</li>
+                  <li>Auteurs&nbsp;: {{auteurs_txt|non renseignés}}</li>
+                </ul>
+                <p class="fr-text--xs fr-mb-0">Notice {{ref}}</p>
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
+          <dsfr-data-repeat source="syn">
+            <template>
+              <p class="fr-text--xs fr-hint-text fr-mt-1w">
+                La carte s'ouvre sur la métropole&nbsp;: les édifices de Martinique, de La Réunion, de Guadeloupe et de Guyane
+                sont hors du cadre, faire glisser la carte pour les voir. {{sans_geo:number}}&nbsp;édifices n'ont pas de
+                coordonnées&nbsp;: absents de la carte, ils restent dans le tableau.
+              </p>
+            </template>
+          </dsfr-data-repeat>
+          <dsfr-data-a11y for="carte-acr" source="acr-f" download
+            filename="architecture-contemporaine-selection.csv"
+            label="Données de la carte"
+            description="Carte de France, un point par édifice labellisé géolocalisé de la sélection, coloré selon la période où commence sa construction : gris avant 1945, bleu foncé de 1945 à 1974, bleu clair de 1975 à 1999, rouge en 2000 et après. Sans filtre, les points bleu foncé dominent partout ; ils se concentrent en Île-de-France, sur la côte méditerranéenne, dans le Grand Est et le long de la Loire. Le tableau sous la carte donne les mêmes édifices.">
+          </dsfr-data-a11y>
+        </div>
+
+        <h3 class="fr-h5 fr-mt-6w">Les édifices de la sélection</h3>
+        <dsfr-data-list source="acr-f"
+          columns="titre:Édifice, commune:Commune, departement:Département, datation_txt:Construction, auteurs_txt:Auteurs, label_txt:Label"
+          sort="label_txt:desc" pagination="15" count-label="édifice|édifices" export="csv"
+          caption="Édifices labellisés Architecture contemporaine remarquable de la sélection : commune, années de construction, auteurs, année du label">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="anc-q">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Les édifices sortis du label.</strong> Le fichier compte {{lignes:number}}&nbsp;lignes, dont
+            {{ancien:number}} «&nbsp;anciennement labellisées&nbsp;». La page les écarte partout&nbsp;: elles ne sont plus dans le
+            stock. {{ancien_pa:number}} seulement portent une référence de monument historique (<code>PA…</code>)&nbsp;; le
+            fichier ne dit pas pourquoi les autres sont sortis.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Une date de construction exacte.</strong> La datation est une liste d'années («&nbsp;1966&nbsp;;
+            1967&nbsp;»)&nbsp;: la page retient la plus ancienne, le début connu du chantier. Un intervalle («&nbsp;1922-1930&nbsp;»)
+            donne sa première année. {{sans_date:number}}&nbsp;édifices n'ont aucune année lisible (datation vide, ou une phrase
+            à la place de la date)&nbsp;: ils sont hors des décennies, des parts et de l'âge moyen, qui se calculent sur les
+            {{dates:number}}&nbsp;édifices datés.</li>
+          <li><strong>Les édifices sans année de label ni coordonnées.</strong> {{sans_label:number}}&nbsp;édifices n'ont pas
+            d'année de label (absents du graphique par année) et {{sans_geo:number}} pas de coordonnées (absents de la carte).</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Des types d'édifices exclusifs.</strong> Les dénominations sont une liste de termes, du plus général au plus
+        précis. La page les range en onze familles par mots&nbsp;; un édifice qui relève de deux familles (une école avec
+        gymnase) compte dans les deux, et une cinquantaine d'édifices aux dénominations rares (monuments, jardins,
+        funéraire, agricole) n'entrent dans aucune.</li>
+      <li><strong>Une densité par habitant.</strong> Le nombre d'édifices par région dépend du rythme des campagnes de
+        labellisation plus que du parc construit&nbsp;: le rapporter à la population aurait donné une précision trompeuse.</li>
+      <li><strong>Les propriétaires.</strong> Le statut juridique du propriétaire est vide pour trois édifices sur
+        quatre&nbsp;: aucune part ne se tire d'un champ aussi lacunaire.</li>
+      <li><strong>Ce qu'est devenu chaque édifice.</strong> Le fichier donne l'état du jour, sans historique des retraits
+        ni des démolitions.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création sur la liste des édifices labellisés «&nbsp;Architecture contemporaine
+        remarquable&nbsp;», 1&nbsp;824&nbsp;lignes servies par l'API Tabular. Le cadrage annonçait «&nbsp;1&nbsp;824 édifices
+        labellisés depuis 2000&nbsp;»&nbsp;: 13 sont sortis du label, et l'histoire n'était pas dans la date du label mais
+        dans celle de la construction, cachée dans un champ multivalué.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le jeu entier en une lecture.</strong> <code>fetch-mode="export"</code> + <code>select</code>&nbsp;:
+              l'export Parquet, douze colonnes sur 45, sans jamais lire les descriptions historiques.</li>
+            <li><strong>Une coordonnée «&nbsp;lat,lon&nbsp;» en texte.</strong> <code>split="Coordonnees"</code> en fait un
+              tableau <code>[lat, lon]</code>, que <code>geo-field</code> lit tel quel&nbsp;: pas de colonne à dériver.</li>
+            <li><strong>Des auteurs et des dénominations multivalués.</strong> <code>split</code> puis <code>explode</code>, et
+              <code>distinct</code> sur la référence pour ne compter chaque édifice qu'une fois par barre.</li>
+            <li><strong>Exploration.</strong> Recherche, facettes, carte et tableau branchés sur la même sortie, en client.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas de « premier élément » d'un tableau.</strong> <code>compute</code> n'a ni index ni sous-chaîne&nbsp;:
+              pour tirer une année d'une datation «&nbsp;1966;1967&nbsp;», il faut éclater, convertir, regrouper par édifice
+              (<code>min</code>) et rejoindre. Quatre éléments pour une colonne&nbsp;; la dénomination principale (le premier
+              terme) reste hors d'atteinte, d'où des familles recodées par mots.</li>
+            <li><strong>Une chaîne qui renvoie ses calculs au serveur, sous de faux noms.</strong> Première écriture&nbsp;:
+              <code>normalize</code> (renommage) → <code>query</code> → <code>normalize numeric</code> → <code>query group-by</code>.
+              La dernière query a été déléguée à l'API avec les noms <em>renommés</em> (<code>ref__groupby&amp;datation__min</code>)&nbsp;:
+              l'export Parquet abandonné, une requête refusée, et <strong>toute la page</strong> en «&nbsp;Failed to fetch&nbsp;».
+              Rejoué sur une page minimale (0.42.0)&nbsp;: sans la query intermédiaire, ou sans le <code>normalize</code> de
+              valeurs, rien n'est délégué. Contournement&nbsp;: un <code>rename</code> dans le second <code>normalize</code>, qui
+              coupe la délégation.</li>
+            <li><strong>Des datations qui ne sont pas des nombres.</strong> <code>numeric</code> lit le nombre de tête après
+              avoir retiré les espaces&nbsp;: «&nbsp;1922-1930&nbsp;» donne 1922, «&nbsp;2008 : 2012&nbsp;» 2008 — utile ici, mais
+              silencieux. Deux datations sont des phrases&nbsp;: aucune année, et la page les compte.</li>
+            <li><strong>Des années affichées «&nbsp;1&nbsp;838&nbsp;».</strong> Une année convertie en nombre prend le séparateur
+              de milliers dans le tableau&nbsp;: une colonne texte (<code>'' + annee</code>) pour l'affichage.</li>
+            <li><strong>Des indices de mise en évidence fragiles.</strong> <code>highlight-index</code> désigne une position,
+              pas une modalité&nbsp;: la série des décennies a été figée en onze classes pour que «&nbsp;années 1950&nbsp;»
+              reste l'indice 4.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 1&nbsp;824&nbsp;lignes Tabular sans les textes longs</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif</td></tr>
+            <tr><td>Écarter les anciennement labellisés</td><td><code>normalize compute</code> + <code>query where</code></td><td>Natif</td></tr>
+            <tr><td>Première année d'une datation multivaluée</td><td><code>split</code> + <code>explode</code> + <code>numeric</code> + <code>min</code> + <code>dsfr-data-join</code></td><td>Natif, en quatre étapes&nbsp;; délégation fautive à contourner</td></tr>
+            <tr><td>Décennies, périodes, âge au label</td><td><code>normalize compute</code> (<code>when</code>, <code>floor</code>)</td><td>Natif</td></tr>
+            <tr><td>Architectes et familles multivalués</td><td><code>query explode</code> + <code>distinct</code></td><td>Natif</td></tr>
+            <tr><td>Carte depuis «&nbsp;lat,lon&nbsp;» en texte</td><td><code>normalize split</code> + <code>dsfr-data-map-layer geo-field</code></td><td>Natif</td></tr>
+            <tr><td>Recherche, facettes, carte, tableau</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code> + <code>dsfr-data-map</code> + <code>dsfr-data-list</code></td><td>Natif (client)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un petit jeu, une histoire cachée dans un champ texte.</strong> Tout tient dans la balise&nbsp;; le seul
+          détour est l'absence d'accès au premier élément d'une liste, qui transforme «&nbsp;l'année de construction&nbsp;» en
+          une chaîne de quatre transformations — et cette chaîne a déclenché une délégation au serveur sous des noms renommés,
+          qui a fait tomber toute la page avant contournement. Le coût réel est éditorial&nbsp;: décider quelle année dit la construction,
+          et dire combien d'édifices n'en ont pas.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la carte Leaflet (dsfr-data-map) n'est pas dans `core`. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
