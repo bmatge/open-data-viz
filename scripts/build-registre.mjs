@@ -37,18 +37,18 @@ const STATUTS = {
   '/pages/dataviz-prix-des-carburants': ['reproduite', '/viz/prix-des-carburants', 'Recréée en récit (2026-09-26) : la station fait le prix, pas la région ; heures de relevé rendues justes (timezone retiré, FP-019)'],
   '/pages/entreprise-patrimoine-vivant/': ['reproduite', '/viz/entreprise-patrimoine-vivant', 'Recréée en récit (2026-09-26) : un label de très petites entreprises, 62 % de PME parmi les tailles déclarées, pas 34 % ; une fiche sur trois vide (FP-024)'],
   '/pages/comptabilite-generale/': ['reproduite', '/viz/comptabilite-generale', 'Recréée en récit (2026-09-26) : la dette fait 90 % de la hausse du passif ; plus de solde par mission (95 % des produits sans mission, PG-042)'],
-  '/pages/qualite-tourisme/': ['reproduite', '/viz/qualite-tourisme', 'Annuaire cartographié : 1 carte au lieu de 6, facettes cherchables'],
-  '/pages/annuaire-des-services-dgfip/': ['reproduite', '/viz/annuaire-services-dgfip', '21 761 services — quatrième emploi du gabarit annuaire'],
+  '/pages/qualite-tourisme/': ['reproduite', '/viz/qualite-tourisme', 'Recréée en récit (2026-09-26) : l’Occitanie pèse 24 % des labels, dont 73 % par une seule marque régionale ; sans elle, 5e rang (PG-049)'],
+  '/pages/annuaire-des-services-dgfip/': ['reproduite', '/viz/annuaire-services-dgfip', 'Recréée en récit (2026-09-26) : les buralistes font 95 à 99 % des points de paiement, les centres ne sont que dans 751 communes ; les 74 % n’étaient pas un défaut de périmètre (FP-031)'],
   '/pages/tourisme-et-handicap/': ['reproduite', '/viz/tourisme-et-handicap', 'Recréée en récit (2026-09-26) : le label suit ses relais locaux, la Charente-Maritime pèse un tiers de la Nouvelle-Aquitaine (PG-049)'],
-  '/pages/accompagnements-actions-fnum/': ['analyse', '/viz/formations-france-num', 'Jeu de données à zéro enregistrement : analyse au lieu de reproduction'],
-  '/pages/entreprises-restauration-notre-dame': ['reproduite', '/viz/entreprises-restauration-notre-dame', 'Carte à 2 couches issues de 2 portails Opendatasoft'],
+  '/pages/accompagnements-actions-fnum/': ['analyse', '/viz/formations-france-num', 'Jeu toujours vide au 2026-09-26 (LIM-005), page du portail passée en 404 (LIM-006) : constat daté, qui interroge le jeu en direct à chaque chargement'],
+  '/pages/entreprises-restauration-notre-dame': ['reproduite', '/viz/entreprises-restauration-notre-dame', 'Recréée en récit (2026-09-26) : 52 % des entreprises hors Île-de-France, les métiers d’art en région ; « + 3 000 compagnons », absent des données, retiré'],
   '/pages/fiscalite-locale-particuliers/?headless=true': ['reproduite', '/viz/fiscalite-locale', 'Recréée en récit (2026-09-26) : la surtaxe des résidences secondaires ×7, rupture de 2024 ; moyennes pondérées par la population'],
   '/pages/barometre-france-num/': ['reproduite', '/viz/barometre-france-num', 'Refonte en trois régimes d’accès (profil partagé), relue le 2026-09-26 ; la reproduction fidèle a été retirée le même jour'],
 
   '/pages/comptabilite-etat/': ['analyse', '/viz/non-reproduites', 'Page 404, jeu supprimé — sujet couvert par la page Comptabilité générale'],
   '/pages/signalconso/': ['reproduite', '/viz/signalconso', 'Page 404, jeu vivant. Recréée en récit (2026-09-26) : 40 % jamais transmis ; 70,6 % de réponses parmi les transmis, pas 38 % (FP-021)'],
-  '/pages/rappelconso/': ['reproduite', '/viz/rappelconso', 'Page 404 et jeu renommé : la v2 existe ; relecture métier du 2026-09-26, compte des fiches (jeu -espaces) et non des codes-barres'],
-  '/pages/annuaire-centres-controles-techniques/': ['reproduite', '/viz/centres-controle-technique', 'Page 404 et jeux renommés : 6 113 centres retrouvés'],
+  '/pages/rappelconso/': ['reproduite', '/viz/rappelconso', 'Page 404 et jeu renommé : la v2 existe ; relecture métier du 2026-09-26, compte des fiches (jeu -espaces) et non des codes-barres. Tableau de bord recréé en récit le même jour (/viz/rappel-conso-tableau-de-bord) : 2021 est la crise de l’oxyde d’éthylène, la listeria monte ; les « 87 % volontaires » mêlent deux régimes (PG-050)'],
+  '/pages/annuaire-centres-controles-techniques/': ['reproduite', '/viz/centres-controle-technique', 'Page 404 et jeux renommés. Recréée en récit (2026-09-26) : un centre sur six contrôle les motos, de 10,8 % à 29,0 % selon la région ; un seul export, aucun script (AV-039)'],
   '/pages/livre-d-or/': ['analyse', '/viz/non-reproduites', 'Page 404, aucun jeu associé : rien à reprendre'],
   '/pages/visualisation-liste-des-complements-alimentaires/': ['analyse', '/viz/non-reproduites', 'Page servie mais jeu supprimé : seul un jeu « preprod » vide subsiste']
 };
@@ -69,7 +69,7 @@ Object.assign(STATUTS, {
   'https://prix.conso.gouv.fr/controle-technique':
     ['reproduite', '/viz/prix-controle-technique', 'Recréée en récit (2026-09-26) : changer de centre fait gagner autant que changer de département ; facettes serveur possibles (FP-018)'],
   'https://data.ofgl.fr':
-    ['analyse', '/viz/ofgl', 'Atelier de cartographie sur des agrégats OFGL, pas une dataviz ; les balances brutes exigent une règle comptable'],
+    ['reproduite', '/viz/ofgl', 'Recréée en récit (2026-09-26) sur data.ofgl.fr : épargne brute des départements 12,1 → 5,1 Md€ de 2022 à 2024 ; les agrégats étaient publiés, LIM-007 requalifié (FP-032)'],
   'https://www.francebleu.fr/services/prix-carburants':
     ['reproduite', '/viz/prix-des-carburants', 'Même jeu que Prix des carburants : la reproduction couvre carburant, distributeur et horaires'],
   'https://www.prix-carburants.gouv.fr':

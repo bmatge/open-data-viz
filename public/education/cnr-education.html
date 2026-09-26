@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Les projets CNR Éducation — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la cartographie du CNR Éducation : 5 695 projets sur 6 024 lignes, 178 thèmes, et le premier emploi d'explode.">
+  <meta name="description" content="Recréation avec dsfr-data de la cartographie du CNR Éducation : rapportés au parc d'établissements, les projets ont gagné un collège public sur cinq, une école sur treize, et presque pas le privé ; l'engagement varie de un à sept d'une académie à l'autre.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,200 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un localisateur muet : quatre couches de pictos, cinq
+       filtres, aucun chiffre. La reproduction précédente comptait des VOLUMES
+       (6 024 lignes, 5 695 projets, 61 % d'écoles). Un volume de projets dit
+       surtout combien il y a d'écoles en France. Rapporté au parc
+       d'établissements ouverts (annuaire de l'éducation), le récit se
+       renverse : les écoles portent six projets sur dix, mais elles sont de
+       loin les MOINS engagées du public ; les collèges le sont deux fois et
+       demie plus ; le privé ne l'est presque pas. Et l'académie qui compte le
+       plus de projets n'est pas la plus engagée.
+
+       Deux sources, lues SANS clé :
+         · `cnr`  — les 6 024 lignes du jeu, en un export, sans les textes longs ;
+         · `annu` — les écoles, collèges, lycées et EREA ouverts de l'annuaire
+                    (≈ 62 600 lignes, quatre champs courts, ≈ 470 Ko compressés).
+       ========================================================================== -->
+
+  <!-- Le champ `1_uai` commence par un chiffre : la bibliothèque le backquote
+       elle-même depuis 0.29.0 (PG-027). Les textes longs sont écartés du
+       `select` (règle du dépôt : un `select` qui les inclut coûte plus qu'il
+       ne rapporte). -->
+  <dsfr-data-source id="cnr" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-cnr-base-nefle"
+    fetch-mode="export" max-records="8000"
+    select="1_uai, etab_verif, type_etablissement, adresse_1, code_postal, nom_commune_verif, libelle_academie, libelle_region, nom_projet, eleves_benef, debut_proj, partenaires_du_projet, themes_projets, validation_du_projet, position">
+  </dsfr-data-source>
+
+  <!-- Deux codes pour une même absence : un `themes_projets` vide (911 lignes)
+       n'éclate en rien sous `explode` ; il est fondu dans « Non mentionné ».
+       `rentree` : l'année scolaire de démarrage, en comparaison de dates ISO
+       (texte). `k` : une clé constante pour replier les phrases en une ligne. -->
+  <dsfr-data-normalize id="cnr-n" source="cnr"
+    compute="themes_projets = when is_empty(themes_projets) then 'Non mentionné' else themes_projets;
+             ampleur = when is_null(eleves_benef) then 'Non renseigné' when eleves_benef &lt; 50 then 'Moins de 50 élèves' when eleves_benef &lt; 150 then '50 à 150' when eleves_benef &lt; 400 then '150 à 400' else '400 et plus';
+             rentree = when is_empty(debut_proj) then 'Sans date' when debut_proj &lt; '2022-09-01' then 'Avant septembre 2022' when debut_proj &lt; '2023-09-01' then '2022-2023' when debut_proj &lt; '2024-09-01' then '2023-2024' when debut_proj &lt; '2025-09-01' then '2024-2025' else 'Date aberrante';
+             rrang = when rentree = 'Avant septembre 2022' then 0 when rentree = '2022-2023' then 1 when rentree = '2023-2024' then 2 when rentree = '2024-2025' then 3 else 9;
+             k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Un projet = une clé (PG-001) ----------
+       329 lignes sont la copie d'une autre (seul `themes_dgesco` change) :
+       le `group-by` EST le dédoublonnage. `libelle_academie`, `rentree`,
+       `rrang` et `k` dépendent de la clé : ils ne la scindent pas. -->
+  <dsfr-data-query id="projets" source="cnr-n"
+    group-by="1_uai, nom_projet, debut_proj, eleves_benef, themes_projets, type_etablissement, libelle_academie, rentree, rrang, k"></dsfr-data-query>
+
+  <!-- ---------- Le taux d'engagement : établissements engagés / établissements ouverts ----------
+       Un établissement engagé = une UAI qui porte au moins une ligne. -->
+  <dsfr-data-query id="etabs" source="cnr-n" group-by="1_uai" aggregate="1_uai:count:lignes"></dsfr-data-query>
+
+  <!-- Le dénominateur : le parc ouvert d'aujourd'hui. Hors Nouvelle-Calédonie,
+       Polynésie française et Wallis-et-Futuna (compétence éducative locale,
+       aucun projet dans le jeu) ; hors 5 lignes sans statut public/privé. -->
+  <dsfr-data-source id="annu" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-annuaire-education"
+    fetch-mode="export" max-records="70000"
+    select="identifiant_de_l_etablissement, type_etablissement, statut_public_prive, libelle_academie"
+    where='type_etablissement in ("Ecole","Collège","Lycée","EREA") and statut_public_prive is not null and not libelle_academie in ("Nouvelle Calédonie","Polynésie Française","Wallis et Futuna")'>
+  </dsfr-data-source>
+
+  <!-- ⚠️ L'annuaire N'EST PAS unique sur l'UAI : 63 UAI y figurent deux fois
+       (relevé à l'export le 2026-09-26). 53 sont des doublons exacts ; 10 sont
+       des cités scolaires listées une fois « Collège », une fois « Lycée ».
+       Joindre le parc brut comptait ces établissements deux fois, au
+       dénominateur ET au numérateur (PG-001, côté GAUCHE cette fois).
+       D'où deux dédoublonnages par `group-by` :
+         · `annu-t` — une ligne par UAI × type (la cité scolaire compte dans
+                      chacun de ses deux types : c'est le graphique par type) ;
+         · `annu-s` — une ligne par UAI (secteur, académie, totaux). -->
+  <dsfr-data-query id="annu-t" source="annu"
+    group-by="identifiant_de_l_etablissement, type_etablissement, statut_public_prive, libelle_academie"></dsfr-data-query>
+  <dsfr-data-query id="annu-s" source="annu"
+    group-by="identifiant_de_l_etablissement, statut_public_prive, libelle_academie"></dsfr-data-query>
+
+  <!-- Gauche = le parc dédoublonné, droite = les UAI engagées (clé unique
+       par `group-by`) : pas de relation 1-N. -->
+  <dsfr-data-join id="parc-t" left="annu-t" right="etabs" on="identifiant_de_l_etablissement=1_uai" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="parc-tn" source="parc-t"
+    compute="engage = when is_null(lignes) then 0 else 1;
+             grp = type_etablissement + ' ' + statut_public_prive;
+             k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-join id="parc-s" left="annu-s" right="etabs" on="identifiant_de_l_etablissement=1_uai" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="parc-sn" source="parc-s"
+    compute="engage = when is_null(lignes) then 0 else 1; k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- Taux par type × secteur, et par secteur seul. -->
+  <dsfr-data-query id="par-grp" source="parc-tn"
+    group-by="k, grp, type_etablissement, statut_public_prive"
+    aggregate="engage:sum:engages, engage:count:ouverts"></dsfr-data-query>
+  <dsfr-data-query id="par-sect" source="parc-sn"
+    group-by="k, statut_public_prive"
+    aggregate="engage:sum:engages, engage:count:ouverts"></dsfr-data-query>
+  <!-- Même schéma que `par-grp`, sinon `dsfr-data-concat` refuse d'empiler. -->
+  <dsfr-data-normalize id="par-sect-g" source="par-sect"
+    compute="grp = statut_public_prive; type_etablissement = 'Tous'"></dsfr-data-normalize>
+  <dsfr-data-concat id="par-tout" sources="par-grp, par-sect-g"></dsfr-data-concat>
+  <dsfr-data-normalize id="par-tout-t" source="par-tout" compute="taux = engages * 100 / ouverts"></dsfr-data-normalize>
+  <dsfr-data-pivot id="chapo-t" source="par-tout-t" row="k" column="grp" value="taux" aggregate="first"
+    labels="Collège Public:col | Lycée Public:lyc | Ecole Public:eco | EREA Public:erea | Public:pub | Privé:priv | Collège Privé:colp | Lycée Privé:lycp | Ecole Privé:ecop | EREA Privé:ereap">
+  </dsfr-data-pivot>
+  <dsfr-data-query id="par-pub" source="par-sect" where="statut_public_prive:eq:Public"></dsfr-data-query>
+  <dsfr-data-join id="chapo-j" left="chapo-t" right="par-pub" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="chapo" source="chapo-j" compute="ratio = col / eco"></dsfr-data-normalize>
+
+  <!-- Graphique 1 : un groupe par type, public et privé côte à côte, trié sur le public. -->
+  <dsfr-data-normalize id="type-t" source="par-grp"
+    compute="taux = engages * 100 / ouverts;
+             type = when type_etablissement = 'Ecole' then 'Écoles' when type_etablissement = 'Collège' then 'Collèges' when type_etablissement = 'Lycée' then 'Lycées' else 'EREA'">
+  </dsfr-data-normalize>
+  <dsfr-data-pivot id="type-w" source="type-t" row="type" column="statut_public_prive" value="taux" aggregate="first"
+    labels="Public:pub | Privé:priv"></dsfr-data-pivot>
+  <dsfr-data-query id="type-o" source="type-w" order-by="pub:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="type-r" source="type-o" round="pub:1, priv:1"></dsfr-data-normalize>
+  <dsfr-data-query id="type-a" source="type-t" order-by="ouverts:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="type-tab" source="type-a" round="taux:1"
+    rename="type:Type | statut_public_prive:Secteur | engages:Établissements engagés | ouverts:Établissements ouverts | taux:Part engagée (%)"></dsfr-data-normalize>
+
+  <!-- Graphique 2 : les académies, public seulement (le privé, à 2,5 %, ne
+       ferait que diluer), triées par taux. Les projets distincts viennent à
+       côté pour opposer le volume au taux. -->
+  <dsfr-data-query id="aca" source="parc-sn" where="statut_public_prive:eq:Public"
+    group-by="libelle_academie" aggregate="engage:sum:engages, engage:count:ouverts"></dsfr-data-query>
+  <dsfr-data-query id="proj-aca" source="projets" group-by="libelle_academie" aggregate="1_uai:count:projets"></dsfr-data-query>
+  <dsfr-data-join id="aca-j" left="aca" right="proj-aca" on="libelle_academie" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="aca-n" source="aca-j"
+    compute="taux = engages * 100 / ouverts; projets = coalesce(projets, 0)"></dsfr-data-normalize>
+  <!-- Saint-Pierre-et-Miquelon (7 établissements publics) : un seul projet y
+       ferait 14 %. Sous 50 établissements, pas de barre — c'est dit en page. -->
+  <dsfr-data-query id="aca-o" source="aca-n" where="ouverts:gte:50" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-r" source="aca-o" round="taux:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="aca-tab" source="aca-r"
+    rename="libelle_academie:Académie | taux:Part engagée (%) | engages:Établissements publics engagés | ouverts:Établissements publics ouverts | projets:Projets distincts (public et privé)"></dsfr-data-normalize>
+  <!-- La phrase de lecture : trois lignes d'une ligne chacune, renommées puis
+       jointes sur une clé constante — un seul gabarit, une seule phrase. -->
+  <dsfr-data-query id="aca-haut" source="aca-n" where="ouverts:gte:50" order-by="taux:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-haut-k" source="aca-haut"
+    rename="libelle_academie:h_nom | taux:h_taux | engages:h_eng | ouverts:h_ouv | projets:h_proj" compute="k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-bas" source="aca-n" where="ouverts:gte:50" order-by="taux:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-bas-k" source="aca-bas"
+    rename="libelle_academie:b_nom | taux:b_taux | engages:b_eng | ouverts:b_ouv | projets:b_proj" compute="k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-vol" source="aca-n" order-by="projets:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-vol-k" source="aca-vol"
+    rename="libelle_academie:v_nom | taux:v_taux | engages:v_eng | ouverts:v_ouv | projets:v_proj" compute="k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-join id="aca-hb" left="aca-haut-k" right="aca-bas-k" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="aca-hbv" left="aca-hb" right="aca-vol-k" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="aca-phrase-j" left="aca-hbv" right="chapo" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="aca-phrase" source="aca-phrase-j" compute="ecart = h_taux / b_taux"></dsfr-data-normalize>
+
+  <!-- Graphique 3 : les démarrages par année scolaire. Sans date et date
+       aberrante (2323) hors du graphique, comptés à part. -->
+  <dsfr-data-query id="rentrees" source="projets"
+    where="rrang:lte:3"
+    group-by="k, rentree, rrang" aggregate="1_uai:count:projets, projets:share_percent:part"
+    order-by="rrang:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="rentrees-r" source="rentrees" round="part:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="rentrees-tab" source="rentrees-r"
+    rename="rentree:Année scolaire de démarrage | projets:Projets distincts | part:Part des projets datés (%)"></dsfr-data-normalize>
+  <dsfr-data-pivot id="rentrees-p" source="rentrees" row="k" column="rentree" value="part" aggregate="first"
+    labels="Avant septembre 2022:p_av | 2022-2023:p22 | 2023-2024:p23 | 2024-2025:p24"></dsfr-data-pivot>
+  <dsfr-data-pivot id="rentrees-c" source="rentrees" row="k" column="rentree" value="projets" aggregate="first"
+    labels="Avant septembre 2022:n_av | 2022-2023:n22 | 2023-2024:n23 | 2024-2025:n24"></dsfr-data-pivot>
+  <dsfr-data-join id="rentrees-phrase" left="rentrees-p" right="rentrees-c" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-query id="sans-date" source="projets" where="rrang:gt:3"
+    group-by="k" aggregate="1_uai:count:n"></dsfr-data-query>
+
+  <!-- Graphique 4 : les thèmes. `explode` éclate le champ multivalué (178
+       thèmes, 1 814 combinaisons) ; le premier `group-by` dédoublonne un
+       couple projet × thème, le second compte. -->
+  <dsfr-data-query id="proj-th" source="cnr-n" explode="themes_projets"
+    group-by="themes_projets, 1_uai, nom_projet, debut_proj, eleves_benef"></dsfr-data-query>
+  <dsfr-data-query id="themes" source="proj-th"
+    group-by="themes_projets" aggregate="1_uai:count:projets" order-by="projets:desc"></dsfr-data-query>
+  <dsfr-data-query id="themes-top" source="themes" limit="12"></dsfr-data-query>
+  <dsfr-data-normalize id="themes-r" source="themes-top" rename="themes_projets:Thème | projets:Projets"></dsfr-data-normalize>
+  <dsfr-data-query id="proj-tot" source="projets" group-by="k" aggregate="1_uai:count:n_proj"></dsfr-data-query>
+  <dsfr-data-query id="th-nm" source="themes" where="themes_projets:eq:Non mentionné"></dsfr-data-query>
+  <dsfr-data-normalize id="th-nm-k" source="th-nm" compute="k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-join id="th-nm-j" left="th-nm-k" right="proj-tot" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="th-phrase" source="th-nm-j" compute="part = projets * 100 / n_proj"></dsfr-data-normalize>
+  <dsfr-data-query id="th-1" source="themes" where="themes_projets:neq:Non mentionné" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="th-1-k" source="th-1" rename="themes_projets:t1 | projets:n1" compute="k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-join id="th-phrase-j" left="th-phrase" right="th-1-k" on="k" type="inner"></dsfr-data-join>
+
+  <!-- Hors du taux : les UAI du jeu absentes du parc filtré (fermées,
+       fusionnées, Andorre). -->
+  <dsfr-data-join id="etabs-j" left="etabs" right="annu-s" on="1_uai=identifiant_de_l_etablissement" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="etabs-jk" source="etabs-j" compute="k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-query id="hors-parc" source="etabs-jk" where="statut_public_prive:isnull"
+    group-by="k" aggregate="1_uai:count:n"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,115 +226,197 @@
       </div>
     </nav>
 
-    <h1>Les projets du CNR Éducation</h1>
+    <h1>Le CNR Éducation a pris dans les collèges publics, bien moins dans les écoles, presque pas dans le privé</h1>
 
-    <p class="fr-text--lead">
-      Dans le cadre du Conseil national de la refondation, les écoles et établissements ont été
-      invités à bâtir des projets répondant à leurs besoins propres.
-      Le jeu publie <strong>6 024 lignes</strong>, mais <strong>5 695 projets</strong> — 329 lignes
-      sont la copie d'une autre — répartis en <strong>3 481 écoles</strong>, 1 500 collèges,
-      692 lycées et 22 EREA, au bénéfice déclaré de <strong>1,47 million d'élèves</strong>.
-      Les porteurs ont retenu <strong>178 thèmes différents</strong>, combinés de
-      <strong>1 814 façons</strong> — mais près de deux projets sur cinq n'en déclarent aucun :
-      c'est une politique dont la diversité est le fait principal, et le silence des porteurs
-      le second.
+    <!-- Le chapô est CALCULÉ : parc ouvert du jour, projets du jeu publié. -->
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="fr-text--lead">
+          Sur les {{ouverts:number}} écoles, collèges, lycées et EREA publics ouverts, <strong>{{engages:number}}
+          ({{pub:number:1}}&nbsp;%)</strong> ont porté au moins un projet «&nbsp;Notre école, faisons-la
+          ensemble&nbsp;». La part monte à <strong>{{col:number:1}}&nbsp;% des collèges publics</strong> et
+          {{lyc:number:1}}&nbsp;% des lycées publics, mais tombe à <strong>{{eco:number:1}}&nbsp;% des
+          écoles publiques</strong> — {{ratio:number:1}} fois moins que les collèges — et à
+          {{priv:number:1}}&nbsp;% des établissements privés. Les écoles portent pourtant six projets
+          sur dix&nbsp;: elles sont simplement bien plus nombreuses.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Lancé à l'automne 2022, le volet éducation du Conseil national de la refondation invite
+      chaque école et établissement à bâtir un projet qui réponde à ses besoins, avec un
+      financement dédié. Le jeu publie un projet par ligne&nbsp;; cette page le rapporte au
+      nombre d'établissements ouverts recensés par l'annuaire de l'éducation, pour mesurer
+      l'engagement plutôt que le volume.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-cnr-base-nefle/"
            target="_blank" rel="noopener external"><code>fr-en-cnr-base-nefle</code></a>
-        — 6 024 lignes, 40 champs, lu sans clé. <strong>Aucune ligne sans position</strong> :
-        les 6 024 lignes sont cartographiables. Le champ <code>themes_projets</code> est
-        <strong>multivalué</strong> — un projet porte de un à plusieurs thèmes, et il est
-        <strong>vide sur 911 lignes</strong> quand 1 345 autres portent la valeur explicite
-        « Non mentionné ».
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Une ligne n'est pas un projet.</strong> Vérifié sur l'export complet le
-        2026-09-20 : <strong>325 lignes sont identiques à une autre sur 39 champs sur 40</strong>
-        — seul <code>themes_dgesco</code> change (« Non mentionné » contre vide, ou un second
-        thème DGESCO) — et 4 de plus n'en diffèrent que par leurs textes libres. Sur la clé
-        UAI + intitulé + date + élèves + thèmes + type, thèmes vides et « Non mentionné »
-        confondus, le jeu compte <strong>5 695 projets distincts</strong>. Les compteurs de cette page comptent les projets ; la carte, la
-        liste et la recherche montrent les lignes.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Le champ <code>email_etabl</code> ne contient aucune adresse électronique.</strong>
-        Vérifié sur les 6 024 lignes : <strong>pas un seul caractère « @ »</strong>. Il porte en
-        réalité le nom de l'académie — « Créteil » 559 fois, « Lille » 417, « Aix-Marseille »
-        344 — soit exactement les 32 valeurs du champ <code>libelle_academie</code> qui existe
-        déjà à côté. Un utilisateur qui construirait une liste de diffusion sur ce champ
-        n'obtiendrait rien. Il n'est donc pas exposé sur cette page.
+        (DGESCO, dernière modification le 29 janvier 2026) — 6 024 lignes, une par projet déclaré,
+        dont 329 copies d'une autre&nbsp;: les compteurs de cette page comptent les projets
+        distincts. Pour le dénominateur,
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-annuaire-education/"
+           target="_blank" rel="noopener external"><code>fr-en-annuaire-education</code></a>&nbsp;:
+        les écoles, collèges, lycées et EREA ouverts au jour du chargement, appariés au jeu CNR par
+        leur code UAI. Lecture sans clé.
       </p>
     </details>
+
+    <!-- ---------- Accroche : quatre repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:2 lg:4" gap="md" class="fr-mb-6w" aria-label="Les chiffres à retenir">
+      <dsfr-data-kpi source="parc-tn" value="engage:sum / count" where="grp:eq:Collège Public"
+        format="pourcentage" heading="des collèges publics"
+        label="ont porté au moins un projet"></dsfr-data-kpi>
+      <dsfr-data-kpi source="parc-tn" value="engage:sum / count" where="grp:eq:Ecole Public"
+        format="pourcentage" heading="des écoles publiques"
+        label="ont porté au moins un projet"></dsfr-data-kpi>
+      <dsfr-data-kpi source="parc-sn" value="engage:sum / count" where="statut_public_prive:eq:Privé"
+        format="pourcentage" heading="des établissements privés"
+        label="écoles, collèges et lycées confondus"></dsfr-data-kpi>
+      <dsfr-data-kpi source="projets"
+        value="count{rentree:eq:2022-2023} / count{rrang:lte:3}"
+        format="pourcentage" heading="des projets datés"
+        label="ont démarré pendant l'année scolaire 2022-2023"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve : le taux par type ---------- -->
+    <h2 class="fr-h3">1. Rapporté au nombre d'établissements, l'engagement s'inverse&nbsp;: les collèges devant, les écoles loin derrière</h2>
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="odv-lecture">{{col:number:1}}&nbsp;% des collèges publics, {{lyc:number:1}}&nbsp;% des
+          lycées publics et {{erea:number:1}}&nbsp;% des EREA ont porté au moins un projet, contre
+          <strong>{{eco:number:1}}&nbsp;% des écoles publiques</strong>. Dans le privé, aucun type ne
+          dépasse {{colp:number:1}}&nbsp;% (collèges)&nbsp;: la démarche est restée, de fait, une
+          affaire de l'enseignement public.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Part des établissements ouverts qui ont porté au moins un projet, par type et secteur">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-type" source="type-r" type="bar" horizontal
+        label-field="type" value-field="pub:Établissements publics" value-fields="priv:Établissements privés"
+        color-map="Établissements publics:#000091,Établissements privés:#929292"
+        x-min="0" unit-tooltip="%"
+        databox databox-title="Part des établissements ouverts ayant porté au moins un projet CNR Éducation (%)"
+        databox-source="DGESCO — fr-en-cnr-base-nefle ; annuaire de l'éducation — via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-type" source="type-tab" table download
+        filename="cnr-engagement-par-type.csv"
+        label-field="Type"
+        value-field="Secteur, Établissements engagés, Établissements ouverts, Part engagée (%)"
+        description="Pour chaque type d'établissement et chaque secteur, le nombre d'établissements ouverts, le nombre de ceux qui ont porté au moins un projet CNR Éducation, et la part qu'ils représentent. Les collèges et lycées publics sont les plus engagés, les écoles publiques nettement moins, le privé très peu."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. Le territoire : volume contre taux ---------- -->
+    <h2 class="fr-h3">2. Les académies qui déposent le plus de projets ne sont pas les plus engagées</h2>
+    <dsfr-data-repeat source="aca-phrase">
+      <template>
+        <p class="odv-lecture">L'académie de <strong>{{v_nom}}</strong> compte le plus de projets
+          ({{v_proj:number}}), parce qu'elle compte beaucoup d'établissements&nbsp;:
+          {{v_taux:number:1}}&nbsp;% de ses établissements publics se sont engagés. En tête,
+          <strong>{{h_nom}}</strong> atteint {{h_taux:number:1}}&nbsp;% ({{h_eng:number}}
+          établissements sur {{h_ouv:number}})&nbsp;; en queue, <strong>{{b_nom}}</strong> plafonne à
+          {{b_taux:number:1}}&nbsp;%, {{ecart:number:1}} fois moins. La part de l'ensemble des
+          établissements publics est de {{pub:number:1}}&nbsp;%.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">Quatre des cinq académies ultramarines occupent le haut du
+      classement, avec Nice et Clermont-Ferrand&nbsp;; les grandes académies de métropole — Versailles, Grenoble,
+      Bordeaux — le bas. Le jeu ne dit pas pourquoi&nbsp;: la mobilisation des rectorats, le
+      calendrier des appels à projets et la façon de déclarer ont pu différer.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Part des établissements publics engagés, par académie">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-aca" source="aca-r" type="bar" horizontal
+        label-field="libelle_academie" value-field="taux:Établissements publics engagés (%)"
+        x-min="0" unit-tooltip="%"
+        databox databox-title="Part des établissements publics ayant porté au moins un projet, par académie (%)"
+        databox-source="DGESCO — fr-en-cnr-base-nefle ; annuaire de l'éducation — via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-aca" source="aca-tab" table download
+        filename="cnr-engagement-par-academie.csv"
+        label-field="Académie"
+        value-field="Part engagée (%), Établissements publics engagés, Établissements publics ouverts, Projets distincts (public et privé)"
+        description="Pour chaque académie comptant au moins 50 établissements publics, la part de ses écoles, collèges, lycées et EREA publics ayant porté au moins un projet CNR Éducation, triée de la plus forte à la plus faible, avec le nombre de projets distincts pour comparer volume et taux."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La nuance : une seule année ---------- -->
+    <h2 class="fr-h3">3. L'essentiel s'est joué pendant la première année scolaire</h2>
+    <dsfr-data-repeat source="rentrees-phrase">
+      <template>
+        <p class="odv-lecture"><strong>{{p22:number:1}}&nbsp;% des projets datés</strong>
+          ({{n22:number}}) ont démarré pendant l'année scolaire 2022-2023, {{p23:number:1}}&nbsp;%
+          ({{n23:number}}) en 2023-2024, et {{n24:number}} seulement en 2024-2025. Le jeu ne permet pas
+          de dire si la démarche s'est essoufflée ou si la collecte s'est arrêtée&nbsp;: ses
+          validations cessent presque toutes au printemps 2024. {{n_av:number}} projets sont datés
+          d'avant septembre 2022, avant le lancement&nbsp;: projets antérieurs versés dans la démarche
+          ou erreurs de saisie, le jeu ne le dit pas.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Projets distincts par année scolaire de démarrage">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-rentree" source="rentrees-r" type="bar"
+        label-field="rentree" value-field="projets:Projets distincts"
+        y-min="0" unit-tooltip="projets"
+        databox databox-title="Projets CNR Éducation distincts par année scolaire de démarrage"
+        databox-source="DGESCO — fr-en-cnr-base-nefle, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-rentree" source="rentrees-tab" table download
+        filename="cnr-projets-par-rentree.csv"
+        label-field="Année scolaire de démarrage"
+        value-field="Projets distincts, Part des projets datés (%)"
+        description="Nombre de projets distincts selon l'année scolaire (septembre à août) de leur date de démarrage. Sept sur dix ont démarré en 2022-2023. Les projets sans date ou à date aberrante sont exclus."></dsfr-data-a11y>
+      <dsfr-data-repeat source="sans-date">
+        <template>
+          <p class="fr-text--xs fr-mt-1w">{{n:number}} projets sans date de démarrage ou datés d'une
+            année impossible (2323) sont hors du graphique.</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+
+    <!-- ---------- 4. De quoi parlent les projets ---------- -->
+    <h2 class="fr-h3">4. Le thème le plus fréquent est l'absence de thème</h2>
+    <dsfr-data-repeat source="th-phrase-j">
+      <template>
+        <p class="odv-lecture"><strong>{{projets:number}} projets sur {{n_proj:number}}
+          ({{part:number:0}}&nbsp;%)</strong> ne déclarent aucun thème, ou cochent «&nbsp;Non
+          mentionné&nbsp;». Parmi ceux qui en déclarent un, le plus fréquent,
+          «&nbsp;{{t1}}&nbsp;», en réunit {{n1:number}}. Un projet compte dans chacun de ses
+          thèmes&nbsp;: les barres ne s'additionnent pas.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Les douze thèmes les plus portés par les projets distincts">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-themes" source="themes-r" type="bar" horizontal
+        label-field="Thème" value-field="Projets:Projets distincts"
+        x-min="0" unit-tooltip="projets"
+        databox databox-title="Les douze thèmes les plus portés par les projets CNR Éducation"
+        databox-source="DGESCO — fr-en-cnr-base-nefle, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-themes" source="themes-r" table download
+        filename="cnr-themes.csv"
+        label-field="Thème" value-field="Projets"
+        description="Les douze thèmes les plus souvent portés par les projets distincts. « Non mentionné » (champ vide ou coché ainsi) arrive en tête ; un projet compte dans chacun de ses thèmes."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       ✅ PREMIER EMPLOI D'`explode` (#736, dsfr-data 0.27.0), et ce jeu en est le
-       cas d'école.
-
-       `themes_projets` est un tableau. Un `group-by` classique compte les
-       COMBINAISONS : ce jeu porte 178 thèmes distincts, mais 1 814 combinaisons
-       — de sorte qu'un graphique « par thème » sans `explode` produirait
-       1 814 barres dont la plupart à 1, et qu'aucune ne dirait combien de projets
-       portent « Bien-être ». C'est le constat BUG-006 du registre, écrit sur le
-       portail de Bercy et corrigé en 0.27.0.
-
-       Avec `explode="themes_projets"`, une ligne portant N thèmes compte dans
-       N groupes, et les modalités du `group-by` deviennent exactement celles de
-       la facette du même champ. Vérifié ici : 178 barres, « Aménagements des
-       espaces » à 1 006 projets.
-       ========================================================================== -->
-
-  <!-- Le champ s'appelle littéralement `1_uai`, ce qui n'est pas un identifiant
-       ODSQL valide (il commence par un chiffre). Jusqu'en 0.28, il fallait le
-       backquoter À LA MAIN dans le `select` : l'adaptateur échappait `group_by`
-       mais jamais `select`, et l'API répondait « ODSQL syntax exception:
-       unexpected _uai at position 1 » — HTTP 400, source en erreur, les quatre
-       KPI affichant « Erreur de chargement ». C'était le MIROIR exact de
-       BUG-010 : dans `group-by` l'adaptateur backquotait TROP, dans `select`
-       PAS ASSEZ. Deux clauses voisines, deux traitements opposés, deux échecs
-       symétriques. Constat PG-027.
-       ⚠️ Contournement RETIRÉ au lot 20 : #796, livré en 0.29.0, échappe le
-       `select` explicite comme le `group_by` — un identifiant à chiffre initial
-       est backquoté par la bibliothèque, et un élément déjà backquoté par
-       l'auteur passe intact. Le champ est donc écrit nu ci-dessous. -->
-  <dsfr-data-source id="cnr" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-cnr-base-nefle"
-    fetch-mode="export" max-records="8000"
-    select="1_uai, etab_verif, type_etablissement, adresse_1, code_postal, nom_commune_verif, code_departement, libelle_academie, libelle_region, nom_projet, eleves_benef, debut_proj, date_validation, partenaires_du_projet, themes_projets, themes_dgesco, type_de_prestation, validation_du_projet, position">
-  </dsfr-data-source>
-
-  <!-- Deux codes pour une même absence : 911 lignes ont un `themes_projets` vide,
-       1 345 portent « Non mentionné ». Séparées, les 911 disparaissent d'un
-       `explode` sans laisser de barre (une cellule vide n'éclate en rien) et le
-       classement des thèmes annonce « un projet sur cinq » sans thème, quand c'est
-       près de deux sur cinq. Elles sont fusionnées ici, avant la facette, pour que
-       la facette, le graphique et l'infobulle disent la même chose. -->
-  <dsfr-data-normalize id="cnr-n" source="cnr"
-    compute="themes_projets = when is_empty(themes_projets) then 'Non mentionné' else themes_projets; ampleur = when is_null(eleves_benef) then 'Non renseigné' when eleves_benef &lt; 50 then 'Moins de 50 élèves' when eleves_benef &lt; 150 then '50 à 150' when eleves_benef &lt; 400 then '150 à 400' else '400 et plus'">
-  </dsfr-data-normalize>
-
-  <dsfr-data-context id="cnr-ctx" sources="cnr">
-    <dsfr-data-context-filter field="debut_proj" operator="year-of" year-start-month="9"
-      ui="cnr-annee" label="Rentrée"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <!-- ⚠️ `objectifs_detailles` retire du `select` ET de la recherche le
-       2026-09-19. C'est la regle du depot appliquee a elle-meme : « soit on
-       ecarte les textes longs par `select`, soit on ne met PAS de `select` du
-       tout ; jamais un `select` qui les inclut ». Mesure a l'API le meme jour,
-       endpoint d'export, `limit=-1` : 7 558 024 octets avec la colonne,
-       5 252 342 sans — 2,3 Mo, 30 % du transfert, a chaque chargement.
-       PRIX PAYE, et il faut le dire : la recherche plein texte ne couvre plus
-       l'objectif du projet, seulement son intitule, l'etablissement et la
-       commune. Une recherche sur les objectifs demanderait `server-search`,
-       qui renvoie la question au portail — hors perimetre de ce correctif. -->
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+  <!-- ---------- 5. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">5. Trouver un projet</h2>
+    <p class="fr-text--sm">La recherche et les filtres pilotent les compteurs, la carte et la
+      liste&nbsp;; ils ne touchent pas les graphiques ci-dessus. La carte et la liste montrent les
+      lignes du jeu — un projet en double y figure deux fois&nbsp;; les compteurs comptent les
+      projets distincts.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
@@ -154,93 +430,38 @@
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Un dédoublonnage par group-by, puis quatre compteurs qui disent leur base">
-    <p class="odv-lecture"><strong>6 024 lignes, 5 695 projets</strong>&nbsp;: 329 lignes sont la
-      copie d'une autre, identiques jusqu'aux élèves et aux thèmes. Les compteurs comptent les
-      projets. La moitié des projets renseignés déclarent <strong>moins de 147 élèves</strong>&nbsp;;
-      sept en déclarent 5 000 ou plus, jusqu'à 30 000 pour une école élémentaire — c'est pourquoi
-      aucune moyenne n'est affichée.</p>
-    <!-- Le `group-by` EST le dédoublonnage (règle du dépôt, PG-001) : une ligne par
-         clé, la clé étant tout ce qui identifie un projet. Les colonnes de clé
-         ressortent en chaîne, ce qui suffit à compter et à sommer — mais pas à
-         cartographier ni à éclater les thèmes : la carte et la liste restent
-         sur les lignes, et le disent. -->
-    <dsfr-data-query id="cnr-projets" source="cnr-f"
+    <dsfr-data-query id="projets-f" source="cnr-f"
       group-by="1_uai, nom_projet, debut_proj, eleves_benef, themes_projets, type_etablissement"></dsfr-data-query>
-    <dsfr-data-kpi-group cols="4" gap="md">
-      <dsfr-data-kpi source="cnr-projets" value="count" format="nombre"
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="projets-f" value="count" format="nombre"
         heading="Projets" label="distincts dans la sélection"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cnr-projets" value="eleves_benef:sum" format="nombre"
+      <dsfr-data-kpi source="projets-f" value="eleves_benef:sum" format="nombre"
         where="eleves_benef:isnotnull"
-        heading="Élèves bénéficiaires" label="déclarés par les porteurs"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cnr-projets" value="count" format="nombre"
-        where="eleves_benef:isnotnull"
-        heading="Projets renseignés" label="ont déclaré un nombre d'élèves"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cnr-f" value="nom_commune_verif:distinct" format="nombre"
-        heading="Communes" label="porteuses d'au moins un projet"></dsfr-data-kpi>
+        lines='[{"value":"count{eleves_benef:isnotnull}","format":"nombre","prefix":"déclarés par ","suffix":" projets"}]'
+        heading="Élèves bénéficiaires" label="somme des déclarations, sans moyenne"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cnr-f" value="1_uai:distinct" format="nombre"
+        heading="Établissements" label="porteurs d'au moins un projet"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
-    </div>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <div class="fr-col-12 fr-col-md-3">
         <details class="odv-filtres odv-filtres--md" open>
           <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
           </summary>
-        <h2 class="fr-h6">Filtrer</h2>
-        <!-- La recherche rend de l'INTERFACE : sa place est dans la colonne de
-             filtres, pas dans la zone de pipeline ou vivent les sources. Declaree
-             la-bas, elle s'etalait sur toute la largeur du document. -->
-
-        <!-- ✅ `year-start-month` (#735, dsfr-data 0.27.0). L'unité de temps de tout
-             ce portail est l'ANNÉE SCOLAIRE, et aucun opérateur ne la connaissait :
-             `year-of` découpait en année civile, donc coupait l'année scolaire en
-             son milieu, en silence (AM-050). C'est mesurable sur ce jeu : les
-             4 637 projets « 2023 » au sens civil mélangent deux rentrées, et les
-             274 démarrages de septembre 2023 appartiennent à la même année scolaire
-             que les 335 de janvier 2024.
-
-             `year-start-month="9"` fait de « 2023 » la plage
-             [2023-09-01, 2024-09-01). La clause reste un `gte` + `lt` : elle se
-             délègue au serveur comme n'importe quelle autre, et le tag affiche
-             « 2023-2024 ».
-
-             ⚠️ Le filtre écarte les 85 projets sans date de démarrage — c'est le
-             propre d'une plage, et c'est dit dans l'analyse. -->
-        <div class="fr-select-group fr-mb-3w">
-          <label class="fr-label" for="cnr-annee">Année scolaire de démarrage</label>
-          <select class="fr-select" id="cnr-annee">
-            <option value="">Toutes</option>
-            <option value="2024">2024-2025</option>
-            <option value="2023">2023-2024</option>
-            <option value="2022">2022-2023</option>
-            <option value="2021">2021-2022</option>
-          </select>
-          <p class="fr-hint-text">Septembre à août, et non l'année civile. Les quatre rentrées
-            couvrent 5 885 lignes sur 6 024&nbsp;: 85 sans date, 53 antérieures à 2021 et une datée
-            de 2323 n'apparaissent que sous «&nbsp;Toutes&nbsp;».</p>
-          <dsfr-data-context-tags for="cnr-ctx" clear-all></dsfr-data-context-tags>
-        </div>
-
+        <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="cnr-f" source="cnr-q"
-          fields="type_etablissement, themes_projets, ampleur, type_de_prestation, validation_du_projet, libelle_academie, libelle_region"
-          labels="type_etablissement:Type d'établissement | themes_projets:Thème du projet | ampleur:Élèves bénéficiaires | type_de_prestation:Type de prestation | validation_du_projet:Validation | libelle_academie:Académie | libelle_region:Région"
-          display="type_etablissement:checkbox | themes_projets:multiselect | ampleur:checkbox | type_de_prestation:multiselect | validation_du_projet:checkbox | libelle_academie:multiselect | libelle_region:radio"
-          searchable="themes_projets, type_de_prestation, libelle_academie"
-          disjunctive="type_etablissement, themes_projets, libelle_academie"
+          fields="type_etablissement, rentree, themes_projets, ampleur, validation_du_projet, libelle_academie"
+          labels="type_etablissement:Type d'établissement | rentree:Année scolaire de démarrage | themes_projets:Thème du projet | ampleur:Élèves bénéficiaires | validation_du_projet:Validation | libelle_academie:Académie"
+          display="type_etablissement:checkbox | rentree:checkbox | themes_projets:multiselect | ampleur:checkbox | validation_du_projet:checkbox | libelle_academie:multiselect"
+          searchable="themes_projets, libelle_academie"
+          disjunctive="type_etablissement, rentree, themes_projets, libelle_academie"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
         </details>
       </div>
       <div class="fr-col-12 fr-col-md-9">
         <div class="odv-viz" data-code="Carte des projets, un point par ligne du jeu">
-        <h2 class="fr-h4">Où sont les projets</h2>
-        <p class="odv-lecture">Le bleu des <strong>écoles</strong> domine partout&nbsp;: six
-          projets sur dix sont portés par le premier degré. Chaque point est une ligne du jeu
-          — un projet en double y fait deux points au même endroit — et l'infobulle donne les
-          thèmes, les partenaires et les élèves bénéficiaires.</p>
         <dsfr-data-map id="carte-cnr"
           name="Écoles et établissements engagés dans la démarche du CNR Éducation"
           height="600px" tiles="ign-plan" tiles-style="muted"
@@ -254,12 +475,7 @@
             max-items="8000" cluster cluster-radius="45">
           </dsfr-data-map-layer>
           <dsfr-data-map-legend for="couche-cnr" label="Type d'établissement"></dsfr-data-map-legend>
-          <!-- `{{#each}}` (0.27.0) : les thèmes en vraie liste. Certains projets en
-               portent plus de dix. ⚠️ Ce commentaire vivait DANS le <template> : le
-               détecteur de blocs imbriqués lit les commentaires HTML, y comptait un
-               `{{#each}}` ouvrant jamais fermé, et avertissait « gabarit à blocs
-               imbriqués … le rendu sera tronqué » à chaque ouverture d'infobulle —
-               pour un gabarit correct. Sorti du template le 2026-09-20. -->
+          <!-- Pas de commentaire DANS le gabarit : le détecteur de blocs imbriqués les lit. -->
           <dsfr-data-map-popup mode="panel-right" title-field="nom_projet" width="400px">
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{type_etablissement}}</p>
@@ -269,263 +485,128 @@
                 {{code_postal|}} {{nom_commune_verif}}<br>
                 académie de {{libelle_academie}} · {{libelle_region}}
               </p>
-
               <p class="fr-text--sm fr-mb-1v">
                 <strong>{{eleves_benef:number|—}}</strong> élèves bénéficiaires ·
                 projet {{validation_du_projet}}
               </p>
-              <p class="fr-text--sm fr-mb-3v">Démarré le {{debut_proj:date|—}}</p>
-
+              <p class="fr-text--sm fr-mb-3v">Démarré le {{debut_proj:date|—}} (année {{rentree}})</p>
               <p class="fr-text--sm fr-mb-1v"><strong>Thèmes</strong></p>
               <ul class="fr-text--sm fr-mb-3v">{{#each themes_projets}}<li>{{.}}</li>{{/each}}</ul>
-
               {{#if partenaires_du_projet}}<p class="fr-text--sm fr-mb-1v"><strong>Partenaires</strong></p>
               <p class="fr-text--sm fr-mb-3v">{{partenaires_du_projet}}</p>{{/if}}
-
               <p class="fr-text--xs fr-mb-0">UAI {{1_uai}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <!-- `dsfr-data-a11y` n'a pas de grammaire de libellés de colonnes : ses
-             en-têtes sont les noms de champ. Un `rename` en amont les nomme. -->
         <dsfr-data-normalize id="cnr-a11y" source="cnr-f"
-          rename="nom_projet:Projet | etab_verif:Établissement | type_etablissement:Type | themes_projets:Thèmes | eleves_benef:Élèves bénéficiaires | nom_commune_verif:Commune | libelle_academie:Académie | validation_du_projet:Validation"></dsfr-data-normalize>
+          rename="nom_projet:Projet | etab_verif:Établissement | type_etablissement:Type | themes_projets:Thèmes | eleves_benef:Élèves bénéficiaires | nom_commune_verif:Commune | libelle_academie:Académie | rentree:Année de démarrage"></dsfr-data-normalize>
         <dsfr-data-a11y source="cnr-a11y" for="carte-cnr" table download
           filename="cnr-education.csv"
           label="Données de la carte"
-          description="Une ligne du jeu par ligne du tableau — un projet peut y figurer deux fois : intitulé, établissement, type, thèmes, bénéficiaires, commune, académie, validation."
+          description="Une ligne du jeu par ligne du tableau — un projet peut y figurer deux fois : intitulé, établissement, type, thèmes, bénéficiaires, commune, académie, année de démarrage."
           label-field="Projet"
-          value-field="Établissement, Type, Thèmes, Élèves bénéficiaires, Commune, Académie, Validation">
+          value-field="Établissement, Type, Thèmes, Élèves bénéficiaires, Commune, Académie, Année de démarrage">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-7">
-        <div class="odv-viz" data-code="Les vingt thèmes les plus retenus">
-        <h2 class="fr-h4">Les thèmes les plus retenus</h2>
-        <p class="fr-text--sm fr-mb-3w">
-          Ce graphique n'aurait pas été possible avant la version publiée aujourd'hui : un
-          regroupement classique aurait compté les <strong>1 814 combinaisons</strong> de thèmes au
-          lieu des <strong>178 thèmes</strong>. Il suit les filtres de la colonne de gauche.
-        </p>
-        <p class="odv-lecture">La première barre n'est pas un thème&nbsp;: «&nbsp;Non
-          mentionné&nbsp;» réunit les projets qui l'ont coché (1 345 lignes) et ceux dont le champ
-          est vide (911 lignes) — <strong>près de deux projets sur cinq</strong> (2 196 sur 5 695).
-          Elle reste
-          dans le graphique — l'écarter aurait fait mentir le classement. Un projet compte
-          dans chaque thème qu'il porte&nbsp;: les barres ne s'additionnent pas.</p>
-        <dsfr-data-chart id="g-cnr-themes" source="cnr-themes-r" type="bar" horizontal
-          label-field="Thème" value-field="Projets" name="Projets" unit-tooltip="projets"
-          databox databox-title="Thèmes les plus retenus par les projets CNR Éducation"
-          databox-source="Ministère de l'éducation nationale — fr-en-cnr-base-nefle"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-cnr-themes" source="cnr-themes-r" table download
-          description="Les vingt thèmes les plus souvent portés par les projets distincts de la sélection ; « Non mentionné » (champ vide ou coché ainsi) arrive en tête, avec près de deux projets sur cinq."></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          « Non mentionné » arrive en tête avec 2 196 projets sur 5 695 : c'est la valeur la plus
-          fréquente du champ, et l'original ne la montre pas. Les 911 lignes au champ vide y sont
-          comptées — sans cette fusion, elles ne feraient aucune barre.
-        </p>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-5">
-        <div class="odv-viz" data-code="Part des projets par type d'établissement">
-        <h2 class="fr-h4">Qui porte les projets</h2>
-        <p class="odv-lecture">Une <strong>part du total</strong> plutôt qu'un compte&nbsp;: les
-          écoles portent <strong>près de 61&nbsp;%</strong> des projets distincts, et la part se
-          recalcule avec la sélection.</p>
-        <!-- `share_percent` (#926, 0.33.0) : la part de chaque ligne dans la somme
-             de la colonne, en points de pourcentage — calculée par la query, pas
-             par une division écrite à la main. La colonne de compte non aliasée
-             s'appelle `1_uai__count`, et c'est elle que la part référence. -->
-        <!-- ⚠️ `order-by="part:desc"` était un no-op SILENCIEUX : la part est un
-             agrégat de fenêtre calculé APRÈS le tri (le JSDoc le dit pour les
-             cumuls), donc la colonne n'existe pas encore quand on trie dessus.
-             Sans filtre, l'ordre d'arrivée coïncidait avec le tri voulu ; avec la
-             rentrée 2023-2024, la table sortait École, Lycée, Collège. Trier sur le
-             compte donne le même ordre que la part, et cette colonne-là existe. -->
-        <dsfr-data-query id="cnr-types" source="cnr-projets" group-by="type_etablissement"
-          aggregate="1_uai:count:Projets, Projets:share_percent:Part"
-          order-by="Projets:desc"></dsfr-data-query>
-        <dsfr-data-normalize id="cnr-types-r" source="cnr-types" round="Part:1"
-          rename="type_etablissement:Type"></dsfr-data-normalize>
-        <dsfr-data-chart id="g-cnr-types" source="cnr-types-r" type="bar" horizontal
-          label-field="Type" value-field="Part:Part des projets (%)"
-          unit-tooltip="%" x-min="0" x-max="100"
-          databox databox-title="Part des projets par type d'établissement"
-          databox-source="Ministère de l'éducation nationale — fr-en-cnr-base-nefle"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-cnr-types" source="cnr-types-r" table download
-          label-field="Type" value-field="Part, Projets"
-          description="Part de chaque type d'établissement dans les projets distincts de la sélection, en pourcentage, avec le nombre de projets correspondant."></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ✅ `explode` : une ligne portant N thèmes compte dans N groupes.
-       Branchée sur la facette, jamais sur la source (BUG-009).
-       En deux temps depuis le 2026-09-20 : le premier `group-by` éclate les
-       thèmes ET dédoublonne sur la clé du projet (un couple projet × thème par
-       ligne), le second compte. Sans le premier, un projet en double comptait
-       deux fois dans chacun de ses thèmes. -->
-  <dsfr-data-query id="cnr-projets-themes" source="cnr-f" explode="themes_projets"
-    group-by="themes_projets, 1_uai, nom_projet, debut_proj, eleves_benef"></dsfr-data-query>
-  <dsfr-data-query id="cnr-themes" source="cnr-projets-themes"
-    group-by="themes_projets" aggregate="1_uai:count:Projets"
-    order-by="Projets:desc" limit="20"></dsfr-data-query>
-  <dsfr-data-normalize id="cnr-themes-r" source="cnr-themes" rename="themes_projets:Thème"></dsfr-data-normalize>
-
-  <div class="fr-container fr-mb-8w">
-    <div class="odv-viz" data-code="La liste des lignes du jeu, colonnes nommées">
-    <h2 class="fr-h4">Les projets, ligne à ligne</h2>
+    <div class="odv-viz fr-mt-4w" data-code="La liste des lignes du jeu, colonnes nommées">
+    <h3 class="fr-h5">Les projets, ligne à ligne</h3>
     <dsfr-data-list source="cnr-f"
-      columns="nom_projet:Projet, etab_verif:Établissement, type_etablissement:Type, nom_commune_verif:Commune, libelle_academie:Académie, eleves_benef:Élèves bénéficiaires, validation_du_projet:Validation"
+      columns="nom_projet:Projet, etab_verif:Établissement, type_etablissement:Type, nom_commune_verif:Commune, libelle_academie:Académie, eleves_benef:Élèves bénéficiaires, rentree:Année de démarrage"
       search sort pagination="25" count-label="ligne">
     </dsfr-data-list>
     </div>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Compter les projets, c'est compter les écoles de France. Rapporté
+        au parc, le CNR Éducation a surtout gagné le second degré public — un collège sur cinq —,
+        une école publique sur treize, et presque pas le privé. L'engagement varie du simple au
+        septuple d'une académie à l'autre, sans rapport avec le nombre de projets déposés, et
+        l'essentiel des démarrages tient dans l'année scolaire 2022-2023. Ce que ces données ne
+        disent pas&nbsp;: le montant engagé, ce que les projets ont produit, ni pourquoi un
+        établissement s'est engagé et son voisin non.</p>
+    </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Un établissement engagé = une UAI présente dans le jeu.</strong> Qu'il porte un
+          projet ou dix. Le dénominateur est le parc <em>ouvert au jour du chargement</em>, pas celui
+          de 2022-2024&nbsp;: un établissement fermé depuis n'y est plus.
+          <dsfr-data-repeat source="hors-parc"><template>{{n:number}} établissements du jeu (fermés,
+            fusionnés, ou situés à Andorre) n'y figurent pas et sortent du taux.</template></dsfr-data-repeat></li>
+        <li><strong>Périmètre.</strong> Écoles, collèges, lycées et EREA, publics et privés. Hors
+          Nouvelle-Calédonie, Polynésie française et Wallis-et-Futuna, où l'éducation relève de la
+          collectivité et où le jeu ne compte aucun projet. Saint-Pierre-et-Miquelon (7 établissements
+          publics) n'a pas de barre au classement des académies&nbsp;: sous 50 établissements, un
+          seul projet fait varier le taux de plusieurs points.</li>
+        <li><strong>Un projet = une clé.</strong> UAI + intitulé + date de démarrage + élèves
+          bénéficiaires + thèmes + type&nbsp;: 329 lignes du jeu sont la copie d'une autre, seul
+          <code>themes_dgesco</code> changeant. Carte et liste restent sur les lignes.</li>
+        <li><strong>Pas de moyenne d'élèves.</strong> La moitié des projets déclarent moins de 150
+          élèves, quelques-uns plusieurs milliers&nbsp;: la moyenne décrirait la queue. La somme est
+          affichée avec sa base.</li>
+        <li><strong>Champ vide et «&nbsp;Non mentionné&nbsp;» sont une même absence</strong>, fondus
+          en amont. Le champ <code>email_etabl</code> n'est pas utilisé&nbsp;: il ne contient aucune
+          adresse, seulement le nom de l'académie.</li>
+        <li><strong>Angles écartés.</strong> Le classement des académies en nombre de projets (il
+          mesure la taille des académies)&nbsp;; la part des écoles dans les projets (61&nbsp;%, qui
+          dit la composition du parc, pas l'engagement)&nbsp;; la carte comme preuve (des points
+          plus denses là où il y a plus d'écoles).</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
     <details class="odv-technique" id="analyse">
-      <summary>Analyse technique — ce que la reproduction a coûté</summary>
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
       <section class="fr-py-4w">
-      <h2>Analyse de reproduction — CNR Éducation</h2>
+      <h2>Analyse — CNR Éducation</h2>
 
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/cnr/" target="_blank" rel="noopener external">/pages/cnr/</a>.
-        Fiche d'audit : <code>docs/portail-education/cnr-education.md</code>.
+        <a href="https://data.education.gouv.fr/pages/cnr/" target="_blank" rel="noopener external">/pages/cnr/</a>
+        — quatre couches de pictos, cinq filtres, aucun chiffre. Fiche d'audit :
+        <code>docs/portail-education/cnr-education.md</code>. Recréée le 2026-09-26 en page
+        éditoriale&nbsp;; la reproduction précédente, qui comptait des volumes, est remplacée.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong><code>explode</code>, premier emploi — et ce jeu en est le cas
-              d'école.</strong> <code>themes_projets</code> est un tableau : 178 thèmes distincts,
-              mais <strong>1 814 combinaisons</strong>. Un <code>group-by</code> classique compte
-              les combinaisons, donc produit 1 814 barres dont la plupart à 1, et ne dit jamais
-              combien de projets portent « Bien-être ». <code>explode="themes_projets"</code>
-              (#736, 0.27.0) fait compter une ligne dans autant de groupes qu'elle a de valeurs :
-              178 modalités, exactement celles de la facette du même champ. <strong>C'est le
-              constat BUG-006, écrit sur le portail de Bercy et corrigé aujourd'hui</strong>, et
-              c'est le premier jeu qui en avait vraiment besoin.</li>
-            <li><strong><code>{{#each}}</code> sur des tableaux longs.</strong> Certains projets
-              portent plus de dix thèmes ; la liste structurée les rend lisibles là où un
-              <code>join</code> aurait produit une phrase interminable.</li>
-            <li><strong>L'année scolaire, enfin un opérateur (lot 18).</strong> L'unité de temps de
-              tout le portail Éducation est la <em>rentrée</em>, et aucun opérateur de
-              <code>dsfr-data-context-filter</code> ne la connaissait&nbsp;: <code>year-of</code>
-              raisonnait en année civile, donc coupait l'année scolaire en son milieu sans le dire
-              (AM-050). Ce jeu le rend mesurable&nbsp;: ses 4 637 projets «&nbsp;2023&nbsp;» au sens
-              civil mélangent deux rentrées, et les 274 démarrages de septembre 2023 appartiennent à
-              la même année scolaire que les 335 de janvier 2024.
-              <code>year-start-month="9"</code> (#735, <strong>0.27.0</strong>) fait de
-              «&nbsp;2023&nbsp;» la plage [2023-09-01, 2024-09-01).
-              <strong>Vérifié au navigateur&nbsp;:</strong> la requête part en
-              <code>where=debut_proj &gt;= "2023-09-01" AND debut_proj &lt; "2024-09-01"</code> —
-              donc <em>déléguée au serveur</em> comme n'importe quelle autre clause — le tag affiche
-              «&nbsp;Rentrée&nbsp;: 2023-2024&nbsp;», et le compteur tombe à <strong>1 313 projets</strong>,
-              chiffre recoupé à l'API par la somme mois par mois (567 de septembre à décembre 2023,
-              746 de janvier à août 2024).</li>
-            <li><strong>Le reste est le gabarit.</strong> Source, recherche sur l'intitulé,
-              l'établissement et la commune, facettes, carte, tableau, liste : écrit d'un trait.
-              Sixième page du portail sans difficulté technique.</li>
-            <li><strong>Le <code>group-by</code> est le dédoublonnage, et il se chaîne.</strong>
-              Une query sans agrégat, groupée sur tout ce qui identifie un projet, rend une ligne
-              par projet&nbsp;: les compteurs y lisent 5 695 projets et 1 465 331 élèves au lieu de
-              6 024 et 1 561 649. Pour les thèmes, une première query éclate <em>et</em>
-              dédoublonne (un couple projet × thème par ligne), une seconde compte&nbsp;:
-              «&nbsp;Aménagements des espaces&nbsp;» passe de 1 006 à 956. <strong>Vérifié à
-              l'export complet</strong> (Python, même clé, même fusion des thèmes vides)&nbsp;:
-              5 695, 1 465 331, 2 196 et 956 exactement.</li>
+            <li><strong>Un taux entre deux jeux.</strong> Un <code>group-by</code> ramène les
+              6 024 lignes à une ligne par UAI, une jointure à gauche sur l'annuaire marque chaque
+              établissement ouvert engagé ou non, un <code>compute</code> en fait un 0/1&nbsp;: la
+              part se lit ensuite par type, par secteur et par académie.</li>
+            <li><strong>Des phrases qui se calculent.</strong> <code>dsfr-data-concat</code>,
+              <code>dsfr-data-pivot</code> et une jointure sur une clé constante replient les taux en
+              une ligne&nbsp;: chapô et phrases de lecture suivent la donnée.</li>
+            <li><strong>Les thèmes éclatés</strong> par <code>explode</code>, le dédoublonnage par
+              <code>group-by</code>, l'année scolaire par une comparaison de dates ISO dans
+              <code>compute</code>&nbsp;: aucune ligne de script.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Un champ nommé <code>email_etabl</code> qui ne contient pas d'adresses.</strong>
-              Zéro caractère « @ » sur 6 024 lignes : le champ porte le nom de l'académie, en
-              doublon d'un <code>libelle_academie</code> qui existe à côté. Ce n'est pas un
-              champ vide — qu'on repère vite — ni un champ mal orthographié : c'est un champ
-              <em>plein</em>, de valeurs plausibles, et fausses au regard de son nom. Aucun outil
-              ne peut le détecter&nbsp;; il faut lire les valeurs. <strong>C'est le défaut de
-              données le plus difficile à voir rencontré par ce banc</strong>, tous portails
-              confondus : les colonnes vides se comptent, les nomenclatures à deux graphies se
-              comptent, mais un champ qui ment sur son contenu ne se voit qu'à l'œil.</li>
-            <li><strong>« Non mentionné » est le thème le plus fréquent.</strong> 1 345 projets
-              sur 6 024 — plus d'un sur cinq — n'ont pas de thème déclaré, et cette valeur arrive
-              en tête du classement. La montrer était un choix : l'écarter aurait donné un
-              graphique plus flatteur et moins vrai.</li>
-            <li><strong>Un champ nommé <code>1_uai</code> casse le <code>select</code>.</strong>
-              Le jeu publie un champ dont le nom commence par un chiffre — ce qui n'est pas un
-              identifiant ODSQL valide. Transmis nu, il vaut « <em>unexpected _uai at position
-              1</em> », HTTP 400, et les quatre KPI en erreur. Il faut le backquoter à la main
-              dans l'attribut. <strong>C'est le miroir exact de BUG-010</strong> : dans
-              <code>group-by</code>, l'adaptateur backquote <em>trop</em> — un alias
-              <code>x as y</code> devient <code>`x as y`</code> et vaut un 400 ; dans
-              <code>select</code>, il ne backquote <em>pas assez</em>. Deux clauses voisines,
-              deux traitements opposés, deux échecs symétriques. Constat PG-027 — <strong>corrigé
-              en 0.29.0</strong> (#796)&nbsp;: le champ est écrit nu depuis le lot 20, et la page
-              charge sans erreur.</li>
-            <li><strong>Une ligne n'est pas un projet, et rien ne le dit.</strong> 325 lignes
-              sont identiques à une autre sur 39 champs sur 40 — seul <code>themes_dgesco</code>
-              change — et 4 de plus n'en diffèrent que par leurs textes libres. Le «&nbsp;6 024
-              projets&nbsp;» que cette page affichait depuis le lot 17 en comptait donc 329 de trop
-              (5,5&nbsp;%), et la somme des élèves bénéficiaires 96 318 de trop. Aucun outil ne
-              le voit&nbsp;: pas d'identifiant de projet dans le jeu, pas de doublon exact, pas de
-              valeur aberrante. Seul un recalcul sur une clé composite le révèle — la même leçon
-              que PG-001, sur un jeu sans jointure.</li>
-            <li><strong><code>order-by</code> sur une part&nbsp;: un no-op silencieux.</strong>
-              <code>order-by="part:desc"</code> sur la colonne <code>share_percent</code> ne triait
-              rien&nbsp;: la part est calculée <em>après</em> le tri (comme les cumuls, et le JSDoc
-              le dit pour eux), donc la colonne n'existe pas encore quand le tri la cherche. Sans
-              filtre, l'ordre d'arrivée coïncidait avec l'ordre voulu&nbsp;; la rentrée 2023-2024
-              rendait École, Lycée, Collège, EREA. <strong>Vérifié au navigateur</strong> le
-              2026-09-20, puis corrigé en triant sur le compte, qui donne le même ordre.</li>
-            <li><strong>Une cellule vide n'éclate en rien.</strong> <code>explode</code> ignore
-              les 911 lignes sans thème&nbsp;: ni barre, ni <code>empty-label</code>, ni
-              avertissement — le groupe null d'un <code>group-by</code> classique ressort en
-              <code>null</code> et se nomme, celui d'un <code>explode</code> disparaît. Le
-              classement annonçait «&nbsp;un projet sur cinq&nbsp;» sans thème quand c'est près de
-              deux sur cinq. Réglé par un <code>compute</code> en amont qui donne aux cellules
-              vides la valeur «&nbsp;Non mentionné&nbsp;» déjà employée par 1 345 porteurs.</li>
-            <li><strong>Le tableau équivalent n'a pas de libellés de colonnes.</strong>
-              <code>dsfr-data-a11y</code> rend les noms de champ en en-tête
-              (<code>nom_projet</code>, <code>1_uai__count</code>) et n'a pas de grammaire
-              <code>champ:Libellé</code>, contrairement à <code>columns</code> de
-              <code>dsfr-data-list</code>. Un <code>dsfr-data-normalize rename</code> par tableau
-              y pourvoit — trois balises de plus sur la page.</li>
-            <li><strong>BUG-009, toujours.</strong> La query d'agrégat est branchée sur la
-              facette, jamais sur la source. Quatrième page à porter cette contrainte.</li>
-            <li><strong>Une plage d'année scolaire écarte ce qui n'a pas de date.</strong>
-              <code>year-start-month</code> produit un <code>gte</code> + <code>lt</code>&nbsp;: les
-              <strong>85 projets sans <code>debut_proj</code></strong> sortent de la sélection dès
-              qu'une rentrée est choisie, comme ils sortiraient de n'importe quelle plage. Ce n'est pas
-              un défaut de l'opérateur — c'est la conséquence exacte de sa définition — mais l'écart
-              entre «&nbsp;toutes rentrées&nbsp;» (6 024) et la somme des quatre rentrées proposées
-              n'est explicable qu'en le sachant, et rien à l'écran ne le dit.</li>
-                      <li><strong>Les blocs de template ne s'imbriquent pas, et le silence coûte cher (lot 18).</strong>
-              L'écriture naturelle d'une liste optionnelle est
-              <code>{{#if champ}}&lt;ul&gt;{{#each champ}}…{{/each}}&lt;/ul&gt;{{/if}}</code>. Elle ne
-              rend <strong>rien du tout</strong>&nbsp;: ni les items, ni le repli
-              <code>{{#unless}}</code>, ni un message en console. Le changelog de 0.27.0 le dit — «&nbsp;les
-              blocs ne s'imbriquent pas&nbsp;» — mais rien à l'exécution ne le rappelle, et l'infobulle
-              affichait un intertitre suivi du vide. <strong>Relevé au navigateur puis corrigé&nbsp;:</strong>
-              le <code>&lt;ul&gt;</code> sort de la condition, le <code>{{#each}}</code> reste seul (un tableau
-              vide ne rend rien), et le cas vide est masqué par une règle <code>ul:empty</code> de
-              <code>site.css</code>. C'est la famille de défauts la plus coûteuse du dépôt&nbsp;: une
-              grammaire fausse qui ne dit rien (PG-022).</li>
+            <li><strong>Le dénominateur pèse plus que le jeu.</strong> L'annuaire doit être chargé
+              ligne à ligne (≈ 62 600 UAI) pour savoir <em>quels</em> établissements sont engagés
+              et leur secteur, que le jeu CNR ne porte pas. Il faut lire ce jeu entier pour un
+              graphique de huit barres.</li>
+            <li><strong>Le dénominateur n'est pas unique non plus.</strong> L'annuaire porte
+              63 UAI en double (53 doublons exacts, 10 cités scolaires listées « Collège » et
+              « Lycée »)&nbsp;: joint tel quel, il comptait ces établissements deux fois, au
+              numérateur comme au dénominateur. Rien ne le signale&nbsp;; un <code>group-by</code>
+              en amont de la jointure le corrige — la règle PG-001, côté gauche cette fois.</li>
+            <li><strong>Deux jeux, deux dates.</strong> Le parc est celui d'aujourd'hui, les projets
+              ceux de 2022-2024&nbsp;: l'écart (établissements fermés depuis) ne se voit qu'en
+              comptant les UAI sans correspondance.</li>
           </ul>
         </div>
       </div>
@@ -537,51 +618,20 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-dataset-context</code></td><td><code>dsfr-data-source</code> + <code>select</code></td><td>Équivalent</td></tr>
-            <tr><td>facette sur un champ multivalué</td><td><code>dsfr-data-facets</code></td><td>Équivalent (la facette éclatait déjà les valeurs)</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-query explode</code></td><td><strong>Sans équivalent, et impossible avant aujourd'hui</strong> : 178 thèmes au lieu de 1 814 combinaisons</td></tr>
-            <tr><td>thèmes dans l'infobulle</td><td><code>{{#each}}</code></td><td>Meilleur : une liste, pas une phrase</td></tr>
-            <tr><td>recherche sur dix champs, textes libres compris</td><td><code>dsfr-data-search</code> sur trois champs courts</td><td>Plus étroit, et c'est dit : les textes longs pesaient 30 % du transfert ; <code>server-search</code> les rendrait</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-query group-by</code> sur la clé du projet</td><td>Sans équivalent : 5 695 projets, là où l'original ne compte rien et où cette page comptait 6 024</td></tr>
-            <tr><td><code>email_etabl</code></td><td>—</td><td><strong>Écarté</strong> : le champ ne contient pas d'adresses</td></tr>
+            <tr><td><code>ods-dataset-context</code> × 6</td><td><code>dsfr-data-source fetch-mode="export"</code> + <code>dsfr-data-normalize</code></td><td>Équivalent, en une source</td></tr>
+            <tr><td>quatre couches, une par type</td><td>une couche, <code>color-field</code> + <code>color-map</code> + légende</td><td>Meilleur : une clé de lecture</td></tr>
+            <tr><td>recherche sur dix champs, cinq filtres radio</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code></td><td>Plus étroit en texte (trois champs courts), plus large en filtres</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-join</code> sur l'annuaire, <code>pivot</code>, <code>concat</code>, <code>explode</code>, <code>dsfr-data-repeat</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
-      <h3 class="fr-h5 fr-mt-4w fr-mb-2v">Notes — les hypothèses éditoriales</h3>
-      <ul class="fr-text--sm">
-        <li><strong>Un projet = une clé.</strong> UAI + intitulé + date de démarrage + élèves
-          bénéficiaires + thèmes + type d'établissement, thèmes vides et «&nbsp;Non
-          mentionné&nbsp;» confondus. Deux projets distincts d'une même école, identiques sur ces
-          six champs, seraient fondus&nbsp;; sur l'export, la clé stricte (39 champs) trouve 325
-          doublons et celle-ci 329 — les 4 d'écart ne diffèrent que par leurs textes libres, et
-          sont tenus pour une ressaisie.</li>
-        <li><strong>Champ vide et «&nbsp;Non mentionné&nbsp;» sont une même absence.</strong>
-          Fusionnés en amont de la facette, du graphique et de l'infobulle. Qui voudrait les
-          distinguer retire le <code>compute</code> et perd les 911 lignes vides du classement.</li>
-        <li><strong>Pas de moyenne.</strong> 260 élèves par projet renseigné, mais la médiane
-          est à 147 et sept projets déclarent 5 000 élèves ou plus (30 000 pour une école
-          élémentaire)&nbsp;: la moyenne décrit la queue, pas les projets. La somme reste affichée
-          avec sa base — 5 629 projets renseignés sur 5 695.</li>
-        <li><strong>Lignes ici, projets là.</strong> Le dédoublonnage rend des chaînes&nbsp;: la
-          carte (position), l'infobulle et la liste restent sur les lignes, et la recherche compte
-          des lignes. Chaque bloc dit lequel.</li>
-        <li><strong>Une rentrée est une plage.</strong> Les 139 lignes sans date, antérieures à
-          2021 ou datées de 2323 ne sont accessibles que sous «&nbsp;Toutes&nbsp;» — écrit sous
-          le sélecteur.</li>
-      </ul>
-
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, et troisième page consécutive à employer une
-          capacité livrée le jour même — cette fois <code>explode</code>, sur le jeu qui en avait
-          le plus besoin de tout le banc. Ce que la page apprend n'est pourtant pas là&nbsp;:
-          c'est qu'un champ peut être <strong>plein, plausible et faux</strong>, et qu'une ligne
-          peut ne pas être un projet. Les colonnes vides se comptent, les doubles graphies se
-          comptent, les valeurs manquantes se comptent — mais un <code>email_etabl</code> rempli
-          de noms d'académies ne se repère qu'en lisant, et 329 doublons sans identifiant ne se
-          voient qu'en recalculant. C'est la limite de tout outillage, y compris de celui qu'on
-          éprouve ici.</p>
+        <p>La bibliothèque n'a pas résisté&nbsp;; <strong>le travail a été de choisir le
+          dénominateur</strong>. La page précédente affirmait que les écoles portent six projets
+          sur dix — c'est vrai, et ça ne dit rien de l'engagement&nbsp;: rapportées au parc, elles
+          sont les moins engagées du public.</p>
       </div>
       </section>
     </details>

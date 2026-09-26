@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Les établissements labellisés Génération 2024 — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz « Génération 2024 » de data.education.gouv.fr : 11 221 établissements, six dispositifs repliés par fold, et 44 colonnes vides sur 79.">
+  <meta name="description" content="Recréation avec dsfr-data de la dataviz « Génération 2024 » de data.education.gouv.fr : rapporté à l'annuaire de l'éducation, le label a touché près d'un collège d'éducation prioritaire sur deux, moins d'un collège privé sur six — et l'académie pèse plus que l'éducation prioritaire.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,104 @@
 
 <main role="main" id="contenu">
 
+  <!-- ======================================================================
+       PIPELINE
+       1. Le jeu du label, en une requête d'export (11 221 lignes, 23 champs
+          utiles sur 79 : 44 colonnes `column_36`…`column_79` sont vides).
+          Pas de `where position is not null` : le récit compte TOUS les
+          établissements ; seule la carte a besoin de coordonnées.
+       2. L'annuaire de l'éducation, agrégé CÔTÉ SERVEUR (deux requêtes de
+          quelques lignes) : c'est le dénominateur. Sans lui, 7 413 écoles
+          « dominent » le label ; avec lui, les écoles sont les moins touchées.
+       ====================================================================== -->
+
+  <dsfr-data-source id="g24" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-etablissements-labellises-generation-2024"
+    fetch-mode="export" max-records="15000"
+    select="uai, nom_etablissement, type, statut_public_prive, commune, cp, dept, academie, adresse_1, effectif, qpv, educ_prio, ulis, segpa, section_sport, lycee_agricole, lycee_militaire, lycee_des_metiers, lien_onisep, debut_labellisation, fin_labellisation, position">
+  </dsfr-data-source>
+
+  <!-- `seg` : le segment qui sert de clé de jointure avec l'annuaire. L'éducation
+       prioritaire n'existe que dans le public : quatre segments, pas six.
+       Les 9 lignes au secteur atypique (null, « 0 », « Privé sous contrat »,
+       « Consulaire ») n'ont pas de segment et sortent des taux. -->
+  <dsfr-data-normalize id="g24-n" source="g24"
+    rename="ulis:ULIS | segpa:SEGPA | section_sport:Section sportive | lycee_agricole:Lycée agricole | lycee_militaire:Lycée militaire | lycee_des_metiers:Lycée des métiers"
+    fold="ULIS:dispositifs, SEGPA:dispositifs, Section sportive:dispositifs, Lycée agricole:dispositifs, Lycée militaire:dispositifs, Lycée des métiers:dispositifs"
+    compute="seg = when statut_public_prive = 'Privé' then 'prive' when statut_public_prive = 'Public' and educ_prio = 'REP+' then 'repp' when statut_public_prive = 'Public' and educ_prio = 'REP' then 'rep' when statut_public_prive = 'Public' then 'public_hors' else null;
+             ep = when educ_prio = 'REP+' then 'REP+' when educ_prio = 'REP' then 'REP' else 'Hors éducation prioritaire';
+             annee = year(debut_labellisation);
+             taille = when is_null(effectif) then 'Effectif non renseigné' when effectif &lt; 100 then 'Moins de 100 élèves' when effectif &lt; 300 then '100 à 300' when effectif &lt; 600 then '300 à 600' else '600 et plus'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Dénominateur 1 : écoles, collèges, lycées par segment ----------
+       Les sections (SEGPA, SEP, SGT) ont leur propre UAI dans l'annuaire, rangée
+       sous « Collège » ou « Lycée » : 2 343 lignes qui gonfleraient le
+       dénominateur d'établissements qui n'en sont pas. Écartées. -->
+  <dsfr-data-source id="ann-seg" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-annuaire-education" fetch-mode="export"
+    select="count(*) as total"
+    group-by="type_etablissement as type, statut_public_prive as statut, appartenance_education_prioritaire as ep_ann"
+    where='type_etablissement in ("Ecole","Collège","Lycée") and not libelle_nature in ("SECTION ENSEIGNT GEN. ET PROF. ADAPTE","SECTION D ENSEIGNEMENT PROFESSIONNEL","SECTION ENSEIGT GENERAL ET TECHNOLOGIQUE")'>
+  </dsfr-data-source>
+  <dsfr-data-normalize id="ann-seg-n" source="ann-seg"
+    compute="seg = when statut = 'Privé' then 'prive' when statut = 'Public' and ep_ann = 'REP+' then 'repp' when statut = 'Public' and ep_ann = 'REP' then 'rep' when statut = 'Public' then 'public_hors' else null">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ann-seg-q" source="ann-seg-n" where="seg:isnotnull"></dsfr-data-query>
+
+  <!-- Numérateur : établissements labellisés par type et segment -->
+  <dsfr-data-query id="num-seg" source="g24-n" where="seg:isnotnull, type:in:Ecole|Collège|Lycée"
+    group-by="type, seg" aggregate="uai:count:n"></dsfr-data-query>
+
+  <!-- Taux par segment : annuaire à gauche (un segment sans label vaut 0, pas absent). -->
+  <dsfr-data-join id="j-seg" left="ann-seg-q" right="num-seg" on="type,seg" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="seg-t" source="j-seg"
+    compute="n = when is_null(n) then 0 else n; taux = round(n / total * 100, 1)"></dsfr-data-normalize>
+
+  <!-- Un type par ligne, un segment par colonne : source du graphique, de son tableau et des phrases. -->
+  <dsfr-data-pivot id="seg-w" source="seg-t" row="type" column="seg" value="taux" aggregate="first"></dsfr-data-pivot>
+  <dsfr-data-query id="type-t" source="seg-t" group-by="type" aggregate="n:sum:n, total:sum:total"></dsfr-data-query>
+  <dsfr-data-join id="type-w" left="seg-w" right="type-t" on="type" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="type-l" source="type-w"
+    compute="taux_type = round(n / total * 100, 1);
+             libelle = when type = 'Ecole' then 'Écoles' when type = 'Collège' then 'Collèges' else 'Lycées';
+             rang = when type = 'Collège' then 1 when type = 'Lycée' then 2 else 3"></dsfr-data-normalize>
+  <dsfr-data-query id="type-o" source="type-l" order-by="rang:asc"></dsfr-data-query>
+  <dsfr-data-query id="type-col" source="type-l" where="type:eq:Collège"></dsfr-data-query>
+  <dsfr-data-query id="type-eco" source="type-l" where="type:eq:Ecole"></dsfr-data-query>
+
+  <!-- ---------- Dénominateur 2 : collèges PUBLICS par académie ----------
+       Public seulement : la part du privé varie d'une académie à l'autre
+       (Rennes, Nantes), et le privé est deux fois moins labellisé. Comparer
+       des académies tous secteurs confondus, ce serait comparer leur part
+       de privé. -->
+  <dsfr-data-source id="ann-aca" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-annuaire-education" fetch-mode="export"
+    select="count(*) as total"
+    group-by="libelle_academie as academie"
+    where='type_etablissement = "Collège" and statut_public_prive = "Public" and libelle_nature != "SECTION ENSEIGNT GEN. ET PROF. ADAPTE"'>
+  </dsfr-data-source>
+  <dsfr-data-query id="num-aca" source="g24-n" where="type:eq:Collège, statut_public_prive:eq:Public"
+    group-by="academie" aggregate="uai:count:n"></dsfr-data-query>
+  <dsfr-data-join id="j-aca" left="ann-aca" right="num-aca" on="academie" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="aca-t" source="j-aca"
+    compute="n = when is_null(n) then 0 else n; taux = round(n / total * 100, 1); k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-o" source="aca-t" order-by="taux:desc"></dsfr-data-query>
+  <!-- Phrase : premier et dernier parmi les académies d'au moins 100 collèges publics. -->
+  <dsfr-data-query id="aca-haut" source="aca-t" where="total:gte:100" order-by="taux:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="aca-bas" source="aca-t" where="total:gte:100" order-by="taux:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="aca-ecart" left="aca-haut" right="aca-bas" on="k" prefix-right="bas_"></dsfr-data-join>
+
+  <!-- ---------- Calendrier ---------- -->
+  <dsfr-data-query id="an" source="g24-n" group-by="annee"
+    aggregate="uai:count:n, n:share_percent:part" order-by="annee:asc"></dsfr-data-query>
+  <dsfr-data-query id="an-top" source="an" order-by="n:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="fin" source="g24-n" group-by="fin_labellisation" aggregate="uai:count:n"></dsfr-data-query>
+
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,137 +130,193 @@
       </div>
     </nav>
 
-    <h1>Les établissements labellisés « Génération 2024 »</h1>
+    <h1>Génération 2024&nbsp;: près d'un collège d'éducation prioritaire sur deux a été labellisé</h1>
 
-    <p class="fr-text--lead">
-      Le label « Génération 2024 » a distingué les écoles et établissements qui développent des
-      passerelles avec le mouvement sportif en vue des Jeux de Paris.
-      <strong>11 221 établissements</strong> l'ont obtenu — dont
-      <strong>7 413 écoles</strong>, 2 375 collèges et 982 lycées, mais aussi
-      112 structures médico-sociales, 100 lycées français à l'étranger et 54 universités&nbsp;:
-      le label déborde largement le second degré.
+    <dsfr-data-repeat source="type-col">
+      <template>
+        <p class="fr-text--lead">
+          Le label «&nbsp;Génération 2024&nbsp;», qui a distingué de 2017 à 2024 les établissements
+          liés au mouvement sportif en vue des Jeux de Paris, a touché
+          <strong>{{taux_type:number:1}}&nbsp;%</strong> des collèges de France
+          ({{n:number}} sur {{total:number}}). Pas uniformément&nbsp;:
+          <strong>{{repp:number:1}}&nbsp;%</strong> des collèges publics en REP+ et
+          {{rep:number:1}}&nbsp;% en REP, contre {{public_hors:number:1}}&nbsp;% des autres collèges
+          publics et <strong>{{prive:number:1}}&nbsp;%</strong> des collèges privés.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Chaque taux rapporte les établissements labellisés au nombre d'établissements de même type et
+      de même secteur de l'<a href="https://data.education.gouv.fr/explore/dataset/fr-en-annuaire-education/"
+      target="_blank" rel="noopener external">annuaire de l'éducation</a>, lu à l'ouverture de la
+      page. Le jeu du label ne publie que des numérateurs.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-etablissements-labellises-generation-2024/"
            target="_blank" rel="noopener external"><code>fr-en-etablissements-labellises-generation-2024</code></a>
-        — 11 221 lignes, <strong>79 champs</strong>, lu sans clé.
-        <strong>292 établissements sont sans position</strong> : la carte en montre
-        <strong>10 929</strong>. Ils ne se répartissent pas au hasard —
-        <strong>81 des 100 lycées français à l'étranger</strong> en font partie, ce qui est
-        logique pour un jeu géocodé sur le territoire national, mais fait tomber cette catégorie
-        de 100 à 19 sur la carte sans que rien ne le signale.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>44 de ces 79 colonnes sont entièrement vides</strong> — vérifié ligne à ligne sur
-        l'export complet. Quarante-quatre d'entre elles s'appellent <code>column_36</code>,
-        <code>column_37</code>… jusqu'à <code>column_79</code>&nbsp;: elles n'ont même pas de nom.
-        Ce n'est pas anodin pour le lecteur : <strong>l'export du jeu pèse 21,3 Mo, dont environ
-        14 de clés qui ne portent aucune valeur</strong>. Un <code>select</code> sur les 23 champs
-        réellement utiles le ramène à 7,2 Mo — trois fois moins, sans rien perdre.
+        (DGESCO) — un établissement labellisé par ligne, lu sans clé en une requête d'export limitée
+        aux 22 champs utiles&nbsp;: 44 des 79 colonnes publiées (<code>column_36</code> à
+        <code>column_79</code>) sont entièrement vides.
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-annuaire-education/"
+           target="_blank" rel="noopener external"><code>fr-en-annuaire-education</code></a> — le
+        dénominateur, agrégé par le portail en deux requêtes de quelques lignes.
       </p>
     </details>
+
+    <!-- ---------- Accroche ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mb-6w" aria-label="Les chiffres à retenir">
+      <dsfr-data-kpi source="g24-n" value="count" format="nombre"
+        heading="Établissements labellisés" label="de 2017 à 2024, tous types"></dsfr-data-kpi>
+      <dsfr-data-kpi source="type-col" value="n:sum / total:sum" format="pourcentage" decimals="1"
+        heading="Des collèges" label="labellisés, public et privé"></dsfr-data-kpi>
+      <dsfr-data-kpi source="type-o" where="type:eq:Lycée" value="n:sum / total:sum" format="pourcentage" decimals="1"
+        heading="Des lycées" label="labellisés, public et privé"></dsfr-data-kpi>
+      <dsfr-data-kpi source="type-eco" value="n:sum / total:sum" format="pourcentage" decimals="1"
+        heading="Des écoles" label="labellisées, public et privé"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. Le label a d'abord touché le public, et plus encore l'éducation prioritaire</h2>
+    <dsfr-data-repeat source="type-eco">
+      <template>
+        <p class="odv-lecture">Dans chaque type d'établissement, la barre grise (le privé) est la plus
+          courte et les barres bleues s'allongent à mesure qu'on entre dans l'éducation prioritaire.
+          Le motif est le même dans les écoles, à un niveau plus bas&nbsp;: {{prive:number:1}}&nbsp;%
+          des écoles privées, {{public_hors:number:1}}&nbsp;% des écoles publiques hors éducation
+          prioritaire, <strong>{{repp:number:1}}&nbsp;%</strong> en REP+. Les lycées ne relèvent pas de
+          l'éducation prioritaire&nbsp;: seules les deux premières barres les concernent.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Part d'établissements labellisés, par type, secteur et éducation prioritaire">
+      <dsfr-data-chart id="g-seg" source="type-o" type="bar"
+        label-field="libelle"
+        value-field="prive:Privé"
+        value-fields="public_hors:Public hors éducation prioritaire, rep:Public REP, repp:Public REP+"
+        color-map="Privé:#929292,Public hors éducation prioritaire:#a1a1f8,Public REP:#6a6af4,Public REP+:#000091"
+        unit-tooltip="%"
+        databox databox-title="Part des établissements labellisés Génération 2024, par type, secteur et éducation prioritaire (%)"
+        databox-source="DGESCO — établissements labellisés Génération 2024 ; annuaire de l'éducation (dénominateur)"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-seg" source="type-o" table download
+        filename="generation-2024-taux-par-segment.csv"
+        label-field="libelle"
+        value-field="prive, public_hors, rep, repp, taux_type, n, total"
+        description="Pour les écoles, les collèges et les lycées : part des établissements labellisés Génération 2024 dans le privé, dans le public hors éducation prioritaire, en REP et en REP+ (en %), puis la part tous secteurs, le nombre de labellisés et le nombre d'établissements de l'annuaire. Dans les trois types, le privé est le moins labellisé ; parmi les collèges et les écoles publics, la part croît de hors éducation prioritaire à REP puis à REP+.">
+      </dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. La nuance ---------- -->
+    <h2 class="fr-h3">2. Mais l'académie pèse plus lourd que l'éducation prioritaire</h2>
+    <dsfr-data-repeat source="aca-ecart">
+      <template>
+        <p class="odv-lecture">Entre les académies qui comptent au moins cent collèges publics, la part
+          de collèges labellisés va de <strong>{{bas_taux:number:1}}&nbsp;%</strong> ({{bas_academie}},
+          {{bas_n}} sur {{bas_total}}) à <strong>{{taux:number:1}}&nbsp;%</strong> ({{academie}},
+          {{n}} sur {{total}}). L'écart entre académies est bien plus large que celui qui sépare
+          l'éducation prioritaire du reste du public&nbsp;: être labellisé a dépendu de l'académie au moins
+          autant que du profil du collège.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Part des collèges publics labellisés, par académie">
+      <dsfr-data-chart id="g-aca" source="aca-o" type="bar" horizontal
+        label-field="academie" value-field="taux:Collèges publics labellisés (%)"
+        unit-tooltip="%"
+        databox databox-title="Part des collèges publics labellisés Génération 2024, par académie (%)"
+        databox-source="DGESCO — établissements labellisés Génération 2024 ; annuaire de l'éducation (dénominateur)"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-aca" source="aca-o" table download
+        filename="generation-2024-colleges-publics-par-academie.csv"
+        label-field="academie" value-field="taux, n, total"
+        description="Pour chaque académie, de la plus haute à la plus basse : part des collèges publics labellisés Génération 2024 (en %), nombre de collèges publics labellisés, nombre de collèges publics de l'annuaire. Les académies du Pacifique et de Saint-Pierre-et-Miquelon, peu nombreuses en collèges, sont aux extrémités.">
+      </dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. Le calendrier ---------- -->
+    <h2 class="fr-h3">3. Un label de l'avant-Jeux, échu depuis la rentrée 2025</h2>
+    <dsfr-data-repeat source="an-top">
+      <template>
+        <p class="odv-lecture">Les labellisations se sont étalées sur huit ans, mais l'année
+          <strong>{{annee}}</strong> en concentre <strong>{{part:number:0}}&nbsp;%</strong>
+          ({{n:number}}), deux ans avant les Jeux.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="fin">
+      <template>
+        <p class="odv-lecture">{{n:number}} labels prennent fin le
+          <strong>{{fin_labellisation:date}}</strong>&nbsp;: le jeu décrit un label révolu, pas un
+          réseau en activité.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Établissements labellisés par année de labellisation">
+      <dsfr-data-chart id="g-an" source="an" type="bar"
+        label-field="annee" value-field="n:Établissements labellisés"
+        databox databox-title="Établissements labellisés Génération 2024, par année de début de labellisation"
+        databox-source="DGESCO — fr-en-etablissements-labellises-generation-2024"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-an" source="an" table download
+        filename="generation-2024-par-annee.csv"
+        label-field="annee" value-field="n, part"
+        description="Nombre d'établissements labellisés Génération 2024 par année civile de début de labellisation, de 2017 à 2024, et part de chaque année dans le total (%).">
+      </dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 4. L'exploration ---------- -->
+    <h2 class="fr-h3">4. Retrouver un établissement</h2>
+    <p class="fr-text--sm">La carte, les compteurs et le tableau suivent la recherche et les filtres.
+      Les taux des sections&nbsp;1 et&nbsp;2, eux, restent nationaux&nbsp;: filtrer le numérateur sans
+      filtrer l'annuaire fausserait le rapport.</p>
   </div>
 
-  <!-- ==========================================================================
-       ⚠️ Le `select` est ici indispensable, et c'est l'inverse du cas de
-       l'annuaire des internats, où le même geste allégeait le fichier tout en le
-       rendant DEUX FOIS PLUS LENT. Mesuré sur ce jeu :
-         export complet ......... 21,3 Mo en 1,40 s
-         export avec `select` .... 7,2 Mo en 0,91 s
-       La différence tient à la nature de ce qu'on écarte : ici ce sont 44 clés
-       répétées 11 221 fois pour ne rien porter. La règle maison (« un `select`
-       coûte parfois plus qu'il ne rapporte ») reste vraie, mais elle n'a de sens
-       qu'après mesure, jeu par jeu — c'est la troisième fois que ce banc en fait
-       l'expérience, et les trois réponses ont été différentes.
-
-       Les six dispositifs sont des colonnes 0/1 parallèles : `fold` (#677) les
-       replie en un champ multivalué. Troisième emploi du motif sur ce portail,
-       après Euroscol et la déficience sensorielle. `rename` s'exécute AVANT
-       `fold` et fournit les étiquettes ; séparateurs `|` puis `,` (PG-022).
-       ========================================================================== -->
-
-  <dsfr-data-source id="g24" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-etablissements-labellises-generation-2024"
-    fetch-mode="export" max-records="15000"
-    where="position is not null"
-    select="uai, nom_etablissement, type, statut_public_prive, commune, cp, dept, academie, region, adresse_1, mail, effectif, qpv, ulis, segpa, section_sport, lycee_agricole, lycee_militaire, lycee_des_metiers, lien_onisep, debut_labellisation, fin_labellisation, position">
-  </dsfr-data-source>
-
-  <dsfr-data-normalize id="g24-n" source="g24"
-    rename="ulis:ULIS | segpa:SEGPA | section_sport:Section sportive | lycee_agricole:Lycée agricole | lycee_militaire:Lycée militaire | lycee_des_metiers:Lycée des métiers"
-    fold="ULIS:dispositifs, SEGPA:dispositifs, Section sportive:dispositifs, Lycée agricole:dispositifs, Lycée militaire:dispositifs, Lycée des métiers:dispositifs"
-    compute="taille = when is_null(effectif) then 'Effectif non renseigné' when effectif &lt; 100 then 'Moins de 100 élèves' when effectif &lt; 300 then '100 à 300' when effectif &lt; 600 then '300 à 600' else '600 et plus'; est_ecole = when type = 'Ecole' then 1 else 0; multi = when len(dispositifs) &gt; 1 then 1 else 0">
-  </dsfr-data-normalize>
-
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="g24-q" source="g24-n"
-        fields="nom_etablissement, commune, uai"
-        label="Rechercher un établissement" placeholder="Nom, commune, code UAI…"
-        operator="words" count count-label="établissement" url-sync>
+          fields="nom_etablissement, commune, uai"
+          label="Rechercher un établissement" placeholder="Nom, commune, code UAI…"
+          operator="words" count count-label="établissement" url-sync>
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
-  <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Quatre indicateurs, dont un compte distinct de communes">
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+  <div class="fr-container fr-mb-6w">
+    <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mb-3w" aria-label="La sélection">
       <dsfr-data-kpi source="g24-f" value="count" format="nombre"
         heading="Établissements" label="labellisés dans la sélection"></dsfr-data-kpi>
       <dsfr-data-kpi source="g24-f" value="effectif:sum" format="nombre"
         where="effectif:isnotnull"
-        heading="Élèves concernés" label="sur les établissements renseignés"></dsfr-data-kpi>
-      <dsfr-data-kpi source="g24-f" value="count:qpv:Au sein d'un QP" format="nombre"
-        heading="En quartier prioritaire" label="au sein d'un QP"></dsfr-data-kpi>
+        heading="Élèves" label="dans les établissements dont l'effectif est renseigné"></dsfr-data-kpi>
+      <dsfr-data-kpi source="g24-f" value="count{ep:neq:Hors éducation prioritaire} / count" format="pourcentage" decimals="1"
+        heading="En éducation prioritaire" label="REP ou REP+, part de la sélection"></dsfr-data-kpi>
       <dsfr-data-kpi source="g24-f" value="commune:distinct" format="nombre"
         heading="Communes" label="concernées"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
-    </div>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <div class="fr-col-12 fr-col-md-3">
         <details class="odv-filtres odv-filtres--md" open>
           <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
           </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-
         <h2 class="fr-h6">Filtrer</h2>
         <dsfr-data-facets id="g24-f" source="g24-q"
-          fields="type, dispositifs, qpv, taille, statut_public_prive, academie, dept"
-          labels="type:Type d'établissement | dispositifs:Dispositifs | qpv:Quartier prioritaire | taille:Effectif | statut_public_prive:Secteur | academie:Académie | dept:Département"
-          display="type:multiselect | dispositifs:checkbox | qpv:multiselect | taille:checkbox | statut_public_prive:checkbox | academie:multiselect | dept:radio"
+          fields="type, statut_public_prive, ep, dispositifs, taille, academie, dept"
+          labels="type:Type d'établissement | statut_public_prive:Secteur | ep:Éducation prioritaire | dispositifs:Dispositifs | taille:Effectif | academie:Académie | dept:Département"
+          display="type:multiselect | statut_public_prive:checkbox | ep:checkbox | dispositifs:checkbox | taille:checkbox | academie:multiselect | dept:multiselect"
           searchable="academie, dept"
-          disjunctive="type, dispositifs, academie, dept"
+          disjunctive="type, statut_public_prive, ep, dispositifs, academie, dept"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
         </details>
       </div>
       <div class="fr-col-12 fr-col-md-9">
         <div class="odv-viz" data-code="Carte des établissements labellisés, colorée par type">
-        <!-- Phrase calculée depuis un agrégat global (une ligne) qui suit les facettes. -->
-        <dsfr-data-repeat source="g24-lect" empty="Aucun établissement ne correspond à la sélection.">
-          <template>
-            <p class="odv-lecture">Le label déborde le second degré :
-              <strong>{{part_ecole:number:0|—}} %</strong> des <strong>{{n:number}}</strong>
-              établissements labellisés de la sélection sont des écoles — chaque type a sa couleur
-              sur la carte.</p>
-          </template>
-        </dsfr-data-repeat>
-
         <dsfr-data-map id="carte-g24"
           name="Établissements labellisés Génération 2024"
           height="600px" tiles="ign-plan" tiles-style="muted"
@@ -179,34 +333,19 @@
           <dsfr-data-map-popup mode="panel-right" title-field="nom_etablissement" width="380px">
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{type}}</p>
-              <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{statut_public_prive|secteur non renseigné}}</p>
-
+              <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{statut_public_prive|secteur non renseigné}} · {{ep}}</p>
               <p class="fr-text--sm fr-mb-1v">
                 {{adresse_1|}}<br>
                 <strong>{{cp|}} {{commune}}</strong> — {{dept}}<br>
-                académie de {{academie}} · {{region}}
+                académie de {{academie}}
               </p>
-              <p class="fr-text--sm fr-mb-3v">
-                Effectif : <strong>{{effectif:number|non renseigné}}</strong> ·
-                {{qpv|position QPV non renseignée}}
-              </p>
-
-              <!-- ✅ `{{#each}}` (#737, dsfr-data 0.27.0) : un champ multivalué se
-                   rend enfin en liste structurée, avec `{{.}}` pour l'élément.
-                   Jusqu'à hier il fallait `{{champ:join: · }}`, qui produit une
-                   phrase ; ici on obtient de vrais items de liste. -->
+              <p class="fr-text--sm fr-mb-3v">Effectif&nbsp;: <strong>{{effectif:number|non renseigné}}</strong></p>
               <p class="fr-text--sm fr-mb-1v"><strong>Dispositifs</strong></p>
               <ul class="fr-text--sm fr-mb-3v">{{#each dispositifs}}<li>{{.}}</li>{{/each}}</ul>
               {{#unless dispositifs}}<p class="fr-text--sm fr-mb-3v">Aucun des six dispositifs suivis.</p>{{/unless}}
-
-              <p class="fr-text--sm fr-mb-1v">
-                Labellisé du {{debut_labellisation:date|—}} au {{fin_labellisation:date|—}}
-              </p>
+              <p class="fr-text--sm fr-mb-1v">Labellisé du {{debut_labellisation:date|—}} au {{fin_labellisation:date|—}}</p>
               {{#if lien_onisep}}<p class="fr-text--sm fr-mb-1v">
                 <a href="{{lien_onisep:url}}" target="_blank" rel="noopener external">Fiche Onisep</a></p>{{/if}}
-              {{#if mail}}<p class="fr-text--sm fr-mb-3v">
-                <a href="mailto:{{mail}}">{{mail}}</a></p>{{/if}}
-
               <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
             </template>
           </dsfr-data-map-popup>
@@ -215,151 +354,92 @@
         <dsfr-data-a11y source="g24-f" for="carte-g24" table download
           filename="generation-2024.csv"
           label="Données de la carte"
-          description="Un établissement par ligne : nom, type, secteur, dispositifs, effectif, commune, académie."
+          description="Un établissement labellisé par ligne : nom, type, secteur, éducation prioritaire, dispositifs, effectif, commune, académie. Le tableau compte aussi les établissements sans coordonnées, que la carte ne peut pas placer."
           label-field="nom_etablissement"
-          value-field="type, statut_public_prive, dispositifs, effectif, qpv, commune, dept, academie">
+          value-field="type, statut_public_prive, ep, dispositifs, effectif, commune, dept, academie">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Six dispositifs repliés en un champ par fold">
-        <h2 class="fr-h5">Les six dispositifs suivis</h2>
-        <dsfr-data-repeat source="g24-lect">
-          <template>
-            <p class="odv-lecture">Les barres se recoupent : <strong>{{multi:number}}</strong>
-              établissements cumulent plusieurs dispositifs, et leur somme dépasse le nombre
-              d'établissements.</p>
-          </template>
-        </dsfr-data-repeat>
-        <dsfr-data-chart id="g-g24-disp" source="g24-disp" type="bar" horizontal
-          label-field="dispositifs" value-field="n" name="Établissements"
-          databox databox-title="Établissements labellisés par dispositif"
-          databox-source="Ministère de l'éducation nationale — fr-en-etablissements-labellises-generation-2024"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-g24-disp" source="g24-disp" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="odv-viz" data-code="Établissements par académie, avec la part de la première">
-        <h2 class="fr-h5">Par académie</h2>
-        <dsfr-data-repeat source="g24-aca-top">
-          <template>
-            <p class="odv-lecture">L'académie de <strong>{{academie}}</strong> arrive en tête :
-              <strong>{{n:number}}</strong> établissements labellisés, soit
-              <strong>{{part:number:0}} %</strong> de la sélection.</p>
-          </template>
-        </dsfr-data-repeat>
-        <dsfr-data-chart id="g-g24-aca" source="g24-aca" type="bar" horizontal
-          label-field="academie" value-field="n" name="Établissements"
-          databox databox-title="Établissements labellisés Génération 2024, par académie"
-          databox-source="Ministère de l'éducation nationale — fr-en-etablissements-labellises-generation-2024"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-g24-aca" source="g24-aca" table download></dsfr-data-a11y>
-        </div>
-      </div>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Compté en établissements, Génération 2024 paraît être un label
+        d'écoles&nbsp;: elles font les deux tiers de la liste. Rapporté à ce qui existe, c'est
+        l'inverse&nbsp;: un label de collèges publics, plus fréquent en éducation prioritaire, rare
+        dans le privé — et très inégal d'une académie à l'autre. Ce que le jeu ne dit pas&nbsp;:
+        ce que le label a changé, ni pourquoi certaines académies s'en sont saisies et d'autres non.</p>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Deux dates différentes.</strong> Le numérateur liste les établissements labellisés
+          de 2017 à 2024&nbsp;; le dénominateur est l'annuaire tel qu'il est aujourd'hui. Un
+          établissement fermé depuis compte au numérateur et plus au dénominateur&nbsp;: les taux sont
+          des ordres de grandeur à quelques dixièmes près, pas des mesures d'une même rentrée.</li>
+        <li><strong>Des établissements, pas des élèves.</strong> Un collège de 150 élèves pèse autant
+          qu'un collège de 900. L'effectif n'est pas renseigné partout (10 535 lignes sur 11 221 au
+          2026-09-26).</li>
+        <li><strong>Trois types seulement dans les taux.</strong> Écoles, collèges et lycées — l'annuaire
+          n'a pas d'équivalent fiable pour les 39 autres «&nbsp;types&nbsp;» du jeu (universités,
+          lycées français à l'étranger, établissements médico-sociaux…), qui restent dans l'exploration.
+          Les sections SEGPA, SEP et SGT de l'annuaire, qui ont leur propre UAI, sont retirées du
+          dénominateur. Neuf lignes au secteur atypique («&nbsp;0&nbsp;», vide, «&nbsp;Privé sous
+          contrat&nbsp;», «&nbsp;Consulaire&nbsp;») sortent des taux.</li>
+        <li><strong>Les académies, public seulement.</strong> La part du privé varie beaucoup d'une
+          académie à l'autre&nbsp;; la section&nbsp;2 compare donc des collèges publics entre eux. La
+          phrase de lecture écarte les académies de moins de cent collèges publics, dont le taux bouge
+          de plusieurs points pour un établissement&nbsp;: la Polynésie française, en tête du graphique,
+          et la Nouvelle-Calédonie, Wallis-et-Futuna et Saint-Pierre-et-Miquelon, à zéro — le jeu ne dit pas si le label y était proposé.</li>
+        <li><strong>La carte ne montre pas tout.</strong> 292 établissements n'ont pas de coordonnées,
+          dont 81 des 100 lycées français à l'étranger&nbsp;: ils sont dans les compteurs et le tableau,
+          pas sur la carte.</li>
+        <li><strong>Angles écartés.</strong> Les quartiers prioritaires (<code>qpv</code>, 871 valeurs
+          manquantes et deux nomenclatures de distance mêlées)&nbsp;; les dispositifs (ULIS, SEGPA,
+          section sportive), qui disent ce que sont les établissements plus que ce qu'est le label.</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- Branchées sur la facette, jamais sur la source (BUG-009, toujours vrai en 0.27.0). -->
-  <dsfr-data-query id="g24-disp" source="g24-f" group-by="dispositifs"
-    aggregate="uai:count:n" order-by="n:desc"></dsfr-data-query>
-  <!-- `share_percent` (#926) : part de chaque académie dans l'ensemble filtré, avant `limit`. -->
-  <dsfr-data-query id="g24-aca" source="g24-f" group-by="academie"
-    aggregate="uai:count:n, n:share_percent:part" where="academie:isnotnull" order-by="n:desc" limit="20"></dsfr-data-query>
-  <dsfr-data-query id="g24-aca-top" source="g24-aca" limit="1"></dsfr-data-query>
-  <!-- Agrégat global (une ligne) pour les phrases de lecture. -->
-  <dsfr-data-query id="g24-tot" source="g24-f"
-    aggregate="uai:count:n, est_ecole:sum:n_ecole, multi:sum:multi"></dsfr-data-query>
-  <dsfr-data-normalize id="g24-lect" source="g24-tot"
-    compute="part_ecole = when n = 0 then null else round(n_ecole / n * 100, 0)"></dsfr-data-normalize>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
-  <details class="odv-technique" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-    <section class="fr-pt-4w">
-    <div>
-      <h2>Analyse de reproduction — Génération 2024</h2>
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — Génération 2024</h2>
 
       <p class="fr-text--sm fr-mb-4w">
-        Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/dataviz-generation2024/" target="_blank" rel="noopener external">/pages/dataviz-generation2024/</a>.
-        Fiche d'audit : <code>docs/portail-education/generation-2024.md</code>.
+        Page d'origine&nbsp;:
+        <a href="https://data.education.gouv.fr/pages/dataviz-generation2024/" target="_blank" rel="noopener external">/pages/dataviz-generation2024/</a>
+        — une carte seule, huit couches par ministère de tutelle, ni chiffre ni filtre. Fiche
+        d'audit&nbsp;: <code>docs/portail-education/generation-2024.md</code>. Recréée le 2026-09-26 en
+        page éditoriale&nbsp;; l'ancienne reproduction est devenue la section&nbsp;4.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong><code>fold</code>, troisième emploi.</strong> Six colonnes 0/1
-              (<code>ulis</code>, <code>segpa</code>, <code>section_sport</code>,
-              <code>lycee_agricole</code>, <code>lycee_militaire</code>,
-              <code>lycee_des_metiers</code>) repliées en une facette lisible et un graphique.
-              Le motif est désormais acquis : troisième jeu de ce portail à publier ses modalités
-              en colonnes parallèles, troisième fois que deux attributs suffisent.</li>
-            <li><strong><code>{{#each}}</code>, pour la première fois.</strong> Livré en 0.27.0
-              (#737), il rend le champ multivalué en <em>vraie liste</em> —
-              <code>&lt;li&gt;</code> par dispositif — là où <code>{{champ:join: · }}</code>
-              produisait une phrase. C'est AM-039, le constat « il n'y a pas de boucle dans les
-              templates », consigné au lot 10 et corrigé douze versions plus tard.</li>
-            <li><strong>Le <code>select</code>, et cette fois il gagne franchement.</strong>
-              21,3 Mo → 7,2 Mo, et 1,40 s → 0,91 s. Trois fois moins lourd <em>et</em> plus
-              rapide, en n'écartant que des colonnes vides.</li>
+            <li><strong>Un dénominateur venu d'un autre jeu</strong>&nbsp;: l'annuaire agrégé par le
+              portail (<code>group-by</code> aliasé, <code>count(*)</code>), joint sur deux clés
+              (<code>on="type,seg"</code>), sans rapatrier ses 68&nbsp;000 lignes.</li>
+            <li><strong>Un segment qui sert de clé</strong>&nbsp;: le même <code>when … then</code> de
+              <code>compute</code> des deux côtés de la jointure.</li>
+            <li><strong>Un graphique groupé depuis un tableau long</strong>&nbsp;:
+              <code>dsfr-data-pivot</code> fait une colonne par segment, qui sert à la fois au
+              graphique, au tableau équivalent et aux phrases.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>44 colonnes vides sur 79, dont 44 sans nom.</strong> Le jeu publie
-              <code>column_36</code> à <code>column_79</code> — des en-têtes que personne n'a
-              nommés, et qui ne portent aucune valeur sur aucune des 11 221 lignes. Elles
-              représentent <strong>les deux tiers du poids de l'export</strong>. Rien dans la
-              bibliothèque ne les signale : elles arrivent comme des champs ordinaires, s'offrent
-              à l'auto-détection des facettes, et il faut les compter soi-même pour découvrir
-              qu'elles sont vides. <em>L'épic 0.26.0 distingue désormais « présent mais vide »
-              d'« absent du schéma » quand on nomme un champ inexistant</em> — mais ici les champs
-              existent et sont vides, et personne ne les nomme : ils ne déclenchent donc rien.</li>
-            <li><strong>Le secteur est saisi en texte libre.</strong>
-              <code>statut_public_prive</code> vaut « Public » (10 013), « Privé » (1 199) —
-              et aussi « <strong>0</strong> » (2 lignes), « Privé sous contrat » (1) et
-              « Consulaire » (1). Cinq modalités pour deux catégories, dont une qui est un
-              zéro. La facette les affiche telles quelles : c'est honnête, mais cela produit
-              trois entrées qui ne sélectionnent qu'une ou deux lignes. Quatrième jeu de ce
-              portail où une nomenclature est saisie à la main.</li>
-            <li><strong>Une catégorie perd 81 % de ses membres à la géolocalisation.</strong>
-              Les 292 lignes sans position ne sont pas réparties au hasard : 81 des 100 lycées
-              français à l'étranger en font partie. La facette « Type d'établissement » annonce
-              donc 19 là où le jeu en compte 100, et rien ne dit pourquoi. C'est le défaut le plus
-              insidieux de ce banc — un filtre <code>position is not null</code>, posé pour une
-              bonne raison (une carte a besoin de coordonnées), qui biaise silencieusement une
-              catégorie entière. La page l'écrit ; ni le portail ni la bibliothèque ne pouvaient
-              le faire à sa place.</li>
-            <li><strong>L'arbitrage du <code>select</code> n'a toujours pas de règle.</strong>
-              Troisième page de ce banc à le mesurer, troisième réponse différente : sur les
-              internats il alourdit le temps, sur IPS Écoles il divise le poids par deux, ici par
-              trois. La seule règle qui tienne est de mesurer — ce qui suppose de savoir qu'il
-              faut le faire.</li>
-                      <li><strong>Les blocs de template ne s'imbriquent pas, et le silence coûte cher (lot 18).</strong>
-              L'écriture naturelle d'une liste optionnelle est
-              <code>{{#if champ}}&lt;ul&gt;{{#each champ}}…{{/each}}&lt;/ul&gt;{{/if}}</code>. Elle ne
-              rend <strong>rien du tout</strong>&nbsp;: ni les items, ni le repli
-              <code>{{#unless}}</code>, ni un message en console. Le changelog de 0.27.0 le dit — «&nbsp;les
-              blocs ne s'imbriquent pas&nbsp;» — mais rien à l'exécution ne le rappelle, et l'infobulle
-              affichait un intertitre suivi du vide — <strong>constaté par A/B au navigateur sur les infobulles
-              du CNR, de Cactus et des prix des carburants, sur le même établissement avant et après</strong>.
-              Cette page portait la même écriture, corrigée de la même façon&nbsp;:
-              le <code>&lt;ul&gt;</code> sort de la condition, le <code>{{#each}}</code> reste seul (un tableau
-              vide ne rend rien), et le cas vide est masqué par une règle <code>ul:empty</code> de
-              <code>site.css</code>. C'est la famille de défauts la plus coûteuse du dépôt&nbsp;: une
-              grammaire fausse qui ne dit rien (PG-022).</li>
+            <li><strong>ODS refuse un alias répété</strong> entre <code>select</code> et
+              <code>group_by</code> («&nbsp;Alias 'type' is declared several times&nbsp;»)&nbsp;: l'alias
+              ne se pose que dans <code>group-by</code>, le <code>select</code> ne porte que le
+              <code>count(*)</code>.</li>
+            <li><strong>Une phrase «&nbsp;du plus bas au plus haut&nbsp;»</strong> passe par deux
+              requêtes <code>limit="1"</code> et une jointure sur une clé constante.</li>
           </ul>
         </div>
       </div>
@@ -371,27 +451,24 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-dataset-context</code> sur 79 champs</td><td><code>dsfr-data-source</code> + <code>select</code></td><td>Équivalent, trois fois plus léger</td></tr>
-            <tr><td>six colonnes 0/1 séparées</td><td><code>rename</code> + <code>fold</code></td><td>Nettement meilleur : une facette au lieu de six</td></tr>
-            <tr><td>liste de dispositifs dans l'infobulle</td><td><code>{{#each}}</code> + <code>{{.}}</code></td><td>Meilleur : une vraie liste, impossible avant la 0.27.0</td></tr>
-            <tr><td><code>ods-map</code> + épingles uniformes</td><td><code>color-field="type"</code> + <code>cluster</code></td><td>Meilleur : six types distingués, amas comptés</td></tr>
-            <tr><td>—</td><td>tranches d'effectif par <code>compute</code>, KPI d'élèves concernés</td><td>Sans équivalent</td></tr>
+            <tr><td>huit <code>ods-dataset-context</code> sur le même jeu</td><td>une <code>dsfr-data-source</code> en export, <code>select</code> sur 22 champs</td><td>Meilleur</td></tr>
+            <tr><td>huit couches <code>ods-map</code> par tutelle</td><td>une couche <code>color-field="type"</code>, <code>cluster</code></td><td>Meilleur&nbsp;: 97 établissements n'étaient sur aucune couche</td></tr>
+            <tr><td>aucun filtre</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code>, URL partageable</td><td>Sans équivalent</td></tr>
+            <tr><td>—</td><td>annuaire agrégé + <code>dsfr-data-join</code> + <code>dsfr-data-pivot</code>&nbsp;: taux par segment et par académie</td><td>Sans équivalent&nbsp;: le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, et deuxième page consécutive à employer une
-          capacité livrée dans la journée. Le fait marquant n'est pas technique : ce jeu publie
-          <strong>44 colonnes vides et sans nom sur 79</strong>, qui pèsent les deux tiers de son
-          export. Aucun outil ne le dit — ni le portail, ni la bibliothèque, ni la page
-          d'origine ; il faut compter. C'est le quatrième jeu de ce portail dont le principal
-          défaut se voit seulement quand on regarde les données plutôt que la dataviz.</p>
+        <p>La bibliothèque n'a opposé aucune résistance&nbsp;; <strong>tout s'est joué dans le choix
+          du dénominateur</strong>. Le jeu du label ne publie que des numérateurs&nbsp;: compté seul, il
+          fait des écoles le cœur du label (7&nbsp;413 lignes sur 11&nbsp;221), l'ancienne page
+          l'écrivait. Rapporté à l'annuaire, ce sont les écoles les moins touchées, et les collèges
+          publics d'éducation prioritaire les plus.</p>
       </div>
-    </div>
-  </section>
-  </details>
+      </section>
+    </details>
   </div>
 
 </main>

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chiffres clés de France Éducation international — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la page Studio « Données ouvertes de France Éducation international » : neuf jeux, sept chiffres clés, et le sélecteur d'année que l'original n'a pas.">
+  <meta name="description" content="Recréation avec dsfr-data des chiffres clés de France Éducation international : en deux ans, le test de connaissance du français (TCF) a gagné plus de moitié d'inscrits, et la hausse vient presque entièrement des deux versions exigées pour immigrer au Canada.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,162 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original (et la reproduction précédente) posait sept chiffres de 2025
+       côte à côte, de même poids : 513 435 inscrits au DELF-DALF, 310 473 au
+       TCF, 1 146 participants au BELC… Aucun ne bougeait, aucun n'était
+       comparé. Or les jeux portent trois années (sept pour ENIC-NARIC), et
+       une colonne que personne n'affichait, `declinaison`, dit POUR QUOI on
+       passe le TCF. En la lisant, l'histoire tombe :
+
+         · le TCF passe de 201 199 à 310 473 inscrits entre 2023 et 2025 ;
+         · 86 % de la hausse vient de deux déclinaisons, TCF Canada et TCF
+           Québec — les versions demandées pour immigrer au Canada ;
+         · le TCF Canada se passe de plus en plus AU CANADA même (2 749 → 44 677)
+           et au Cameroun (11 366 → 35 881) ;
+         · pendant ce temps, le DELF-DALF, d'abord diplôme d'élèves, stagne.
+
+       Tous ces chiffres sont CALCULÉS dans la page. Aucune année n'est écrite
+       en dur dans le récit : la première et la dernière année publiées sont
+       lues dans la donnée (min / max de `an`), puis rejointes à chaque ligne
+       par une clé constante — le motif « bornes » ci-dessous, répété trois
+       fois. Le jour où 2026 sera publiée, les phrases suivront.
+       ========================================================================== -->
+
+  <!-- ====================== 1. Le TCF, par déclinaison et par année ======================
+       15 lignes (5 déclinaisons × 3 ans), agrégées côté portail.
+       `year(annee) as an` : l'alias n'est déclaré QU'UNE FOIS (PG-008). -->
+  <dsfr-data-source id="tcf-da" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-tcf_inscrits_centres"
+    group-by="declinaison, year(annee) as an"
+    select="sum(inscrits) as i">
+  </dsfr-data-source>
+
+  <!-- Libellés courts ; `can` marque les deux tests canadiens ; `k` est la
+       clé constante qui sert à rejoindre les bornes. `contains` est
+       insensible à la casse. -->
+  <dsfr-data-normalize id="tcf-f" source="tcf-da"
+    compute="famille = when contains(declinaison, 'Canada') then 'TCF Canada'
+                       when contains(declinaison, 'Québec') then 'TCF Québec'
+                       when contains(declinaison, 'IRN') then 'TCF IRN (nationalité et résidence en France)'
+                       when contains(declinaison, 'DAP') then 'TCF DAP (admission en université)'
+                       else 'TCF tout public';
+             can = when contains(declinaison, 'Canada') or contains(declinaison, 'Québec') then 1 else 0;
+             rang = when contains(declinaison, 'Canada') then 1 when contains(declinaison, 'Québec') then 2
+                    when contains(declinaison, 'IRN') then 3 when contains(declinaison, 'DAP') then 5 else 4;
+             k = 'x'">
+  </dsfr-data-normalize>
+  <!-- Ordre des séries = ordre d'empilement : les deux tests canadiens côte à côte, en bas. -->
+  <dsfr-data-query id="tcf-o" source="tcf-f" order-by="rang:asc, an:asc"></dsfr-data-query>
+
+  <!-- Bornes : première et dernière année publiées. -->
+  <dsfr-data-query id="tcf-b" source="tcf-f" group-by="k" aggregate="an:min:a0, an:max:a1"></dsfr-data-query>
+  <dsfr-data-join id="tcf-j" left="tcf-f" right="tcf-b" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="tcf-jc" source="tcf-j"
+    compute="t0 = when an = a0 then i else 0; t1 = when an = a1 then i else 0;
+             c0 = when an = a0 and famille = 'TCF Canada' then i else 0;
+             c1 = when an = a1 and famille = 'TCF Canada' then i else 0;
+             q0 = when an = a0 and can = 1 then i else 0;
+             q1 = when an = a1 and can = 1 then i else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="tcf-s" source="tcf-jc" group-by="k"
+    aggregate="t0:sum:t0, t1:sum:t1, c0:sum:c0, c1:sum:c1, q0:sum:q0, q1:sum:q1, a0:max:a0, a1:max:a1">
+  </dsfr-data-query>
+  <!-- Une ligne : tout ce que le chapô et l'accroche disent du TCF. -->
+  <dsfr-data-normalize id="tcf-r" source="tcf-s"
+    compute="dt = t1 - t0; dq = q1 - q0;
+             evol = (t1 - t0) / t0 * 100;
+             part_dq = (q1 - q0) / (t1 - t0) * 100;
+             mult_c = c1 / c0;
+             part_q0 = q0 / t0 * 100; part_q1 = q1 / t1 * 100">
+  </dsfr-data-normalize>
+
+  <!-- ====================== 2. Le TCF Canada, par pays de passation ======================
+       ~300 lignes (pays × année), agrégées côté portail. -->
+  <dsfr-data-source id="tcfc" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-tcf_inscrits_centres"
+    where="declinaison = 'TCF Canada'"
+    group-by="pays_centre, year(annee) as an"
+    select="sum(inscrits) as i"
+    max-records="2000">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="tcfc-k" source="tcfc" compute="k = 'x'"></dsfr-data-normalize>
+  <dsfr-data-query id="tcfc-b" source="tcfc-k" group-by="k" aggregate="an:min:a0, an:max:a1"></dsfr-data-query>
+  <dsfr-data-join id="tcfc-j" left="tcfc-k" right="tcfc-b" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="tcfc-c" source="tcfc-j"
+    compute="i0 = when an = a0 then i else 0; i1 = when an = a1 then i else 0;
+             bord = when an = a0 or an = a1 then 1 else 0;
+             annee = '' + an">
+  </dsfr-data-normalize>
+  <!-- Les huit premiers pays de la dernière année. -->
+  <dsfr-data-query id="tcfc-p" source="tcfc-c" group-by="pays_centre"
+    aggregate="i0:sum:i0, i1:sum:i1, a0:max:a0, a1:max:a1" order-by="i1:desc" limit="8">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tcfc-pm" source="tcfc-p" compute="mult = i1 / i0"></dsfr-data-normalize>
+  <dsfr-data-query id="tcfc-p3" source="tcfc-pm" limit="3"></dsfr-data-query>
+  <!-- Leurs deux années extrêmes, en format long : une jointure 1-N VOULUE
+       (un pays à gauche, ses deux années à droite ; la clé gauche est unique). -->
+  <dsfr-data-query id="tcfc-l" source="tcfc-c" where="bord:eq:1"></dsfr-data-query>
+  <dsfr-data-join id="tcfc-t" left="tcfc-p" right="tcfc-l" on="pays_centre" type="inner"></dsfr-data-join>
+
+  <!-- ====================== 3. Le DELF-DALF, par déclinaison et par année ======================
+       ⚠️ Le producteur écrit « DELF scolaire/junior » en 2023-2024 et
+       « Delf scolaire/junior » en 2025 : grouper sur `declinaison` brute
+       coupe la série en deux. `contains` (insensible à la casse) la recoud. -->
+  <dsfr-data-source id="delf-da" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-delf-dalf_inscrits_centres"
+    group-by="declinaison, year(annee) as an"
+    select="sum(inscrits) as i">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="delf-f" source="delf-da"
+    compute="famille = when contains(declinaison, 'Prim') then 'DELF Prim (enfants)'
+                       when contains(declinaison, 'scolaire') then 'DELF scolaire et junior'
+                       else 'DELF-DALF tout public';
+             ele = when contains(declinaison, 'Prim') or contains(declinaison, 'scolaire') then 1 else 0;
+             k = 'x'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="delf-o" source="delf-f" group-by="famille, an" aggregate="i:sum:i" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-query id="delf-b" source="delf-f" group-by="k" aggregate="an:min:a0, an:max:a1"></dsfr-data-query>
+  <dsfr-data-join id="delf-j" left="delf-f" right="delf-b" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="delf-jc" source="delf-j"
+    compute="d0 = when an = a0 then i else 0; d1 = when an = a1 then i else 0;
+             e1 = when an = a1 and ele = 1 then i else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="delf-s" source="delf-jc" group-by="k"
+    aggregate="d0:sum:d0, d1:sum:d1, e1:sum:e1, a0:max:a0, a1:max:a1">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="delf-r" source="delf-s"
+    compute="evol = (d1 - d0) / d0 * 100; part_e1 = e1 / d1 * 100">
+  </dsfr-data-normalize>
+
+  <!-- Le chapô croise les deux lignes. -->
+  <dsfr-data-normalize id="delf-rk" source="delf-r"
+    rename="d0:delf0 | d1:delf1 | evol:delf_evol | part_e1:delf_ele | a0:delf_a0 | a1:delf_a1"></dsfr-data-normalize>
+  <dsfr-data-join id="chapo" left="tcf-r" right="delf-rk" on="k" type="inner"></dsfr-data-join>
+
+  <!-- ====================== 4. ENIC-NARIC, sept années ======================
+       `annee` est un TEXTE dans ce jeu : `an` en fait un nombre pour les bornes. -->
+  <dsfr-data-source id="enic-da" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-reconnaissance_diplomes_comparabilite"
+    group-by="annee"
+    select="sum(dossiers_expertises) as d">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="enic-f" source="enic-da" compute="an = annee * 1; k = 'x'"></dsfr-data-normalize>
+  <dsfr-data-query id="enic-o" source="enic-f" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-query id="enic-max" source="enic-f" order-by="d:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="enic-b" source="enic-f" group-by="k" aggregate="an:min:a0, an:max:a1"></dsfr-data-query>
+  <dsfr-data-join id="enic-j" left="enic-f" right="enic-b" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="enic-jc" source="enic-j"
+    compute="d0 = when an = a0 then d else 0; d1 = when an = a1 then d else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="enic-s" source="enic-jc" group-by="k"
+    aggregate="d0:sum:d0, d1:sum:d1, a0:max:a0, a1:max:a1"></dsfr-data-query>
+  <dsfr-data-normalize id="enic-r0" source="enic-s" compute="mult = d1 / d0"></dsfr-data-normalize>
+  <!-- L'année du sommet, rejointe à la même ligne. -->
+  <dsfr-data-normalize id="enic-mk" source="enic-max" rename="an:amax | d:dmax"></dsfr-data-normalize>
+  <dsfr-data-join id="enic-r" left="enic-r0" right="enic-mk" on="k" type="inner"></dsfr-data-join>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,153 +188,228 @@
       </div>
     </nav>
 
-    <h1>Données ouvertes de France Éducation international</h1>
+    <h1>Le test de français de France Éducation international est devenu une porte d'entrée vers le Canada</h1>
 
-    <p class="fr-text--lead">
-      France Éducation international est l'opérateur du ministère de l'Éducation nationale pour la
-      coopération éducative internationale. Son activité est <strong>mondiale et massive sur la
-      certification</strong> — plus d'un demi-million d'inscrits au DELF-DALF — et beaucoup plus
-      resserrée sur la formation et la mobilité.
+    <!-- Chapô CALCULÉ : chiffres et années lus dans la donnée. -->
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="fr-text--lead">
+          Entre {{a0}} et {{a1}}, les inscriptions au test de connaissance du français (TCF) sont
+          passées de {{t0:number:0}} à <strong>{{t1:number:0}}</strong>, soit
+          <strong>+{{evol:number:0}}&nbsp;%</strong>. Sur ces {{dt:number:0}} inscriptions
+          supplémentaires, <strong>{{part_dq:number:0}}&nbsp;%</strong> viennent de deux versions du
+          test&nbsp;: le TCF Canada et le TCF Québec, exigés pour immigrer au Canada. À elles deux,
+          elles pèsent désormais {{part_q1:number:0}}&nbsp;% des inscriptions, contre
+          {{part_q0:number:0}}&nbsp;% en {{a0}}. Le diplôme historique, le DELF-DALF, reste le
+          premier en volume ({{delf1:number:0}} inscrits en {{delf_a1}}) mais ne progresse que de
+          {{delf_evol:number:0}}&nbsp;%&nbsp;: c'est d'abord un diplôme d'élèves.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Toutes les valeurs sont des <strong>inscriptions</strong>, pas des personnes&nbsp;: un candidat
+      qui passe le test deux fois compte deux fois. Le pays est celui du <strong>centre de
+      passation</strong>, pas la nationalité du candidat. Source&nbsp;: France Éducation
+      international, jeux publiés sur data.education.gouv.fr.
     </p>
 
-    <details class="fr-callout fr-icon-calendar-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Ce que cette page ajoute : l'année</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        La page d'origine fige tous ses chiffres sur <strong>2025</strong> et n'offre aucun sélecteur,
-        alors que ses six jeux principaux couvrent de deux à sept millésimes — ENIC-NARIC publie
-        <strong>2019 à 2025</strong>, dont la page ne montre qu'un septième. Ici l'année est un
-        filtre, et il ne coûte rien : les sources sont <strong>agrégées côté serveur</strong>, donc
-        toutes les années tiennent déjà dans quelques kilo-octets.
+    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
+        Neuf jeux publiés par France Éducation international, lus sans clé sur le portail officiel.
+        Le récit en lit trois&nbsp;:
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-tcf_inscrits_centres/" target="_blank" rel="noopener external"><code>fr-en-tcf_inscrits_centres</code></a>
+        (inscrits au TCF par centre, déclinaison et année),
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-delf-dalf_inscrits_centres/" target="_blank" rel="noopener external"><code>fr-en-delf-dalf_inscrits_centres</code></a>
+        (inscrits, présents et admis au DELF-DALF par centre, niveau et déclinaison) et
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-reconnaissance_diplomes_comparabilite/" target="_blank" rel="noopener external"><code>fr-en-reconnaissance_diplomes_comparabilite</code></a>
+        (dossiers ENIC-NARIC par pays du diplôme). Tous sont agrégés par le portail&nbsp;: la page
+        rapatrie quelques centaines de lignes, pas les 23&nbsp;648 du DELF-DALF. Les six autres jeux
+        nourrissent l'exploration, en fin de page.
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois repères de poids différents ---------- -->
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+          <dsfr-data-kpi source="tcf-r" value="t1:sum" format="nombre"
+            heading="Inscrits au TCF en {{a1}}"
+            lines='[{"value":"evol:sum","decimals":0,"sign":true,"suffix":" depuis {{a0}}"}]'
+            label="toutes déclinaisons, tous pays"></dsfr-data-kpi>
+          <dsfr-data-kpi source="tcf-r" value="part_dq:sum" format="nombre" decimals="0" unit="%"
+            heading="De la hausse vient des tests canadiens"
+            label="TCF Canada et TCF Québec, {{a0}}-{{a1}}"></dsfr-data-kpi>
+          <dsfr-data-kpi source="delf-r" value="d1:sum" format="nombre"
+            heading="Inscrits au DELF-DALF en {{delf_a1}}"
+            lines='[{"value":"evol:sum","decimals":0,"sign":true,"suffix":" depuis {{delf_a0}}"}]'
+            label="dont {{delf_ele:number:0}} % d'élèves (DELF Prim, scolaire et junior)"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+      </template>
+    </dsfr-data-repeat>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. La hausse du TCF vient presque entièrement des deux tests canadiens</h2>
+    <dsfr-data-repeat source="tcf-r">
+      <template>
+        <p class="odv-lecture">Chaque barre fait le total des inscriptions d'une année. Les deux tons
+          de bleu sont les versions canadiennes&nbsp;: le TCF Canada, reconnu par l'administration
+          fédérale de l'immigration, passe de {{c0:number:0}} à <strong>{{c1:number:0}}</strong>
+          inscriptions (×{{mult_c:number:1}})&nbsp;; le TCF Québec suit. Les trois versions grises —
+          le TCF demandé pour la nationalité ou la résidence en France, la version tout public et celle
+          de l'admission à l'université — bougent peu.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Inscriptions au TCF par déclinaison et par année">
+      <dsfr-data-chart id="g-tcf" source="tcf-o" type="bar" stacked
+        label-field="an" value-field="i" series-field="famille"
+        color-map="TCF Canada:#000091,TCF Québec:#6a6af4,TCF IRN (nationalité et résidence en France):#666666,TCF tout public:#929292,TCF DAP (admission en université):#cecece"
+        databox databox-title="Inscriptions au TCF, par déclinaison et par année"
+        databox-source="France Éducation international — fr-en-tcf_inscrits_centres, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-tcf" source="tcf-o" table download
+        filename="tcf-inscriptions-par-declinaison.csv"
+        label-field="an" value-field="i" series-field="famille"
+        description="Nombre d'inscriptions au test de connaissance du français, par année et par déclinaison. Le total progresse d'environ la moitié entre la première et la dernière année publiées ; le TCF Canada fait presque trois fois plus d'inscriptions, le TCF Québec presque deux fois plus, les trois autres déclinaisons varient peu."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. Où ---------- -->
+    <h2 class="fr-h3">2. Le TCF Canada se passe de plus en plus au Canada même, et au Cameroun</h2>
+    <p class="odv-lecture">Le pays d'un centre n'est pas la nationalité du candidat&nbsp;: un
+      inscrit au Canada y réside déjà, le plus souvent. Les trois premiers pays de passation, de la
+      première à la dernière année publiée&nbsp;:</p>
+    <dsfr-data-repeat source="tcfc-p3" key-field="pays_centre">
+      <template>
+        <p class="fr-mb-1v"><strong>{{pays_centre}}</strong>&nbsp;: {{i0:number:0}} inscriptions en {{a0}},
+          <strong>{{i1:number:0}}</strong> en {{a1}} (×{{mult:number:1}}).</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">Au Maghreb, en revanche, le TCF Canada ne progresse pas&nbsp;: de 2023
+      à 2025, il stagne en Algérie et recule au Maroc (tableau ci-dessous).</p>
+    <div class="odv-viz fr-mb-6w" data-code="TCF Canada : les huit premiers pays de passation, première et dernière année">
+      <dsfr-data-chart id="g-pays" source="tcfc-t" type="bar" horizontal
+        label-field="pays_centre" value-field="i" series-field="annee"
+        databox databox-title="TCF Canada : inscriptions dans les huit premiers pays de passation, première et dernière année publiées"
+        databox-source="France Éducation international — fr-en-tcf_inscrits_centres"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-pays" source="tcfc-t" table download
+        filename="tcf-canada-pays-de-passation.csv"
+        label-field="pays_centre" value-field="i" series-field="annee"
+        description="Inscriptions au TCF Canada dans les huit pays de passation qui en comptent le plus la dernière année, pour la première et la dernière année publiées. Le Canada, où le test se passait peu, arrive en tête ; le Cameroun a triplé ; l'Algérie et le Maroc stagnent ou reculent."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La nuance ---------- -->
+    <h2 class="fr-h3">3. Le DELF-DALF, lui, stagne&nbsp;: six inscrits sur dix sont des élèves</h2>
+    <dsfr-data-repeat source="delf-r">
+      <template>
+        <p class="odv-lecture">Le diplôme d'études en langue française reste de loin le premier
+          examen de l'opérateur, mais il ne progresse que de {{evol:number:1}}&nbsp;% de {{a0}} à
+          {{a1}}. Il se passe d'abord à l'école&nbsp;: en {{a1}}, <strong>{{part_e1:number:0}}&nbsp;%</strong>
+          des inscriptions sont des DELF Prim, scolaire ou junior, passés par des enfants et des
+          adolescents dans leur établissement. La version tout public, celle des adultes, n'a pas
+          bougé.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Inscriptions au DELF-DALF par déclinaison et par année">
+      <dsfr-data-chart id="g-delf" source="delf-o" type="bar" stacked
+        label-field="an" value-field="i" series-field="famille"
+        color-map="DELF Prim (enfants):#6a6af4,DELF scolaire et junior:#000091,DELF-DALF tout public:#929292"
+        databox databox-title="Inscriptions au DELF-DALF, par déclinaison et par année"
+        databox-source="France Éducation international — fr-en-delf-dalf_inscrits_centres"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-delf" source="delf-o" table download
+        filename="delf-dalf-inscriptions-par-declinaison.csv"
+        label-field="an" value-field="i" series-field="famille"
+        description="Nombre d'inscriptions au DELF-DALF par année et par déclinaison. Le total progresse de quelques pour cent ; la version tout public est stable, les versions scolaire et junior et DELF Prim progressent lentement et font environ six inscriptions sur dix."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 4. Le prolongement ---------- -->
+    <h2 class="fr-h3">4. La reconnaissance des diplômes étrangers a doublé, puis plafonne</h2>
+    <dsfr-data-repeat source="enic-r">
+      <template>
+        <p class="odv-lecture">Le centre ENIC-NARIC établit, pour un diplôme obtenu à l'étranger, une
+          attestation de comparabilité avec les diplômes français. Les dossiers expertisés passent
+          de {{d0:number:0}} en {{a0}} à <strong>{{d1:number:0}}</strong> en {{a1}}
+          (×{{mult:number:1}}). Le sommet est atteint en {{amax}}, avec {{dmax:number:0}} dossiers.
+          Le jeu ne dit pas qui les dépose ni pourquoi&nbsp;; il dit en revanche d'où viennent les
+          diplômes, et l'Algérie, la Tunisie et le Maroc y sont en tête.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Dossiers ENIC-NARIC expertisés par année">
+      <dsfr-data-chart id="g-enic" source="enic-o" type="bar"
+        label-field="an" value-field="d:Dossiers expertisés" y-min="0"
+        databox databox-title="Dossiers de comparabilité de diplômes étrangers expertisés, par année"
+        databox-source="France Éducation international — fr-en-reconnaissance_diplomes_comparabilite"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-enic" source="enic-o" table download
+        filename="enic-naric-dossiers-par-annee.csv"
+        label-field="an" value-field="d"
+        description="Nombre de dossiers de comparabilité expertisés par le centre ENIC-NARIC, par année. Stable les deux premières années, le nombre double en trois ans puis se maintient autour de ce niveau, avec un creux l'avant-dernière année."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       Neuf jeux, dont un de 23 648 lignes. Deux stratégies chronométrées :
-
-         9 exports complets ............ 749 Ko, ~3,1 s
-         6 agrégats + 3 exports ......  35 Ko, ~1,3 s
-
-       Vingt fois moins de poids pour deux fois moins de temps — et surtout,
-       l'agrégat rapatrie TOUTES les années, ce qui offre gratuitement le
-       sélecteur que l'original n'a pas.
-
-       ⚠️ Ces six sources emploient une voie qui était réputée fermée.
-       Le piège PG-014 du dépôt disait que l'adaptateur Opendatasoft entourait
-       `group-by` d'accents graves, ce qui faisait échouer toute expression
-       (`year(annee) as an` → HTTP 400). C'est CORRIGÉ (#641) et vérifié en page
-       ici pour la première fois : la requête part sans accents graves, répond
-       200, et la somme des inscrits 2025 vaut 513 435 — le chiffre du KPI de
-       l'original, au chiffre près.
-
-       ⚠️ Piège voisin, repayé en le vérifiant : l'alias ne doit être déclaré
-       QU'UNE FOIS. Le mettre dans `group-by` ET dans `select` donne « Alias 'an'
-       is declared several times », erreur qui ressemble à s'y méprendre à un
-       refus de la fonction — au point d'avoir failli faire conclure que le
-       correctif ne marchait pas. C'est PG-008, et les deux pièges se déguisent
-       l'un en l'autre.
-       ========================================================================== -->
-
-  <!-- Certification — DELF-DALF (23 648 lignes → 500 lignes d'agrégat, 0,13 s) -->
+  <!-- ====================== 5. Exploration : l'année, les pays, les implantations ======================
+       Les sources de l'ancienne reproduction, inchangées : agrégées par pays
+       et par année, filtrées par UN <select> et TROIS filtres de contexte,
+       parce que les jeux typent l'année de trois façons (date, texte,
+       entier) et qu'un alias de `group-by` n'existe pas pour `where` (PG-025). -->
   <dsfr-data-source id="delf" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-delf-dalf_inscrits_centres"
     group-by="pays, iso2_pays, year(annee) as an"
-    select="pays, iso2_pays, sum(inscrits) as v"
+    select="sum(inscrits) as v"
     max-records="2000">
   </dsfr-data-source>
-
-  <!-- Le champ garde son nom d'origine, `pays_centre`. Ce n'est plus une
-       contrainte depuis la 0.29.0 (#796 : un alias sans fonction n'est plus
-       backquoté) — `pays_centre as pays` passerait. C'est désormais un CHOIX
-       ÉDITORIAL, et la raison qui était accessoire devient la seule : c'est le
-       pays du CENTRE DE PASSATION, pas la nationalité du candidat, et
-       l'original intitule son axe « Pays » sans le dire. Renommer alignerait le
-       gabarit au prix de la justesse du libellé. -->
   <dsfr-data-source id="tcf" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-tcf_inscrits_centres"
     group-by="pays_centre, iso2_pays, year(annee) as an"
-    select="iso2_pays, sum(inscrits) as v"
+    select="sum(inscrits) as v"
     max-records="2000">
   </dsfr-data-source>
-
-  <!-- BELC -->
   <dsfr-data-source id="belc" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-belc-participants-par-pays"
     group-by="pays_participants, iso2_pays, year(annee) as an"
-    select="iso2_pays, sum(nombre_participants) as v"
+    select="sum(nombre_participants) as v"
     max-records="2000">
   </dsfr-data-source>
-
-  <!-- ENIC-NARIC : ici `annee` est un TEXTE, pas une date — troisième typage du
-       même concept dans neuf jeux du même producteur. Pas de `year()`, donc pas
-       de parenthèse : jusqu'en 0.28, l'adaptateur backquotait l'élément entier
-       et l'API répondait 400 (BUG-010), le champ restait donc groupé tel quel.
-       ⚠️ Alias RÉTABLI au lot 20 : #796, livré en 0.29.0, ne backquote plus un
-       alias sans fonction. Les sept sources exposent enfin la même colonne `an`.
-       Vérifié à l'API : `group_by=pays, iso2_pays, annee as an` → HTTP 200 ;
-       la même expression backquotée → HTTP 400. -->
   <dsfr-data-source id="enic" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-reconnaissance_diplomes_comparabilite"
     group-by="pays, iso2_pays, annee as an"
-    select="iso2_pays, sum(dossiers_expertises) as v"
+    select="sum(dossiers_expertises) as v"
     max-records="2000">
   </dsfr-data-source>
-
-  <!-- Assistants : `periode`, un ENTIER. Quatrième variante du même concept.
-       L'alias était impossible jusqu'en 0.28 (BUG-010) ; rétabli au lot 20
-       (#796). Le filtre de contexte continue de viser `periode`, le champ du
-       jeu : un `where` s'applique AVANT le `group_by`, l'alias ne le gêne pas. -->
   <dsfr-data-source id="asfr" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-assistants_langue_francaise"
     group-by="pays, iso2_pays, periode as an"
-    select="iso2_pays, sum(postes_offerts) as v"
+    select="sum(postes_offerts) as v"
     max-records="2000">
   </dsfr-data-source>
-
   <dsfr-data-source id="aslve" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-assistants_langues_vivantes_etrangeres"
     group-by="pays, iso2_pays, periode as an"
-    select="iso2_pays, sum(postes_offerts) as v"
+    select="sum(postes_offerts) as v"
     max-records="2000">
   </dsfr-data-source>
-
   <dsfr-data-source id="mob" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-programmes-mobilite-enseignante-fei"
     group-by="pays, year(annee) as an"
     select="sum(postes) as v"
     max-records="500">
   </dsfr-data-source>
-
   <!-- Les deux jeux de points : trop petits pour être agrégés (19 et 111 lignes). -->
   <dsfr-data-source id="cpfx" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-cefte"
     fetch-mode="export" max-records="200">
   </dsfr-data-source>
-
   <dsfr-data-source id="cql" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr"
     dataset-id="fr-en-centres-et-etablissements-labellises-label-qualite-francais-langue-etrange"
     fetch-mode="export" max-records="500">
   </dsfr-data-source>
 
-  <!-- Le filtre d'année : UN <select>, TROIS filtres de contexte.
-
-       ⚠️ Le premier montage filtrait sur `an`, l'alias posé par les `group-by`
-       ci-dessus — l'idée étant qu'il réconcilie les trois noms de champ. Il
-       envoie `where=an = "2025"` au serveur et vaut un HTTP 400 sur les sept
-       sources : un alias de `group_by` n'existe pas pour la clause `where`, qui
-       s'applique AVANT l'agrégation. L'échec est ici franc — 400, message en
-       console, source en erreur — c'est le seul de tout ce lot qui n'ait pas été
-       silencieux. Constat PG-025.
-
-       Il faut donc filtrer chaque source sur SON champ d'origine, avec SON
-       typage — c'est-à-dire écrire trois fois ce que l'alias promettait
-       d'unifier une fois :
-         · `annee` en date  → opérateur `year-of` (delf, tcf, belc, mob)
-         · `annee` en texte → opérateur `eq`      (enic)
-         · `periode` en int → opérateur `eq`      (asfr, aslve)
-       `apply-to` dit à quelles sources chaque filtre s'applique. Les trois
-       partagent le même `ui` : un seul contrôle à l'écran. -->
   <dsfr-data-context id="fei-ctx" sources="delf tcf belc enic asfr aslve mob" url-sync>
     <dsfr-data-context-filter field="annee" operator="year-of" ui="fei-annee"
       apply-to="delf tcf belc mob" label="Année" default="2025"></dsfr-data-context-filter>
@@ -189,155 +420,104 @@
   </dsfr-data-context>
 
   <div class="fr-container fr-mb-6w">
-    <div class="fr-select-group" style="max-width:16rem">
-      <label class="fr-label" for="fei-annee">Année de référence</label>
-      <select class="fr-select" id="fei-annee">
-        <option value="2025">2025</option>
-        <option value="2024">2024</option>
-        <option value="2023">2023</option>
-        <option value="2022">2022</option>
-        <option value="2021">2021</option>
-        <option value="2020">2020</option>
-        <option value="2019">2019</option>
-      </select>
-      <p class="fr-hint-text">Toutes les activités ne sont pas publiées sur toutes les années.</p>
-    </div>
-  </div>
+    <h2 class="fr-h3">5. Les chiffres clés d'une année, pays par pays</h2>
+    <p class="fr-text--sm">Les sept chiffres de la page d'origine, pour l'année choisie. Ils ne sont
+      pas de même ordre&nbsp;: la certification se compte en centaines de milliers d'inscriptions,
+      la formation, les assistants et la mobilité en centaines ou en milliers de places. Le sélecteur
+      s'arrête à 2023, première année commune aux jeux principaux (ENIC-NARIC remonte à 2019&nbsp;: voir la
+      section&nbsp;4). Le BELC et la mobilité enseignante ne sont publiés qu'à partir de 2024&nbsp;: en 2023,
+      leur zéro veut dire «&nbsp;non publié&nbsp;», pas «&nbsp;aucune place&nbsp;».</p>
 
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">La certification</h2>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
+    <div class="odv-barre-filtres">
+      <div class="fr-select-group">
+        <label class="fr-label" for="fei-annee">Année</label>
+        <select class="fr-select" id="fei-annee">
+          <option value="2025">2025</option>
+          <option value="2024">2024</option>
+          <option value="2023">2023</option>
+        </select>
+      </div>
+    </div>
+
+    <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mt-4w fr-mb-2w" aria-label="Certification et reconnaissance, année choisie">
       <dsfr-data-kpi source="delf" value="v:sum" format="nombre"
-        heading="DELF et DALF" label="inscrits au diplôme d'études et au diplôme approfondi de langue française"></dsfr-data-kpi>
+        heading="DELF-DALF" label="inscriptions"></dsfr-data-kpi>
       <dsfr-data-kpi source="tcf" value="v:sum" format="nombre"
-        heading="TCF" label="inscrits au test de connaissance du français"></dsfr-data-kpi>
-      <dsfr-data-kpi source="delf" value="iso2_pays:distinct" format="nombre"
-        heading="Pays" label="où le DELF-DALF est passé"></dsfr-data-kpi>
-      <dsfr-data-kpi source="tcf" value="iso2_pays:distinct" format="nombre"
-        heading="Pays" label="où le TCF est passé"></dsfr-data-kpi>
+        heading="TCF" label="inscriptions"></dsfr-data-kpi>
+      <dsfr-data-kpi source="enic" value="v:sum" format="nombre"
+        heading="ENIC-NARIC" label="dossiers de comparabilité expertisés"></dsfr-data-kpi>
+      <dsfr-data-kpi source="belc" value="v:sum" format="nombre"
+        heading="BELC" label="participants aux formations de professeurs de français"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="Assistants et mobilité, année choisie">
+      <dsfr-data-kpi source="asfr" value="v:sum" format="nombre"
+        heading="Assistants français à l'étranger" label="postes offerts"></dsfr-data-kpi>
+      <dsfr-data-kpi source="aslve" value="v:sum" format="nombre"
+        heading="Assistants étrangers en France" label="postes offerts"></dsfr-data-kpi>
+      <dsfr-data-kpi source="mob" value="v:sum" format="nombre"
+        heading="Mobilité enseignante" label="postes offerts"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
     <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">DELF-DALF — les dix premiers pays</h3>
-        <div class="odv-viz" data-code="DELF-DALF : dix premiers pays par inscrits">
-        <dsfr-data-chart id="g-delf" source="delf-top" type="bar" horizontal
-          label-field="pays" value-field="v" name='["Inscrits"]'
-          databox databox-title="DELF-DALF : dix premiers pays par inscrits"
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Inscriptions au DELF-DALF par pays de passation">
+        <dsfr-data-chart id="c-delf" source="delf" type="map-monde"
+          code-field="iso2_pays" value-field="v" map-summary="sum" name="Inscriptions au DELF-DALF"
+          selected-palette="sequentialAscending"
+          databox databox-title="DELF-DALF : inscriptions par pays de passation, année choisie"
           databox-source="France Éducation international — fr-en-delf-dalf_inscrits_centres"
-          databox-download>
+          databox-download heading-level="3">
         </dsfr-data-chart>
-        <dsfr-data-a11y for="g-delf" source="delf-top" table download></dsfr-data-a11y>
+        <dsfr-data-a11y for="c-delf" source="delf" table download
+          filename="delf-dalf-par-pays.csv" label-field="pays" value-field="v"
+          description="Inscriptions au DELF-DALF par pays du centre de passation, pour l'année choisie."></dsfr-data-a11y>
         </div>
       </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">TCF — les dix premiers pays de passation</h3>
-        <div class="odv-viz" data-code="TCF : dix premiers pays de centre de passation">
-        <dsfr-data-chart id="g-tcf" source="tcf-top" type="bar" horizontal
-          label-field="pays_centre" value-field="v" name='["Inscrits"]'
-          databox databox-title="TCF : dix premiers pays de centre de passation"
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-viz" data-code="Inscriptions au TCF par pays de passation">
+        <dsfr-data-chart id="c-tcf" source="tcf" type="map-monde"
+          code-field="iso2_pays" value-field="v" map-summary="sum" name="Inscriptions au TCF"
+          selected-palette="sequentialAscending"
+          databox databox-title="TCF : inscriptions par pays de passation, année choisie"
           databox-source="France Éducation international — fr-en-tcf_inscrits_centres"
-          databox-download>
+          databox-download heading-level="3">
         </dsfr-data-chart>
-        <dsfr-data-a11y for="g-tcf" source="tcf-top" table download></dsfr-data-a11y>
+        <dsfr-data-a11y for="c-tcf" source="tcf" table download
+          filename="tcf-par-pays.csv" label-field="pays_centre" value-field="v"
+          description="Inscriptions au TCF, toutes déclinaisons, par pays du centre de passation, pour l'année choisie. La France, l'Algérie, le Canada, le Cameroun et le Maroc sont en tête la dernière année."></dsfr-data-a11y>
         </div>
-        <p class="fr-text--xs fr-mt-1w">
-          Le champ est <code>pays_centre</code> : c'est le pays du <strong>centre de passation</strong>,
-          pas la nationalité du candidat. L'original intitule son axe « Pays » sans le préciser.
-        </p>
       </div>
     </div>
 
-    <h3 class="fr-h6">Où le DELF-DALF est passé</h3>
-    <div class="odv-viz" data-code="Inscrits au DELF-DALF par pays">
-    <dsfr-data-chart id="c-delf" source="delf" type="map-monde"
-      code-field="iso2_pays" value-field="v"
+    <div class="odv-viz fr-mb-2w" data-code="Dossiers ENIC-NARIC par pays du diplôme">
+    <dsfr-data-chart id="c-enic" source="enic" type="map-monde"
+      code-field="iso2_pays" value-field="v" map-summary="sum" name="Dossiers expertisés"
       selected-palette="sequentialAscending"
-      databox databox-title="Inscrits au DELF-DALF par pays"
-      databox-source="France Éducation international — fr-en-delf-dalf_inscrits_centres"
-      databox-download>
+      databox databox-title="ENIC-NARIC : dossiers expertisés par pays du diplôme, année choisie"
+      databox-source="France Éducation international — fr-en-reconnaissance_diplomes_comparabilite"
+      databox-download heading-level="3">
     </dsfr-data-chart>
-    <dsfr-data-a11y for="c-delf" source="delf" table download></dsfr-data-a11y>
+    <dsfr-data-a11y for="c-enic" source="enic" table download
+      filename="enic-naric-par-pays.csv" label-field="pays" value-field="v"
+      description="Dossiers de comparabilité expertisés par pays où le diplôme a été obtenu, pour l'année choisie. Les entités historiques (ex-URSS, ex-Zaïre, ex-Yougoslavie) et les petits États absents du fond de carte figurent dans le tableau mais pas sur la carte."></dsfr-data-a11y>
     </div>
-  </div>
+    <p class="fr-hint-text fr-mb-6w">Les trois cartes se dessinent sur le code ISO du pays, et
+      le fond de carte ne connaît pas tous les pays. En 2025, sont comptés dans les chiffres clés et
+      dans les tableaux, mais absents des cartes&nbsp;: 7&nbsp;066 inscriptions au DELF-DALF (1,4&nbsp;%&nbsp;;
+      Maurice, les Comores, les Seychelles, Hong Kong, Singapour, Monaco, Malte…), 944 au TCF (dont
+      929 à Maurice) et 749 dossiers ENIC-NARIC (1,5&nbsp;%&nbsp;: les Comores, le Kosovo, Maurice,
+      et 85 dossiers d'entités qui n'existent plus — ex-URSS, ex-Zaïre, ex-Yougoslavie). Pour un
+      petit État, lire le tableau sous la carte. Pour la même raison, le total affiché dans l'encadré
+      de chaque carte est un peu inférieur au chiffre clé&nbsp;: il ne somme que les pays transmis à la carte.</p>
 
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">La formation, la reconnaissance et la mobilité</h2>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-      <dsfr-data-kpi source="belc" value="v:sum" format="nombre"
-        heading="BELC" label="participants aux formations de professeurs de français"></dsfr-data-kpi>
-      <dsfr-data-kpi source="enic" value="v:sum" format="nombre"
-        heading="ENIC-NARIC" label="dossiers de comparabilité de diplômes expertisés"></dsfr-data-kpi>
-      <dsfr-data-kpi source="asfr" value="v:sum" format="nombre"
-        heading="Assistants français" label="postes offerts à l'étranger"></dsfr-data-kpi>
-      <dsfr-data-kpi source="aslve" value="v:sum" format="nombre"
-        heading="Assistants étrangers" label="postes offerts en France"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-      <dsfr-data-kpi source="mob" value="v:sum" format="nombre"
-        heading="Mobilité enseignante" label="postes offerts"></dsfr-data-kpi>
-      <dsfr-data-kpi source="belc" value="iso2_pays:distinct" format="nombre"
-        heading="Pays" label="d'origine des participants BELC"></dsfr-data-kpi>
-      <dsfr-data-kpi source="enic" value="iso2_pays:distinct" format="nombre"
-        heading="Pays" label="de diplôme expertisés"></dsfr-data-kpi>
-      <dsfr-data-kpi source="aslve" value="iso2_pays:distinct" format="nombre"
-        heading="Pays" label="d'origine des assistants en France"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">Assistants de langues vivantes étrangères en France</h3>
-        <div class="odv-viz" data-code="Postes d'assistants de langues vivantes étrangères, par pays d'origine">
-        <dsfr-data-chart id="c-aslve" source="aslve" type="map-monde"
-          code-field="iso2_pays" value-field="v"
-          selected-palette="sequentialAscending"
-          databox databox-title="Postes d'assistants de langues vivantes étrangères, par pays d'origine"
-          databox-source="France Éducation international — fr-en-assistants_langues_vivantes_etrangeres"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="c-aslve" source="aslve" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">Dossiers ENIC-NARIC par pays de diplôme</h3>
-        <div class="odv-viz" data-code="Dossiers de comparabilité expertisés, par pays du diplôme">
-        <dsfr-data-chart id="c-enic" source="enic" type="map-monde"
-          code-field="iso2_pays" value-field="v"
-          selected-palette="sequentialAscending"
-          databox databox-title="Dossiers de comparabilité expertisés, par pays du diplôme"
-          databox-source="France Éducation international — fr-en-reconnaissance_diplomes_comparabilite"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="c-enic" source="enic" table download></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-
-    <div class="fr-alert fr-alert--info fr-alert--sm fr-mt-3w">
-      <p class="fr-text--sm">
-        <strong>Ces deux cartes ne montrent pas tout, et l'original ne le dit pas.</strong>
-        Elles se dessinent à partir du code ISO du pays — or certaines lignes n'en ont pas, parce que
-        ce ne sont pas des pays. Côté ENIC-NARIC, <strong>85 dossiers de 2025</strong> se rattachent à
-        des entités historiques (ex-URSS 71, ex-Zaïre 13, ex-Yougoslavie 1) ; côté assistants,
-        <strong>90 postes</strong> vont à des regroupements (Jamaïque et Bahamas 40, Trinité-et-Tobago
-        et Barbade 40, OECO 10), soit 2,1 % du total. Ces valeurs sont dans les compteurs ci-dessus,
-        et absentes des cartes — dans les deux versions de la page. La différence est qu'ici c'est écrit.
-      </p>
-    </div>
-  </div>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">Les implantations</h2>
-    <p class="fr-text--sm fr-mb-3w">
-      Deux réseaux sur une seule carte, là où l'original leur consacre deux blocs identiques :
-      les campus professionnels franco-étrangers et les centres labellisés « Qualité français langue
-      étrangère ». Ces deux jeux ne portent pas d'année : ils ne suivent pas le sélecteur.
-    </p>
-
+    <h3 class="fr-h5">Les implantations&nbsp;: campus franco-étrangers et centres labellisés</h3>
+    <p class="fr-text--sm">Deux réseaux sans année, qui ne suivent donc pas le sélecteur. Un clic
+      sur un point ouvre sa fiche&nbsp;; pour les centres labellisés «&nbsp;Qualité français langue
+      étrangère&nbsp;», elle donne le téléphone, l'adresse électronique et le site, que la page
+      d'origine n'affichait pas.</p>
     <div class="odv-viz" data-code="Implantations de France Éducation international dans le monde">
     <dsfr-data-map id="carte-fei" name="Implantations de France Éducation international dans le monde"
-      height="600px" tiles="ign-plan" tiles-style="muted"
+      height="560px" tiles="ign-plan" tiles-style="muted"
       fit-bounds fit-max-zoom="4">
       <dsfr-data-map-layer id="couche-cql" source="cql" type="circle"
         geo-field="centroid" radius="5" color="#009081" fill-opacity="0.85"
@@ -347,14 +527,6 @@
         geo-field="position" radius="8" color="#c9191e" fill-opacity="0.95"
         tooltip-field="ville" max-items="200">
       </dsfr-data-map-layer>
-      <!-- UNE popup pour DEUX couches aux schémas différents : les blocs
-           `{{#if}}` (0.22.0) branchent sur le champ présent. Sans eux, il aurait
-           fallu deux cartes — ce que fait l'original, avec deux blocs identiques.
-
-           Les quatre champs de contact du jeu des centres labellisés
-           (`telephone`, `contact`, `site_web`, `code_postal`) ne sont exposés
-           NULLE PART sur la page d'origine, alors que c'est le seul de ses neuf
-           jeux qui ressemble à un annuaire utile. -->
       <dsfr-data-map-popup mode="panel-right" title-field="ville" width="360px">
         <template>
           {{#if pays}}
@@ -374,118 +546,93 @@
         </template>
       </dsfr-data-map-popup>
     </dsfr-data-map>
+    <dsfr-data-map-legend for="couche-cpfx" label="Campus professionnels franco-étrangers"></dsfr-data-map-legend>
+    <dsfr-data-map-legend for="couche-cql" label="Centres labellisés « Qualité français langue étrangère »"></dsfr-data-map-legend>
     </div>
-    <p class="fr-text--xs fr-mt-1w">
-      <span style="color:#c9191e">●</span> Campus professionnels franco-étrangers (CPFx) ·
-      <span style="color:#009081">●</span> Centres labellisés « Qualité français langue étrangère »
-    </p>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">La croissance de France Éducation international ne vient pas de
+        son diplôme historique, le DELF-DALF, qui stagne et se passe surtout à l'école, mais d'un
+        test&nbsp;: le TCF, et plus précisément de ses deux versions canadiennes, qui font l'essentiel
+        de la hausse. Ce que les jeux ne disent pas&nbsp;: qui sont les candidats, combien passent
+        le test plusieurs fois, et s'ils obtiennent le niveau demandé — le jeu du TCF ne publie ni
+        résultat ni nationalité.</p>
+    </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Des inscriptions, pas des candidats.</strong> Les jeux comptent des inscriptions
+          par centre&nbsp;; une personne inscrite deux fois compte deux fois. Aucune part de la page
+          n'est un nombre de personnes.</li>
+        <li><strong>Le pays est celui du centre.</strong> Le champ du TCF s'appelle d'ailleurs
+          <code>pays_centre</code>. Un inscrit au Canada n'est pas un Canadien&nbsp;; la page ne dit
+          rien de la nationalité, que le jeu ne publie pas.</li>
+        <li><strong>« Tests canadiens »</strong> regroupe les déclinaisons TCF Canada et TCF Québec,
+          dont le libellé nomme l'usage. Le jeu ne dit pas pourquoi elles progressent&nbsp;: la page
+          constate une hausse, elle n'en donne pas la cause.</li>
+        <li><strong>Trois années seulement</strong> pour le TCF et le DELF-DALF. Une hausse de deux
+          ans n'est pas une tendance longue&nbsp;; la page lit la première et la dernière année
+          publiées dans la donnée, et suivra la prochaine livraison.</li>
+        <li><strong>Une casse qui coupait la série.</strong> Le producteur écrit « DELF
+          scolaire/junior » en 2023 et 2024, « Delf scolaire/junior » en 2025. Groupées telles
+          quelles, ce seraient deux déclinaisons, dont une apparue en 2025&nbsp;; la page les réunit.</li>
+        <li><strong>Pas de taux de réussite.</strong> Le TCF est un test de niveau sans admis&nbsp;;
+          le DELF-DALF publie des admis, mais la page ne les compare pas d'une déclinaison à l'autre,
+          les niveaux passés (A1 à C2) n'étant pas les mêmes.</li>
+        <li><strong>Angles écartés.</strong> Le classement des pays par nombre d'inscrits au DELF-DALF
+          (il classe la taille des réseaux scolaires francophones, pas une dynamique)&nbsp;; le BELC,
+          les assistants et la mobilité enseignante (quelques centaines à quelques milliers de places,
+          stables, laissés à l'exploration)&nbsp;; la carte mondiale en tête de page (elle aurait
+          montré la France et le Maghreb, pas le changement).</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- Les deux tops, branchés sur les sources d'agrégat (elles n'ont pas d'autres
-       consommateurs que leurs KPI et leurs cartes, qui lisent le même agrégat :
-       le cas BUG-009 ne se pose pas ici, la query ne change pas la maille). -->
-  <dsfr-data-query id="delf-top" source="delf" order-by="v:desc" limit="10"></dsfr-data-query>
-  <dsfr-data-query id="tcf-top" source="tcf" order-by="v:desc" limit="10"></dsfr-data-query>
+  <!-- ====================== Analyse ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — chiffres clés de France Éducation international</h2>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — chiffres clés de France Éducation international — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine :
+        Page d'origine&nbsp;:
         <a href="https://data.education.gouv.fr/p/fei-chiffres-cles-france-education-international/" target="_blank" rel="noopener external">une page ODS Studio</a>
-        à <strong>neuf jeux et dix-neuf blocs de données</strong> — la plus complexe du portail.
-        Fiche d'audit : <code>docs/portail-education/fei-chiffres-cles.md</code>, vingt défauts.
-        C'est aussi la page la plus multi-sources rencontrée par ce banc, tous portails confondus :
-        Bercy était très majoritairement mono-jeu.
+        à neuf jeux, sept chiffres clés figés sur 2025, six cartes du monde et quatre tops 10. Fiche
+        d'audit&nbsp;: <code>docs/portail-education/fei-chiffres-cles.md</code>. Recréée le
+        2026-09-26 en page éditoriale&nbsp;; l'ancienne reproduction est devenue la section&nbsp;5.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Neuf sources ne coûtent pas plus cher qu'une.</strong> Chaque jeu est une
-              balise ; il n'y a ni contexte global à câbler, ni ordre à respecter, ni coordination à
-              écrire. C'est le résultat le plus net de cette page — et il n'allait pas de soi :
-              l'audit l'avait retenue pour éprouver le multi-sources, en supposant que ce serait
-              le point dur. Ça ne l'a pas été.</li>
-            <li><strong>L'agrégation serveur, et l'année qu'elle offre.</strong>
-              <code>group-by="pays, iso2_pays, year(annee) as an"</code> ramène <strong>toutes</strong>
-              les années en 5 Ko au lieu de 591 Ko pour le seul DELF-DALF. Le sélecteur d'année que
-              l'original n'a pas n'est donc pas un ajout coûteux : <em>c'est un sous-produit de
-              l'architecture</em>. Sur les sept années d'ENIC-NARIC, l'original n'en montre qu'une.</li>
-            <li><strong>Une carte du monde en un attribut.</strong>
-              <code>type="map-monde" code-field="iso2_pays"</code> — les six planisphères de
-              l'original sont six blocs configurés à la main.</li>
-            <li><strong>Un <code>&lt;select&gt;</code> HTML pilote trois filtres.</strong>
-              <code>dsfr-data-context-filter</code> accepte plusieurs filtres partageant le même
-              <code>ui</code>, chacun visant ses sources par <code>apply-to</code> : un seul contrôle
-              à l'écran commande sept sources qui ne s'accordent ni sur le nom du champ d'année, ni
-              sur son type. L'opérateur <code>year-of</code> traduit tout seul « 2025 » en
-              <code>annee &gt;= "2025-01-01" AND annee &lt; "2026-01-01"</code>.</li>
+            <li><strong>Lire la colonne que personne ne montrait</strong>&nbsp;: <code>declinaison</code>,
+              agrégée côté portail avec l'année (<code>group-by="declinaison, year(annee) as an"</code>),
+              quinze lignes pour toute l'histoire.</li>
+            <li><strong>Recoller une série coupée par la casse</strong>&nbsp;: <code>contains()</code>
+              dans <code>compute</code> est insensible à la casse, un <code>when</code> suffit.</li>
+            <li><strong>Une barre empilée par année</strong>, deux bleus pour le message et des gris pour
+              le reste&nbsp;: <code>series-field</code> + <code>color-map</code>, légende et infobulle
+              justes depuis la correction de BUG-022.</li>
+            <li><strong>Des KPI dont le titre porte l'année</strong>&nbsp;: un
+              <code>dsfr-data-repeat</code> autour du groupe de KPI.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>PG-014 est tombé — et il a fallu deux essais pour s'en apercevoir.</strong>
-              Le piège disait qu'une fonction dans <code>group-by</code> valait un HTTP 400, parce que
-              l'adaptateur entourait la valeur d'accents graves. C'est corrigé (#641), et cette page
-              est la première du dépôt à le vérifier <em>en page</em> et non seulement à l'API ou au
-              source. Mais le premier essai a bien renvoyé 400 — pour une autre raison :
-              l'alias <code>an</code> était déclaré dans <code>group-by</code> <strong>et</strong>
-              dans <code>select</code>, ce qui est le piège voisin PG-008. Le message de l'API
-              (« Alias 'an' is declared several times ») ne ressemble à rien de ce qu'on cherche
-              quand on croit tester le premier piège. <strong>Deux pièges qui se déguisent l'un en
-              l'autre</strong> : il s'en est fallu d'un curl pour re-classer à tort en « toujours
-              cassé » une capacité qui marche.</li>
-            <li><strong>Un alias de <code>group-by</code> était refusé s'il ne contenait pas de
-              parenthèse — corrigé en 0.29.</strong> Le moyen naturel d'harmoniser sept jeux qui
-              nomment différemment la même chose est l'aliasing ODSQL :
-              <code>pays_centre as pays</code>, <code>periode as an</code>. C'était impossible :
-              l'adaptateur décidait qu'un élément de <code>group-by</code> est une expression
-              <em>s'il contient une parenthèse ouvrante</em> — littéralement
-              <code>field.includes('(')</code> au source. <code>year(annee) as an</code> passait
-              donc, et <code>periode as an</code> partait backquoté en
-              <code>`periode as an`</code>, que l'API refuse en 400 ; le correctif #641 n'avait
-              réglé que la moitié portant une fonction. Constat BUG-010, corrigé par
-              <a href="https://github.com/bmatge/dsfr-data/pull/796" target="_blank" rel="noopener external">#796</a>
-              (0.29.0), qui a réglé d'un coup les trois symptômes du même découpeur : cet alias,
-              la virgule à l'intérieur d'une fonction (BUG-011) et le <code>select</code> non
-              échappé (PG-027). <strong>Rétabli ici au lot 20</strong> : ENIC-NARIC groupe
-              <code>annee as an</code>, les deux jeux d'assistants <code>periode as an</code>, et
-              les sept sources exposent enfin la même colonne. Vérifié à l'API : l'expression nue
-              rend 200, la même backquotée 400. Seul <code>pays_centre</code> garde son nom, et
-              c'est maintenant un choix éditorial — le centre de passation n'est pas la
-              nationalité.</li>
-            <li><strong>Le <code>where</code> d'un contexte ne connaît pas les alias
-              d'agrégat.</strong> Premier montage : un seul filtre sur <code>an</code>, l'alias
-              commun. Il envoie <code>where=an = "2025"</code> et vaut un 400 sur les sept sources —
-              <code>where</code> s'applique <em>avant</em> l'agrégation, l'alias n'existe pas encore.
-              Il faut donc filtrer chaque source sur son champ d'origine, avec son typage, c'est-à-dire
-              écrire trois fois ce que l'alias promettait d'unifier une fois. Constat PG-025.
-              <strong>À porter au crédit de la bibliothèque</strong> : de tous les échecs de ce lot,
-              c'est le seul qui n'ait pas été silencieux — HTTP 400, message en console, source en
-              état d'erreur. On le voit en dix secondes.</li>
-            <li><strong>Trois typages pour le même concept d'année</strong>, dans neuf jeux du même
-              producteur : <code>date</code> (cinq jeux), <code>text</code> (ENIC-NARIC),
-              <code>int</code> (les deux jeux d'assistants). Ce n'est pas un défaut de la
-              bibliothèque — c'est le terrain — mais les deux constats ci-dessus font qu'elle
-              n'aide pas à le résorber : ni l'alias au <code>group-by</code>, ni le filtre unique
-              au contexte. La configuration Studio de l'original paie exactement la même
-              hétérogénéité, avec ses conditions écrites à la main jeu par jeu.</li>
-            <li><strong>Ce que ni l'une ni l'autre version ne sait faire : dire ce qui manque.</strong>
-              Les six choroplèthes se dessinent sur le code ISO du pays. Les lignes qui n'en ont pas —
-              parce que ce sont des entités historiques ou des regroupements — disparaissent de la
-              carte tout en restant dans les compteurs. Sur les assistants, ce sont 2,1 % des postes.
-              <code>getSkippedCount()</code> existe sur une couche <code>dsfr-data-map</code>, mais
-              une carte <code>dsfr-data-chart type="map-monde"</code> est rendue par DSFR Chart et
-              n'expose rien de tel. La page le compense par une phrase écrite à la main, après
-              vérification à l'API. <strong>C'est du travail que la bibliothèque pourrait faire</strong>,
-              et c'est le seul manque de fond relevé sur cette page.</li>
+            <li><strong>« Première et dernière année » sans les écrire</strong> coûte cinq balises par
+              jeu&nbsp;: une clé constante, une query <code>min</code>/<code>max</code>, une jointure
+              pour rendre les bornes à chaque ligne, un <code>compute</code> conditionnel, une query
+              de sommes. Trois fois sur la page. <code>first</code>/<code>last</code>/<code>evolution</code>
+              existent, mais au KPI seulement, pas dans <code>aggregate</code>.</li>
+            <li><strong>Deux années côte à côte pour huit pays</strong> passent par une jointure 1-N
+              voulue (le top 8 à gauche, ses lignes longues à droite)&nbsp;: sans elle, le filtre
+              «&nbsp;huit premiers pays de la dernière année&nbsp;» ne se reporte pas sur l'autre
+              année.</li>
           </ul>
         </div>
       </div>
@@ -497,34 +644,26 @@
             <tr><th scope="col">Page Studio d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>9 <code>data_providers</code> + conditions par bloc</td><td>9 <code>dsfr-data-source</code>, dont 7 agrégées</td><td>Équivalent, et 20× plus léger</td></tr>
-            <tr><td>7 blocs <code>kpi</code> figés sur 2025</td><td><code>dsfr-data-kpi</code> + <code>dsfr-data-context</code></td><td>Meilleur : l'année devient un filtre</td></tr>
-            <tr><td>4 blocs <code>chart comparison.columns limit:10</code></td><td><code>dsfr-data-query limit="10"</code> + <code>dsfr-data-chart</code></td><td>Équivalent</td></tr>
-            <tr><td>6 blocs choroplèthe mondiale, configurés un par un</td><td><code>dsfr-data-chart type="map-monde"</code></td><td>Nettement plus simple</td></tr>
-            <tr><td>2 blocs <code>map poi</code> séparés, sans clustering</td><td>une carte, deux <code>dsfr-data-map-layer</code></td><td>Équivalent, et regroupé</td></tr>
-            <tr><td>popup « une requête par enregistrement » au clic</td><td><code>dsfr-data-map-popup</code> + <code>&lt;template&gt;</code></td><td>Meilleur : zéro requête au clic</td></tr>
-            <tr><td>légendes dont la borne haute est sous le maximum réel (4 cartes sur 6)</td><td>légende dérivée des bornes appliquées</td><td>Meilleur : le défaut devient structurellement impossible</td></tr>
-            <tr><td>—</td><td>mention des lignes sans code ISO</td><td><strong>Écrit à la main</strong> : rien ne compte les lignes écartées d'une carte DSFR Chart</td></tr>
+            <tr><td>9 <code>data_providers</code>, conditions « 2025 » écrites dans 17 blocs</td><td>9 <code>dsfr-data-source</code> agrégées + un contexte à trois filtres</td><td>Meilleur&nbsp;: l'année devient un filtre</td></tr>
+            <tr><td>7 blocs <code>kpi</code> de même poids</td><td>3 KPI d'accroche calculés, 7 en exploration</td><td>Meilleur&nbsp;: une hiérarchie</td></tr>
+            <tr><td>4 tops 10 par pays</td><td>barres empilées par déclinaison, barres groupées première / dernière année</td><td>Remplacé&nbsp;: le changement plutôt que le classement</td></tr>
+            <tr><td>6 choroplèthes mondiales</td><td>3 <code>type="map-monde"</code> filtrées par année</td><td>Équivalent</td></tr>
+            <tr><td>2 blocs <code>map poi</code></td><td>une carte, deux couches, deux <code>dsfr-data-map-legend</code></td><td>Équivalent, regroupé</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-repeat</code>, <code>dsfr-data-join</code>, <code>compute</code> : chapô et phrases calculés</td><td>Sans équivalent&nbsp;: le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, et le multi-sources — que le lot avait retenu
-          comme point dur probable — <strong>n'en est pas un</strong> : neuf jeux se déclarent en neuf
-          balises. Le vrai enseignement est ailleurs, et il est méthodologique : <strong>un piège du
-          registre était périmé, et la vérification a d'abord semblé le confirmer</strong> parce qu'un
-          second piège produisait la même erreur. Sans le curl qui a lu le message de l'API mot pour
-          mot, ce dépôt aurait réaffirmé une limite qui n'existe plus. Et en poursuivant la
-          vérification, la même page a trouvé <strong>ce que le correctif ne couvre pas</strong> :
-          l'alias sans fonction (BUG-010). Un piège périmé et un bug neuf, tirés du même fil.
-          C'est la démonstration la plus concrète de la règle du dépôt : lire le JSDoc <em>et</em>
-          l'erreur, pas seulement le symptôme.</p>
+        <p>La bibliothèque a tout porté&nbsp;; le seul coût réel est le motif «&nbsp;bornes&nbsp;»,
+          qui répète cinq balises pour ne pas écrire deux années. <strong>Le travail a été de lire la
+          donnée</strong>&nbsp;: sept chiffres de même poids cachaient le seul qui bouge, et la raison
+          pour laquelle il bouge était dans une colonne que la page d'origine n'affichait pas.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 

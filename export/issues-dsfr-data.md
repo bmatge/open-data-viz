@@ -39,7 +39,7 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-32 critiques ont été **retirées** au fil du
+36 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
 `faux-probleme` du registre), et 109
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
@@ -88,7 +88,7 @@ _6 demandes — S 5, M 0, L 0._
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
 | AM-088 | `subtitle-field` du podium affiche le nombre brut : ni séparateur de milliers, ni format, ni suffixe | amelioration | S | 1 | Déposer chez dsfr-data |
-| AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 1 | Déposer chez dsfr-data |
+| AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 2 | Déposer chez dsfr-data |
 
 _2 demandes — S 1, M 0, L 0._
 
@@ -585,11 +585,13 @@ Un `subtitle-format` (nombre, euro, pourcentage) avec suffixe, ou un `subtitle-t
 
 **Priorité** P3 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-normalize`
-**Rencontré sur** 1 page(s) : barometre-france-num
+**Rencontré sur** 2 page(s) : barometre-france-num, entreprises-restauration-notre-dame
 
 ### Constat
 
 Le tokenizer de `compute` (`packages/shared/src/utils/compute.ts`) termine un littéral texte à la première quote, sans accepter `''` ni `\'`. On ne peut donc pas écrire `when libelle = 'J''en ai'`, alors que les libellés à apostrophe ASCII sont courants dans les jeux publics. Le JSDoc ne mentionne pas la limite.
+
+**Lot 4 de recréation (2026-09-26)** : la famille « Métiers d'art et du patrimoine » de /viz/entreprises-restauration-notre-dame ne s'écrit pas en littéral ; contournée par `contains(…, 'art et du patrimoine')`. Deuxième jeu public qui bute sur la même apostrophe.
 
 ### Impact de l'erreur ou du manque
 
@@ -605,7 +607,7 @@ Permanent : l'apostrophe est partout dans les nomenclatures françaises.
 
 ### Comment ça a été vérifié
 
-Source `compute.ts` l. 330-340 (boucle jusqu'à `input[j] !== "'"`) relue le 2026-09-26, grammaire identique dans le bundle 0.33.0 du CDN et sur origin/main (0.42.0). Contournement appliqué sur /viz/barometre-france-num : 802-807 unifiées, 802 9,46 → 21,91 affichée au navigateur.
+Source `compute.ts` l. 330-340 (boucle jusqu'à `input[j] !== "'"`) relue le 2026-09-26, grammaire identique dans le bundle 0.33.0 du CDN et sur origin/main (0.42.0). Contournement appliqué sur /viz/barometre-france-num : 802-807 unifiées, 802 9,46 → 21,91 affichée au navigateur. — Lot 4 (2026-09-26) : page Notre-Dame, 0.42.0, chiffres de la famille identiques au recalcul sur l'export (103 entreprises).
 
 ### Contournement actuel
 
