@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Les ULIS pour troubles des fonctions visuelles — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la cartographie des ULIS-TFV de data.education.gouv.fr : 52 dispositifs, 25 départements, et le contact que l'original n'affiche pas.">
+  <meta name="description" content="Recréation avec dsfr-data de la cartographie des ULIS-TFV de data.education.gouv.fr : 44 des 52 dispositifs de la rentrée 2024 sont en école ou en collège ; après le collège, il n'en reste que huit, dans quatre villes.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,81 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un annuaire cartographié sans un chiffre ; la
+       reproduction précédente disait « rare et concentré en Île-de-France ».
+       C'est vrai, mais l'histoire du jeu est ailleurs : le parcours de l'élève.
+       44 des 52 dispositifs sont en école ou en collège, dans 23 départements ;
+       après le collège, il en reste 8 (6 lycées, 2 EREA), dans 4 villes
+       seulement — Villeurbanne, Saint-Lô, Saint-Quentin, Rambouillet.
+       L'Île-de-France, qui porte 25 dispositifs, n'a qu'un lycée.
+
+       Une source, 52 lignes, lue sans clé, en un export. Tout le reste est
+       calculé dans le navigateur.
+       ========================================================================== -->
+
+  <dsfr-data-source id="ulis" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-ulis-tfv"
+    fetch-mode="export" max-records="500">
+  </dsfr-data-source>
+
+  <!-- L'étape du parcours : lycée et EREA réunis en « après le collège »
+       (2 EREA seulement, trop peu pour une barre à part). `type_txt` corrige
+       le code « Ecole » du jeu pour l'affichage. -->
+  <dsfr-data-normalize id="ulis-n" source="ulis"
+    compute="etape = when type_etablissement = 'Ecole' then 'École' when type_etablissement = 'Collège' then 'Collège' else 'Lycée ou EREA';
+             rang = when type_etablissement = 'Ecole' then 1 when type_etablissement = 'Collège' then 2 else 3;
+             type_txt = when type_etablissement = 'Ecole' then 'École' else type_etablissement;
+             apres = when rang = 3 then 1 else 0;
+             idf = when libelle_region = 'Ile-de-France' then 1 else 0;
+             idf_apres = idf * apres;
+             k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Le chapô : une ligne, jointe sur une clé constante ---------- -->
+  <dsfr-data-query id="nat" source="ulis-n" group-by="k"
+    aggregate="uai:count:n, apres:sum:n_apres, idf:sum:n_idf, idf_apres:sum:n_idf_apres, libelle_departement:distinct:n_dep, libelle_region:distinct:n_reg, nom_commune:distinct:n_com"></dsfr-data-query>
+  <dsfr-data-query id="nat-apres" source="ulis-n" where="rang:eq:3" group-by="k"
+    aggregate="nom_commune:distinct:com_apres, libelle_departement:distinct:dep_apres"></dsfr-data-query>
+  <dsfr-data-query id="nat-avant" source="ulis-n" where="rang:lt:3" group-by="k"
+    aggregate="uai:count:n_avant, libelle_departement:distinct:dep_avant"></dsfr-data-query>
+  <dsfr-data-join id="chapo-1" left="nat" right="nat-apres" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="chapo-2" left="chapo-1" right="nat-avant" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="chapo" source="chapo-2"
+    compute="part_idf = n_idf * 100 / n; part_avant = n_avant * 100 / n; dep_absents = 101 - n_dep"></dsfr-data-normalize>
+
+  <!-- ---------- 1. Par étape du parcours ---------- -->
+  <dsfr-data-query id="etape" source="ulis-n" group-by="etape, rang"
+    aggregate="uai:count:n, libelle_departement:distinct:dep, nom_commune:distinct:com"
+    order-by="rang:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="etape-tab" source="etape"
+    rename="etape:Étape du parcours | n:Dispositifs | dep:Départements couverts | com:Communes d'implantation"></dsfr-data-normalize>
+
+  <!-- Les huit dispositifs d'après le collège, et leurs quatre villes. -->
+  <dsfr-data-query id="apres" source="ulis-n" where="rang:eq:3"
+    order-by="nom_commune:asc"></dsfr-data-query>
+  <dsfr-data-query id="apres-villes" source="ulis-n" where="rang:eq:3"
+    group-by="nom_commune, libelle_departement" aggregate="uai:count:n" order-by="n:desc"></dsfr-data-query>
+
+  <!-- ---------- 2. Par région, empilé par étape ----------
+       Deux tris successifs (stables) : l'étape d'abord, pour que les séries
+       sortent dans l'ordre du parcours, puis le total régional. -->
+  <dsfr-data-query id="reg-tot" source="ulis-n" group-by="libelle_region"
+    aggregate="uai:count:tot"></dsfr-data-query>
+  <dsfr-data-query id="reg-etape" source="ulis-n" group-by="libelle_region, etape, rang"
+    aggregate="uai:count:n"></dsfr-data-query>
+  <dsfr-data-join id="reg-j" left="reg-etape" right="reg-tot" on="libelle_region" type="left"></dsfr-data-join>
+  <dsfr-data-query id="reg-o1" source="reg-j" order-by="rang:asc"></dsfr-data-query>
+  <dsfr-data-query id="reg-o" source="reg-o1" order-by="tot:desc"></dsfr-data-query>
+  <dsfr-data-pivot id="reg-w" source="reg-o" row="libelle_region" column="etape" value="n"
+    aggregate="sum" labels="École:ecole | Collège:college | Lycée ou EREA:apres"></dsfr-data-pivot>
+  <dsfr-data-normalize id="reg-t" source="reg-w"
+    compute="ecole = coalesce(ecole, 0); college = coalesce(college, 0); apres = coalesce(apres, 0); total = ecole + college + apres"></dsfr-data-normalize>
+  <dsfr-data-normalize id="reg-tab" source="reg-t"
+    rename="libelle_region:Région | ecole:École | college:Collège | apres:Lycée ou EREA | total:Total"></dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,129 +107,205 @@
       </div>
     </nav>
 
-    <h1>Les ULIS pour troubles des fonctions visuelles</h1>
+    <h1>Pour un élève aveugle ou malvoyant, l'offre spécialisée se referme après le collège</h1>
 
-    <p class="fr-text--lead">
-      Les <strong>unités localisées pour l'inclusion scolaire</strong> spécialisées dans l'accueil
-      des élèves aveugles ou malvoyants sont <strong>52 en France</strong>. C'est un dispositif
-      rare, et très inégalement réparti : <strong>25 départements sur 101</strong> en accueillent
-      une, <strong>9 régions sur 18</strong>, et l'<strong>Île-de-France en concentre 25</strong>
-      — soit près de la moitié. Toutes sont publiques.
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="fr-text--lead">
+          À la rentrée 2024, la France compte <strong>{{n}} unités localisées pour l'inclusion
+          scolaire consacrées aux troubles des fonctions visuelles</strong> (ULIS-TFV), toutes
+          publiques, dans {{n_dep}} départements. <strong>{{n_avant}} sont en école ou en
+          collège</strong>, dans {{dep_avant}} départements. Après le collège, il n'en reste que
+          <strong>{{n_apres}}</strong>, en lycée ou en EREA, <strong>dans {{com_apres}} villes
+          seulement</strong>. L'Île-de-France porte
+          {{n_idf}} dispositifs, soit {{part_idf:number:0}}&nbsp;% du total, mais un seul
+          après le collège.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Une ULIS est un dispositif, pas une classe&nbsp;: l'élève est inscrit dans une classe
+      ordinaire de l'établissement et rejoint l'ULIS pour un enseignement adapté (braille,
+      outils de compensation). Les ULIS-TFV sont spécialisées dans la déficience visuelle. Le
+      jeu recense où elles sont implantées — pas combien d'élèves elles accueillent.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-ulis-tfv/"
            target="_blank" rel="noopener external"><code>fr-en-ulis-tfv</code></a>
-        — 52 lignes, 14 champs, rentrée 2024, lu sans clé. <strong>Aucune ligne incomplète</strong> :
-        les 52 sont localisées et les 52 portent une adresse de contact. C'est le seul jeu de ce
-        banc, tous portails confondus, à n'avoir aucun trou.
+        — une ligne par dispositif (un code UAI par ligne, sans doublon), implantation à la
+        rentrée scolaire 2024, lu sans clé. Toutes les lignes sont localisées et portent une
+        adresse électronique de contact. Le jeu ne déclare pas de licence.
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="chapo" value="n_avant:first" format="nombre"
+        heading="dispositifs en école ou en collège"
+        lines='[{"value":"dep_avant:first","format":"nombre","prefix":"dans ","suffix":" départements"}]'
+        label="rentrée 2024"></dsfr-data-kpi>
+      <dsfr-data-kpi source="chapo" value="n_apres:first" format="nombre"
+        heading="après le collège (lycée ou EREA)"
+        lines='[{"value":"com_apres:first","format":"nombre","prefix":"dans ","suffix":" villes"}]'
+        label="rentrée 2024"></dsfr-data-kpi>
+      <dsfr-data-kpi source="chapo" value="n_dep:first" format="nombre"
+        heading="départements sur 101 ont au moins une ULIS-TFV"
+        lines='[{"value":"part_idf:first","format":"decimal","decimals":0,"prefix":"Île-de-France : ","suffix":" % des dispositifs"}]'
+        label="tous niveaux confondus"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. De l'école au lycée, la couverture du territoire s'effondre</h2>
+    <dsfr-data-repeat source="etape" key-field="etape">
+      <template>
+        <p class="fr-text--sm fr-mb-1v"><strong>{{etape}}</strong>&nbsp;: {{n}} dispositifs,
+          dans {{dep}} départements et {{com}} communes.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="odv-lecture fr-mt-2w">Un élève qui entre en ULIS-TFV à l'école peut, dans la
+          plupart des départements concernés, la poursuivre au collège. Au lycée, l'offre se
+          resserre sur <strong>{{dep_apres}} départements</strong>&nbsp;: la continuité du parcours
+          suppose alors, pour la plupart des familles, un éloignement du domicile.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-4w" data-code="ULIS-TFV par étape du parcours : dispositifs et départements couverts">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-etape" source="etape" type="bar"
+        label-field="etape" value-field="n:Dispositifs" value-fields="dep:Départements couverts"
+        y-min="0" color-map="Dispositifs:#000091,Départements couverts:#a1a1f8"
+        databox databox-title="ULIS-TFV par étape du parcours : dispositifs et départements couverts, rentrée 2024"
+        databox-source="Ministère de l'éducation nationale — fr-en-ulis-tfv, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-etape" source="etape-tab" table download
+        filename="ulis-tfv-par-etape.csv"
+        label-field="Étape du parcours"
+        value-field="Dispositifs, Départements couverts, Communes d'implantation"
+        description="Nombre de dispositifs ULIS-TFV et de départements couverts à chaque étape du parcours, rentrée 2024 : école, collège, puis lycée ou EREA. Le nombre de départements couverts chute nettement après le collège."></dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5">Les quatre villes où l'on peut poursuivre après le collège</h3>
+    <div class="fr-mb-2w">
+      <dsfr-data-repeat source="apres-villes" key-field="nom_commune">
+        <template>
+          <p class="fr-tag fr-mr-1v fr-mb-1v">{{nom_commune}} ({{libelle_departement}}) — {{n}}</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <dsfr-data-list source="apres"
+      columns="nom_etablissement:Établissement, type_txt:Type, nom_commune:Commune, libelle_departement:Département, libelle_region:Région"
+      count-label="dispositif" class="fr-mb-6w">
+    </dsfr-data-list>
+
+    <!-- ---------- 2. La nuance ---------- -->
+    <h2 class="fr-h3">2. L'Île-de-France concentre près de la moitié des dispositifs, mais presque rien après le collège</h2>
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="odv-lecture">L'Île-de-France porte <strong>{{n_idf}} ULIS-TFV sur {{n}}</strong>
+          ({{part_idf:number:0}}&nbsp;%), dont <strong>{{n_idf_apres}} seulement après le collège</strong>. À la rentrée 2024,
+          Auvergne-Rhône-Alpes et la Normandie tirent au contraire leur rang de leurs lycées et
+          de leurs EREA, regroupés à Villeurbanne et à Saint-Lô. La
+          concentration francilienne vaut pour l'école et le collège, pas pour la suite.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="ULIS-TFV par région et par étape du parcours">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-reg" source="reg-o" type="bar" horizontal stacked
+        label-field="libelle_region" value-field="n" series-field="etape"
+        color-map="École:#a1a1f8,Collège:#4747d3,Lycée ou EREA:#e1000f"
+        databox databox-title="ULIS-TFV par région et par étape du parcours, rentrée 2024"
+        databox-source="Ministère de l'éducation nationale — fr-en-ulis-tfv, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-reg" source="reg-tab" table download
+        filename="ulis-tfv-par-region.csv"
+        label-field="Région"
+        value-field="École, Collège, Lycée ou EREA, Total"
+        description="Nombre de dispositifs ULIS-TFV par région, répartis entre école, collège et lycée ou EREA, rentrée 2024, de la région la mieux dotée à la moins dotée. Neuf régions seulement en comptent ; l'Île-de-France en porte près de la moitié, presque toutes en école et en collège."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       52 lignes. Le gabarit « annuaire cartographié » est ici à son emploi le
-       plus dépouillé : une source, une recherche, quatre facettes, une carte,
-       un tableau. Rien à arbitrer, rien à mesurer, aucun plafond à relever.
-
-       Le seul apport réel de la reproduction est de rendre visible ce que
-       l'original laisse implicite : la rareté et la concentration. L'original
-       n'affiche à aucun moment le nombre 52, ni le compte d'une sélection.
-       ========================================================================== -->
-
-  <dsfr-data-source id="ulis" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-ulis-tfv"
-    fetch-mode="export" max-records="500">
-  </dsfr-data-source>
-
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+  <!-- ---------- 3. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">3. Trouver une ULIS-TFV</h2>
+    <p class="fr-text--sm">Tous les dispositifs, un point par établissement, colorés selon
+      l'étape. La recherche et les filtres pilotent les compteurs, la carte et la liste&nbsp;;
+      ils ne touchent pas les graphiques ci-dessus. Chaque fiche donne l'adresse de contact de
+      l'établissement.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
-        <dsfr-data-search id="ulis-q" source="ulis"
-        fields="nom_etablissement, nom_commune, libelle_departement, uai"
-        label="Rechercher un dispositif" placeholder="Nom, commune, département, code UAI…"
-        operator="words" count count-label="dispositif" url-sync>
+        <dsfr-data-search id="ulis-q" source="ulis-n"
+          fields="nom_etablissement, nom_commune, libelle_departement, uai"
+          label="Rechercher un dispositif" placeholder="Nom, commune, département, code UAI…"
+          operator="words" count count-label="dispositif"
+          url-sync url-search-param="q">
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
       <dsfr-data-kpi source="ulis-f" value="count" format="nombre"
         heading="Dispositifs" label="dans la sélection"></dsfr-data-kpi>
       <dsfr-data-kpi source="ulis-f" value="libelle_departement:distinct" format="nombre"
         heading="Départements" label="couverts (sur 101)"></dsfr-data-kpi>
-      <dsfr-data-kpi source="ulis-f" value="libelle_region:distinct" format="nombre"
-        heading="Régions" label="couvertes (sur 18)"></dsfr-data-kpi>
-      <dsfr-data-kpi source="ulis-f" value="nom_commune:distinct" format="nombre"
-        heading="Communes" label="d'implantation"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ulis-f" value="count{rang:eq:3}" format="nombre"
+        heading="Après le collège" label="lycées et EREA de la sélection"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-
-        <h2 class="fr-h6">Filtrer</h2>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="ulis-f" source="ulis-q"
-          fields="type_etablissement, libelle_region, libelle_academie, libelle_departement"
-          labels="type_etablissement:Type d'établissement | libelle_region:Région | libelle_academie:Académie | libelle_departement:Département"
-          display="type_etablissement:checkbox | libelle_region:multiselect | libelle_academie:multiselect | libelle_departement:multiselect"
-          disjunctive="type_etablissement, libelle_region, libelle_academie, libelle_departement"
+          fields="type_txt, libelle_region, libelle_academie, libelle_departement"
+          labels="type_txt:Type d'établissement | libelle_region:Région | libelle_academie:Académie | libelle_departement:Département"
+          display="type_txt:checkbox | libelle_region:multiselect | libelle_academie:multiselect | libelle_departement:multiselect"
+          searchable="libelle_departement"
+          disjunctive="type_txt, libelle_region, libelle_academie, libelle_departement"
           max-values="10" url-sync url-params>
         </dsfr-data-facets>
-        <p class="fr-text--xs fr-mt-2w fr-mb-0">
-          La facette « Secteur » n'existe pas ici&nbsp;: les 52 dispositifs sont publics.
-          Une facette à valeur unique n'est pas un filtre.
-        </p>
-        </details>
-      </div>
-      <div class="fr-col-12 fr-col-md-9">
-        <div class="odv-viz" data-code="Implantation des ULIS pour troubles des fonctions visuelles">
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des ULIS pour troubles des fonctions visuelles">
+        <!-- Un seul point ultramarin (Collège Terre Sainte, Saint-Pierre de La
+             Réunion) : un encart, et le fit reste sur la métropole (fit-zone par
+             défaut dès qu'un encart existe). -->
         <dsfr-data-map id="carte-ulis"
-          name="Implantation des ULIS pour troubles des fonctions visuelles"
-          height="580px" tiles="ign-plan" tiles-style="muted"
-          fit-bounds fit-max-zoom="12">
-          <!-- Pas d'`insets` : aucune ligne ultramarine dans ce jeu (vérifié —
-               9 régions, toutes métropolitaines). Poser `insets="drom"` créerait
-               cinq encarts vides ET clipperait le fit sur la métropole sans
-               raison. C'est le pendant du piège BUG-004, pris par l'autre bout :
-               il faut regarder les données AVANT de poser l'attribut. -->
+          name="ULIS pour troubles des fonctions visuelles, par étape du parcours"
+          height="600px" tiles="ign-plan" tiles-style="muted"
+          fit-bounds fit-max-zoom="11">
           <dsfr-data-map-layer id="couche-ulis" source="ulis-f" type="circle"
-            geo-field="position" radius="8" fill-opacity="0.9"
-            color-field="type_etablissement"
-            color-map="Ecole:#0b72b5,Collège:#19630a,Lycée:#ba022a,EREA:#f8b334"
+            geo-field="position" radius="7" fill-opacity="0.9"
+            color-field="etape"
+            color-map="École:#a1a1f8,Collège:#4747d3,Lycée ou EREA:#e1000f"
             tooltip-field="nom_etablissement"
             max-items="500">
           </dsfr-data-map-layer>
-          <dsfr-data-map-legend for="couche-ulis" label="Type d'établissement"></dsfr-data-map-legend>
-          <dsfr-data-map-popup mode="panel-right" title-field="nom_etablissement" width="360px">
+          <dsfr-data-map-legend for="couche-ulis" label="Étape du parcours"></dsfr-data-map-legend>
+          <!-- Encart explicite, zoom 8 : le préréglage `la-reunion` (zoom 9) coupe
+               le sud de l'île dans un encart de 10 rem — et Saint-Pierre avec lui. -->
+          <dsfr-data-map-inset territory="la-reunion" zoom="8"></dsfr-data-map-inset>
+          <dsfr-data-map-popup mode="panel-right" title-field="nom_etablissement" width="380px">
             <template>
-              <p class="fr-badge fr-badge--sm fr-mb-3v">{{type_etablissement}}</p>
-
+              <p class="fr-badge fr-badge--sm fr-mb-3v">{{type_txt}}</p>
               <p class="fr-text--sm fr-mb-3v">
                 <strong>{{nom_commune}}</strong> — {{libelle_departement}}<br>
                 académie de {{libelle_academie}} · {{libelle_region}}
               </p>
-
-              <!-- Le contact : renseigné pour les 52 lignes, affiché NULLE PART
-                   par l'original — qui expose pourtant `web` (27/52) et
-                   `fiche_onisep` (29/52). Pour un annuaire d'orientation destiné
-                   à des familles qui préparent une affectation, c'est le champ
-                   le plus utile du jeu, et le seul complet. -->
               <p class="fr-text--sm fr-mb-1v">
                 <a href="mailto:{{mail}}">{{mail}}</a>
               </p>
@@ -162,129 +313,111 @@
                 <a href="{{web:url}}" target="_blank" rel="noopener external">Site de l'établissement</a></p>{{/if}}
               {{#if fiche_onisep}}<p class="fr-text--sm fr-mb-3v">
                 <a href="{{fiche_onisep:url}}" target="_blank" rel="noopener external">Fiche Onisep</a></p>{{/if}}
-
               <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="ulis-f" for="carte-ulis" table download
-          filename="ulis-tfv.csv"
+        <dsfr-data-normalize id="ulis-tableau" source="ulis-f"
+          rename="nom_etablissement:Établissement | type_txt:Type | nom_commune:Commune | libelle_departement:Département | libelle_academie:Académie | libelle_region:Région | mail:Contact | uai:UAI"></dsfr-data-normalize>
+        <dsfr-data-a11y source="ulis-tableau" for="carte-ulis" table download
+          filename="ulis-tfv-2024.csv"
           label="Données de la carte"
-          description="Un dispositif ULIS-TFV par ligne : établissement, type, commune, département, académie, contact."
-          label-field="nom_etablissement"
-          value-field="type_etablissement, nom_commune, libelle_departement, libelle_academie, libelle_region, mail">
+          description="Un dispositif ULIS-TFV par ligne pour la sélection courante : établissement, type, commune, département, académie, région, contact, UAI."
+          label-field="Établissement"
+          value-field="Type, Commune, Département, Académie, Région, Contact, UAI">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <h2 class="fr-h5">La concentration régionale</h2>
-        <div class="odv-viz" data-code="ULIS-TFV par région">
-        <dsfr-data-chart id="g-ulis-reg" source="ulis-reg" type="bar" horizontal
-          label-field="libelle_region" value-field="n" name='["Dispositifs"]'
-          databox databox-title="ULIS-TFV par région"
-          databox-source="Ministère de l'éducation nationale — fr-en-ulis-tfv"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-ulis-reg" source="ulis-reg" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          Neuf régions sur dix-huit. L'Île-de-France en compte 25, soit près de la moitié du
-          total national — le fait que l'original laisse deviner sans jamais l'écrire.
-        </p>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <h2 class="fr-h5">Par type d'établissement</h2>
-        <div class="odv-viz" data-code="ULIS-TFV par type d'établissement">
-        <dsfr-data-chart id="g-ulis-type" source="ulis-type" type="pie"
-          label-field="type_etablissement" value-field="n"
-          databox databox-title="ULIS-TFV par type d'établissement"
-          databox-source="Ministère de l'éducation nationale — fr-en-ulis-tfv"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-ulis-type" source="ulis-type" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          23 écoles, 21 collèges, 6 lycées et 2 EREA : la couverture se raréfie à mesure que
-          l'élève avance dans sa scolarité.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <dsfr-data-query id="ulis-reg" source="ulis-f" group-by="libelle_region"
-    aggregate="uai:count:n" where="libelle_region:isnotnull" order-by="n:desc"></dsfr-data-query>
-  <dsfr-data-query id="ulis-type" source="ulis-f" group-by="type_etablissement"
-    aggregate="uai:count:n" where="type_etablissement:isnotnull" order-by="n:desc"></dsfr-data-query>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">Les 52 dispositifs</h2>
-    <p class="fr-text--sm fr-mb-3w">
-      L'original n'a <strong>ni liste ni tableau</strong> : la carte est son seul mode d'accès à
-      la donnée. Sur 52 lignes, un tableau trié se lit plus vite qu'une carte.
-    </p>
-    <div class="odv-viz" data-code="Graphique">
+    <h3 class="fr-h5 fr-mt-6w">La liste</h3>
     <dsfr-data-list source="ulis-f"
-      columns="nom_etablissement, type_etablissement, nom_commune, libelle_departement, libelle_academie, libelle_region, mail"
+      columns="nom_etablissement:Établissement, type_txt:Type, nom_commune:Commune, libelle_departement:Département, libelle_academie:Académie, mail:Contact"
       search sort pagination="25" count-label="dispositif">
     </dsfr-data-list>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Les ULIS-TFV sont rares — un quart des départements en a
+        une — mais c'est leur répartition par âge qui frappe&nbsp;: l'offre de l'école et du
+        collège, concentrée en Île-de-France, ne se prolonge au lycée que dans quatre villes.
+        Pour un élève aveugle ou malvoyant, la poursuite d'études en ULIS-TFV après la troisième
+        passe le plus souvent par un changement de ville. Ce que le jeu ne dit pas&nbsp;: combien
+        d'élèves sont concernés, ni comment sont accompagnés ceux qui vivent loin de ces
+        dispositifs.</p>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Un dispositif, pas une place.</strong> Le jeu dit où une ULIS-TFV existe,
+          pas combien d'élèves elle accueille ni combien de places elle offre&nbsp;: les
+          comparaisons de la page portent sur des implantations, pas sur une capacité.</li>
+        <li><strong>« Après le collège » réunit lycées et EREA.</strong> Les deux EREA
+          (Villeurbanne, Saint-Lô) accueillent des élèves du second degré, dans des villes qui
+          ont déjà un lycée à ULIS-TFV&nbsp;: les compter à part n'ajoute aucune ville.</li>
+        <li><strong>Un département sans ULIS-TFV n'est pas un département sans
+          accompagnement.</strong> D'autres formes de scolarisation des élèves déficients visuels
+          existent (services d'accompagnement, établissements médico-sociaux) et ne figurent pas
+          dans ce jeu.</li>
+        <li><strong>Public seulement.</strong> Tous les dispositifs du jeu sont publics&nbsp;;
+          d'où l'absence de filtre « secteur ».</li>
+        <li><strong>Un millésime.</strong> La rentrée 2024, sans historique&nbsp;: la page ne dit
+          pas si l'offre s'étend ou se contracte.</li>
+        <li><strong>Angles écartés.</strong> La carte seule (elle montre la concentration
+          francilienne, pas la rupture du parcours)&nbsp;; le camembert par type (il ne dit pas
+          où)&nbsp;; un taux par habitant ou par élève (le jeu ne porte aucun effectif, et un
+          dispositif régional n'a pas de bassin défini).</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — ULIS-TFV — ce que la reproduction a coûté</summary>
+  <!-- ====================== Analyse ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — ULIS-TFV</h2>
 
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/implantation-ulis-tfv" target="_blank" rel="noopener external">/pages/implantation-ulis-tfv</a>.
-        Fiche d'audit : <code>docs/portail-education/implantation-ulis-tfv.md</code>.
-        C'est la plus petite dataviz du portail — 52 lignes — et la reproduction la plus courte
-        de tout ce banc d'essai.
+        <a href="https://data.education.gouv.fr/pages/implantation-ulis-tfv" target="_blank" rel="noopener external">/pages/implantation-ulis-tfv</a>
+        — une carte de 52 épingles sans un chiffre ni une légende. Fiche d'audit :
+        <code>docs/portail-education/implantation-ulis-tfv.md</code>. Recréée le 2026-09-26 en
+        page éditoriale&nbsp;; la reproduction précédente (compteurs et répartition par région)
+        est remplacée.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Tout, et en quelques minutes.</strong> Sixième emploi du gabarit
-              « annuaire cartographié » sur ce portail. Aucun arbitrage de chargement, aucun
-              plafond, aucune correction de données — le jeu n'a <em>aucun</em> trou, ce qui
-              n'était arrivé sur aucune autre page de ce banc.</li>
-            <li><strong>Le contact, enfin exposé.</strong> Le champ <code>mail</code> est
-              renseigné pour les 52 lignes et n'apparaît nulle part sur l'original, qui affiche
-              pourtant deux liens moins complets (site web 27/52, fiche Onisep 29/52). Pour un
-              annuaire destiné à des familles qui préparent une affectation, c'est le champ le
-              plus utile du jeu. Une ligne de template.</li>
-            <li><strong>Trois compteurs qui disent la rareté.</strong> Départements et régions
-              couverts, rapportés à 101 et 18 : le message central de la page — la concentration —
-              devient un chiffre au lieu d'une impression visuelle. L'original n'affiche jamais
-              le nombre 52.</li>
+            <li><strong>Tout le calcul.</strong> 52 lignes en un export&nbsp;; un
+              <code>compute</code> pose l'étape du parcours, des <code>dsfr-data-query</code>
+              comptent dispositifs et départements distincts (<code>:distinct</code>), et deux
+              jointures sur une clé constante donnent la ligne du chapô.</li>
+            <li><strong>Le graphique empilé par région.</strong> <code>series-field</code> sur
+              les données longues, <code>color-map</code> pour tenir les couleurs de la carte, un
+              <code>dsfr-data-pivot</code> pour le tableau équivalent.</li>
+            <li><strong>Le point réunionnais.</strong> Un <code>dsfr-data-map-inset</code>&nbsp;: le
+              cadrage reste sur la métropole, sans rien poser d'autre.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Rien.</strong> Deuxième page consécutive sans une seule friction, après
-              les EREA. C'est le résultat attendu d'un gabarit rodé, et il mérite d'être noté
-              comme tel plutôt que passé sous silence : sur les huit pages du portail Éducation
-              reproduites à ce jour, <strong>les six premières ont produit sept constats et les
-              deux dernières aucun</strong>.</li>
-            <li><strong>Deux décisions se prennent en regardant les données, pas la
-              documentation.</strong> D'abord ne <em>pas</em> poser <code>insets="drom"</code> :
-              aucune ligne n'est ultramarine, l'attribut créerait cinq encarts vides et clipperait
-              le cadrage sans raison. Ensuite ne <em>pas</em> créer de facette « Secteur » : les
-              52 dispositifs sont publics, et une facette à valeur unique occupe de la place sans
-              filtrer quoi que ce soit. Les deux erreurs auraient été silencieuses — une carte
-              avec des encarts vides et une facette inutile ne lèvent aucune alerte.</li>
+            <li><strong>Rien du côté de la bibliothèque.</strong> Le travail a été de trouver
+              l'angle&nbsp;: le jeu n'a pas de trou, et la reproduction précédente s'était arrêtée
+              au constat de la concentration.</li>
+            <li><strong>Une affirmation fausse de la page précédente.</strong> Elle écrivait
+              « aucune ligne ultramarine — 9 régions, toutes métropolitaines » et en tirait l'absence
+              d'encart&nbsp;; le jeu compte un collège à La Réunion (Terre Sainte). Rejoué à l'API
+              le 2026-09-26.</li>
+            <li><strong>Un encart qui coupe le sud de l'île.</strong> Le préréglage
+              <code>la-reunion</code> (zoom 9) laisse Saint-Pierre, où est le seul collège
+              réunionnais du jeu, hors d'un encart de 10&nbsp;rem&nbsp;: l'encart était vide. Vu à la
+              capture&nbsp;; <code>zoom="8"</code> sur l'encart le rend.</li>
           </ul>
         </div>
       </div>
@@ -296,28 +429,25 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-dataset-context</code> + <code>ods-map</code></td><td><code>dsfr-data-source</code> + <code>dsfr-data-map</code></td><td>Équivalent</td></tr>
-            <tr><td>aucun dénombrement</td><td>4 <code>dsfr-data-kpi</code></td><td>Meilleur : la rareté devient un chiffre</td></tr>
-            <tr><td>ni liste ni tableau</td><td><code>dsfr-data-list</code> + <code>dsfr-data-a11y</code></td><td>Meilleur : sur 52 lignes, un tableau bat une carte</td></tr>
-            <tr><td><code>mail</code> présent dans le jeu, jamais affiché</td><td>lien <code>mailto:</code> dans la popup</td><td>Meilleur : le champ le plus utile, et le seul complet</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-search</code>, <code>url-sync</code>, légende</td><td>Sans équivalent côté Opendatasoft</td></tr>
+            <tr><td><code>ods-dataset-context</code> × 6 sur un même jeu</td><td>une <code>dsfr-data-source fetch-mode="export"</code></td><td>Meilleur : un contexte suffit</td></tr>
+            <tr><td>quatre couches <code>refine.type_etablissement</code>, sans légende</td><td>une <code>dsfr-data-map-layer</code> + <code>color-map</code> + <code>dsfr-data-map-legend</code></td><td>Meilleur</td></tr>
+            <tr><td>cadrage mondial imposé par un point</td><td><code>dsfr-data-map-inset territory="la-reunion" zoom="8"</code></td><td>Meilleur</td></tr>
+            <tr><td>listes non cascadées, sans compteur</td><td><code>dsfr-data-facets</code></td><td>Meilleur</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-query</code>, <code>dsfr-data-join</code>, <code>dsfr-data-pivot</code>, <code>dsfr-data-repeat</code>, <code>dsfr-data-a11y</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong> et sans obstacle — la plus courte du banc.
-          Ce qu'elle apporte n'est pas technique : l'original montre 52 points sur une carte et
-          laisse le lecteur deviner qu'ils sont rares et mal répartis&nbsp;; ici c'est écrit,
-          compté, et filtrable. <strong>Sur un jeu sans défaut, tout le travail de reproduction
-          se déplace vers l'énoncé</strong> — et c'est peut-être la meilleure démonstration
-          de ce banc d'essai : quand la donnée est propre et la bibliothèque adéquate, il ne
-          reste que la question de ce qu'on veut dire.</p>
+        <p>Sur un jeu propre de 52 lignes, la bibliothèque ne coûte rien&nbsp;; <strong>tout le
+          travail est dans l'angle</strong>. Compter par région disait « concentré en
+          Île-de-France »&nbsp;; compter par étape du parcours montre ce que la carte cachait — une
+          offre qui s'arrête pour l'essentiel à la troisième.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 
