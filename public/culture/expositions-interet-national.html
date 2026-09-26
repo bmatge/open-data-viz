@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Expositions d'intérêt national — open-data-viz</title>
+  <meta name="description" content="De 2014 à 2025, le label « Exposition d'intérêt national » a distingué 261 expositions dans 170 musées de France : six sur dix ne l'ont eu qu'une fois, mais les 68 qui reviennent totalisent près des deux tiers des labels, et plus de la moitié des musées labellisés en 2024 et 2025 l'avaient déjà été. Création avec dsfr-data sur l'API Tabular de data.gouv.fr, croisée avec Muséofile.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 28 de docs/portail-culture/proposition.md.
+
+       DEUX JEUX, DEUX REQUÊTES D'EXPORT :
+       - « Liste des expositions ayant reçu le label Exposition d'intérêt
+         national » (ressource 3f102027…) : 276 lignes, une par couple musée ×
+         exposition, 2014-2025. Trois colonnes projetées.
+       - Muséofile (5ccd6238…) : 1 216 musées de France, identifiant unique
+         (1 216 valeurs distinctes, vérifié le 2026-09-27). Il donne le NOM, la
+         ville, la région et les coordonnées de chaque musée, et le dénominateur
+         des taux.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué le 2026-09-27) :
+       - « 276 ; 33 en 2025 » : 276 lignes dont UNE entièrement vide (2025),
+         donc 275 labels-musée et 32 en 2025. Neuf expositions sont portées par
+         plusieurs musées (23 lignes) : 261 expositions, pas 275.
+       - Le nom du musée ne peut pas servir de clé : onze identifiants ont deux
+         graphies (« museum » / « muséum », apostrophes droite et courbe, « musée
+         de Flandre » / « musée départemental de Flandre »…). La page regroupe par
+         identifiant Muséofile et prend le nom dans Muséofile.
+       - Une ligne se contredit : 2016, nom « musée des beaux-arts » (Bordeaux),
+         mais identifiant, adresse web et coordonnées du musée d'Aquitaine. La
+         page suit l'identifiant, et le dit en fin de page.
+       - La région s'écrit de trois façons pour la Bourgogne-Franche-Comté (7,
+         11 et 2 lignes) : la région vient donc aussi de Muséofile.
+       ========================================================================== -->
+
+  <!-- ---------- Les labels : trois colonnes, export Parquet ---------- -->
+  <dsfr-data-source id="ein" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="3f102027-0472-46f9-9a01-8d2526659cb5"
+    fetch-mode="export"
+    select="Année, ID Muséofile, Titre de l'exposition">
+  </dsfr-data-source>
+
+  <!-- ---------- Muséofile : le nom, le lieu, et le nombre de musées de France ---------- -->
+  <dsfr-data-source id="museo" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="5ccd6238-4fb0-4b2c-b14a-581909489320"
+    fetch-mode="export"
+    select="Identifiant, Nom_officiel, Ville, Region, Coordonnees">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="ein-n" source="ein"
+    rename="ID Muséofile:id | Titre de l'exposition:titre | Année:annee"
+    numeric="annee"
+    compute="k = 'fr'; un = 1">
+  </dsfr-data-normalize>
+  <!-- La ligne entièrement vide du fichier est écartée ici, et comptée en fin de page. -->
+  <dsfr-data-query id="ein-ok" source="ein-n" where="id:isnotnull"></dsfr-data-query>
+  <dsfr-data-query id="ein-vide" source="ein-n" where="id:isnull" group-by="k" aggregate="un:sum:n"></dsfr-data-query>
+
+  <dsfr-data-normalize id="mf" source="museo"
+    rename="Identifiant:id"
+    replace-fields="Region:Territoires et départements d'outre-mer:Outre-mer"
+    compute="k = 'fr'; un = 1; geo = concat('[', Coordonnees, ']')">
+  </dsfr-data-normalize>
+
+  <!-- Un musée = un identifiant Muséofile : nombre de labels, première et dernière année -->
+  <dsfr-data-query id="mu" source="ein-ok" group-by="id"
+    aggregate="un:sum:n, annee:min:premiere, annee:max:derniere">
+  </dsfr-data-query>
+  <!-- Muséofile à droite : 1 216 identifiants uniques, donc une ligne par musée -->
+  <dsfr-data-join id="mu-j" left="mu" right="mf" on="id" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="mu-t" source="mu-j"
+    compute="revient = when n >= 2 then 1 else 0;
+             lab_rev = when n >= 2 then n else 0;
+             classe = when n >= 4 then '4 à 6 fois' when n = 3 then '3 fois' when n = 2 then '2 fois' else '1 fois';
+             ordre = when n >= 4 then 4 else n;
+             sous = concat(Ville, ' — labellisé de ', premiere, ' à ', derniere)">
+  </dsfr-data-normalize>
+
+  <!-- Synthèse : labels, musées, revenants ; expositions distinctes ; musées de France -->
+  <dsfr-data-query id="syn-mu" source="mu-t" group-by="k"
+    aggregate="un:sum:musees, n:sum:labels, revient:sum:rev, lab_rev:sum:lrev, n:max:nmax">
+  </dsfr-data-query>
+  <dsfr-data-query id="syn-ex" source="ein-ok" group-by="k"
+    aggregate="titre:distinct:nexpo, annee:min:a0, annee:max:a1">
+  </dsfr-data-query>
+  <dsfr-data-query id="syn-mf" source="mf" group-by="k" aggregate="un:sum:nmf"></dsfr-data-query>
+  <dsfr-data-join id="syn-1" left="syn-mu" right="syn-ex" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="syn-2" left="syn-1" right="syn-mf" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="syn" source="syn-2"
+    compute="p_mf = musees / nmf * 100;
+             p_lrev = lrev / labels * 100;
+             p_rev = rev / musees * 100;
+             une = musees - rev;
+             p_une = une / musees * 100;
+             nedit = a1 - a0 + 1">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Expositions d'intérêt national</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Expositions d'intérêt national&nbsp;: 170&nbsp;musées labellisés depuis 2014, et ceux qui reviennent font près des deux tiers des labels</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="syn">
+        <template>
+          De {{a0}} à {{a1}}, le label «&nbsp;Exposition d'intérêt national&nbsp;» a distingué {{nexpo:number:0}}&nbsp;expositions
+          dans {{musees:number:0}}&nbsp;musées de France, soit {{p_mf:number:0}}&nbsp;% des {{nmf:number:0}} que recense Muséofile.
+          {{une:number:0}} ne l'ont reçu qu'une fois&nbsp;; <strong>les {{rev:number:0}} autres l'ont reçu au moins deux fois et
+          totalisent {{p_lrev:number:0}}&nbsp;% des labels</strong>.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, «&nbsp;Liste des expositions ayant reçu le label Exposition d'intérêt national&nbsp;» et
+      Muséofile, servis par l'API Tabular de data.gouv.fr. Le label, créé en 1999, distingue des expositions organisées
+      par les musées de France «&nbsp;dans les régions&nbsp;»&nbsp;; le fichier ne remonte qu'à 2014. Un label est compté
+      une fois par musée&nbsp;: une exposition coproduite par trois musées compte pour chacun.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="nexpo:max" decimals="0" span="3"
+        heading="Expositions labellisées" label="dans tout le fichier, depuis 2014"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="musees:max" decimals="0" span="3"
+        heading="Musées labellisés" label="au moins une fois depuis 2014"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_mf:max" decimals="1" unit="%" span="3"
+        heading="Des musées de France" label="part des musées recensés par Muséofile"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_lrev:max" decimals="1" unit="%" span="3"
+        heading="Labels des musées qui reviennent" label="musées labellisés au moins deux fois"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — la répartition ======================= -->
+  <dsfr-data-query id="dist" source="mu-t" group-by="ordre, classe"
+    aggregate="un:sum, n:sum, un__sum:share_percent:pm, n__sum:share_percent:pl"
+    order-by="ordre:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="dist-t" source="dist"
+    compute="p_musees = round(pm, 1); p_labels = round(pl, 1); musees = un__sum; labels = n__sum"
+    rename="classe:Labels reçus">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dist">
+    <h2 id="t-dist" class="fr-h3">Six musées sur dix n'ont eu le label qu'une fois&nbsp;; les autres en font près des deux tiers</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="syn">
+        <template>
+          {{une:number:0}}&nbsp;musées, {{p_une:number:0}}&nbsp;% des musées labellisés, n'apparaissent qu'une fois dans le
+          fichier. Les {{rev:number:0}} autres ({{p_rev:number:0}}&nbsp;%) reviennent au moins deux fois&nbsp;: à eux seuls,
+          <strong>{{lrev:number:0}} des {{labels:number:0}}&nbsp;labels</strong>, {{p_lrev:number:1}}&nbsp;%.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des musées et part des labels selon le nombre de labels reçus">
+      <dsfr-data-chart id="g-dist" source="dist-t" type="bar"
+        label-field="Labels reçus" value-field="p_musees:Part des musées labellisés" value-fields="p_labels:Part des labels"
+        color-map="Part des musées labellisés:#929292,Part des labels:#000091"
+        unit-tooltip="%" y-min="0"
+        databox databox-title="Part des musées et part des labels selon le nombre de labels reçus par le musée, 2014 à la dernière année du fichier (%)"
+        databox-source="Ministère de la Culture — Expositions d'intérêt national (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dist" source="dist-t" label-field="Labels reçus" value-field="musees,p_musees,labels,p_labels"
+        description="Barres groupées pour quatre classes de musées selon le nombre de labels reçus depuis 2014 : une fois, deux fois, trois fois, quatre à six fois. Pour chaque classe, la part des musées labellisés (gris) et la part des labels (bleu). Les musées labellisés une seule fois sont six sur dix mais ne portent qu'un gros tiers des labels ; dans chacune des trois autres classes, la barre des labels dépasse celle des musées. Le tableau donne aussi les effectifs.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= QUI REVIENT — le podium ======================= -->
+  <dsfr-data-query id="top" source="mu-t" where="n:gte:4" order-by="n:desc, Nom_officiel:asc"></dsfr-data-query>
+  <dsfr-data-query id="top-syn" source="top" group-by="k" aggregate="un:sum:nb, n:sum:lab"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-top">
+    <h2 id="t-top" class="fr-h3">Lyon et Montpellier six fois, Toulouse et Rouen cinq&nbsp;: les habitués sont de grands musées de région</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="top-syn">
+        <template>
+          {{nb:number:0}}&nbsp;musées ont reçu le label au moins quatre fois, pour {{lab:number:0}}&nbsp;labels au total.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="syn">
+        <template>
+          Aucun ne l'a reçu plus de {{nmax:number:0}}&nbsp;fois en {{nedit:number:0}}&nbsp;éditions&nbsp;: le label revient,
+          il ne s'abonne pas.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <dsfr-data-podium source="top" label-field="Nom_officiel" subtitle-field="sous" value-field="n"
+      value-unit="labels" max-items="10" selected-palette="sequentialDescending">
+    </dsfr-data-podium>
+    <p class="fr-text--xs fr-hint-text">
+      Noms et villes tels que les publie Muséofile, pour l'identifiant porté par chaque ligne du fichier des labels.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — la part des revenants monte ======================= -->
+  <!-- Chaque ligne reçoit la première année de son musée (mu : un identifiant par ligne) -->
+  <dsfr-data-join id="lab-j" left="ein-ok" right="mu-t" on="id" type="inner" prefix-right="m_"></dsfr-data-join>
+  <dsfr-data-normalize id="lab" source="lab-j"
+    compute="deja = when annee > premiere then 1 else 0;
+             prem = when annee > premiere then 0 else 1;
+             statut = when annee > premiere then 'Déjà labellisé depuis 2014' else 'Premier label du fichier'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="an" source="lab" group-by="annee"
+    aggregate="prem:sum:premier, deja:sum:deja, un:sum:total, titre:distinct:expos"
+    order-by="annee:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="an-t" source="an"
+    compute="Annee = concat(annee, ''); p_deja = deja / total * 100"></dsfr-data-normalize>
+  <dsfr-data-query id="an-der" source="an-t" order-by="annee:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-bas" source="an-t" order-by="total:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-max" source="an-t" order-by="total:desc, annee:desc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-an">
+    <h2 id="t-an" class="fr-h3">En 2024 et 2025, plus de la moitié des musées labellisés l'avaient déjà été</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="an-der">
+        <template>
+          En {{annee}}, {{deja:number:0}} des {{total:number:0}}&nbsp;musées labellisés l'avaient déjà été depuis 2014, soit
+          <strong>{{p_deja:number:0}}&nbsp;%</strong>&nbsp;; {{premier:number:0}} le recevaient pour la première fois du fichier.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-max">
+        <template>
+          L'année la plus fournie est {{annee}}, avec {{total:number:0}}&nbsp;musées labellisés pour {{expos:number:0}}&nbsp;expositions.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-bas">
+        <template>
+          Au plus bas, en {{annee}}, seuls {{total:number:0}}&nbsp;musées ont été labellisés.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Musées labellisés par année, premier label ou retour">
+      <dsfr-data-chart id="g-an" source="an-t" type="bar" stacked
+        label-field="Annee" value-field="premier:Premier label du fichier" value-fields="deja:Déjà labellisé depuis 2014"
+        color-map="Premier label du fichier:#929292,Déjà labellisé depuis 2014:#000091"
+        y-min="0"
+        databox databox-title="Musées labellisés « Exposition d'intérêt national » par année, selon qu'ils l'avaient déjà été depuis 2014"
+        databox-source="Ministère de la Culture — Expositions d'intérêt national (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-an" source="an-t" label-field="Annee" value-field="total,premier,deja,p_deja,expos"
+        description="Barres empilées, une par année depuis 2014 : le nombre de musées labellisés, en gris ceux qui le sont pour la première fois dans le fichier, en bleu ceux qui l'avaient déjà été depuis 2014. La première année est entièrement grise par construction. La part bleue grandit par paliers : un quart à un tiers de 2015 à 2018, 42 à 50 % de 2019 à 2023, 56 à 59 % en 2024 et 2025. Le creux de 2021, neuf musées, tranche sur une série qui tourne autour de vingt-cinq. Le tableau donne aussi le nombre d'expositions distinctes.">
+      </dsfr-data-a11y>
+    </div>
+    <div class="fr-callout fr-mt-4w">
+      <h3 class="fr-callout__title fr-h6">Une hausse en partie mécanique</h3>
+      <p class="fr-callout__text fr-text--sm">
+        Le fichier commence en 2014 alors que le label existe depuis 1999&nbsp;: en 2014, tous les musées comptent comme
+        «&nbsp;nouveaux&nbsp;», et plus la série s'allonge, plus un musée a eu d'occasions d'y figurer déjà. Une part de la
+        hausse tient donc à la fenêtre d'observation, pas à la politique du label. Ce que la série montre sans ambiguïté,
+        c'est l'état des dernières années&nbsp;: plus de la moitié des musées distingués l'avaient déjà été dans la décennie.
+      </p>
+    </div>
+  </section>
+
+  <!-- ======================= TERRITOIRE — rapporté aux musées de France ======================= -->
+  <dsfr-data-query id="reg-mf" source="mf" group-by="Region" aggregate="un:sum:nmf"></dsfr-data-query>
+  <dsfr-data-query id="reg-ein" source="mu-t" group-by="Region" aggregate="un:sum:nein, n:sum:nlab"></dsfr-data-query>
+  <dsfr-data-join id="reg-j" left="reg-mf" right="reg-ein" on="Region" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="reg-t" source="reg-j"
+    compute="nein = coalesce(nein, 0); nlab = coalesce(nlab, 0); taux = round(nein / nmf * 100, 1)"
+    rename="Region:Région">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="reg-s" source="reg-t" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-query id="reg-1" source="reg-s" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-idf" source="reg-t" where="Région:eq:Île-de-France"></dsfr-data-query>
+  <dsfr-data-query id="reg-bas" source="reg-t" order-by="taux:asc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">Un musée ultramarin sur trois a été labellisé, un francilien sur dix</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="reg-1">
+        <template>
+          Région en tête, «&nbsp;{{Région}}&nbsp;» (le regroupement ultramarin de Muséofile)&nbsp;: {{nein:number:0}} des
+          {{nmf:number:0}}&nbsp;musées de France ont reçu au moins un label depuis 2014, <strong>{{taux:number:1}}&nbsp;%</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-idf">
+        <template>
+          L'Île-de-France, qui compte {{nmf:number:0}}&nbsp;musées de France, n'en a vu labelliser que {{nein:number:0}}
+          ({{taux:number:1}}&nbsp;%)&nbsp;;
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-bas">
+        <template>
+          la part la plus faible est celle de la région {{Région}}, {{taux:number:1}}&nbsp;%.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des musées de France labellisés au moins une fois, par région">
+      <dsfr-data-chart id="g-reg" source="reg-s" type="bar" horizontal
+        label-field="Région" value-field="taux" name="Musées labellisés au moins une fois (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Part des musées de France de chaque région labellisés « Exposition d'intérêt national » au moins une fois depuis 2014 (%)"
+        databox-source="Ministère de la Culture — Expositions d'intérêt national et Muséofile (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-s" label-field="Région" value-field="nmf,nein,taux,nlab"
+        description="Barres horizontales triées : pour chaque région, la part de ses musées de France (Muséofile) qui ont reçu au moins un label depuis 2014. L'outre-mer, mis en évidence, arrive en tête avec près d'un tiers ; le Grand Est, la Nouvelle-Aquitaine et les Pays de la Loire suivent autour de 19 % ; la plupart des régions sont entre 10 et 16 % ; l'Île-de-France et le Centre-Val de Loire ferment la marche, sous 10 %. Le tableau donne aussi le nombre de musées et de labels.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Région du musée dans Muséofile, qui regroupe les territoires ultramarins sous une seule entrée («&nbsp;Outre-mer&nbsp;»
+      ici). Sur de petits effectifs, un musée de plus ou de moins déplace le taux de plusieurs points&nbsp;: le tableau donne
+      les effectifs.
+    </p>
+
+    <h3 class="fr-h5 fr-mt-6w">Où sont les musées labellisés</h3>
+    <div class="odv-viz" data-code="Carte des musées labellisés, taille selon le nombre de labels">
+      <!-- 170 points : ni plafond max-items (PG-013) ni filtre, donc des encarts
+           DROM sans le problème de copies périmées de bibliotheques.html.
+           Vue FIXE (center + zoom) : avec fit-bounds, clippé par défaut à la
+           métropole, la vue s'ouvrait au zoom 5, de Dublin à Athènes (mesuré à
+           560 et 660 px de haut) ; la donnée ne change pas, un cadrage fixe suffit. -->
+      <dsfr-data-map id="carte" name="Musées de France labellisés Exposition d'intérêt national depuis 2014"
+        height="620px" tiles="ign-plan" tiles-style="muted"
+        insets="drom" center="46.95,2.6" zoom="6">
+        <dsfr-data-map-layer id="couche" source="mu-t" type="circle"
+          geo-field="geo" radius-field="n" radius-min="4" radius-max="16" fill-opacity="0.8"
+          tooltip-field="Nom_officiel">
+        </dsfr-data-map-layer>
+        <dsfr-data-map-popup mode="panel-right" title-field="Nom_officiel" width="340px">
+          <template>
+            <p class="fr-text--sm fr-mb-1v"><strong>{{Ville}}</strong> — {{Region}}</p>
+            <p class="fr-text--sm fr-mb-0">{{n}}&nbsp;label(s), de {{premiere}} à {{derniere}}</p>
+          </template>
+        </dsfr-data-map-popup>
+      </dsfr-data-map>
+      <p class="fr-text--xs fr-hint-text fr-mt-1w">
+        Cadrages fixes&nbsp;: la carte s'ouvre sur la France continentale, le palais Fesch d'Ajaccio est juste sous le
+        cadre (faire glisser la carte), et l'encart de La Réunion ne montre qu'un des cinq musées labellisés de l'île
+        (relevé le 27&nbsp;septembre 2026). Tous figurent dans le tableau de la carte et dans l'exploration.
+      </p>
+      <dsfr-data-a11y for="carte" source="mu-t" download filename="musees-exposition-interet-national.csv"
+        label="Données de la carte" label-field="Nom_officiel" value-field="n"
+        description="Carte de France avec encarts pour l'outre-mer, un cercle par musée labellisé depuis 2014, d'autant plus grand qu'il a reçu de labels. Les cercles couvrent tout le territoire, plus serrés dans le Nord, en Normandie, dans le Grand Est et en Auvergne-Rhône-Alpes, clairsemés au centre du pays ; les plus grands sont à Lyon, Montpellier, Toulouse, Rouen, Lille, Cassel et Villeneuve-d'Ascq ; Paris n'en porte qu'un. Le tableau donne les mêmes musées.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION — toutes les expositions ======================= -->
+  <dsfr-data-normalize id="ex" source="lab"
+    rename="annee:Année | Region:Région | titre:Exposition | Nom_officiel:Musée"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: toutes les expositions labellisées</h2>
+    <p class="fr-text--sm">
+      Une ligne par musée et par exposition. Cherchez un musée, une ville, un titre, ou filtrez par année et par région.
+    </p>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="ex-f" source="ex"
+          fields="Année, Région, statut" labels="statut:Pour ce musée"
+          display="Année:multiselect | Région:multiselect | statut:checkbox"
+          sort="Année:alpha:desc | Région:alpha:asc">
+        </dsfr-data-facets>
+      </details>
+
+      <div>
+        <dsfr-data-list source="ex-f"
+          columns="Année:Année, Exposition:Exposition, Musée:Musée, Ville:Ville, Région:Région"
+          sort="Année:desc" search pagination="20" count-label="label|labels" export="csv"
+          caption="Expositions labellisées « Exposition d'intérêt national », une ligne par musée">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <dsfr-data-query id="co" source="ein-ok" group-by="titre" aggregate="un:sum:nm"></dsfr-data-query>
+  <dsfr-data-query id="co-m" source="co" where="nm:gt:1"></dsfr-data-query>
+  <dsfr-data-query id="co-s" source="co-m" aggregate="un:count:nexpo, nm:sum:lignes, nm:max:nmax"></dsfr-data-query>
+  <dsfr-data-query id="co-t" source="co-m" order-by="nm:desc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="co-s">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Des expositions partagées.</strong> {{nexpo:number:0}}&nbsp;expositions sont portées par plusieurs musées
+            ({{lignes:number:0}} lignes, jusqu'à {{nmax:number:0}} musées pour une seule)&nbsp;: elles comptent une fois dans le
+            nombre d'expositions, une fois par musée dans les labels. C'est pourquoi les labels sont plus nombreux que les
+            expositions.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="ein-vide">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Une ligne vide.</strong> Le fichier publie {{n:number:0}}&nbsp;ligne sans musée, sans titre ni lieu,
+            datée 2025&nbsp;: elle est écartée de tous les comptes.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Les noms du fichier.</strong> Onze musées y ont deux graphies (relevé le 27&nbsp;septembre 2026)&nbsp;: la page
+        regroupe par identifiant Muséofile et affiche le nom de Muséofile. Une ligne se contredit&nbsp;: en 2016, un label au nom
+        du «&nbsp;musée des beaux-arts&nbsp;» de Bordeaux porte l'identifiant, l'adresse web et les coordonnées du musée
+        d'Aquitaine. La page suit l'identifiant&nbsp;: ce label est compté au musée d'Aquitaine.</li>
+      <li><strong>Les labels avant 2014.</strong> Le label existe depuis 1999, le fichier commence en 2014&nbsp;: «&nbsp;premier
+        label&nbsp;» veut dire premier du fichier, pas premier de l'histoire du musée.</li>
+      <li><strong>Ce que le label apporte.</strong> Ni montant de soutien, ni fréquentation des expositions&nbsp;: le fichier
+        ne dit que qui a été labellisé, et quand. Il ne dit pas non plus combien de musées ont candidaté.</li>
+      <li><strong>La cible du label.</strong> Le label vise les expositions organisées «&nbsp;dans les régions&nbsp;»&nbsp;;
+        un taux régional faible, en Île-de-France notamment, décrit donc la cible du label autant que les musées.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création sur un petit fichier du ministère de la Culture, servi par
+        l'API Tabular de data.gouv.fr et croisé avec Muséofile. Le cadrage demandait «&nbsp;quels musées reviennent&nbsp;?&nbsp;»&nbsp;;
+        la donnée répond&nbsp;: quatre sur dix, qui font près des deux tiers des labels, et de plus en plus chaque année.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Deux fichiers, deux exports.</strong> <code>fetch-mode="export"</code> lit les deux exports Parquet,
+              sans pagination ni délégation&nbsp;: tout se calcule en aval.</li>
+            <li><strong>Le nom juste par la jointure.</strong> Muséofile a un identifiant unique par musée&nbsp;: une
+              <code>dsfr-data-join</code> à droite corrige les graphies du fichier des labels sans une ligne de nettoyage.</li>
+            <li><strong>Premier label ou retour.</strong> <code>annee:min</code> par musée, rejoint à chaque ligne, puis un
+              <code>when annee &gt; premiere</code>&nbsp;: la série empilée en trois balises.</li>
+            <li><strong>Des taux plutôt que des comptes.</strong> Le dénominateur (musées de France par région) vient du même
+              Muséofile, par un <code>group-by</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>La clé n'est pas le nom.</strong> Regrouper par nom aurait coupé onze musées en deux&nbsp;; seul un
+              <code>group-by</code> sur l'identifiant, comparé aux noms, l'a montré.</li>
+            <li><strong>Trois graphies d'une même région</strong> dans le fichier des labels&nbsp;: la région est reprise de
+              Muséofile, qui a les siennes («&nbsp;Territoires et départements d'outre-mer&nbsp;», raccourci par
+              <code>replace-fields</code>).</li>
+            <li><strong>Une ligne vide dans un fichier de 276.</strong> Le compte «&nbsp;33 en 2025&nbsp;» du cadrage l'incluait.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger les deux jeux Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export"</code></td><td>Natif</td></tr>
+            <tr><td>Nom, lieu, région d'un musée</td><td><code>dsfr-data-join on="id"</code> sur Muséofile</td><td>Natif</td></tr>
+            <tr><td>Nombre d'expositions distinctes</td><td><code>aggregate="titre:distinct"</code></td><td>Natif</td></tr>
+            <tr><td>Part des musées et des labels par classe</td><td><code>compute</code> (classe) + <code>share_percent</code></td><td>Natif</td></tr>
+            <tr><td>Premier label ou retour, par année</td><td><code>annee:min</code> + <code>dsfr-data-join</code> + <code>compute when</code></td><td>Natif, trois balises</td></tr>
+            <tr><td>Musées les plus labellisés</td><td><code>dsfr-data-podium</code></td><td>Natif</td></tr>
+            <tr><td>Carte, rayon selon le nombre de labels</td><td><code>dsfr-data-map-layer radius-field</code> + <code>insets="drom"</code></td><td>Natif</td></tr>
+            <tr><td>Toutes les expositions</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-list search</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un petit fichier, un référentiel, et la question se tranche dans la page.</strong> L'outil n'a posé aucune
+          limite&nbsp;; ce qui a coûté, c'est la qualité du fichier des labels (graphies, une ligne vide, une ligne
+          contradictoire), et le référentiel Muséofile l'a absorbée par une jointure.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la page porte une carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

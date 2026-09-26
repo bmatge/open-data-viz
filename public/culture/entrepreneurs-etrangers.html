@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Entrepreneurs de spectacles étrangers, un mois pile — open-data-viz</title>
+  <meta name="description" content="Un entrepreneur de spectacles établi hors de France doit prévenir l'État un mois avant de jouer : la plupart déclarent à un mois pile, et plus d'un sur quatre en deçà. Belgique et États-Unis en tête, une première date sur deux en Île-de-France, un passage sur trois d'un seul jour. Création avec dsfr-data à partir des déclarations publiées par le ministère de la Culture (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 26 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte la base « Activité temporaire en France
+       d'entrepreneurs de spectacles établis hors de France » du ministère de la Culture,
+       mise à jour chaque jour, servie par Tabular. Page sœur : entrepreneurs-spectacles.
+
+       L'HISTOIRE. La description du jeu donne la règle : un entrepreneur établi hors de
+       France informe la DRAC « au moins un mois au préalable ». Le délai entre le dépôt
+       et le début d'activité annoncé se calcule ligne à ligne : il s'entasse juste après
+       trente jours, et plus d'une déclaration sur quatre est en deçà. C'est l'angle ; le
+       cadrage (« 1 658 déclarations, Royaume-Uni 171 ») donnait un volume et un pays qui
+       n'est que troisième.
+
+       LE CHARGEMENT. 1 658 lignes, export Parquet : `fetch-mode="export"`, une requête.
+
+       LES DATES. Pas de fonction de différence de dates dans `compute` : le délai et la
+       durée passent par un numéro de jour calculé avec year() / month() / day() et
+       floor() (formule des jours civils, mois décalés pour mettre février en fin
+       d'année). `date_debut_activite` est typée TEXTE par Tabular (une valeur
+       « 252026-04-03 » l'empêche d'être une date) : year() rend null sur les valeurs
+       malformées. Une ligne dont le début est hors 2024-2028 ou la fin avant le début
+       est écartée des délais et des durées (« dates incohérentes »), et comptée.
+
+       LA ZONE. Le préfixe du numéro de dossier dit l'espace de l'entrepreneur : IE =
+       Espace économique européen hors France, HE = hors EEE (description du jeu).
+       `contains(numero, 'IE-')` le lit sans fonction de sous-chaîne.
+       ========================================================================== -->
+
+  <dsfr-data-source id="dec" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="e6a3517f-dac4-446f-bffd-02216be7bfb0"
+    fetch-mode="export" max-records="25000">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="dec-n" source="dec" trim
+    rename="_id:numero | region_premiere_representation:region"
+    compute="un = 1; k = 1;
+             zone = when contains(numero, 'IE-') then 'Espace économique européen' else 'Hors de l’EEE';
+             ie = when contains(numero, 'IE-') then 1 else 0;
+             pays_lib = when is_empty(pays) then 'Non renseigné' else pays;
+             sans_pays = when is_empty(pays) then 1 else 0;
+             france = when pays = 'France' then 1 else 0;
+             statut_vide = when is_empty(status) then 1 else 0;
+             categorie_lib = when categorie = 1 then '1 — Exploitant de lieu'
+                             when categorie = 2 then '2 — Producteur, entrepreneur de tournées'
+                             when categorie = 3 then '3 — Diffuseur'
+                             else 'Non renseignée';
+             cat2 = when categorie = 2 then 1 else 0;
+             idf = when region = 'Île-de-France' then 1 else 0;
+             y_a = year(date_debut_activite); m_a = month(date_debut_activite);
+             y_f = year(date_fin_activite); m_f = month(date_fin_activite);
+             y_d = year(date_depot_dossier); m_d = month(date_depot_dossier);
+             ya2 = y_a - (when m_a &lt;= 2 then 1 else 0);
+             yf2 = y_f - (when m_f &lt;= 2 then 1 else 0);
+             yd2 = y_d - (when m_d &lt;= 2 then 1 else 0);
+             ma2 = when m_a &gt; 2 then m_a - 3 else m_a + 9;
+             mf2 = when m_f &gt; 2 then m_f - 3 else m_f + 9;
+             md2 = when m_d &gt; 2 then m_d - 3 else m_d + 9;
+             j_a = 365 * ya2 + floor(ya2 / 4) - floor(ya2 / 100) + floor(ya2 / 400) + floor((153 * ma2 + 2) / 5) + day(date_debut_activite);
+             j_f = 365 * yf2 + floor(yf2 / 4) - floor(yf2 / 100) + floor(yf2 / 400) + floor((153 * mf2 + 2) / 5) + day(date_fin_activite);
+             j_d = 365 * yd2 + floor(yd2 / 4) - floor(yd2 / 100) + floor(yd2 / 400) + floor((153 * md2 + 2) / 5) + day(date_depot_dossier);
+             coherent = when y_a &gt;= 2024 and y_a &lt;= 2028 and j_f &gt;= j_a then 1 else 0;
+             incoherent = 1 - coherent;
+             delai = when coherent = 1 then j_a - j_d else null;
+             duree = when coherent = 1 then j_f - j_a + 1 else null;
+             tardif = when coherent = 1 and delai &lt; 30 then 1 else 0;
+             apres = when coherent = 1 and delai &lt; 0 then 1 else 0;
+             pile = when coherent = 1 and delai &gt;= 30 and delai &lt; 45 then 1 else 0;
+             un_jour = when coherent = 1 and duree = 1 then 1 else 0;
+             long = when coherent = 1 and duree &gt; 30 then 1 else 0;
+             tranche_delai = when coherent = 0 then 'Dates incohérentes'
+                             when delai &lt; 0 then 'Déclarée après le début'
+                             when delai &lt; 15 then '0 à 14 jours avant'
+                             when delai &lt; 30 then '15 à 29 jours avant'
+                             when delai &lt; 45 then '30 à 44 jours avant'
+                             when delai &lt; 60 then '45 à 59 jours avant'
+                             when delai &lt; 90 then '60 à 89 jours avant'
+                             else '90 jours avant ou plus';
+             ordre_delai = when coherent = 0 then 9 when delai &lt; 0 then 1 when delai &lt; 15 then 2 when delai &lt; 30 then 3
+                           when delai &lt; 45 then 4 when delai &lt; 60 then 5 when delai &lt; 90 then 6 else 7;
+             tranche_duree = when coherent = 0 then 'Dates incohérentes'
+                             when duree = 1 then '1 jour'
+                             when duree &lt;= 3 then '2 ou 3 jours'
+                             when duree &lt;= 7 then '4 à 7 jours'
+                             when duree &lt;= 30 then '8 à 30 jours'
+                             else 'Plus de 30 jours';
+             ordre_duree = when coherent = 0 then 9 when duree = 1 then 1 when duree &lt;= 3 then 2 when duree &lt;= 7 then 3
+                           when duree &lt;= 30 then 4 else 5;
+             mois_depot = concat(y_d, '-', when m_d &lt; 10 then '0' else '', m_d);
+             k_depot = y_d * 100 + m_d">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="dec-n" group-by="k"
+    aggregate="un:sum:n, coherent:sum:coherent, incoherent:sum:incoherent, tardif:sum:tardif, apres:sum:apres,
+               pile:sum:pile, un_jour:sum:un_jour, long:sum:long, ie:sum:ie, idf:sum:idf, cat2:sum:cat2,
+               sans_pays:sum:sans_pays, france:sum:france, statut_vide:sum:statut_vide">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="he = n - ie;
+             part_tardif = tardif / coherent * 100;
+             part_pile = pile / coherent * 100;
+             part_un_jour = un_jour / coherent * 100;
+             part_idf = idf / n * 100;
+             part_cat2 = cat2 / n * 100;
+             part_ie = ie / n * 100;
+             statut_rempli = n - statut_vide">
+  </dsfr-data-normalize>
+
+  <!-- Premier et dernier dépôt : tri + limit (l'agrégat min de query rend l'année d'une
+       date ISO, pas la date — constaté sur la page sœur), joints sur la clé constante k. Le préfixe de jointure ne s'applique qu'aux champs en collision : la date du premier dépôt garde son nom, celle du dernier devient f_date_depot_dossier. -->
+  <dsfr-data-query id="debut" source="dec-n" order-by="date_depot_dossier:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="fin" source="dec-n" order-by="date_depot_dossier:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="syn-d" left="syn-t" right="debut" on="k" type="inner" prefix-right="d_"></dsfr-data-join>
+  <dsfr-data-join id="syn-df" left="syn-d" right="fin" on="k" type="inner" prefix-right="f_"></dsfr-data-join>
+
+  <!-- Pays étrangers distincts (hors « France » et hors pays non renseigné). -->
+  <dsfr-data-query id="pays-all" source="dec-n" where="pays:isnotnull, pays:neq:France" group-by="pays" aggregate="un:sum:n"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Entrepreneurs de spectacles étrangers</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Entrepreneurs de spectacles venus de l'étranger&nbsp;: la déclaration arrive à un mois pile — et plus d'une fois sur quatre, en deçà</h1>
+
+    <dsfr-data-repeat source="syn-df">
+      <template>
+        <p class="fr-text--lead">
+          Pour jouer en France sans licence française, un entrepreneur de spectacles établi à l'étranger doit prévenir
+          l'État au moins un mois avant. Du {{date_depot_dossier:date}} au {{f_date_depot_dossier:date}},
+          {{n:number}}&nbsp;déclarations ont été publiées. Le plus souvent, elles tombent juste après l'échéance&nbsp;:
+          {{part_pile:number:0}}&nbsp;% sont déposées 30 à 44 jours avant le début de l'activité. Mais
+          <strong>{{tardif:number}} ({{part_tardif:number:0}}&nbsp;%) le sont moins de trente jours avant</strong>, dont
+          {{apres:number}} après le début.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture — <em>Activité temporaire en France d'entrepreneurs de spectacles établis hors de France</em>,
+      base mise à jour chaque jour. Une ligne par déclaration. Délai = jours entre le dépôt et le début de l'activité
+      déclaré, calculé sur les déclarations aux dates cohérentes. Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/activite-temporaire-en-france-dentrepreneurs-de-spectacles-etablis-hors-de-france" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="3"
+        heading="Déclarations" label="publiées depuis l'ouverture de la base"></dsfr-data-kpi>
+      <dsfr-data-kpi source="pays-all" value="count" format="nombre" span="3"
+        heading="Pays d'établissement" label="étrangers, parmi les pays renseignés"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_tardif:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Moins de 30 jours" label="entre le dépôt et le début de l'activité"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_un_jour:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Un seul jour" label="d'activité en France déclaré"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — le délai ======================= -->
+  <dsfr-data-query id="dl" source="dec-n" where="coherent:eq:1" group-by="tranche_delai, ordre_delai" aggregate="un:sum:n" order-by="ordre_delai:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="dl-g" source="dl" rename="tranche_delai:Délai entre dépôt et début d'activité | n:Déclarations"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-delai">
+    <h2 id="t-delai" class="fr-h3">Le délai d'un mois est devenu une date limite&nbsp;: on dépose juste après, ou en deçà</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Sur {{coherent:number}}&nbsp;déclarations aux dates cohérentes, {{pile:number}} ({{part_pile:number:0}}&nbsp;%)
+          sont déposées entre 30 et 44 jours avant le début de l'activité&nbsp;: le mois exigé, à peine plus. Au-delà, les
+          barres retombent vite. En deçà du mois, on trouve {{tardif:number}}&nbsp;déclarations, soit {{part_tardif:number:0}}&nbsp;%,
+          dont {{apres:number}} déposées alors que l'activité avait déjà commencé.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations selon le délai entre le dépôt et le début de l'activité">
+      <dsfr-data-chart id="g-delai" source="dl-g" type="bar"
+        label-field="Délai entre dépôt et début d'activité" value-field="Déclarations" name="Déclarations"
+        selected-palette="neutral" highlight-index="[0, 1, 2]" unit-tooltip="déclarations"
+        databox databox-title="Déclarations selon le nombre de jours entre le dépôt et le début de l'activité en France (en couleur : moins de 30 jours)"
+        databox-source="Ministère de la Culture — Activité temporaire d'entrepreneurs de spectacles établis hors de France (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-delai" source="dl-g" label-field="Délai entre dépôt et début d'activité" value-field="Déclarations"
+        description="Sept barres verticales, du délai le plus court au plus long : déclarée après le début, 0 à 14 jours, 15 à 29 jours, 30 à 44 jours, 45 à 59 jours, 60 à 89 jours, 90 jours ou plus. Les trois premières barres, en couleur, sont sous le mois réglementaire ; elles comptent ensemble un peu plus d'un quart des déclarations. La barre des 30 à 44 jours domine nettement, avec près de la moitié des déclarations ; les barres suivantes retombent sous 200.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      La règle dit «&nbsp;un mois&nbsp;»&nbsp;; la page compte en jours, avec un seuil de trente. Compté en mois civils (début
+      avant le même quantième du mois suivant), l'effectif en deçà est un peu plus élevé&nbsp;: 465 contre 451 le
+      27&nbsp;septembre 2026. Le début d'activité peut précéder la première représentation (répétitions, montage)&nbsp;:
+      c'est lui que la règle vise.
+    </p>
+
+    <h3 class="fr-h5 fr-mt-4w">Européens ou non, même habitude</h3>
+    <dsfr-data-query id="zone" source="dec-n" where="coherent:eq:1" group-by="zone" aggregate="un:sum:n, tardif:sum:tardif, pile:sum:pile"></dsfr-data-query>
+    <dsfr-data-normalize id="zone-t" source="zone" compute="part_tardif = round(tardif / n * 100, 0); part_pile = round(pile / n * 100, 0)"></dsfr-data-normalize>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Le numéro de dossier dit d'où vient le déclarant&nbsp;: {{ie:number}}&nbsp;déclarations ({{part_ie:number:0}}&nbsp;%)
+          viennent de l'Espace économique européen, {{he:number}} d'ailleurs. Les seconds doivent en plus avoir signé un contrat
+          avec un entrepreneur titulaire d'une licence française. La part déposée en deçà du mois ne change presque pas&nbsp;:
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-list source="zone-t"
+      columns="zone:Zone d'établissement, n:Déclarations aux dates cohérentes, part_tardif:Moins de 30 jours (%), part_pile:30 à 44 jours (%)"
+      caption="Délai de déclaration selon que l'entrepreneur est établi dans l'Espace économique européen ou non">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= QUI — les pays ======================= -->
+  <dsfr-data-query id="pays" source="dec-n" where="pays:isnotnull" group-by="pays" aggregate="un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-query id="pays-top" source="pays" limit="15"></dsfr-data-query>
+  <dsfr-data-normalize id="pays-g" source="pays-top" rename="pays:Pays d'établissement | n:Déclarations"></dsfr-data-normalize>
+  <dsfr-data-normalize id="pays-k" source="pays" compute="k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="pays-1" source="pays-k" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="pays-1s" left="pays-1" right="syn-t" on="k" type="inner" prefix-right="s_"></dsfr-data-join>
+  <dsfr-data-normalize id="pays-1t" source="pays-1s" compute="part = n / s_n * 100"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-pays">
+    <h2 id="t-pays" class="fr-h3">La Belgique en tête, les États-Unis juste derrière</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="pays-1t"><template>Premier pays d'établissement&nbsp;: {{pays}}, avec {{n:number}}&nbsp;déclarations, {{part:number:0}}&nbsp;% du total.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="syn-t"><template>Le 27&nbsp;septembre 2026, le Royaume-Uni (troisième) et la Suisse (cinquième),
+        tous deux hors de l'EEE, étaient dans les cinq premiers. {{sans_pays:number}}&nbsp;déclarations ne disent pas de pays.</template></dsfr-data-repeat>
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations par pays d'établissement, quinze premiers pays">
+      <dsfr-data-chart id="g-pays" source="pays-g" type="bar" horizontal
+        label-field="Pays d'établissement" value-field="Déclarations" name="Déclarations"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="déclarations"
+        databox databox-title="Déclarations par pays d'établissement de l'entrepreneur, quinze premiers pays"
+        databox-source="Ministère de la Culture — Activité temporaire d'entrepreneurs de spectacles établis hors de France (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-pays" source="pays" label-field="pays" value-field="n"
+        description="Quinze barres horizontales triées de la plus longue à la plus courte. La Belgique, mise en évidence, dépasse 300 déclarations ; les États-Unis suivent, au-dessus de 250, puis le Royaume-Uni, autour de 170. L'Espagne et la Suisse dépassent 100 ; l'Allemagne, le Canada et l'Italie sont entre 60 et 80. Le tableau donne tous les pays renseignés.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Pays d'établissement principal, tel que déclaré. «&nbsp;France&nbsp;» figure dans la liste&nbsp;: la source le porte,
+      la page le laisse voir (voir «&nbsp;Ce que cette page ne montre pas&nbsp;»).
+    </p>
+  </section>
+
+  <!-- ======================= OÙ — la première date ======================= -->
+  <dsfr-data-query id="reg" source="dec-n" group-by="region" aggregate="un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-g" source="reg" rename="region:Région de la première représentation | n:Déclarations"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">Une première date sur deux se joue en Île-de-France</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{idf:number}}&nbsp;déclarations ({{part_idf:number:0}}&nbsp;%) annoncent leur première représentation en
+          Île-de-France. La région ne compte pourtant qu'un habitant sur cinq&nbsp;: l'Île-de-France est la porte d'entrée des
+          tournées étrangères.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations par région de la première représentation">
+      <dsfr-data-chart id="g-reg" source="reg-g" type="bar" horizontal
+        label-field="Région de la première représentation" value-field="Déclarations" name="Déclarations"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="déclarations"
+        databox databox-title="Déclarations par région de la première représentation en France"
+        databox-source="Ministère de la Culture — Activité temporaire d'entrepreneurs de spectacles établis hors de France (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-g" label-field="Région de la première représentation" value-field="Déclarations"
+        description="Barres horizontales triées de la plus longue à la plus courte, une par région. L'Île-de-France, mise en évidence, dépasse 750 déclarations, près de la moitié du total. Provence-Alpes-Côte d'Azur suit, au-dessus de 200, puis Auvergne-Rhône-Alpes, Grand-Est et Occitanie, entre 100 et 160. La Corse, la Guyane et La Réunion n'en comptent qu'une ou deux.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Région de la <em>première</em> représentation déclarée&nbsp;: une tournée qui commence à Paris et passe par Lyon et
+      Marseille compte pour l'Île-de-France seule. La base ne dit rien des dates suivantes.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — la durée ======================= -->
+  <dsfr-data-query id="du" source="dec-n" where="coherent:eq:1" group-by="tranche_duree, ordre_duree" aggregate="un:sum:n" order-by="ordre_duree:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="du-g" source="du" rename="tranche_duree:Durée de l'activité déclarée | n:Déclarations"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-duree">
+    <h2 id="t-duree" class="fr-h3">Une déclaration sur trois couvre un seul jour&nbsp;: un mois de préavis pour un soir</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{un_jour:number}}&nbsp;déclarations ({{part_un_jour:number:0}}&nbsp;%) annoncent une activité d'un seul jour en France,
+          un concert ou une représentation unique. À l'autre bout, {{long:number}} couvrent plus d'un mois&nbsp;: des tournées,
+          des résidences. Le préavis est le même dans les deux cas.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations selon la durée de l'activité déclarée">
+      <dsfr-data-chart id="g-duree" source="du-g" type="bar"
+        label-field="Durée de l'activité déclarée" value-field="Déclarations" name="Déclarations"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="déclarations"
+        databox databox-title="Déclarations selon la durée de l'activité en France, du début à la fin déclarés (jours inclus)"
+        databox-source="Ministère de la Culture — Activité temporaire d'entrepreneurs de spectacles établis hors de France (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-duree" source="du-g" label-field="Durée de l'activité déclarée" value-field="Déclarations"
+        description="Cinq barres verticales, de la durée la plus courte à la plus longue : 1 jour, 2 ou 3 jours, 4 à 7 jours, 8 à 30 jours, plus de 30 jours. La barre d'un jour, mise en évidence, est la plus haute, au-dessus de 500 ; les séjours de 2 ou 3 jours suivent, autour de 400 ; ceux de plus d'un mois sont les moins nombreux, autour de 150.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LE RYTHME ======================= -->
+  <dsfr-data-query id="mois" source="dec-n" group-by="k_depot, mois_depot" aggregate="un:sum:n" order-by="k_depot:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="mois-g" source="mois" rename="mois_depot:Mois de dépôt | n:Déclarations"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-mois">
+    <h2 id="t-mois" class="fr-h3">Un flux régulier, trop jeune pour dire une saison</h2>
+    <p class="odv-lecture">
+      Le 27&nbsp;septembre 2026, chaque mois complet comptait entre 59 et 152&nbsp;déclarations. Dix-sept mois ne suffisent
+      pas à distinguer une saison d'un démarrage&nbsp;: la base a ouvert à la fin d'avril 2025, et n'a vu passer que deux étés.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Déclarations déposées chaque mois">
+      <dsfr-data-chart id="g-mois" source="mois-g" type="bar"
+        label-field="Mois de dépôt" value-field="Déclarations" name="Déclarations"
+        unit-tooltip="déclarations"
+        databox databox-title="Déclarations déposées chaque mois (le premier et le dernier mois sont incomplets)"
+        databox-source="Ministère de la Culture — Activité temporaire d'entrepreneurs de spectacles établis hors de France (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-mois" source="mois-g" label-field="Mois de dépôt" value-field="Déclarations"
+        description="Une barre par mois de dépôt, d'avril 2025 au mois en cours. Le premier mois ne compte que quelques déclarations, la base commençant le 29 avril. Ensuite, entre 59 et 152 par mois : un pic en mai 2025 et en octobre 2025, un creux en juillet et août 2026 ; le dernier mois est en cours.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: qui vient jouer, d'où, et avec quel préavis&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Les filtres agissent sur les chiffres et sur la liste. Délai et durée sont en jours&nbsp;; ils sont vides pour les
+      déclarations aux dates incohérentes.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="fac" value="count" format="nombre"
+        heading="Déclarations" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="tardif:sum / coherent:sum" format="pourcentage" decimals="0"
+        heading="Moins de 30 jours" label="de préavis, parmi les dates cohérentes"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="un_jour:sum / coherent:sum" format="pourcentage" decimals="0"
+        heading="Un seul jour" label="d'activité, parmi les dates cohérentes"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="fac" source="dec-n"
+          fields="tranche_delai, zone, pays_lib, region, tranche_duree, categorie_lib"
+          labels="tranche_delai:Délai de déclaration | zone:Zone d'établissement | pays_lib:Pays d'établissement | region:Région de la première représentation | tranche_duree:Durée de l'activité | categorie_lib:Catégorie"
+          display="tranche_delai:checkbox | zone:checkbox | pays_lib:multiselect | region:multiselect | tranche_duree:checkbox | categorie_lib:checkbox"
+          disjunctive="tranche_delai, zone, pays_lib, region, tranche_duree, categorie_lib"
+          searchable="pays_lib, region"
+          sort="tranche_delai:alpha:asc | tranche_duree:alpha:asc | pays_lib:alpha:asc | region:alpha:asc"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-list source="fac"
+          columns="declarant:Déclarant, pays_lib:Pays, region:Première représentation, date_depot_dossier:Dépôt, date_debut_activite:Début, date_fin_activite:Fin, delai:Délai (jours), duree:Durée (jours)"
+          search sort="date_depot_dossier:desc" pagination="20" count-label="déclaration|déclarations" export="csv"
+          caption="Déclarations d'activité temporaire d'entrepreneurs de spectacles établis hors de France (sélection courante)">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-df">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Une infraction.</strong> Une déclaration déposée moins de trente jours avant n'est pas forcément
+            irrégulière&nbsp;: la base ne dit ni si la DRAC l'a acceptée, ni si une date a été avancée après le dépôt, ni si
+            le début d'activité a été mal saisi.</li>
+          <li><strong>{{incoherent:number}}&nbsp;déclarations aux dates incohérentes</strong>&nbsp;: fin d'activité avant le
+            début (souvent d'un mois, comme si les deux champs avaient été inversés ou décalés), année impossible
+            («&nbsp;0026&nbsp;», «&nbsp;252026&nbsp;»). Comptées dans les totaux, les pays et les régions&nbsp;; hors des délais
+            et des durées.</li>
+          <li><strong>Un statut.</strong> La description du jeu annonce que «&nbsp;le tableau n'intègre que les informations au
+            statut transmis&nbsp;». Or la colonne est vide pour {{statut_vide:number}}&nbsp;déclarations et vaut
+            «&nbsp;Transmis&nbsp;» pour les {{statut_rempli:number}} autres&nbsp;: la page ne s'en sert pas.</li>
+          <li><strong>{{sans_pays:number}}&nbsp;déclarations sans pays</strong> et {{france:number}} dont le pays
+            d'établissement est… la France, pour un jeu d'entrepreneurs établis hors de France. Comptées dans les totaux, hors
+            du compte des pays étrangers.</li>
+          <li><strong>Un pays qui recoupe toujours la zone.</strong> La zone (EEE ou non) vient du numéro de dossier, le pays
+            d'une autre colonne&nbsp;; ils se contredisent pour 86&nbsp;déclarations le 27&nbsp;septembre 2026 (17 dossiers
+            «&nbsp;EEE&nbsp;» établis aux États-Unis, 10 dossiers «&nbsp;hors EEE&nbsp;» en Allemagne…). La page suit le
+            numéro, que la description du jeu définit.</li>
+          <li><strong>Les tournées.</strong> Seule la région de la première représentation est publiée.</li>
+          <li><strong>Les catégories de licence.</strong> {{part_cat2:number:0}}&nbsp;% des déclarations relèvent de la
+            catégorie 2 (producteurs, entrepreneurs de tournées)&nbsp;: la répartition n'apprend rien, elle reste un filtre.</li>
+          <li><strong>Les déclarations d'avant la base.</strong> La base commence au {{date_depot_dossier:date}} (la
+            description dit «&nbsp;à compter du 01/06/2025&nbsp;»)&nbsp;; les entrepreneurs
+            étrangers venus avant ne sont pas comptés.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir des déclarations d'activité temporaire publiées par le ministère
+        de la Culture. Le volume du cadrage tient (1&nbsp;658 déclarations en dix-sept mois)&nbsp;; le pays qu'il citait, le
+        Royaume-Uni, n'est que troisième. L'histoire est ailleurs&nbsp;: la règle du mois, écrite dans la description du jeu,
+        se mesure dans ses dates.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le jeu entier en une requête.</strong> Export Parquet, <code>fetch-mode="export"</code>&nbsp;: toutes
+              les vues se calculent côté client.</li>
+            <li><strong>La zone EEE sans sous-chaîne.</strong> <code>contains(numero, 'IE-')</code> lit le préfixe du numéro
+              de dossier.</li>
+            <li><strong>Des tranches ordonnées.</strong> Un libellé et un ordre calculés par <code>when</code>, un
+              <code>group-by</code> sur les deux, un tri sur l'ordre.</li>
+            <li><strong>Mettre en évidence plusieurs barres.</strong> <code>highlight-index="[0, 1, 2]"</code> colore les trois
+              tranches sous le mois.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas de différence de dates.</strong> <code>compute</code> n'a ni <code>date_diff</code> ni conversion
+              en jours&nbsp;: le délai passe par un numéro de jour civil écrit à la main (six colonnes intermédiaires,
+              <code>floor</code>, mois décalés pour les années bissextiles). Juste, mais personne ne l'écrira sans modèle.</li>
+            <li><strong>Une date typée texte.</strong> Une seule valeur «&nbsp;252026-04-03&nbsp;» fait classer tout
+              <code>date_debut_activite</code> en texte par Tabular. <code>year()</code> la rend nulle, ce qui l'écarte
+              proprement&nbsp;; mais «&nbsp;0026-12-22&nbsp;» passe, d'où le garde-fou sur l'année.</li>
+            <li><strong>Le premier pays dans une phrase.</strong> Un <code>limit="1"</code> sur la liste triée, puis une
+              jointure sur clé constante pour sa part du total.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger le jeu Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export"</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Zone EEE depuis le numéro de dossier</td><td><code>compute</code> <code>contains()</code></td><td>Natif</td></tr>
+            <tr><td>Délai et durée en jours</td><td><code>compute</code> : numéro de jour civil par <code>year/month/day/floor</code></td><td>Contournement (pas de différence de dates)</td></tr>
+            <tr><td>Écarter les dates aberrantes</td><td><code>compute</code> <code>when</code> + <code>where="coherent:eq:1"</code></td><td>Natif</td></tr>
+            <tr><td>Tranches de délai triées</td><td><code>query group-by="tranche, ordre" order-by</code></td><td>Natif</td></tr>
+            <tr><td>Contraste sur plusieurs barres</td><td><code>highlight-index</code></td><td>Natif</td></tr>
+            <tr><td>Phrases de lecture calculées</td><td><code>dsfr-data-repeat</code> sur une synthèse <code>group-by="k"</code></td><td>Natif</td></tr>
+            <tr><td>Explorer</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-list search</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un petit jeu, une vraie question.</strong> Tout se fait dans la page, en une requête. Le seul manque
+          rencontré est une fonction de différence de dates&nbsp;: la question centrale — combien de jours de préavis&nbsp;? —
+          demande aujourd'hui une formule de calendrier recopiée dans l'attribut.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte Leaflet sur la page. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

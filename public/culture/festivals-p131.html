@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Festivals soutenus par l'État — open-data-viz</title>
+  <meta name="description" content="En 2024, le programme 131 a versé 31,7 millions d'euros à 810 aides de festivals, mais le Festival d'Aix-en-Provence et le Festival d'Avignon en ont reçu près de trois euros sur dix : Aix seul touche plus que les 503 festivals aidés à 10 000 € ou moins. Création avec dsfr-data à partir de la liste du ministère de la Culture (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 25 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte « Festivals financés au titre du programme
+       131 : Création » (DGCA, ministère de la Culture), servi par Tabular. La page
+       /culture/festivals raconte le recensement (qui existe) ; celle-ci raconte
+       l'argent de l'État (qui est aidé, combien).
+
+       LE CHAMP. Les seules aides du programme budgétaire 131 (création), versées
+       par les DRAC ou par l'administration centrale (« Région = DGCA », qui n'est
+       pas une région). Les autres programmes du ministère et les collectivités
+       n'y sont pas. Deux années : 2023 (792 lignes) et 2024 (810). Le récit porte
+       sur 2024, la plus récente ; 2023 sert de contrôle de stabilité.
+
+       UNE LIGNE = UNE AIDE, pas un festival. « France Design Week » a dix lignes
+       en 2024 (une par région), « Mois Kréyol » cinq. Les montants se somment sans
+       risque ; les festivals se comptent en noms distincts (`distinct`).
+
+       AIX ET AVIGNON sont repérés par leur nom (le jeu n'a pas d'identifiant
+       stable : SIRET absent de toutes les lignes 2023). Motifs vérifiés à l'API
+       le 2026-09-27 : « LYRIQUE » + « AIX-EN-PROVENCE » ne prend que le Festival
+       d'Aix ; « FESTIVAL D » + « AVIGNON » + DGCA ne prend que le Festival
+       d'Avignon (ni le Off, aidé par la DRAC, ni le TOMA, sans « FESTIVAL D »).
+
+       LE CHARGEMENT. 1 602 lignes : `fetch-mode="export"` lit l'export Parquet en
+       une requête (aucun where/group-by sur la source). `trim` retire l'espace
+       final des lieux et le domaine « Théâtre » saisi une fois avec espace.
+       ========================================================================== -->
+
+  <dsfr-data-source id="p131" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="e4761b32-c601-4ec9-b361-658315d07389"
+    fetch-mode="export" max-records="5000">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="p-n" source="p131" trim
+    rename="Année:annee | Région:region_brute | Entreprise raison sociale:structure | Nom du festival:nom | Domaine artistique principal:domaine | Lieu du festival:lieu | Code Postal:cp | Montant aide sur programme Création (BOP 131):montant | Lieu du festival (Code INSEE):insee | SIRET:siret"
+    compute="aix = when contains(nom, 'LYRIQUE') and contains(nom, 'AIX-EN-PROVENCE') then 1 else 0;
+             avignon = when region_brute = 'DGCA' and contains(nom, 'FESTIVAL D') and contains(nom, 'AVIGNON') then 1 else 0;
+             aix_m = aix * montant;
+             avi_m = avignon * montant;
+             duo_m = (aix + avignon) * montant;
+             autres_m = montant - duo_m;
+             central = when region_brute = 'DGCA' then 1 else 0;
+             central_m = central * montant;
+             region = when central = 1 then 'Administration centrale (DGCA)' else region_brute;
+             guichet = when central = 1 then 'Administration centrale (DGCA)' else 'Direction régionale (DRAC)';
+             petit = when montant &lt;= 10000 then 1 else 0;
+             petit_m = petit * montant;
+             ordre_t = when montant &lt;= 5000 then 1 when montant &lt;= 10000 then 2 when montant &lt;= 20000 then 3
+                       when montant &lt;= 50000 then 4 when montant &lt;= 100000 then 5 when montant &lt;= 500000 then 6 else 7;
+             tranche = when ordre_t = 1 then '5 000 € ou moins' when ordre_t = 2 then '5 001 à 10 000 €'
+                       when ordre_t = 3 then '10 001 à 20 000 €' when ordre_t = 4 then '20 001 à 50 000 €'
+                       when ordre_t = 5 then '50 001 à 100 000 €' when ordre_t = 6 then '100 001 à 500 000 €'
+                       else 'Plus de 500 000 €';
+             sans_siret = when is_empty(siret) then 1 else 0;
+             annee_txt = concat('', annee);
+             un = 1;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 2024, l'année du récit ---------- -->
+  <dsfr-data-query id="a24" source="p-n" where="annee:eq:2024"></dsfr-data-query>
+
+  <!-- La synthèse 2024 sur une ligne. -->
+  <dsfr-data-query id="syn-agg" source="a24" group-by="k"
+    aggregate="un:sum:n, montant:sum:m, nom:distinct:festivals, aix_m:sum:aix_m, avi_m:sum:avi_m, duo_m:sum:duo_m,
+               petit:sum:petit, petit_m:sum:petit_m, central:sum:central, central_m:sum:central_m, sans_siret:sum:sans_siret">
+  </dsfr-data-query>
+  <!-- Le rang où l'on franchit la moitié des crédits : aides triées par montant,
+       part de chacune, cumul ; on compte celles dont le cumul reste sous 50 %,
+       la suivante franchit le seuil. -->
+  <dsfr-data-query id="rang" source="a24" order-by="montant:desc"
+    aggregate="montant:share_percent:part, part:running_sum:cumul"></dsfr-data-query>
+  <dsfr-data-query id="sous-moitie" source="rang" where="cumul:lt:50" group-by="k" aggregate="un:sum:avant_moitie"></dsfr-data-query>
+  <!-- La DRAC qui distribue le plus. -->
+  <dsfr-data-query id="reg" source="a24" where="central:eq:0" group-by="region"
+    aggregate="montant:sum:m, un:sum:n, nom:distinct:festivals" order-by="m:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-k" source="reg" compute="k = 1; m_k = round(m / 1000, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="reg1" source="reg-k" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="reg1-r" source="reg1" rename="region:reg1 | m:reg1_m | n:reg1_n"></dsfr-data-normalize>
+
+  <dsfr-data-join id="syn-j1" left="syn-agg" right="sous-moitie" on="k"></dsfr-data-join>
+  <!-- 2023, pour le SIRET : absent sur toutes les lignes de cette année-là. -->
+  <dsfr-data-query id="s23" source="p-n" where="annee:eq:2023" group-by="k" aggregate="un:sum:n23, sans_siret:sum:sans_siret23"></dsfr-data-query>
+  <dsfr-data-join id="syn-j2" left="syn-j1" right="reg1-r" on="k"></dsfr-data-join>
+  <dsfr-data-join id="syn-j3" left="syn-j2" right="s23" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="syn" source="syn-j3"
+    compute="m_mio = m / 1000000;
+             aix_mio = aix_m / 1000000;
+             avi_mio = avi_m / 1000000;
+             duo_mio = duo_m / 1000000;
+             part_duo = duo_m / m * 100;
+             part_aix = aix_m / m * 100;
+             moitie = avant_moitie + 1;
+             part_petit_n = petit / n * 100;
+             part_petit_m = petit_m / m * 100;
+             petit_mio = petit_m / 1000000;
+             part_central = central_m / m * 100;
+             central_mio = central_m / 1000000;
+             drac_n = n - central;
+             drac_mio = (m - central_m) / 1000000;
+             reg1_mio = reg1_m / 1000000;
+             aix_sur_reg1 = aix_m / reg1_m;
+             moyenne = m / n;
+             multi = n - festivals;
+             part_sans_siret = sans_siret / n * 100">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Festivals soutenus par l'État</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Festivals soutenus par l'État&nbsp;: Aix et Avignon reçoivent près de trois euros sur dix</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          En 2024, le ministère de la Culture a versé {{m_mio:number:1}}&nbsp;millions d'euros à des festivals sur son
+          programme «&nbsp;Création&nbsp;», en {{n:number}}&nbsp;aides. Deux festivals en ont reçu
+          <strong>{{part_duo:number:1}}&nbsp;%</strong>&nbsp;: le Festival d'Aix-en-Provence ({{aix_mio:number:1}}&nbsp;M€) et
+          le Festival d'Avignon ({{avi_mio:number:1}}&nbsp;M€). Les {{moitie:number}}&nbsp;aides les plus élevées font la moitié
+          des crédits. À l'autre bout, {{petit:number}}&nbsp;aides de 10&nbsp;000&nbsp;€ ou moins, six sur dix, se partagent
+          {{petit_mio:number:1}}&nbsp;M€&nbsp;: moins que le seul Festival d'Aix.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, direction générale de la création artistique (DGCA)&nbsp;:
+      <a href="https://www.data.gouv.fr/datasets/festivals-finances-au-titre-du-programme-131-creation" target="_blank" rel="noopener external"><em>Festivals
+      financés au titre du programme 131&nbsp;: Création</em></a>, aides 2023 et 2024 versées par les directions régionales
+      (DRAC) et par l'administration centrale. Données lues à l'ouverture de la page sur l'API Tabular de data.gouv.fr
+      (export Parquet).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="m:max" format="compact" unit="€" span="4"
+        heading="Crédits aux festivals en 2024" label="programme 131, DRAC et administration centrale"
+        lines='[{"value":"n:max","format":"nombre","prefix":"en","suffix":"aides"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="part_duo:max" format="decimal" decimals="1" unit="%" span="4"
+        heading="Part d'Aix et d'Avignon" label="des crédits 2024 aux festivals"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="part_petit_n:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Aides de 10 000 € ou moins" label="des aides 2024"
+        lines='[{"value":"part_petit_m:max","decimals":1,"prefix":"pour","suffix":"des crédits"}]'></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — le haut du classement ======================= -->
+  <dsfr-data-query id="top" source="rang" limit="15"></dsfr-data-query>
+  <!-- Deux normalize : dans un même élément, rename passe AVANT compute et ne voit pas les colonnes calculées. -->
+  <dsfr-data-normalize id="top-c" source="top"
+    compute="m_k = round(montant / 1000, 0); part_r = round(part, 1); cumul_r = round(cumul, 1)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="top-g" source="top-c"
+    rename="nom:Festival | domaine:Domaine | m_k:Aide 2024 (milliers d'euros) | part_r:Part des crédits (%) | cumul_r:Part cumulée (%)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-top">
+    <h2 id="t-top" class="fr-h3">Deux festivals en tête, loin devant le troisième</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Le Festival d'Aix-en-Provence reçoit {{aix_mio:number:2}}&nbsp;M€, le Festival d'Avignon {{avi_mio:number:2}}&nbsp;M€&nbsp;:
+          à eux deux {{duo_mio:number:1}}&nbsp;M€, {{part_duo:number:1}}&nbsp;% des crédits. Le troisième, le Festival d'Automne
+          à Paris, reçoit 1,38&nbsp;M€, et dès le quatrième on passe sous le million. La moitié des crédits est atteinte à
+          la {{moitie:number}}<sup>e</sup>&nbsp;aide sur {{n:number}}.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les quinze aides les plus élevées en 2024">
+      <dsfr-data-chart id="g-top" source="top-g" type="bar" horizontal
+        label-field="Festival" value-field="Aide 2024 (milliers d'euros)" name="Aide 2024 (milliers d'euros)"
+        selected-palette="neutral" highlight-index="[0, 1]" unit-tooltip="k€"
+        databox databox-title="Les quinze aides aux festivals les plus élevées du programme 131 en 2024 (milliers d'euros)"
+        databox-source="Ministère de la Culture, DGCA — Festivals financés au titre du programme 131 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-top" source="top-g" label-field="Festival"
+        value-field="Aide 2024 (milliers d'euros), Part des crédits (%), Part cumulée (%), Domaine"
+        description="Barres horizontales triées de la plus longue à la plus courte : les quinze aides les plus élevées de 2024, en milliers d'euros. Les deux premières, mises en évidence, Aix-en-Provence et Avignon, dépassent 4 000 ; la troisième, le Festival d'Automne à Paris, est autour de 1 400 ; les suivantes sont toutes sous 900. Le tableau donne aussi la part de chaque aide et la part cumulée des crédits.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Le troisième montant (Festival d'Automne à Paris, 1&nbsp;380&nbsp;000&nbsp;€) est lu dans la donnée 2024 le 2026-09-27&nbsp;;
+      les autres chiffres de cette phrase sont calculés à l'ouverture de la page.
+    </p>
+  </section>
+
+  <!-- ======================= PREUVE — les tranches ======================= -->
+  <dsfr-data-query id="tr" source="a24" group-by="tranche, ordre_t"
+    aggregate="un:sum, un__sum:share_percent:p_aides, montant:sum, montant__sum:share_percent:p_credits"
+    order-by="ordre_t:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="tr-c" source="tr"
+    compute="pa = round(p_aides, 1); pc = round(p_credits, 1)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="tr-g" source="tr-c"
+    rename="tranche:Montant de l'aide | pa:Part des aides (%) | pc:Part des crédits (%) | un__sum:Aides | montant__sum:Crédits (€)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-tr">
+    <h2 id="t-tr" class="fr-h3">Six aides sur dix font 10 000 € ou moins, et un dixième des crédits</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          {{petit:number}}&nbsp;aides sur {{n:number}} ({{part_petit_n:number:0}}&nbsp;%) ne dépassent pas 10&nbsp;000&nbsp;€. Ensemble,
+          elles pèsent {{part_petit_m:number:1}}&nbsp;% des crédits, {{petit_mio:number:2}}&nbsp;M€&nbsp;: le seul Festival d'Aix
+          reçoit {{aix_mio:number:2}}&nbsp;M€. L'aide moyenne, {{moyenne:number:0}}&nbsp;€, ne ressemble à aucune aide réelle&nbsp;:
+          elle est tirée vers le haut par quelques grands montants.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part des aides et part des crédits par tranche de montant, 2024">
+      <dsfr-data-chart id="g-tr" source="tr-g" type="bar"
+        label-field="Montant de l'aide"
+        value-field="Part des aides (%):Part des aides"
+        value-fields="Part des crédits (%):Part des crédits"
+        color-map="Part des aides:#929292,Part des crédits:#000091"
+        unit-tooltip="%" y-min="0"
+        databox databox-title="Part des aides et part des crédits de chaque tranche de montant, festivals du programme 131 en 2024 (%)"
+        databox-source="Ministère de la Culture, DGCA — Festivals financés au titre du programme 131 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-tr" source="tr-g" label-field="Montant de l'aide"
+        value-field="Aides, Part des aides (%), Crédits (€), Part des crédits (%)"
+        description="Barres verticales groupées par tranche de montant, de « 5 000 € ou moins » à « plus de 500 000 € » : pour chaque tranche, la part des aides (gris) et la part des crédits (bleu). À gauche, les petites tranches ont de hautes barres grises et de petites barres bleues : beaucoup d'aides, peu d'argent. À droite, la tranche au-delà de 500 000 € n'a presque pas de barre grise (sept aides) mais la plus haute barre bleue, près de la moitié des crédits.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — les domaines ======================= -->
+  <dsfr-data-query id="dom" source="a24" group-by="domaine"
+    aggregate="duo_m:sum:duo, autres_m:sum:autres, montant:sum:m, un:sum:n" order-by="m:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="dom-g" source="dom"
+    compute="duo_k = round(duo / 1000, 0); autres_k = round(autres / 1000, 0)"
+    rename="domaine:Domaine artistique | n:Aides"></dsfr-data-normalize>
+  <dsfr-data-query id="theatre" source="dom" where="domaine:eq:Théâtre"></dsfr-data-query>
+  <dsfr-data-normalize id="theatre-t" source="theatre" compute="p = duo / m * 100; m_mio = m / 1000000; autres_mio = autres / 1000000; autres_n = n - 1"></dsfr-data-normalize>
+  <dsfr-data-query id="lyrique" source="dom" where="domaine:eq:Musiques de répertoire et contemporaine"></dsfr-data-query>
+  <dsfr-data-normalize id="lyrique-t" source="lyrique" compute="p = duo / m * 100"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dom">
+    <h2 id="t-dom" class="fr-h3">Sans Avignon, le théâtre serait un petit domaine du programme</h2>
+    <dsfr-data-repeat source="theatre-t">
+      <template>
+        <p class="odv-lecture">
+          Le théâtre reçoit {{m_mio:number:1}}&nbsp;M€ pour {{n:number}}&nbsp;aides, dont {{p:number:0}}&nbsp;% pour le seul
+          Festival d'Avignon&nbsp;: les {{autres_n:number}}&nbsp;autres aides au théâtre se partagent {{autres_mio:number:1}}&nbsp;M€.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="lyrique-t">
+      <template>
+        <p class="odv-lecture">
+          De même, Aix pèse {{p:number:0}}&nbsp;% des crédits des musiques de répertoire et contemporaine. Hors de ces deux
+          festivals, la hiérarchie des domaines change&nbsp;: le pluridisciplinaire et les musiques actuelles passent devant le théâtre.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Crédits 2024 par domaine artistique, Aix et Avignon à part">
+      <dsfr-data-chart id="g-dom" source="dom-g" type="bar" horizontal stacked
+        label-field="Domaine artistique"
+        value-field="autres_k:Autres festivals"
+        value-fields="duo_k:Aix et Avignon"
+        color-map="Autres festivals:#929292,Aix et Avignon:#000091"
+        unit-tooltip="k€"
+        databox databox-title="Crédits 2024 aux festivals par domaine artistique, en milliers d'euros : la part d'Aix et d'Avignon"
+        databox-source="Ministère de la Culture, DGCA — Festivals financés au titre du programme 131 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dom" source="dom-g" label-field="Domaine artistique" value-field="autres_k, duo_k, Aides"
+        description="Barres horizontales empilées, une par domaine artistique, triées par crédits totaux : en gris les autres festivals, en bleu Aix et Avignon (en milliers d'euros). Les musiques de répertoire et contemporaine et le théâtre sont en tête, mais plus de la moitié de leur barre est bleue ; sans cette part, le pluridisciplinaire et les musiques actuelles, entièrement gris, dépasseraient le théâtre.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Domaine artistique principal déclaré dans la demande d'aide. Colonnes du tableau&nbsp;: autres festivals, Aix et Avignon
+      (milliers d'euros), nombre d'aides.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — qui décide ======================= -->
+  <dsfr-data-normalize id="reg-g" source="reg-k" rename="region:Région (DRAC) | m_k:Crédits 2024 (milliers d'euros) | n:Aides | festivals:Festivals distincts"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">Plus d'un tiers des crédits est décidé à Paris, et Aix seul dépasse n'importe quelle région</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          {{central:number}}&nbsp;aides seulement passent par l'administration centrale (la DGCA), mais elles portent
+          {{central_mio:number:1}}&nbsp;M€, {{part_central:number:0}}&nbsp;% des crédits&nbsp;: Aix, Avignon et le Festival d'Automne
+          en font l'essentiel. Les {{drac_n:number}} autres aides sont versées par les directions régionales, pour
+          {{drac_mio:number:1}}&nbsp;M€. La plus dotée, {{reg1}}, distribue {{reg1_mio:number:2}}&nbsp;M€ à {{reg1_n:number}}&nbsp;aides&nbsp;:
+          le Festival d'Aix reçoit à lui seul {{aix_sur_reg1:number:1}}&nbsp;fois plus.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Crédits 2024 versés par chaque direction régionale">
+      <dsfr-data-chart id="g-reg" source="reg-g" type="bar" horizontal
+        label-field="Région (DRAC)" value-field="Crédits 2024 (milliers d'euros)" name="Crédits 2024 (milliers d'euros)"
+        selected-palette="neutral" unit-tooltip="k€"
+        databox databox-title="Crédits 2024 du programme 131 aux festivals versés par chaque direction régionale (milliers d'euros), hors administration centrale"
+        databox-source="Ministère de la Culture, DGCA — Festivals financés au titre du programme 131 (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-g" label-field="Région (DRAC)"
+        value-field="Crédits 2024 (milliers d'euros), Aides, Festivals distincts"
+        description="Barres horizontales triées, une par direction régionale des affaires culturelles, hors administration centrale : crédits versés aux festivals en 2024, en milliers d'euros. Cinq régions sont entre 2 200 et 2 700 (Provence-Alpes-Côte d'Azur, Nouvelle-Aquitaine, Grand Est, Auvergne-Rhône-Alpes, Occitanie), puis l'Île-de-France vers 1 800 ; les territoires d'outre-mer et la Corse sont sous 300.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Volumes, pas des montants par habitant&nbsp;: le jeu ne donne pas la population, et une région peuplée compte plus de
+      festivals. Les aides de l'administration centrale ne sont pas réparties par région&nbsp;: Aix et Avignon, en Provence-Alpes-Côte
+      d'Azur, n'y figurent pas.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — 2023 ======================= -->
+  <dsfr-data-query id="an" source="p-n" group-by="annee, annee_txt"
+    aggregate="un:sum:n, montant:sum:m, aix_m:sum:aix_m, avi_m:sum:avi_m, duo_m:sum:duo_m, central_m:sum:central_m, petit:sum:petit"
+    order-by="annee:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="an-t" source="an"
+    compute="m_mio = round(m / 1000000, 1); aix_mio = round(aix_m / 1000000, 1); avi_mio = round(avi_m / 1000000, 1);
+             part_duo = round(duo_m / m * 100, 1); part_central = round(central_m / m * 100, 1); part_petit = round(petit / n * 100, 1)">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-an">
+    <h2 id="t-an" class="fr-h3">Ce n'est pas un accident de 2024&nbsp;: la répartition était la même en 2023</h2>
+    <dsfr-data-list source="an-t"
+      columns="annee_txt:Année, n:Aides, m_mio:Crédits (M€), aix_mio:Aix (M€), avi_mio:Avignon (M€), part_duo:Part d'Aix et d'Avignon (%), part_central:Part de l'administration centrale (%), part_petit:Aides de 10 000 € ou moins (%)"
+      caption="Les festivals du programme 131, 2023 et 2024">
+    </dsfr-data-list>
+    <p class="odv-lecture fr-mt-2w">
+      D'une année à l'autre, le total ne bouge presque pas et les deux têtes échangent leur place&nbsp;: Avignon était premier en
+      2023, Aix l'est en 2024. Deux années ne font pas une tendance&nbsp;; elles suffisent à dire que la concentration n'est pas
+      l'effet d'une subvention exceptionnelle.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: toutes les aides, festival par festival</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Une ligne par aide. L'année est toujours fixée&nbsp;: additionner 2023 et 2024 compterait deux fois la plupart des
+      festivals. Les filtres agissent sur les chiffres et sur la liste.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="p-fac" value="count" format="nombre"
+        heading="Aides" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="p-fac" value="montant:sum" format="euro" decimals="0"
+        heading="Crédits" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="p-fac" value="petit:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Aides de 10 000 € ou moins" label="dans la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="p-fac" source="p-n"
+          fields="annee, guichet, region, domaine, tranche"
+          labels="annee:Année | guichet:Qui verse l'aide | region:Région | domaine:Domaine artistique | tranche:Montant de l'aide"
+          display="annee:radio-inline | guichet:checkbox | region:multiselect | domaine:multiselect | tranche:checkbox"
+          default="annee:2024"
+          disjunctive="guichet, region, domaine, tranche"
+          searchable="region, domaine"
+          sort="region:alpha:asc | domaine:alpha:asc | annee:alpha:desc"
+          url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-list source="p-fac"
+          columns="nom:Festival, structure:Structure, lieu:Lieu, region:Région ou DGCA, domaine:Domaine, montant:Aide (€), annee_txt:Année"
+          search sort="montant:desc" pagination="20" count-label="aide|aides" export="csv" decimals="0"
+          caption="Aides du programme 131 aux festivals (sélection courante)">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Tout l'argent public des festivals.</strong> Le jeu ne couvre que le programme 131 («&nbsp;Création&nbsp;»).
+            Les autres programmes du ministère, les collectivités, les sociétés civiles et la billetterie n'y sont pas&nbsp;: la
+            part d'Aix et d'Avignon est une part des crédits de ce programme, pas de leur budget.</li>
+          <li><strong>Le nombre exact de festivals.</strong> Une ligne est une aide&nbsp;: {{n:number}}&nbsp;aides en 2024 pour
+            {{festivals:number}}&nbsp;noms distincts. Un même festival peut être aidé par plusieurs régions («&nbsp;France Design
+            Week&nbsp;» a dix lignes). Deux orthographes d'un même festival compteraient deux fois. Le SIRET, qui
+            identifierait la structure, manque pour {{sans_siret:number}}&nbsp;aides sur {{n:number}} en 2024, mais pour
+            {{sans_siret23:number}} sur {{n23:number}} en 2023&nbsp;: d'une année à l'autre, on ne suit un festival que par son nom.</li>
+          <li><strong>Le lien avec le recensement des festivals.</strong> Rapprocher ces aides de la
+            <a href="/culture/festivals">liste des festivals</a> supposerait une clé commune&nbsp;: les noms sont écrits
+            différemment et le recensement n'a pas de SIRET. La page ne le tente pas.</li>
+          <li><strong>Des montants par habitant ou par spectateur.</strong> Ni la population, ni la fréquentation, ni le budget
+            des festivals ne sont dans le jeu.</li>
+          <li><strong>Une carte.</strong> Le jeu donne une commune et un code postal, pas de coordonnées, et le code INSEE
+            manque souvent. Les régions suffisent à la question posée.</li>
+          <li><strong>Une tendance.</strong> Deux années seulement, 2023 et 2024.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'un fichier de 1&nbsp;602 aides du ministère de la Culture, servi
+        par l'API Tabular. Le titre provisoire du cadrage («&nbsp;Aix et Avignon d'abord&nbsp;») tient, et se chiffre&nbsp;: près
+        de trois euros sur dix en 2024, et une concentration identique en 2023.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Tout le jeu en une requête.</strong> <code>fetch-mode="export"</code> lit l'export Parquet&nbsp;; toutes
+              les vues sont des <code>dsfr-data-query</code> côté client.</li>
+            <li><strong>La concentration en trois attributs.</strong> <code>share_percent</code> puis <code>running_sum</code>
+              sur les aides triées donnent la part cumulée&nbsp;; un <code>where="cumul:lt:50"</code> compté donne le rang de la
+              moitié, recalculé à chaque chargement.</li>
+            <li><strong>Part des aides contre part des crédits.</strong> Deux <code>share_percent</code> dans le même
+              regroupement par tranche, sans jointure.</li>
+            <li><strong>Des festivals distincts.</strong> <code>nom:distinct</code> compte les noms, là où une ligne est une aide.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas d'identifiant.</strong> Aix et Avignon sont repérés par des motifs de nom (<code>contains</code>),
+              vérifiés un à un contre les homonymes (Off d'Avignon, TOMA, «&nbsp;Cycle de musiques sacrées du Festival
+              d'Avignon&nbsp;»). Si le producteur renomme une ligne, la page ne le sait pas.</li>
+            <li><strong>Pas de médiane.</strong> Le paysage des petites aides se dit par tranches et par la part des aides de
+              10&nbsp;000&nbsp;€ ou moins, pas par une valeur centrale.</li>
+            <li><strong>Une «&nbsp;région&nbsp;» qui n'en est pas une.</strong> «&nbsp;DGCA&nbsp;» est recodée en guichet
+              (<code>compute</code>) et sortie du classement régional.</li>
+            <li><strong>Des chaînes de jointures pour une phrase.</strong> La phrase qui compare Aix à la première région
+              demande une query triée, un <code>limit</code>, un <code>rename</code> et deux <code>dsfr-data-join</code> sur une
+              clé constante.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 1&nbsp;602 aides</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export"</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Repérer Aix, Avignon, la DGCA, les tranches</td><td><code>normalize compute</code> (<code>contains</code>, <code>when</code>)</td><td>Natif, fragile sur les noms</td></tr>
+            <tr><td>Part cumulée et rang de la moitié</td><td><code>query aggregate="…:share_percent, …:running_sum"</code> puis <code>where</code> + comptage</td><td>Natif</td></tr>
+            <tr><td>Part des aides / part des crédits</td><td><code>share_percent</code> ×&nbsp;2, barres groupées</td><td>Natif</td></tr>
+            <tr><td>Festivals distincts</td><td><code>aggregate="nom:distinct"</code></td><td>Natif</td></tr>
+            <tr><td>Année toujours fixée dans l'exploration</td><td><code>dsfr-data-facets default="annee:2024"</code> + <code>radio-inline</code></td><td>Natif</td></tr>
+            <tr><td>Médiane des aides</td><td>—</td><td>Absent (tranches à la place)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Une page de concentration se construit sans script.</strong> Les parts, le cumul et le rang de la moitié
+          se calculent dans le pipeline, et restent justes si le producteur met le fichier à jour. Le point faible est dans
+          la donnée&nbsp;: sans identifiant de festival, il faut nommer les deux têtes par leur libellé.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
