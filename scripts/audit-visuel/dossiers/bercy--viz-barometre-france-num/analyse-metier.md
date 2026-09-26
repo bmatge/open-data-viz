@@ -1,28 +1,65 @@
-# Analyse metier — Baromètre France Num
+# Analyse métier — Baromètre France Num (refonte, `public/viz/barometre-france-num-v2.html`)
 
-> La lecture `dataviz-metier` : le sens avant la syntaxe.
-> **Ce fichier n'est jamais ecrase par un script.** Les sorties du modele
-> multimodal arrivent dans `constats/` ; ce qui est retenu se reecrit ici, a la main.
+> La lecture `dataviz-metier` : le sens avant la syntaxe. Niveau **avancé** (une page entière, martini glass : quatre repères → écarts → mouvement → parcours par chapitre → explorateur). Relecture du 2026-09-26, en lecture seule ; chaque chiffre ci-dessous a été rejoué à l'API `data.economie.gouv.fr` (`/api/explore/v2.1/catalog/datasets/{questions-reponses,bfn-table-de-correspondance}/exports/json`, clé `ods-mef`) et, quand il s'affiche, relu au navigateur (Chromium/Playwright sur `localhost:3000`, profils « France entière », `?region=Bretagne`, et Bretagne × Nouvelles technologies × 0 salarié).
+> **Ce fichier n'est jamais écrasé par un script.**
 
-## La question posee, et pour quel lecteur
+## La question posée, et pour quel lecteur
 
-_Une phrase. Si on ne sait pas la dire, la dataviz ne sait pas ce qu'elle montre._
+**Question** : « Où se situe *mon* profil d'entreprise (région × secteur × taille) par rapport à la France entière dans l'édition 2025 du Baromètre, et qu'est-ce qui a bougé depuis 2024 ? »
+
+**Lecteur** : double, et la page l'assume. Le lecteur de rapport (dirigeant de TPE, chargé de mission France Num, presse régionale) veut quatre repères et une phrase ; l'explorateur (CCI, Région) veut *sa* question. La structure sert les deux dans le bon ordre : synthèse d'abord, parcours ensuite, recherche en dernier. Le test des titres seuls tient à moitié : « La Bretagne en quatre repères · Là où la Bretagne s'écarte le plus de la France · Ce qui bouge le plus dans l'enquête · Lire l'enquête, chapitre par chapitre · Chercher une question, puis comparer » — ce sont des titres de *fonction*, pas des titres-messages. La page n'a pas de conclusion « ce qu'il faut retenir » (A12) ; elle a en revanche une section d'hypothèses (A11), ce qui est rare et précieux.
+
+**Ce que l'usager obtient** : les valeurs nationale et filtrée de 100 questions de 2025 (103 posées, moins les trois questions d'identité 201-203), les six plus forts écarts, les trois plus fortes variations 2024→2025, un graphique par question, un tableau CSV par bloc.
+
+**Hors objet** (et il faut le dire) : les éditions 2020-2023 (la v1 les couvre), l'effectif de répondants d'un profil, et la comparaison 2024→2025 de 34 questions sur 100 — voir « Ce qu'on ne montre pas ».
 
 ## La forme retenue, et pourquoi elle sert cette question
 
-## Honnetete de l'echelle
+- **Quatre `dsfr-data-kpi` nommés** (501 perception, 801 IA, 923 MFA, 1006 débit) à la place du « Score moyen » de la v1 : juste, et bien expliqué en hypothèse 1. Les quatre ont `sens_de_l_augmentation = fav` dans la table de correspondance (vérifié : 97 fav / 5 défav / 17 neutres sur 119), donc `color:"auto"` sur la ligne d'écart ne juge pas de travers — ici. Valeurs nationales relues : 77,9 / 25,6 / 37,0 / 29,7 %, identiques à l'API.
+- **Deux barres par question (France violet, profil rouge)** plutôt qu'une barre d'écart : l'hypothèse 3 le justifie correctement (on voit le niveau *et* l'écart). Les six plus forts écarts en Bretagne, relus au navigateur, sont ceux de l'API au centième : 923 « J'en ai » 28,3 contre 37,0 (−8,8), 502 −7,4, 1006 −6,9, 802 −6,5, 205 « C - 10 à 20 ans » +6,2, 602 −6,1. Aucune paire Oui/Non symétrique n'y figure (vérifié aussi sur le profil cumulé) : la crainte d'un top 6 redondant ne se matérialise pas sur ces jeux.
+- **Le pivot 2024/2025 pour « Ce qui bouge le plus »** : bonne idée (calculé, pas choisi), mais la forme trahit — voir Honnêteté : le premier du classement est un artefact de nomenclature.
+- **Un graphique par question, `dsfr-data-repeat` + `scopes` + `lazy`** : 100 `<h4>` rendus, 3 canvas au chargement — la voie native de LIM-004 requalifié. Petits multiples corrects : même forme, même ordre des réponses (tri unique par `libelle_reponse`), même unité.
+- **Barre de filtres en tête** : pour un martini glass, le skill placerait les filtres après la partie guidée ; ici le filtre *est* le récit (« mon profil »), comme sur un portrait (famille D) — choix défendable, à condition d'afficher ce que le profil pèse (voir Honnêteté).
 
-_Axe a zero ? Moyenne de taux ponderee ? Resume de carte ponderee ?_
+## Honnêteté de l'échelle
+
+1. **Le premier « ce qui bouge le plus » est faux.** La page affiche, France entière, « Votre entreprise dispose-t-elle de compétences dans le numérique ? » 46,25 → 32,96 (−13,3 pt) en tête. Rejoué à l'API : en 2024, la réponse « Oui, en interne » vaut 46,2 % ; en 2025 le questionnaire la **scinde** en « Oui, en interne » (33,0 %) et « Oui, en interne (dirigeants, salariés, employés, apprentis, stagiaires) » (22,1 %). Le pivot apparie le libellé resté identique et ignore l'autre : la « plus forte baisse de l'enquête » est une réforme d'item, pas un mouvement (piège « changement de nomenclature » du skill). Le deuxième (713 « 0 % » de factures électroniques, 19,2 → 32,1) et le troisième (801 IA « Oui », 12,8 → 25,6) sont, eux, de vrais mouvements (mêmes trois modalités les deux années pour 713).
+2. **Le repère « Connectivité » ne suit pas la règle qu'il prétend suivre.** L'hypothèse 2 écrit que ne retenir que « Très satisfaisant » pour la 1006 « est la logique du champ `valeurs_dans_calcul` ». Relu dans la table de correspondance : `valeurs_dans_calcul` de la 1006 = « Très satisfaisante / Plutôt satisfaisante », et le `descriptif_de_question` dit « ont été comptabilisées les entreprises ayant répondu "Très satisfaisant" ou "Plutôt satisfaisant" ». L'indicateur du producteur vaut donc **81,0 %** au national (29,7 + 51,3), là où la page affiche 29,7 % sous le titre « Connectivité ». Pour la 501, le même champ liste les cinq niveaux de Likert : ce n'est pas « ce qui est compté », c'est « ce qui est possible » — le champ a été mal lu. Retenir « très satisfaisant » seul est un choix éditorial recevable, mais il doit être écrit comme tel (contre la règle du producteur), pas attribué au jeu.
+3. **L'échantillon fond, et la page ne le montre pas.** Profil Bretagne × Nouvelles technologies × 0 salarié : les scores relus sont 100, 90, 70, 60 % — des multiples de dix, signature d'une dizaine de répondants ; `poids_question` (population pondérée représentée) tombe à 321 entreprises contre 2 144 976 au national. La page affiche pourtant « +57,0 pt » en tête des écarts et « +44,4 pt » sur le repère IA, avec, dans la même phrase que le profil, « Enquête CREDOC 2025, 11 021 entreprises répondantes ». L'avertissement générique (« cumuler … fragilise la comparaison ») est là ; le chiffre qui le rendrait concret n'y est pas, alors que le jeu le porte.
+4. **Des couples question-réponse en double dans le jeu.** Sept questions de 2025 (602, 605, 627, 1311, 1414, 1422, 1425) ont, pour un même profil, deux lignes par couple (`code_unifie`, `libelle_reponse`) — l'une avec `libelle_reponse_unifie` vide, l'autre rempli. `sum(score)` les additionne : 1422 « France Num, l'initiative… » = 1,9 + 12,1 = **14,1 %** ; 1425 « Site internet de France Num » = 5,3 + 3,7 = 9,0 % ; 602 « Z - Autre » = 2,9 + 5,6 = 8,6 %. L'original fait la même somme (`function-y="SUM"` sur `field-x="libelle_reponse"`, relu dans `$scope.blocks`), donc la parité est respectée — mais un lecteur qui télécharge le CSV ne peut pas le savoir. 1 898 groupes en double sur 134 870 en 2025, tous profils.
+5. Axe à zéro : oui (barres). Moyenne de taux : aucune (`sum(score)` sur une partition profil × question, une ligne par couple hors les doublons ci-dessus). Arrondi avant calcul : non (`round` seulement dans les colonnes texte). Couleurs : `color-map` avec les noms exacts des séries, légende et barres cohérentes au navigateur.
 
 ## Phrase de lecture
 
-_Ce qu'un datajournaliste ecrirait sous le graphique, avec chiffres et millesime._
+Ce qu'un datajournaliste écrirait sous chaque bloc, chiffres 2025, France entière :
+
+- **Repères** : « En 2025, 77,9 % des TPE-PME jugent le numérique un bénéfice réel ; un quart (25,6 %) utilise l'IA, deux fois plus qu'en 2024 (12,8 %) ; 37,0 % ont mis en place l'authentification multi-facteurs ; 81,0 % jugent leur débit satisfaisant, 29,7 % très satisfaisant. »
+- **Écarts (Bretagne)** : « La Bretagne est sous la moyenne nationale sur l'authentification multi-facteurs (28,3 % contre 37,0 %, −8,8 pt) et sur l'IA générative (15,4 % contre 21,9 %) ; ses entreprises sont plus souvent âgées de 10 à 20 ans (+6,2 pt). »
+- **Ce qui bouge** : « Entre 2024 et 2025, la part d'entreprises sans aucune facture électronique structurée passe de 19,2 % à 32,1 % (+12,9 pt) et l'usage de l'IA de 12,8 % à 25,6 % (+12,8 pt). Sur les 100 questions de 2025, 66 se comparent à 2024 ; 28 sont nouvelles et 6 (usages détaillés de l'IA, 802-807) ont changé de libellé de réponse et sont hors comparaison. »
+
+Aujourd'hui, la seule « phrase de lecture » du bloc « Ce qui bouge le plus » est un paragraphe qui parle d'autre chose : « Les écarts les plus forts entre votre profil d'entreprise et la France entière. Trois questions sont volontairement écartées… » — c'est le chapô de la section précédente, collé sous le mauvais titre (relu au navigateur).
 
 ## Ce qu'on ne montre pas, et qu'il faut dire
 
-_Groupe null, troncature, echantillon, millesime manquant._
+- **34 questions sur 100 hors de « Ce qui bouge le plus »** (piste #75, rejouée) : 237 couples question-réponse en 2025 hors 201-203 et « Sans réponse », 148 appariés à 2024, 89 sans équivalent ; 66 questions retenues, 34 écartées. **Mais la cause n'est pas celle qu'on croyait** : 28 des 34 sont des questions **nouvelles en 2025** (aucune valeur 2024, exclusion légitime — 11 dans « Gestion et pilotage », 9 dans « Compétences »), et **6 seulement** tombent sur un libellé changé : 802 à 807, les usages détaillés de l'IA, « J'en ai » en 2024 → « Oui » en 2025. Le chapitre IA n'est donc pas « tout » écarté : la 801 (« Oui » les deux années) est appariée et arrive **troisième** du classement. `libelle_reponse_unifie` ne répare rien : il est vide sur ces lignes les deux années. Le producteur, lui, traite ces réponses comme un même item (descriptif de la 802 : « ont été comptabilisées les entreprises ayant répondu "J'en ai" », valeurs_dans_calcul de la 801 : « J'en ai / Oui »). Unifiées, la 802 bougerait de 9,5 à 21,9 % (+12,4 pt) et entrerait dans le top 3 dès que la 1401 en sort. Cinq autres questions ne sont appariées qu'en partie (203, 1311, 1401, 1422, 1425 : items ajoutés, retirés ou renommés — « Mon comptable » → « Mon expert-comptable »).
+- **Le classement des écarts exclut 201-203** : dit en page, et juste (+94,9 pt sur « Région » sinon). Les 204-206 restent : justifié en hypothèse 5.
+- **16 des 119 questions du sélecteur « Question à comparer » n'existent pas en 2025** (503-506, 511, 603, 606, 628, 704, 1001-1005, 1201-1202 : dernière année 2024 ou avant, vérifié à l'API). Choisir la 1001 rend « Aucune donnée disponible » (navigateur). La page reproduit exactement l'« option morte » que son analyse reproche à l'ancienne liste de régions. Le titre du parcours dit « Cent dix-neuf questions, un graphique chacune » ; il y en a 100 (103 posées en 2025, trois écartées ; 100 `<h4>` comptés).
+- **Le groupe null** : `libelle_reponse != 'Sans réponse'` partout ; une ligne `libelle_reponse = null` existe (603, 2024, 0,08 %) mais n'atteint pas 2025 — rien à signaler.
+- **La page charge une source inutile** : `chapitres` (count par chapitre) est déclarée, requêtée (1 requête `group_by=chapitre` observée au réseau) et lue par aucun composant — la grille de tuiles qu'elle nourrissait a disparu. Dix requêtes au chargement, non « cinq » comme l'écrit le verdict.
 
-## Ecarts avec l'original
+## Écarts avec l'original
 
-_Uniquement des ecarts de DONNEES ou de capacite du lecteur.
-Jamais de mise en page : l'equivalence visee est fonctionnelle, pas pixel._
+Uniquement des écarts de **données** ou de **capacité du lecteur** ; la mise en page n'est pas le sujet.
+
+| Écart | Original | Refonte | Verdict |
+|---|---|---|---|
+| Éditions | 2020-2025 par question | 2025 seule (+ 2024 pour trois variations) | Choix éditorial écrit ; la v1 couvre le reste |
+| Repère « Connectivité » | indicateur du producteur : Très + Plutôt satisfaisant (81,0 %) | Très satisfaisant seul (29,7 %), attribué à tort au jeu | À corriger ou à réécrire (R3) |
+| Classement des écarts et des variations | absent | présent, calculé | Gain — mais le n° 1 des variations est un artefact (R1) |
+| Doublons de couples | sommés (SUM) | sommés | Parité ; à dire (R11) |
+| Liste des questions | 119 lues dans la table, 16 sans données 2025 | 119 écrites en dur, 16 mortes | Même défaut ; voie native possible (R7) |
+| Effectif du profil | jamais affiché | jamais affiché | Lacune commune ; le jeu porte `poids_question` (R4) |
+| Tableau équivalent | aucun | présent, mais en-têtes bruts (`score_prof`, `an_2024`) | Gain d'accessibilité à finir (R10) |
+| Section analyse | — | décrit en partie une page antérieure (display, fr-tile, facette de chapitre, LIM-004) | Le livrable est l'analyse : à mettre à jour (R8) |
+
+**Grille avancée, en une ligne chacune** — B1 titres-fonctions, pas titres-messages ; B2 formes justes ; B3 pas de moyenne de taux ; B4 totaux recoupés à l'API (77,9/25,6/37,0/29,7 ; écarts Bretagne au centième) ; B5 source et date posées, légende conforme, phrase de lecture manquante ou fausse sur un bloc ; I6 angle présent (« mon profil contre la France ») ; I7 ordre de l'argument correct ; I8 contraste par `color-map`, ok ; I9 axes à zéro ; I10 null écarté et dit ; A11 hypothèses écrites, dont une fausse (n° 2) ; A12 accroche oui, conclusion non ; A13 sens : les quatre repères sont « fav », ok ; A14 pas d'arrondi amont ; A15 petits multiples homogènes ; A16 tableau équivalent aux en-têtes bruts ; A17 formulations prudentes sauf « calculées et non choisies » qui cache 34 exclusions ; A18 le titre reprend le filtre (`dsfr-data-context-value`), une seule région live.
