@@ -4,17 +4,121 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Observatoire des finances locales — open-data-viz</title>
-  <meta name="description" content="Analyse : pourquoi la cartographie de data.ofgl.fr n'est pas reproduite, et ce que les balances comptables de data.economie.gouv.fr permettent.">
+  <meta name="description" content="Comptes consolidés des départements (OFGL, 2019-2025) : entre 2022 et 2024, leur épargne brute a fondu de plus de moitié, prise en ciseaux entre des droits de mutation qui reculent et des dépenses sociales qui montent. Puis département par département.">
   <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.ofgl.fr" crossorigin>
+
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
 </head>
 <body>
 <div id="site-header"></div>
 
 <main role="main" id="contenu">
-  <div class="fr-container fr-mt-6w fr-mb-8w">
+
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — ce que la page raconte, et pourquoi.
+
+       La page précédente était une analyse seule (LIM-007) : l'entrée du
+       catalogue pointe l'atelier de cartographie de data.ofgl.fr, et les
+       balances brutes du MEF ne portent pas la règle comptable qui fait un
+       agrégat. Vérifié à l'API le 2026-09-26 : c'est vrai des balances, mais
+       l'OFGL PUBLIE ces agrégats, déjà calculés à partir des mêmes balances,
+       sur son propre portail Opendatasoft, en accès libre et CORS ouvert
+       (`ofgl-base-departements-consolidee`, 14 exercices, 2012-2025). La
+       règle n'était pas absente : elle vivait sur un autre domaine. La page
+       se recrée donc, sur les départements (la base la plus lisible).
+
+       L'histoire trouvée à l'API : l'épargne brute des 95 départements
+       (hors Paris et Métropole de Lyon) passe de 12,1 Md€ en 2022 à 5,1 Md€
+       en 2024. Recettes de fonctionnement stables (−0,5 Md€), dépenses en
+       hausse (+6,5 Md€) : un effet de ciseaux, porté d'un côté par les droits
+       de mutation (DMTO −4,3 Md€), de l'autre par les dépenses sociales
+       (RSA, APA, PCH, hébergement : +3,4 Md€). 94 départements sur 95 ont
+       moins épargné en 2024 qu'en 2022 : ce n'est pas une affaire de gestion
+       locale. Dix-huit n'ont plus couvert le remboursement de leur dette
+       (épargne nette négative). 2025 : reprise partielle.
+
+       Périmètre constant depuis 2019 : avant, la Ville de Paris (2019), la
+       Corse (2018), Guyane et Martinique (2016) changent la base. Les
+       séries commencent donc en 2019.
+       ========================================================================== -->
+
+  <!-- ─── Le récit national : une requête groupée, 63 lignes ────────────── -->
+  <dsfr-data-source id="of-fr" api-type="opendatasoft"
+    base-url="https://data.ofgl.fr" dataset-id="ofgl-base-departements-consolidee"
+    fetch-mode="export"
+    select="agregat, sum(montant_en_millions) as m"
+    group-by="year(exer) as an, agregat"
+    where='categ = "DEPT" and year(exer) >= 2019 and agregat in ("Epargne brute", "Epargne nette", "Recettes de fonctionnement", "Dépenses de fonctionnement", "DMTO après péreq.", "Allocations RSA", "Allocations APA", "Allocations PCH", "Frais d&#39;hébergement")'>
+  </dsfr-data-source>
+  <!-- Six postes : les quatre dépenses sociales se regroupent en « soc » -->
+  <dsfr-data-normalize id="of-fr-c" source="of-fr"
+    compute="poste = when agregat = 'Epargne brute' then 'eb' when agregat = 'Epargne nette' then 'en' when agregat = 'Recettes de fonctionnement' then 'rrf' when agregat = 'Dépenses de fonctionnement' then 'drf' when agregat = 'DMTO après péreq.' then 'dmto' else 'soc'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="of-fr-p" source="of-fr-c" group-by="an, poste" aggregate="m:sum:m" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="of-fr-k" source="of-fr-p"
+    compute="k = concat(poste, '_', an); md = round(m / 1000, 1); pays = 'France'"></dsfr-data-normalize>
+
+  <!-- Pour les phrases et les KPI : une seule ligne, une colonne par poste × exercice -->
+  <dsfr-data-pivot id="of-fr-w" source="of-fr-k" row="pays" column="k" value="m"></dsfr-data-pivot>
+  <dsfr-data-normalize id="of-fr-phrase" source="of-fr-w"
+    compute="eb22 = round(eb_2022 / 1000, 1); eb24 = round(eb_2024 / 1000, 1); eb25 = round(eb_2025 / 1000, 1);
+             chute = round((eb_2022 - eb_2024) * 100 / eb_2022, 0);
+             tx22 = round(eb_2022 * 100 / rrf_2022, 1); tx24 = round(eb_2024 * 100 / rrf_2024, 1); tx25 = round(eb_2025 * 100 / rrf_2025, 1);
+             rrf_var = round((rrf_2024 - rrf_2022) / 1000, 1); drf_var = round((drf_2024 - drf_2022) / 1000, 1);
+             dmto_var = round((dmto_2022 - dmto_2024) / 1000, 1); soc_var = round((soc_2024 - soc_2022) / 1000, 1);
+             dmto_rebond = round((dmto_2025 - dmto_2024) / 1000, 1); soc_2025v = round((soc_2025 - soc_2024) / 1000, 1);
+             soc25 = round(soc_2025 / 1000, 1); dmto22 = round(dmto_2022 / 1000, 1); dmto24 = round(dmto_2024 / 1000, 1); dmto25 = round(dmto_2025 / 1000, 1)">
+  </dsfr-data-normalize>
+
+  <!-- L'épargne brute, une barre par exercice -->
+  <dsfr-data-query id="of-fr-eb" source="of-fr-k" where="poste:eq:eb" order-by="an:asc"></dsfr-data-query>
+
+  <!-- Base 100 en 2019 : pivot par poste, indices, puis dépliés en séries -->
+  <dsfr-data-pivot id="of-fr-y" source="of-fr-p" row="poste" column="an" value="m" column-format="y_{value}"></dsfr-data-pivot>
+  <dsfr-data-normalize id="of-fr-i" source="of-fr-y"
+    compute="i_2019 = 100; i_2020 = round(y_2020 * 100 / y_2019, 1); i_2021 = round(y_2021 * 100 / y_2019, 1);
+             i_2022 = round(y_2022 * 100 / y_2019, 1); i_2023 = round(y_2023 * 100 / y_2019, 1);
+             i_2024 = round(y_2024 * 100 / y_2019, 1); i_2025 = round(y_2025 * 100 / y_2019, 1);
+             serie = when poste = 'rrf' then 'Recettes de fonctionnement' when poste = 'drf' then 'Dépenses de fonctionnement' when poste = 'dmto' then 'Droits de mutation (DMTO)' when poste = 'soc' then 'Dépenses sociales' else poste">
+  </dsfr-data-normalize>
+  <dsfr-data-unpivot id="of-fr-long" source="of-fr-i" id-cols="poste, serie"
+    value-cols="i_2019:2019, i_2020:2020, i_2021:2021, i_2022:2022, i_2023:2023, i_2024:2024, i_2025:2025"
+    var-name="an" value-name="indice"></dsfr-data-unpivot>
+  <dsfr-data-query id="of-ciseaux" source="of-fr-long" where="poste:in:rrf|drf"></dsfr-data-query>
+  <dsfr-data-query id="of-cause" source="of-fr-long" where="poste:in:dmto|soc"></dsfr-data-query>
+
+  <!-- ─── Département par département : 3 agrégats × 4 exercices × 95 = 1 140 lignes.
+       max-records relevé : le plafond par défaut (1 000) tronquerait en silence. -->
+  <dsfr-data-source id="of-dep" api-type="opendatasoft"
+    base-url="https://data.ofgl.fr" dataset-id="ofgl-base-departements-consolidee"
+    fetch-mode="export" max-records="5000"
+    select="dep_code, dep_name, year(exer) as an, agregat, montant_en_millions"
+    where='categ = "DEPT" and year(exer) >= 2022 and agregat in ("Epargne brute", "Epargne nette", "Recettes de fonctionnement")'>
+  </dsfr-data-source>
+  <dsfr-data-normalize id="of-dep-k" source="of-dep"
+    compute="code = when agregat = 'Epargne brute' then 'eb' when agregat = 'Epargne nette' then 'en' else 'rrf'; k = concat(code, '_', an)">
+  </dsfr-data-normalize>
+  <dsfr-data-pivot id="of-dep-w" source="of-dep-k" row="dep_code, dep_name" column="k" value="montant_en_millions" aggregate="first"></dsfr-data-pivot>
+  <dsfr-data-normalize id="of-dep-t" source="of-dep-w"
+    compute="tx_2022 = round(eb_2022 * 100 / rrf_2022, 1); tx_2023 = round(eb_2023 * 100 / rrf_2023, 1);
+             tx_2024 = round(eb_2024 * 100 / rrf_2024, 1); tx_2025 = round(eb_2025 * 100 / rrf_2025, 1);
+             tx24_brut = eb_2024 * 100 / rrf_2024;
+             en24 = round(en_2024, 2); en25 = round(en_2025, 2);
+             baisse = when eb_2024 < eb_2022 then 1 else 0;
+             neg24 = when en_2024 < 0 then 1 else 0; neg25 = when en_2025 < 0 then 1 else 0;
+             neg_deux = when en_2024 < 0 and en_2025 < 0 then 1 else 0; pays = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="of-dep-n" source="of-dep-t" group-by="pays"
+    aggregate="baisse:sum:baisse, neg24:sum:neg24, neg25:sum:neg25, neg_deux:sum:neg_deux, dep_code:count:total"></dsfr-data-query>
+  <dsfr-data-query id="of-dep-neg" source="of-dep-t" where="en_2024:lt:0" order-by="en_2024:asc"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
       <div class="fr-collapse" id="fil-ariane">
@@ -25,83 +129,341 @@
       </div>
     </nav>
 
-    <h1>Observatoire des finances et de la gestion publique locales</h1>
-    <p class="fr-text--lead">Analyse seule&nbsp;: la cible n'est pas une visualisation mais un atelier de cartographie,
-      et les jeux référencés ne sont pas ceux qu'elle utilise.</p>
+    <p class="fr-badge fr-badge--info fr-mb-2v">Comptes consolidés des départements · OFGL · exercices 2019 à 2025</p>
+    <h1>En deux ans, l'épargne des départements a fondu de plus de moitié</h1>
 
-    <div class="fr-callout fr-icon-database-line fr-mb-4w">
-      <h2 class="fr-callout__title fr-text--md">Ce que le catalogue référence</h2>
+    <dsfr-data-repeat source="of-fr-phrase">
+      <template>
+        <p class="fr-text--lead">
+          Les départements dégageaient <strong>{{eb22:number:1}}&nbsp;Md€</strong> d'épargne brute en
+          2022&nbsp;; ils n'en dégagent plus que <strong>{{eb24:number:1}}&nbsp;Md€</strong> en 2024,
+          soit <strong>{{chute:number}}&nbsp;% de moins</strong>. Leurs recettes ont stagné quand leurs
+          dépenses montaient&nbsp;: les droits de mutation immobiliers ont reculé de
+          {{dmto_var:number:1}}&nbsp;Md€, les dépenses sociales ont augmenté de {{soc_var:number:1}}&nbsp;Md€.
+          2025 rattrape une partie du terrain ({{eb25:number:1}}&nbsp;Md€), pas la totalité.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
+      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
       <p class="fr-callout__text fr-text--sm">
-        Le lien pointe <a href="https://data.ofgl.fr" target="_blank" rel="noopener external">data.ofgl.fr</a>,
-        portail Opendatasoft de l'OFGL, avec la promesse «&nbsp;réalisez vos propres cartes des agrégats
-        financiers des collectivités locales&nbsp;». Quatre jeux du MEF lui sont associés&nbsp;: les balances
-        comptables des régions (44&nbsp;199 lignes), des départements (574&nbsp;002), des communes 2022
-        (7&nbsp;158&nbsp;025) et des établissements publics locaux (8&nbsp;374&nbsp;498) — 28 champs chacun,
-        une ligne par budget, exercice et compte, avec les soldes débiteurs et créditeurs.
+        <a href="https://data.ofgl.fr/explore/dataset/ofgl-base-departements-consolidee/"
+           target="_blank" rel="noopener external"><code>ofgl-base-departements-consolidee</code></a>
+        (Observatoire des finances et de la gestion publique locales, sur son portail
+        <a href="https://data.ofgl.fr" target="_blank" rel="noopener external">data.ofgl.fr</a>) — une
+        ligne par collectivité, exercice et agrégat financier, de 2012 à 2025. Les agrégats
+        (épargne brute, droits de mutation, allocations…) sont <strong>calculés par l'OFGL à partir
+        des balances comptables de la DGFiP</strong>, celles que le catalogue du MEF publie brutes, et
+        consolidés (budget principal et budgets annexes, flux croisés neutralisés). La règle comptable
+        qui manquait aux balances est là, publiée avec sa méthode.
+        <strong>Épargne brute</strong>&nbsp;: recettes moins dépenses de fonctionnement, ce qui reste
+        pour investir et rembourser la dette. <strong>Épargne nette</strong>&nbsp;: épargne brute moins
+        le remboursement du capital des emprunts.
       </p>
-    </div>
-
-    <h2 class="fr-h4">Ce que fait vraiment la page d'origine</h2>
-    <p>
-      Le source de <code>data.ofgl.fr/pages/cartographie/</code> (161&nbsp;000 caractères de template, lu
-      comme ceux du MEF) est un <strong>constructeur de cartes</strong>&nbsp;: on choisit un niveau de
-      collectivité, un jeu de données parmi <code>carto_liste_regions</code>,
-      <code>carto_liste_departements</code>, <code>carto_liste_gfps</code>, une variable dans
-      <code>variables-cartographie-test-sdis</code>, puis les bornes des classes, les couleurs, les classes
-      à isoler, les contours, l'unité. Huit contextes, quatorze <code>ods-results</code>, sept
-      <code>ods-adv-analysis</code>, vingt-deux infobulles, et des jeux dont le nom est lui-même calculé
-      (<code>{{ niveau_colls_analyses.fields.donnees_carto }}</code>).
-    </p>
-    <p>
-      Deux constats en découlent. D'abord, <strong>les jeux utilisés sont ceux de l'OFGL</strong>, des
-      agrégats déjà calculés par collectivité (une ligne par collectivité et par variable), pas les balances
-      brutes du MEF. Ensuite, <strong>ce n'est pas une dataviz, c'est un outil</strong>&nbsp;: la
-      visualisation est produite par l'utilisateur à partir d'une vingtaine de choix. Reproduire cela avec
-      des balises déclaratives reviendrait à écrire un builder — ce que ChartsBuilder est déjà, par
-      ailleurs.
-    </p>
-
-    <h2 class="fr-h4">Ce que les balances du MEF permettraient</h2>
-    <p>
-      Une carte des départements sur un agrégat est techniquement à portée&nbsp;: une source Opendatasoft
-      agrégée (<code>select sum(sd) … group_by ndept where exer = 2024 and compte …</code>) et un
-      <code>dsfr-data-chart type="map"</code>, exactement le motif de la page
-      <a href="/viz/fiscalite-locale">Fiscalité locale</a>. Ce qui manque n'est pas l'outil, c'est
-      <strong>la règle comptable</strong>&nbsp;: quel agrégat (dépenses de fonctionnement, épargne brute,
-      encours de dette) correspond à quelle combinaison de comptes de la nomenclature M57, avec quels
-      soldes. C'est précisément le travail que l'OFGL fait en amont dans ses jeux
-      <code>carto_liste_*</code>. Publier une carte sans cette règle produirait des chiffres faux avec
-      une apparence officielle&nbsp;: la ligne rouge de ce banc d'essai.
-    </p>
-
-    <div class="fr-table fr-table--bordered">
-      <table>
-        <caption>Pourquoi cette entrée reste une analyse</caption>
-        <thead><tr><th scope="col">Question</th><th scope="col">Réponse</th></tr></thead>
-        <tbody>
-          <tr><td>La donnée est-elle sur la plateforme du MEF&nbsp;?</td><td>Les balances brutes, oui. Les agrégats cartographiés, non&nbsp;: ils sont sur data.ofgl.fr.</td></tr>
-          <tr><td>L'outil sait-il faire une choroplèthe d'un agrégat serveur&nbsp;?</td><td>Oui, démontré sur Fiscalité locale.</td></tr>
-          <tr><td>Peut-on reproduire l'atelier de cartes&nbsp;?</td><td>Non, ce n'est pas une page mais un configurateur — hors du cadre «&nbsp;une dataviz, une page&nbsp;».</td></tr>
-          <tr><td>Peut-on publier une carte «&nbsp;exemple&nbsp;» sur les balances&nbsp;?</td><td>Pas sans la règle d'agrégation comptable&nbsp;; on ne publie pas un chiffre qu'on ne sait pas défendre.</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="odv-verdict fr-mt-4w">
-      <p class="fr-text--lead fr-mb-1v">Verdict</p>
-      <p><strong>Non reproduite, pour une raison de fond et non d'outil.</strong> L'entrée du catalogue
-        associe un atelier de cartographie à des jeux bruts qu'il n'utilise pas. Ce que ChartsBuilder
-        saurait faire — une carte d'un agrégat — demande une expertise comptable qui n'est ni dans les
-        données ni dans l'outil. C'est le seul cas du lot «&nbsp;hors périmètre&nbsp;» où la donnée du
-        portail ne suffit pas.</p>
-      <p class="fr-text--sm fr-hint-text">Constat&nbsp;: LIM-007 (une donnée brute sans règle d'agrégation métier n'est pas visualisable de façon responsable).</p>
-    </div>
+    </details>
   </div>
+
+  <div class="fr-container fr-mb-8w">
+
+    <!-- ====================== 1. L'accroche ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-accroche">
+      <h2 class="fr-h3" id="t-accroche">Presque tous les départements ont moins épargné en 2024 qu'en 2022</h2>
+      <dsfr-data-kpi-group per-row="4" class="fr-mb-3w">
+        <dsfr-data-kpi source="of-fr-phrase" value="eb24:sum" format="decimal" decimals="1" unit="Md€"
+          heading="Épargne brute 2024" label="des 95 départements"
+          lines='[{"value":"eb22:sum","format":"decimal","decimals":1,"prefix":"contre ","suffix":" Md€ en 2022"}]'
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+        <dsfr-data-kpi source="of-fr-phrase" value="tx24:sum" format="decimal" decimals="1" unit="%"
+          heading="Taux d'épargne brute 2024" label="part des recettes de fonctionnement épargnée"
+          lines='[{"value":"tx22:sum","format":"decimal","decimals":1,"prefix":"contre ","suffix":" % en 2022"}]'
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+        <dsfr-data-kpi source="of-dep-n" value="baisse:sum" format="nombre"
+          heading="En recul" label="départements qui ont moins épargné en 2024 qu'en 2022"
+          lines='[{"value":"total:sum","format":"nombre","prefix":"sur ","suffix":""}]'
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+        <dsfr-data-kpi source="of-dep-n" value="neg24:sum" format="nombre"
+          heading="Épargne nette négative en 2024" label="départements dont l'épargne ne couvre plus le remboursement de la dette"
+          lines='[{"value":"neg25:sum","format":"nombre","prefix":"puis ","suffix":" en 2025"}]'
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+      </dsfr-data-kpi-group>
+      <p class="fr-text--sm fr-hint-text">
+        Les 95 départements de droit commun, Collectivité européenne d'Alsace comprise. Paris et la
+        Métropole de Lyon, qui exercent aussi des compétences communales ou métropolitaines, sont
+        écartés&nbsp;; la Corse, la Guyane et la Martinique, collectivités uniques, sont comptées par
+        l'OFGL avec les régions.
+      </p>
+    </section>
+
+    <!-- ====================== 2. La preuve : la chute ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-chute">
+      <h2 class="fr-h3" id="t-chute">Le record de 2022 a été effacé en deux exercices</h2>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-5">
+          <dsfr-data-repeat source="of-fr-phrase">
+            <template>
+              <p class="odv-lecture">Rapportée aux recettes de fonctionnement, l'épargne brute passe de
+                {{tx22:number:1}}&nbsp;% en 2022 à <strong>{{tx24:number:1}}&nbsp;%</strong> en 2024&nbsp;:
+                sur 100&nbsp;€ de recettes courantes, il reste moins de la moitié de ce qui restait deux
+                ans plus tôt pour investir et rembourser. En 2025, le taux remonte à {{tx25:number:1}}&nbsp;%.</p>
+            </template>
+          </dsfr-data-repeat>
+          <p class="fr-text--sm">Des barres qui partent de zéro&nbsp;: la hauteur se lit comme un
+            montant. L'exercice 2024, le plus bas de la période, est mis en évidence.</p>
+        </div>
+        <div class="fr-col-12 fr-col-lg-7">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Épargne brute des départements, par exercice (Md€)">
+            <dsfr-data-chart id="g-eb" source="of-fr-eb" type="bar"
+              label-field="an" value-field="md:Épargne brute (Md€)" unit-tooltip=" Md€"
+              selected-palette="neutral" highlight-index="[5]"
+              databox databox-title="Épargne brute des départements, par exercice (Md€)"
+              databox-source="OFGL — comptes consolidés des départements, via data.ofgl.fr"
+              databox-date="Exercices 2019 à 2025" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-eb" source="of-fr-eb" table download
+              label-field="an" value-field="md"
+              description="Barres verticales, une par exercice de 2019 à 2025 : épargne brute cumulée des 95 départements, en milliards d'euros. Le sommet est en 2022, le creux en 2024 (mis en évidence), puis une remontée partielle en 2025."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================== 3. Le mécanisme : les ciseaux ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-ciseaux">
+      <h2 class="fr-h3" id="t-ciseaux">Des recettes à l'arrêt, des dépenses qui continuent de monter&nbsp;: un effet de ciseaux</h2>
+      <dsfr-data-repeat source="of-fr-phrase">
+        <template>
+          <p class="odv-lecture">De 2022 à 2024, les recettes de fonctionnement varient de
+            {{rrf_var:number:1}}&nbsp;Md€ quand les dépenses de fonctionnement augmentent de
+            <strong>{{drf_var:number:1}}&nbsp;Md€</strong>. Deux postes font l'essentiel de l'écart&nbsp;:
+            les droits de mutation (DMTO), taxés sur les ventes immobilières, tombent de
+            {{dmto22:number:1}} à {{dmto24:number:1}}&nbsp;Md€&nbsp;; les dépenses sociales (RSA, APA, PCH,
+            frais d'hébergement) prennent {{soc_var:number:1}}&nbsp;Md€.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-6">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Recettes et dépenses de fonctionnement des départements, base 100 en 2019">
+            <dsfr-data-chart id="g-ciseaux" source="of-ciseaux" type="line"
+              label-field="an" value-field="indice" series-field="serie"
+              y-min="80" y-max="130"
+              databox databox-title="Les ciseaux : recettes et dépenses de fonctionnement, base 100 en 2019"
+              databox-source="OFGL — comptes consolidés des départements, via data.ofgl.fr"
+              databox-date="Exercices 2019 à 2025" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-ciseaux" source="of-ciseaux" table download
+              label-field="an" value-field="indice" series-field="serie"
+              description="Deux courbes en indice base 100 en 2019. Les recettes de fonctionnement montent jusqu'en 2022, plafonnent en 2023 et 2024 puis remontent en 2025 ; les dépenses de fonctionnement montent chaque année, et leur indice passe au-dessus de celui des recettes à partir de 2023."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-6">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Droits de mutation et dépenses sociales des départements, base 100 en 2019">
+            <dsfr-data-chart id="g-cause" source="of-cause" type="line"
+              label-field="an" value-field="indice" series-field="serie"
+              y-min="80" y-max="130"
+              databox databox-title="Ce qui les écarte : droits de mutation et dépenses sociales, base 100 en 2019"
+              databox-source="OFGL — comptes consolidés des départements, via data.ofgl.fr"
+              databox-date="Exercices 2019 à 2025" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-cause" source="of-cause" table download
+              label-field="an" value-field="indice" series-field="serie"
+              description="Deux courbes en indice base 100 en 2019. Les droits de mutation montent fortement en 2021-2022 puis chutent en 2023 et 2024 sous leur niveau de 2019, avant de remonter en 2025 ; les dépenses sociales progressent chaque année."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="fr-text--xs fr-hint-text">
+        Même échelle sur les deux graphiques (80 à 130), pour que les pentes se comparent. Un indice
+        dit une évolution, pas un poids&nbsp;: les dépenses sociales pèsent de deux à trois fois et demie les
+        droits de mutation selon l'exercice. Montants dans le tableau de chaque graphique.
+      </p>
+    </section>
+
+    <!-- ====================== 4. La nuance : qui, et 2025 ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-qui">
+      <h2 class="fr-h3" id="t-qui">Dix-huit départements n'ont plus couvert le remboursement de leur dette en 2024&nbsp;; la plupart se sont redressés en 2025</h2>
+      <dsfr-data-repeat source="of-dep-n">
+        <template>
+          <p class="odv-lecture">En 2024, <strong>{{neg24:number}} départements</strong> ont une épargne
+            nette négative&nbsp;: leur épargne brute ne suffit pas à rembourser le capital de leurs
+            emprunts. En 2025, ils ne sont plus que {{neg25:number}}, dont <strong>{{neg_deux:number}}</strong>
+            déjà dans ce cas l'année précédente. La liste compte de grands départements urbains
+            (Gironde, Nord, Haute-Garonne, Loire-Atlantique)&nbsp;: la difficulté ne se limite pas aux
+            territoires ruraux.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot odv-chart-slot--haut">
+        <div class="odv-viz" data-code="Épargne nette des départements négative en 2024, et la même en 2025 (M€)">
+        <dsfr-data-chart id="g-neg" source="of-dep-neg" type="bar" horizontal
+          label-field="dep_name" value-field="en24:2024" value-fields="en25:2025" unit-tooltip=" M€"
+          databox databox-title="Épargne nette des départements négative en 2024, et la même en 2025 (M€)"
+          databox-source="OFGL — comptes consolidés des départements, via data.ofgl.fr"
+          databox-date="Exercices 2024 et 2025" databox-download heading-level="3">
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-neg" source="of-dep-neg" table download
+          label-field="dep_name" value-field="en24, en25"
+          description="Barres horizontales groupées, une paire par département dont l'épargne nette est négative en 2024, triés du plus négatif au moins négatif : épargne nette 2024 et 2025, en millions d'euros. La plupart des barres 2025 repassent au-dessus de zéro."></dsfr-data-a11y>
+        </div>
+      </div>
+      <p class="fr-text--xs fr-hint-text">
+        Montants en millions d'euros, non rapportés à la population&nbsp;: la Gironde pèse dix fois la
+        Lozère. Le taux d'épargne brute, lui, se compare d'un département à l'autre&nbsp;: c'est ce que
+        montrent la carte et le tableau qui suivent.
+      </p>
+    </section>
+
+    <!-- ====================== 5. Exploration : la carte et le tableau ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-carte">
+      <h2 class="fr-h3" id="t-carte">Et votre département&nbsp;?</h2>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-7">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Taux d'épargne brute des départements, 2024">
+            <dsfr-data-chart id="g-carte" source="of-dep-t" type="map"
+              code-field="dep_code" value-field="tx_2024" name="Taux d'épargne brute 2024 (%)"
+              selected-palette="sequentialAscending" unit-tooltip=" %"
+              map-summary="weighted" map-summary-weight="rrf_2024" map-summary-field="tx24_brut"
+              databox databox-title="Taux d'épargne brute des départements, 2024 (%)"
+              databox-source="OFGL — comptes consolidés des départements, via data.ofgl.fr"
+              databox-date="Exercice 2024" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-carte" source="of-dep-t" table download
+              label-field="dep_name" value-field="tx_2024, tx_2022, tx_2025"
+              description="Carte des départements colorée selon leur taux d'épargne brute 2024, épargne brute rapportée aux recettes de fonctionnement. Le chiffre affiché sous le titre est pondéré par les recettes : c'est le taux de l'ensemble des départements."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-5">
+          <p class="fr-text--sm">Le taux d'épargne brute rapporte l'épargne aux recettes de
+            fonctionnement&nbsp;: il se compare entre un petit et un grand département, ce que ne permet
+            pas un montant. Le chiffre sous le titre de la carte est le taux de l'ensemble, pondéré par
+            les recettes, et non la moyenne des départements.</p>
+          <p class="fr-text--sm fr-hint-text">La Collectivité européenne d'Alsace (code OFGL
+            <code>67A</code>, Bas-Rhin et Haut-Rhin réunis) n'a pas de contour sur la carte des
+            départements&nbsp;: elle reste blanche, mais figure dans le tableau. Pour la même raison, le
+            chiffre sous le titre de la carte, calculé sans elle, s'écarte d'un dixième de point du taux
+            national de l'encadré du haut.</p>
+        </div>
+      </div>
+
+      <h3 class="fr-h6 fr-mt-4w">Les 95 départements — taux d'épargne brute et épargne nette</h3>
+      <div class="odv-viz" data-code="Taux d'épargne brute et épargne nette par département, 2022-2025">
+      <dsfr-data-list source="of-dep-t"
+        columns="dep_name:Département, dep_code:Code, tx_2022:Taux EB 2022 (%), tx_2023:Taux EB 2023 (%), tx_2024:Taux EB 2024 (%), tx_2025:Taux EB 2025 (%), en24:Épargne nette 2024 (M€), en25:Épargne nette 2025 (M€)"
+        search sort="tx_2024:asc" pagination="20" export="csv" count-label="département">
+      </dsfr-data-list>
+      </div>
+    </section>
+
+    <!-- ====================== 6. Ce qu'on ne montre pas ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-limites">
+      <h2 class="fr-h4" id="t-limites">Ce que cette page ne montre pas</h2>
+      <ul class="fr-text--sm">
+        <li><strong>Les années avant 2019.</strong> Le jeu remonte à 2012, mais son périmètre bouge&nbsp;:
+          Guyane et Martinique sortent en 2016, la Corse en 2018, le département de Paris devient la Ville
+          de Paris en 2019. Une série longue mélangerait des évolutions et des changements de périmètre.</li>
+        <li><strong>Paris et la Métropole de Lyon.</strong> Présentes dans le jeu, elles exercent des
+          compétences communales ou métropolitaines&nbsp;: leurs comptes ne se comparent pas à ceux d'un
+          département.</li>
+        <li><strong>La cause des mouvements.</strong> Le jeu dit quels postes bougent, pas pourquoi&nbsp;:
+          le repli des ventes immobilières derrière les DMTO, les revalorisations et le vieillissement
+          derrière les dépenses sociales sont des lectures habituelles, pas des données de la page.</li>
+        <li><strong>La dette et l'investissement.</strong> L'épargne dit la marge de fonctionnement&nbsp;;
+          l'encours de dette et les dépenses d'équipement, dans le même jeu, feraient une autre page.</li>
+        <li><strong>L'atelier de cartes de l'original.</strong> Choisir soi-même un agrégat et ses classes
+          reste l'affaire de <a href="https://data.ofgl.fr/pages/cartographie/" target="_blank"
+          rel="noopener external">data.ofgl.fr</a>&nbsp;; cette page choisit un indicateur et le défend.</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <!-- ====================== Analyse de reproduction ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+      <details class="odv-technique">
+        <summary>Analyse de reproduction — Observatoire des finances locales — ce que la recréation a coûté</summary>
+
+    <div class="fr-container">
+      <p class="fr-text--lead">
+        Entrée du catalogue&nbsp;: <a href="https://data.ofgl.fr" target="_blank" rel="noopener external">data.ofgl.fr</a>,
+        l'atelier de cartographie de l'OFGL, associé à quatre jeux de balances comptables du MEF. Longtemps
+        tenue ici pour non reproductible&nbsp;; recréée le 26/09/2026 en page qui raconte, sur les agrégats
+        que l'OFGL publie lui-même.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Un autre portail Opendatasoft, la même balise.</strong>
+              <code>base-url="https://data.ofgl.fr"</code>, sans clé&nbsp;: CORS ouvert, <code>fetch-mode="export"</code>
+              et <code>group-by="year(exer) as an, agregat"</code> passent tels quels.</li>
+            <li><strong>Base 100 sans script.</strong> Un pivot par poste (<code>y_2019 … y_2025</code>),
+              <code>compute</code> pour les indices, <code>dsfr-data-unpivot</code> pour revenir en séries,
+              <code>series-field</code> pour les courbes.</li>
+            <li><strong>Des phrases qui se recalculent.</strong> Un second pivot replie tout le récit national en
+              une ligne (<code>eb_2022</code>, <code>dmto_2024</code>…)&nbsp;; aucun chiffre du chapeau n'est
+              dans le HTML.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>L'Alsace sort de la carte.</strong> Le code OFGL <code>67A</code> n'est pas dans le
+              référentiel départemental de DSFR Chart&nbsp;: la ligne est écartée et comptée en console.
+              C'est le jeu, pas la bibliothèque&nbsp;; le tableau la garde.</li>
+            <li><strong>1&nbsp;140 lignes par département.</strong> Au-dessus du plafond par défaut de
+              <code>max-records</code>&nbsp;: relevé à 5&nbsp;000, faute de quoi le pivot aurait perdu des
+              exercices sans le dire.</li>
+            <li><strong>La mise en évidence est un indice.</strong> <code>highlight-index="[5]"</code> vise 2024
+              par sa position&nbsp;: juste tant que la série commence en 2019.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ods-dataset-context</code> sur <code>carto_liste_*</code>, nom de jeu calculé</td><td><code>dsfr-data-source</code> sur <code>ofgl-base-departements-consolidee</code></td><td>Un jeu choisi, pas vingt</td></tr>
+            <tr><td><code>ods-adv-analysis</code> (agrégats par collectivité)</td><td><code>group-by</code> serveur + <code>dsfr-data-pivot</code> + <code>compute</code></td><td>Équivalent</td></tr>
+            <tr><td>choroplèthe à classes réglables</td><td><code>dsfr-data-chart type="map"</code>, résumé pondéré</td><td>Un indicateur fixe, pas un configurateur</td></tr>
+            <tr><td><code>ods-table</code></td><td><code>dsfr-data-list</code> recherche, tri, export</td><td>Équivalent</td></tr>
+            <tr><td>—</td><td>base 100, KPI, phrases <code>dsfr-data-repeat</code></td><td>Le récit, absent de l'original</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>La page n'était pas irreproductible&nbsp;: la donnée était sur un autre portail.</strong>
+          L'ancienne analyse avait raison sur les balances brutes (sans règle d'agrégation, pas de chiffre
+          défendable) et tort d'en conclure qu'il fallait s'arrêter là&nbsp;: l'OFGL publie ces agrégats,
+          calculés à partir des mêmes balances, sur un portail Opendatasoft ouvert que <code>dsfr-data</code>
+          lit sans rien changer. L'atelier de cartes reste un outil, hors du cadre d'une page&nbsp;; l'histoire
+          qu'il permettait de chercher, elle, tient en une requête groupée.</p>
+        <p class="fr-text--sm fr-hint-text">Constat&nbsp;: LIM-007, requalifié par cette recréation.</p>
+      </div>
+    </div>
+
+      </details></section>
+
 </main>
 
 <div id="site-footer"></div>
+
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tableau de bord Rappel Conso (variante fidèle) — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du tableau de bord Rappel Conso de data.economie.gouv.fr.">
+  <title>Tableau de bord Rappel Conso — ce qui fait rappeler — open-data-viz</title>
+  <meta name="description" content="Rappel Conso, lu par motif : l'oxyde d'éthylène a fait l'année record 2021, la listeria fait les suivantes. Recréation avec dsfr-data du tableau de bord de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,138 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       LE RÉCIT — sources qui ne suivent PAS les filtres de l'exploration.
+       Jeu : rappelconso-v2-gtin-espaces, UNE LIGNE PAR FICHE DE RAPPEL
+       (18 699 lignes = 18 699 numero_fiche distincts au 26/09/2026) — et non
+       -gtin-trie, une ligne par code-barre (voir /viz/rappelconso).
+       Toutes les agrégations sont faites par Opendatasoft, une requête d'export
+       chacune : aucune fiche ne descend dans le navigateur.
+
+       Années closes seulement (2021 → dernière année close, `now()` ODSQL) :
+       l'année en cours est comparée à part, à date égale. 2021 commence avant
+       l'ouverture du site (avril 2021) : dit dans l'encadré de description.
+       `date_format(…, 'yyyy')` rend l'année en texte (« 2021 », pas « 2 021 »).
+       ========================================================================== -->
+
+  <dsfr-data-source id="s-tot" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as n"
+    group-by="date_format(date_publication, 'yyyy') as an"
+    where="date_publication >= '2021-01-01' AND date_publication < now(month=1, day=1)">
+  </dsfr-data-source>
+
+  <!-- Listeria : `risques_encourus` est une liste à choix, parfois multiple
+       (« listeria…|salmonella… », 55 fiches) : `like` les attrape toutes. -->
+  <dsfr-data-source id="s-lis" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as listeria"
+    group-by="date_format(date_publication, 'yyyy') as an"
+    where="date_publication >= '2021-01-01' AND date_publication < now(month=1, day=1) AND risques_encourus like '%listeria%'">
+  </dsfr-data-source>
+
+  <!-- Oxyde d'éthylène : aucun champ structuré ne le nomme (ses fiches sont
+       rangées sous « pesticides » OU « contaminants chimiques »). Recherche plein
+       texte dans le motif, insensible aux accents. Aucune fiche n'est à la fois
+       listeria et oxyde d'éthylène (vérifié) : « autres » = total − les deux. -->
+  <dsfr-data-source id="s-eto" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as eto"
+    group-by="date_format(date_publication, 'yyyy') as an"
+    where="date_publication >= '2021-01-01' AND date_publication < now(month=1, day=1) AND search(motif_rappel, 'éthylène')">
+  </dsfr-data-source>
+
+  <!-- Nature juridique : taux calculé sur les fiches RENSEIGNÉES (2 001 fiches
+       sans nature, dont presque tous les rappels de véhicules). -->
+  <dsfr-data-source id="s-nat" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as renseignes"
+    group-by="date_format(date_publication, 'yyyy') as an"
+    where="date_publication >= '2021-01-01' AND date_publication < now(month=1, day=1) AND nature_juridique_rappel is not null">
+  </dsfr-data-source>
+  <dsfr-data-source id="s-imp" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as imposes"
+    group-by="date_format(date_publication, 'yyyy') as an"
+    where="date_publication >= '2021-01-01' AND date_publication < now(month=1, day=1) AND nature_juridique_rappel = 'imposé par arrêté préfectoral'">
+  </dsfr-data-source>
+
+  <!-- Une ligne par année close : total, listeria, oxyde d'éthylène, autres
+       motifs, taux de rappels imposés. `k` sert aux jointures des repères. -->
+  <dsfr-data-join id="j-1" left="s-tot" right="s-lis" on="an" type="left"></dsfr-data-join>
+  <dsfr-data-join id="j-2" left="j-1" right="s-eto" on="an" type="left"></dsfr-data-join>
+  <dsfr-data-join id="j-3" left="j-2" right="s-nat" on="an" type="left"></dsfr-data-join>
+  <dsfr-data-join id="j-4" left="j-3" right="s-imp" on="an" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="annees" source="j-4"
+    compute="listeria = coalesce(listeria, 0);
+             eto = coalesce(eto, 0);
+             autres = n - listeria - eto;
+             pct_impose = round(coalesce(imposes, 0) / renseignes * 100, 1);
+             k = 'r'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="annees-tri" source="annees" order-by="an:asc"></dsfr-data-query>
+
+  <!-- Repères historiques : 2021 (fixe, c'est l'année de la crise) face à la
+       dernière année close (glissante). -->
+  <!-- Plage des années pleines d'activité du site (2021 n'en compte que neuf mois). -->
+  <dsfr-data-query id="plage" source="annees" where="an:gte:2022" group-by="k"
+    aggregate="autres:min:autres_min, autres:max:autres_max, listeria:min:lis_min, listeria:max:lis_max, an:min:an_min"></dsfr-data-query>
+  <dsfr-data-query id="r-2021" source="annees" where="an:eq:2021"></dsfr-data-query>
+  <dsfr-data-query id="r-der" source="annees" order-by="an:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="r-hist-j" left="r-2021" right="r-der" on="k" prefix-right="d_"></dsfr-data-join>
+
+  <!-- Repères de l'année en cours : depuis le 1er janvier, contre la même
+       fenêtre l'an dernier (`now(years=-1)`), sans une date écrite. -->
+  <dsfr-data-source id="s-ytd-lis" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as lis_cur"
+    group-by="date_format(date_publication, 'yyyy') as an_cur"
+    where="date_publication >= now(month=1, day=1) AND risques_encourus like '%listeria%'">
+  </dsfr-data-source>
+  <dsfr-data-source id="s-ytd1-lis" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as lis_prev"
+    group-by="date_format(date_publication, 'yyyy') as an_prev"
+    where="date_publication >= now(years=-1, month=1, day=1) AND date_publication < now(years=-1) AND risques_encourus like '%listeria%'">
+  </dsfr-data-source>
+  <dsfr-data-source id="s-ytd-tot" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as tot_cur"
+    group-by="date_format(date_publication, 'yyyy') as an_tot"
+    where="date_publication >= now(month=1, day=1)">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="ytd-lis-k" source="s-ytd-lis" compute="k = 'r'"></dsfr-data-normalize>
+  <dsfr-data-normalize id="ytd1-lis-k" source="s-ytd1-lis" compute="k = 'r'"></dsfr-data-normalize>
+  <dsfr-data-normalize id="ytd-tot-k" source="s-ytd-tot" compute="k = 'r'"></dsfr-data-normalize>
+  <dsfr-data-join id="ytd-j1" left="ytd-lis-k" right="ytd1-lis-k" on="k"></dsfr-data-join>
+  <dsfr-data-join id="ytd-j2" left="ytd-j1" right="ytd-tot-k" on="k"></dsfr-data-join>
+
+  <!-- Une seule ligne de repères pour le chapeau : parts, rapports, évolution. -->
+  <dsfr-data-join id="reperes-j" left="r-hist-j" right="ytd-j2" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="reperes" source="reperes-j"
+    compute="part_eto21 = round(eto / n * 100);
+             x_lis = round(d_listeria / listeria, 1);
+             part_lis_der = round(d_listeria / d_n * 100);
+             evol_ytd = round((lis_cur - lis_prev) / lis_prev * 100);
+             part_lis_cur = round(lis_cur / tot_cur * 100)">
+  </dsfr-data-normalize>
+
+  <!-- Où se loge la listeria : part de chaque sous-catégorie dans les fiches
+       listeria (depuis 2021). La part est calculée AVANT `limit` : le top 6 ne
+       somme pas à 100 %, et c'est voulu. -->
+  <dsfr-data-source id="s-lis-sous" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="sous_categorie_produit, count(*) as n" group-by="sous_categorie_produit"
+    where="date_publication >= '2021-01-01' AND risques_encourus like '%listeria%'">
+  </dsfr-data-source>
+  <dsfr-data-query id="lis-sous-part" source="s-lis-sous"
+    aggregate="n:share_percent:part" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="lis-sous-n" source="lis-sous-part" round="part:1" compute="k = 'r'"></dsfr-data-normalize>
+  <dsfr-data-query id="lis-sous-top" source="lis-sous-n" limit="6"></dsfr-data-query>
+  <dsfr-data-query id="lis-sous-deux" source="lis-sous-n"
+    where="sous_categorie_produit:in:viandes|lait et produits laitiers"
+    group-by="k" aggregate="part:sum:part_deux, n:sum:n_deux"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -28,310 +160,246 @@
         <ol class="fr-breadcrumb__list">
           <li><a class="fr-breadcrumb__link" href="/bercy">Portail Bercy</a></li>
           <li><a class="fr-breadcrumb__link" href="/viz/rappelconso">Rappel Conso</a></li>
-          <li><a class="fr-breadcrumb__link" aria-current="page">Variante fidèle à la page vivante</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Ce qui fait rappeler</a></li>
         </ol>
       </div>
     </nav>
 
-    <h1>Tableau de bord Rappel Conso <span class="fr-text--regular">de <span id="titre-periode">…</span></span></h1>
+    <p class="fr-text--sm fr-hint-text fr-mb-1w">Tableau de bord Rappel Conso — fiches de rappel de produits (DGCCRF)</p>
+    <h1>L'oxyde d'éthylène a fait l'année record, la listeria fait les suivantes</h1>
+
+    <dsfr-data-repeat source="reperes">
+      <template>
+        <p class="fr-text--lead">
+          En 2021, {{part_eto21:number}}&nbsp;% des {{n:number}} fiches de rappel publiées citaient
+          l'oxyde d'éthylène, un pesticide interdit dans l'Union européenne&nbsp;: {{eto:number}} fiches, et
+          l'année la plus chargée du dispositif. Ce motif a presque disparu dès 2023. Les rappels, eux,
+          n'ont pas reflué&nbsp;: la listeria a pris la place. {{listeria:number}} fiches la citaient en 2021,
+          {{d_listeria:number}} en {{d_an}} ({{x_lis:number:1}} fois plus), soit {{part_lis_der:number}}&nbsp;%
+          des rappels de l'année. Et {{an_cur}} va plus haut&nbsp;: {{lis_cur:number}} fiches depuis le
+          1<sup>er</sup>&nbsp;janvier ({{part_lis_cur:number}}&nbsp;% des rappels de l'année), contre
+          {{lis_prev:number}} à la même date en {{an_prev}}&nbsp;: +{{evol_ytd:number}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
       <div class="fr-col-12 fr-col-md-8">
         <details class="fr-callout fr-icon-database-line odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+          <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
+          <p class="fr-callout__text fr-text--sm">
             <a href="https://data.economie.gouv.fr/explore/dataset/rappelconso-v2-gtin-espaces/"
                target="_blank" rel="noopener external"><code>rappelconso-v2-gtin-espaces</code></a>
-            — 18&nbsp;581 fiches de rappel publiées sur <a href="https://rappel.conso.gouv.fr/"
-            target="_blank" rel="noopener external">rappel.conso.gouv.fr</a>, mises à disposition par la
-            DGCCRF et rafraîchies chaque jour.
-            <strong>Le catalogue officiel pointe encore l'ancien jeu <code>rappelconso0</code> et l'ancienne
-            page <code>/pages/rappelconso/</code>, tous deux disparus.</strong> La page vivante est
+            — les fiches publiées sur <a href="https://rappel.conso.gouv.fr/" target="_blank"
+            rel="noopener external">rappel.conso.gouv.fr</a>, <strong>une ligne par fiche de rappel</strong>,
+            rafraîchies chaque jour sur data.economie.gouv.fr. C'est le jeu de la page vivante du portail,
             <a href="https://data.economie.gouv.fr/pages/rappel-conso-v2/" target="_blank"
-               rel="noopener external"><code>rappel-conso-v2</code></a>&nbsp;; c'est elle que cette
-            reproduction suit. <strong>Cette page est une variante</strong> de
-            <a href="/viz/rappelconso">la reconstitution Rappel Conso</a> du lot 6, écrite sans le
-            source d'origine&nbsp;: ici, on rejoue exactement la page vivante — sélecteur de date, trois
-            compteurs (période, année, mois), deux listes déroulantes, quatre graphiques.
+               rel="noopener external"><code>rappel-conso-v2</code></a> (le catalogue pointe encore l'ancienne
+            page et l'ancien jeu, disparus). Chaque chiffre de cette page est recalculé à l'ouverture.
           </p>
-    </details>
+          <p class="fr-callout__text fr-text--sm">
+            La page d'origine compte les fiches par catégorie, nature juridique et compensation, à une date
+            choisie. Cette page les lit <strong>par motif</strong>&nbsp;: c'est là que l'histoire se trouve.
+            Pour chercher une fiche ou situer le volume total, voir <a href="/viz/rappelconso">la page Rappel
+            Conso</a>.
+          </p>
+        </details>
       </div>
       <div class="fr-col-12 fr-col-md-4">
-        <div class="fr-callout fr-icon-arrow-right-line fr-callout--brown-caramel">
-          <p class="fr-callout__text fr-text--sm">
-            La page d'origine ne pose qu'un filtre&nbsp;: les fiches <em>publiées avant</em> la date choisie.
-            Ici la borne est inclusive (jusqu'au jour choisi compris), ce qui est le sens attendu d'un
-            «&nbsp;tableau de bord au 9&nbsp;septembre&nbsp;».
-          </p>
-        </div>
+        <dsfr-data-kpi-group>
+          <dsfr-data-kpi source="s-ytd-lis" value="lis_cur:sum" format="nombre" span="12"
+            heading="Listeria, année en cours" label="fiches depuis le 1er janvier"
+            icon="fr-icon-calendar-line"></dsfr-data-kpi>
+          <dsfr-data-kpi source="s-ytd1-lis" value="lis_prev:sum" format="nombre" span="12"
+            heading="Listeria, l'an dernier à la même date" label="fiches publiées"
+            icon="fr-icon-calendar-event-line"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
       </div>
     </div>
   </div>
 
-  <!-- ==========================================================================
-       Sept sources, une par agrégation, toutes déléguées au serveur Opendatasoft
-       (select count(*) [+ group_by]). Aucune fiche ne descend dans le navigateur.
-       Les deux camemberts écartent le groupe des valeurs vides (2 001 fiches sans
-       nature juridique ni modalité) par un `where` statique, comme le portail ;
-       il se combine en AND avec les filtres des contextes.
-
-       Deux <dsfr-data-context> diffusent les filtres à toutes (combinés en AND) :
-         - ctx-periode : la date choisie, borne haute inclusive, sur les 7 sources ;
-                         l'année de cette date, sur le seul compteur « année » ;
-                         le mois de cette date, sur le seul compteur « mois » ;
-         - ctx-produit : catégorie et sous-catégorie, sur les 7.
-       C'est la transposition exacte des trois contextes rappelconso /
-       rappelconsoannee / rappelconsomois de l'original.
-       ========================================================================== -->
-
-  <dsfr-data-source id="rc-total" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    api-key-ref="ods-mef" select="count(*) as nb" limit="1">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="rc-annee" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    api-key-ref="ods-mef" select="count(*) as nb" limit="1">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="rc-mois" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    api-key-ref="ods-mef" select="count(*) as nb" limit="1">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="rc-categorie" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    api-key-ref="ods-mef"
-    select="categorie_produit, count(*) as nb" group-by="categorie_produit" order-by="nb:desc" limit="20">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="rc-sous-categorie" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    api-key-ref="ods-mef"
-    select="sous_categorie_produit, count(*) as nb" group-by="sous_categorie_produit" order-by="nb:desc" limit="20">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="rc-nature" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    api-key-ref="ods-mef"
-    where="nature_juridique_rappel is not null"
-    select="nature_juridique_rappel, count(*) as nb" group-by="nature_juridique_rappel" order-by="nb:desc" limit="20">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="rc-compensation" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    api-key-ref="ods-mef"
-    where="modalites_de_compensation is not null"
-    select="modalites_de_compensation, count(*) as nb" group-by="modalites_de_compensation" order-by="nb:desc" limit="20">
-  </dsfr-data-source>
-
-  <dsfr-data-context id="ctx-periode"
-    sources="rc-total rc-annee rc-mois rc-categorie rc-sous-categorie rc-nature rc-compensation">
-    <dsfr-data-context-filter field="date_publication" operator="lt-day-after" ui="filtre-date"
-      label="Au"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="date_publication" operator="year-of" ui="filtre-annee"
-      apply-to="rc-annee" label="Année"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="date_publication" operator="month-of" ui="filtre-mois"
-      apply-to="rc-mois" label="Mois"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <!-- Second contexte sur les MÊMES sources : leurs clauses se combinent en AND.
-       Séparé du premier pour que seuls les filtres produit soient rappelés (et
-       supprimables) par <dsfr-data-context-tags> — retirer la période d'un
-       tableau de bord daté n'aurait pas de sens. -->
-  <dsfr-data-context id="ctx-produit"
-    sources="rc-total rc-annee rc-mois rc-categorie rc-sous-categorie rc-nature rc-compensation">
-    <dsfr-data-context-filter field="categorie_produit" operator="eq" ui="filtre-categorie"
-      label="Catégorie"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="sous_categorie_produit" operator="eq" ui="filtre-sous-categorie"
-      label="Sous-catégorie"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
   <div class="fr-container fr-mb-8w">
 
-    <!-- ------------------------------ Filtres ------------------------------ -->
-    <form class="fr-mb-6w" role="search" aria-label="Filtrer les rappels">
-      <h2 class="fr-h4">Filtres</h2>
-      <div class="fr-grid-row fr-grid-row--gutters">
-        <div class="fr-col-12 fr-col-md-4">
-          <div class="fr-input-group">
-            <label class="fr-label" for="filtre-date">Tableau de bord au
-              <span class="fr-hint-text">Fiches publiées jusqu'à ce jour compris (depuis le 19 janvier 2018)</span>
-            </label>
-            <input class="fr-input" type="date" id="filtre-date" min="2018-01-19">
-          </div>
-          <!-- Les opérateurs year-of et month-of lisent respectivement « AAAA » et
-               « AAAA-MM » : ces deux champs cachés sont dérivés de la date ci-dessus
-               (voir le script en bas de page, et l'analyse). -->
-          <input type="hidden" id="filtre-annee">
-          <input type="hidden" id="filtre-mois">
-        </div>
-        <div class="fr-col-12 fr-col-md-4">
-          <div class="fr-select-group">
-            <label class="fr-label" for="filtre-categorie">Catégorie du produit</label>
-            <select class="fr-select" id="filtre-categorie">
-              <option value="">Toutes les catégories</option>
-              <option>alimentation</option>
-              <option>automobiles et moyens de déplacement</option>
-              <option>bébés-enfants (hors alimentaire)</option>
-              <option>maison-habitat</option>
-              <option>appareils électriques, outils</option>
-              <option>hygiène-beauté</option>
-              <option>vêtements, mode, epi</option>
-              <option>autres</option>
-              <option>sports-loisirs</option>
-              <option>equipements de communication</option>
-            </select>
-          </div>
-        </div>
-        <div class="fr-col-12 fr-col-md-4">
-          <div class="fr-select-group">
-            <label class="fr-label" for="filtre-sous-categorie">Sous-catégorie du produit</label>
-            <select class="fr-select" id="filtre-sous-categorie">
-              <option value="">Toutes les sous-catégories</option>
-              <option>additifs alimentaires</option>
-              <option>alcool et vin</option>
-              <option>aliments diététiques et nutrition</option>
-              <option>aliments pour animaux d'élevage</option>
-              <option>aliments pour animaux domestiques</option>
-              <option>aliments pour bébés</option>
-              <option>appareils laser</option>
-              <option>appareils à pression</option>
-              <option>appareils électriques, électroménager</option>
-              <option>articles de décoration</option>
-              <option>articles imitant les denrées alimentaires</option>
-              <option>articles pour enfants et puériculture</option>
-              <option>automobiles, motos, scooters</option>
-              <option>autres</option>
-              <option>autres moyens de déplacement</option>
-              <option>beurres d'origine végétale, graisses margarines et huiles</option>
-              <option>bijouterie</option>
-              <option>boissons non alcoolisées</option>
-              <option>cacao, café et thé</option>
-              <option>cosmétiques</option>
-              <option>céréales et produits de boulangerie</option>
-              <option>dispositifs médicaux grand public</option>
-              <option>divers</option>
-              <option>eaux</option>
-              <option>engins de déplacement personnel</option>
-              <option>equipements de communication, média</option>
-              <option>equipements de protection individuels</option>
-              <option>equipements de sports et de loisirs</option>
-              <option>escargots et grenouilles</option>
-              <option>fruits et légumes</option>
-              <option>gadgets</option>
-              <option>herbes et épices</option>
-              <option>instruments de mesure</option>
-              <option>jouets</option>
-              <option>lait et produits laitiers</option>
-              <option>machines</option>
-              <option>matériel de cuisine (sauf électroménager)</option>
-              <option>matériels scolaires</option>
-              <option>miel et gelée royale</option>
-              <option>mobilier</option>
-              <option>noix et graines</option>
-              <option>oeufs et produits à base d'oeufs</option>
-              <option>outils à main</option>
-              <option>papiers, cartons</option>
-              <option>plats préparés et snacks</option>
-              <option>pneus</option>
-              <option>produits chimiques</option>
-              <option>produits de construction</option>
-              <option>produits de la pêche et d'aquaculture</option>
-              <option>produits de tatouage</option>
-              <option>produits d’hygiène (cotons, intime, papiers)</option>
-              <option>produits sucrés</option>
-              <option>soupes, sauces et condiments</option>
-              <option>tous types d'accessoires</option>
-              <option>viandes</option>
-              <option>vélos, bicyclettes, vélos à assistance électrique</option>
-              <option>vêtements, textiles, accessoires de mode</option>
-            </select>
-          </div>
-        </div>
-      </div>
-      <dsfr-data-context-tags for="ctx-produit"></dsfr-data-context-tags>
-    </form>
-
-    <!-- ------------------------------ Compteurs ------------------------------ -->
-    <h2 class="fr-h4">Nombre de rappels</h2>
-    <dsfr-data-kpi-group class="fr-mb-6w">
-      <!-- Les en-têtes « Sur l'année … » et « Sur le mois de … » suivent la date
-           choisie, comme sur le portail : posés par le script en bas de page. -->
-      <dsfr-data-kpi source="rc-total" value="nb:max" format="nombre" col="4"
-        heading="Sur toute la période" label="fiches publiées jusqu'à la date choisie — « depuis mars 2021 » selon le portail (ouverture de RappelConso), mais le jeu contient 251 fiches antérieures, depuis le 19 janvier 2018"
-        icon="fr-icon-archive-line"></dsfr-data-kpi>
-      <dsfr-data-kpi id="kpi-annee" source="rc-annee" value="nb:max" format="nombre" col="4"
-        heading="Sur l'année" label="fiches publiées depuis le 1er janvier"
-        icon="fr-icon-calendar-line"></dsfr-data-kpi>
-      <dsfr-data-kpi id="kpi-mois" source="rc-mois" value="nb:max" format="nombre" col="4"
-        heading="Sur le mois" label="fiches publiées depuis le 1er du mois"
-        icon="fr-icon-calendar-event-line"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <!-- ------------------------------ Graphiques ------------------------------ -->
-    <h2 class="fr-h4">Graphiques</h2>
-    <div class="fr-grid-row fr-grid-row--gutters">
-
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Répartition par catégorie de produits">
-          <dsfr-data-chart id="g-categorie" source="rc-categorie" type="bar"
-            label-field="categorie_produit" value-field="nb" name='["Rappels"]'
-            databox databox-title="Répartition par catégorie de produits"
+    <!-- ============================ 1. LA PREUVE ============================ -->
+    <section class="fr-mb-6w" aria-labelledby="t-preuve">
+      <h2 id="t-preuve">Hors oxyde d'éthylène, la listeria est ce qui grossit</h2>
+      <dsfr-data-repeat source="plage">
+        <template>
+          <p class="odv-lecture">
+            Depuis {{an_min}}, toutes les autres causes réunies — corps étrangers, salmonelle, allergènes non
+            déclarés, blessures, incendie… — restent entre {{autres_min:number}} et {{autres_max:number}} fiches
+            par an. Sur la même période, les fiches listeria vont de {{lis_min:number}} à {{lis_max:number}}&nbsp;:
+            c'est elle qui fait la hausse. Le pic de 2021, lui, est celui de l'oxyde d'éthylène.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <div class="odv-viz" data-code="Fiches de rappel par année close et par motif">
+          <dsfr-data-chart id="g-motifs" source="annees-tri" type="bar" stacked
+            label-field="an"
+            value-field="listeria:Listeria"
+            value-fields="eto:Oxyde d'éthylène, autres:Autres motifs"
+            databox databox-title="Fiches de rappel publiées par année close, selon le motif"
             databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr"
-            databox-download>
+           >
           </dsfr-data-chart>
-          <dsfr-data-a11y for="g-categorie" source="rc-categorie" table download></dsfr-data-a11y>
+          <dsfr-data-a11y for="g-motifs" source="annees-tri" table download
+            description="Barres empilées par année civile close, de 2021 à la dernière année terminée. Listeria : fiches dont les risques encourus citent Listeria monocytogenes. Oxyde d'éthylène : fiches dont le motif cite l'éthylène. Autres motifs : toutes les autres fiches. Une fiche n'est jamais dans deux segments. 2021 compte quelques fiches antérieures à l'ouverture du site RappelConso en avril."></dsfr-data-a11y>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ 2. LE DÉTAIL ============================ -->
+    <section class="fr-mb-6w" aria-labelledby="t-detail">
+      <h2 id="t-detail">La listeria se loge d'abord dans la viande et les produits laitiers</h2>
+      <dsfr-data-repeat source="lis-sous-deux">
+        <template>
+          <p class="odv-lecture">
+            Viandes et produits laitiers réunissent {{n_deux:number}} fiches listeria depuis 2021, soit
+            {{part_deux:number:1}}&nbsp;% — plus de deux sur trois. Viennent ensuite les produits de la mer
+            et les plats préparés.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <div class="odv-viz" data-code="Part des fiches listeria par sous-catégorie de produit">
+          <dsfr-data-chart id="g-lis-sous" source="lis-sous-top" type="bar" horizontal
+            label-field="sous_categorie_produit" value-field="part:Part des fiches listeria (%)" unit-tooltip=" %"
+            databox databox-title="Part des fiches citant la listeria, par famille de produits (six premières)"
+            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-lis-sous" source="lis-sous-top" table download
+            description="Part de chaque sous-catégorie de produit dans l'ensemble des fiches citant la listeria depuis le 1er janvier 2021. Six premières familles : les parts ne somment pas à 100 %."></dsfr-data-a11y>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ 3. LA NUANCE ============================ -->
+    <section class="fr-mb-6w" aria-labelledby="t-nuance">
+      <h2 id="t-nuance">L'arrêté préfectoral a suivi la crise, pas la listeria</h2>
+      <dsfr-data-repeat source="reperes">
+        <template>
+          <p class="odv-lecture">
+            En 2021, {{pct_impose:number:1}}&nbsp;% des rappels dont la nature est renseignée ont été imposés
+            par arrêté préfectoral. En {{d_an}}, {{d_pct_impose:number:1}}&nbsp;%. La part «&nbsp;volontaire&nbsp;»
+            que le portail affiche sur toute la période mélange donc deux régimes&nbsp;: une crise où l'État a
+            beaucoup contraint, et des années ordinaires où presque tous les rappels, listeria comprise, partent
+            du professionnel.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <div class="odv-viz" data-code="Part des rappels imposés par arrêté préfectoral, par année close">
+          <dsfr-data-chart id="g-impose" source="annees-tri" type="bar"
+            label-field="an" value-field="pct_impose:Rappels imposés (%)" unit-tooltip=" %" y-min="0"
+            databox databox-title="Part des rappels imposés par arrêté préfectoral, par année close"
+            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-impose" source="annees-tri" table download
+            description="Part des fiches dont la nature juridique est « imposé par arrêté préfectoral », parmi les fiches dont la nature juridique est renseignée, par année civile close. Les fiches sans nature juridique (presque tous les rappels de véhicules) sont hors du calcul."></dsfr-data-a11y>
+        </div>
+      </div>
+      <p class="fr-text--sm fr-hint-text">
+        Ce que les données ne disent pas&nbsp;: <strong>pourquoi</strong> la listeria monte. Plus de
+        contaminations, plus de contrôles, des autocontrôles mieux déclarés&nbsp;? Le jeu décrit des
+        rappels, pas leurs causes. On ne tranche pas ici.
+      </p>
+    </section>
+
+    <!-- ========================== 4. L'EXPLORATION ========================== -->
+    <!-- Les sources de l'exploration sont pilotées par un contexte ; les valeurs
+         des listes viennent de l'API facettes (aucune <option> en dur, AM-043).
+         Année en cours incluse ici : l'explorateur la voit, avec l'avertissement. -->
+    <dsfr-data-source id="ex-facettes" api-type="opendatasoft"
+      base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+      select="numero_fiche" server-side page-size="1">
+    </dsfr-data-source>
+    <dsfr-data-source id="ex-an" api-type="opendatasoft"
+      base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+      fetch-mode="export" select="count(*) as n"
+      group-by="date_format(date_publication, 'yyyy') as an" order-by="an"
+      where="date_publication >= '2021-01-01'">
+    </dsfr-data-source>
+    <dsfr-data-source id="ex-risques" api-type="opendatasoft"
+      base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+      fetch-mode="export" select="risques_encourus, count(*) as n" group-by="risques_encourus"
+      where="date_publication >= '2021-01-01'">
+    </dsfr-data-source>
+    <!-- Le top 10 est pris côté page : un `limit` sur la source d'export
+         déclenche l'avertissement de troncature (voulue ici). -->
+    <dsfr-data-query id="ex-risques-top" source="ex-risques" order-by="n:desc" limit="10"></dsfr-data-query>
+    <dsfr-data-context id="ctx-ex" sources="ex-an ex-risques"></dsfr-data-context>
+
+    <section class="fr-mb-6w" aria-labelledby="t-explorer">
+      <h2 id="t-explorer">À vous : quels risques, pour quels produits&nbsp;?</h2>
+      <p class="fr-text--sm fr-hint-text">
+        Choisissez une catégorie, puis une famille de produits&nbsp;: les deux graphiques se recalculent sur
+        les fiches publiées depuis 2021, <strong>année en cours comprise</strong> (sa barre est incomplète).
+      </p>
+      <dsfr-data-facets id="ex-f" source="ex-facettes" server-facets context="ctx-ex"
+        fields="categorie_produit, sous_categorie_produit"
+        labels="categorie_produit:Catégorie de produit | sous_categorie_produit:Famille de produits"
+        display="categorie_produit:select | sous_categorie_produit:select"
+        per-row="2" no-reset>
+      </dsfr-data-facets>
+      <dsfr-data-context-tags for="ctx-ex"></dsfr-data-context-tags>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mt-2w">
+        <div class="fr-col-12 fr-col-lg-5">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Fiches de rappel par année, sélection">
+              <dsfr-data-chart id="g-ex-an" source="ex-an" type="bar"
+                label-field="an" value-field="n:Fiches de rappel"
+                databox databox-title="Fiches de rappel par année (sélection)"
+                databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr">
+              </dsfr-data-chart>
+              <dsfr-data-a11y for="g-ex-an" source="ex-an" table download
+                description="Nombre de fiches de rappel publiées par année depuis 2021, pour la sélection en cours. La dernière barre est l'année en cours, incomplète."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-7">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Risques les plus cités, sélection">
+              <dsfr-data-chart id="g-ex-risques" source="ex-risques-top" type="bar" horizontal
+                label-field="risques_encourus" value-field="n:Fiches de rappel"
+                databox databox-title="Les dix risques les plus cités (sélection)"
+                databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr">
+              </dsfr-data-chart>
+              <dsfr-data-a11y for="g-ex-risques" source="ex-risques-top" table download
+                description="Les dix valeurs du champ « risques encourus » les plus fréquentes pour la sélection, depuis 2021. Une fiche qui cite plusieurs risques forme une valeur combinée (séparée par une barre verticale), comptée à part."></dsfr-data-a11y>
+            </div>
           </div>
         </div>
       </div>
+    </section>
 
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Familles de produits avec le plus de rappels (20 premières)">
-          <dsfr-data-chart id="g-sous-categorie" source="rc-sous-categorie" type="bar" horizontal
-            label-field="sous_categorie_produit" value-field="nb" name='["Rappels"]'
-            databox databox-title="Familles de produits avec le plus de rappels (20 premières)"
-            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr"
-            databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-sous-categorie" source="rc-sous-categorie" table download></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
+    <!-- ====================== 5. CE QU'ON NE MONTRE PAS ===================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-hors-champ">
+      <h2 id="t-hors-champ" class="fr-h3">Ce que cette page ne montre pas, et pourquoi</h2>
+      <ul>
+        <li><strong>L'année en cours dans les graphiques du récit.</strong> Incomplète, elle se lirait comme
+          une baisse&nbsp;; elle est comparée à part, à date égale (chapeau et compteurs).</li>
+        <li><strong>Les fiches antérieures à 2021</strong> (228 au 26&nbsp;septembre&nbsp;2026, reprises avant
+          l'ouverture du site en avril 2021) sont hors des graphiques. 2021 elle-même ne compte que neuf mois
+          d'activité du site, ce qui <em>minore</em> son pic.</li>
+        <li><strong>L'oxyde d'éthylène est repéré dans un texte libre.</strong> Aucun champ structuré ne le
+          nomme&nbsp;: la page cherche «&nbsp;éthylène&nbsp;» dans le motif du rappel. Les graphies fautives
+          («&nbsp;éthyène&nbsp;», «&nbsp;étylene&nbsp;») échappent à la recherche&nbsp;: 2&nbsp;196 fiches trouvées
+          pour 2021 contre 2&nbsp;215 avec un motif plus large, relevé le 26&nbsp;septembre&nbsp;2026. L'écart
+          est inférieur à 1&nbsp;%.</li>
+        <li><strong>Les risques multiples.</strong> Une fiche peut citer plusieurs risques
+          («&nbsp;listeria|salmonella&nbsp;»)&nbsp;: la listeria les compte toutes, le graphique d'exploration
+          montre les combinaisons telles quelles.</li>
+        <li><strong>Les fiches sans nature juridique</strong> (2&nbsp;001 au 26&nbsp;septembre&nbsp;2026, dont
+          presque tous les rappels de véhicules) sont hors du taux de rappels imposés, calculé sur les fiches
+          renseignées.</li>
+        <li><strong>Les modalités de compensation</strong>, que l'original montre en camembert&nbsp;: le
+          remboursement domine partout et ne raconte rien de plus. Elles restent dans le jeu.</li>
+      </ul>
+    </section>
 
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Nature juridique du rappel">
-          <dsfr-data-chart id="g-nature" source="rc-nature" type="pie"
-            label-field="nature_juridique_rappel" value-field="nb"
-            databox databox-title="Nature juridique du rappel"
-            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr"
-            databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-nature" source="rc-nature" table download></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Modalités de compensation">
-          <dsfr-data-chart id="g-compensation" source="rc-compensation" type="pie"
-            label-field="modalites_de_compensation" value-field="nb"
-            databox databox-title="Modalités de compensation"
-            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr"
-            databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-compensation" source="rc-compensation" table download></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <p class="fr-mt-4w">
+    <p>
       <a class="fr-btn fr-btn--secondary fr-icon-external-link-line fr-btn--icon-right"
          href="https://data.economie.gouv.fr/explore/dataset/rappelconso-v2-gtin-espaces/"
          target="_blank" rel="noopener external">Consulter les données</a>
@@ -340,127 +408,56 @@
 
   <!-- ====================== Analyse de reproduction ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Tableau de bord Rappel Conso — ce que la reproduction a coûté</summary>
+    <details class="odv-technique">
+      <summary>Analyse — Tableau de bord Rappel Conso, recréé : la même donnée, lue par motif</summary>
 
     <div class="fr-container">
       <p>
         Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/rappel-conso-v2/"
-        target="_blank" rel="noopener external">rappel-conso-v2</a>, 8&nbsp;900 caractères de
-        template. Un <code>ods-dataset-context</code> à <strong>quatre contextes</strong> sur le même
-        jeu (toute la période, année, mois, et un quatrième qui ne sert qu'à afficher l'identifiant du
-        jeu), trois compteurs <code>nhits</code>, deux <code>ods-facet-results</code> rendus en
-        <code>&lt;select&gt;</code>, quatre <code>ods-chart</code>. Les bornes de dates sont calculées par
-        cinq expressions <code>moment</code> imbriquées dans le template, qui réécrivent les paramètres
-        <code>q</code> des trois contextes à chaque changement de date.
+        target="_blank" rel="noopener external">rappel-conso-v2</a> — un sélecteur de date, trois compteurs,
+        deux listes, quatre graphiques de répartition. La première version de cette page la rejouait à
+        l'identique. Recréée le 26&nbsp;septembre&nbsp;2026 en récit&nbsp;: les répartitions de l'original
+        (87&nbsp;% de rappels volontaires, alimentation en tête) sont justes mais muettes. Lues année par année
+        et par motif, elles racontent une crise et une tendance.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Les trois contextes deviennent trois cibles d'un seul contexte.</strong>
-              L'original duplique le contexte pour appliquer une borne différente à chaque compteur, et
-              synchronise les facettes entre eux à la main par deux affectations
-              <code>{{a.parameters[…] = b.parameters[…] = c.parameters[…]}}</code>. Ici,
-              <code>apply-to="rc-annee"</code> sur le filtre d'année et <code>apply-to="rc-mois"</code>
-              sur celui du mois suffisent&nbsp;: les autres filtres s'appliquent à tout le monde par défaut.</li>
-            <li><strong>Les bornes de dates sont des opérateurs, pas des expressions.</strong>
-              <code>lt-day-after</code>, <code>year-of</code>, <code>month-of</code> produisent les plages
-              <code>[début, fin)</code> en ISO. Les cinq expressions <code>moment</code> de l'original,
-              avec leur <code>momentadd:'hours':1</code> pour contourner un décalage de fuseau, n'ont
-              plus d'équivalent à écrire.</li>
-            <li><strong>Sept agrégations, sept requêtes légères.</strong> Le jeu compte 18&nbsp;581 fiches
-              avec des champs texte longs (motif du rappel, conduites à tenir)&nbsp;; aucune ne descend.
-              Chaque compteur et chaque graphique est un <code>select count(*)</code> exécuté par Opendatasoft.</li>
-            <li><strong>Le rappel des filtres actifs.</strong> L'original le code en deux
-              <code>&lt;div class="fr-tag" ng-if ng-click&gt;</code>. Ici,
-              <code>dsfr-data-context-tags for="ctx-produit"</code> les rend et les rend supprimables,
-              libellés compris (<code>label</code> du filtre). Retirer un tag vide le
-              <code>&lt;select&gt;</code> et relance les sept agrégations&nbsp;: vérifié.</li>
-            <li><strong>Deux contextes sur les mêmes sources se combinent en AND.</strong> La période et
-              le produit sont portés par deux <code>dsfr-data-context</code> distincts, pour que seuls les
-              filtres produit apparaissent en tags supprimables — retirer «&nbsp;l'année&nbsp;» d'un
-              tableau de bord daté n'aurait pas de sens. Les clauses des deux contextes s'additionnent
-              dans chaque requête, sans rien configurer.</li>
-            <li><strong>Le reste, déjà vu au lot 1&nbsp;:</strong> <code>dsfr-data-chart</code> pour
-              trois balises imbriquées, <code>dsfr-data-kpi</code> pour un <code>nhits</code> mis en forme,
-              <code>dsfr-data-a11y</code> et <code>databox-*</code> sans équivalent.</li>
+            <li><strong>Des fenêtres de dates sans date écrite.</strong> Années closes, année en cours et même
+              date l'an dernier sont des <code>where</code> à <code>now()</code> ODSQL sur la source&nbsp;: rien ne
+              vieillit, et le script de date de la version fidèle a disparu.</li>
+            <li><strong>Un tableau par année en cinq jointures.</strong> Cinq agrégations serveur (total,
+              listeria, oxyde d'éthylène, nature renseignée, imposée), jointes sur l'année, puis un
+              <code>compute</code> pour «&nbsp;autres motifs&nbsp;» et le taux&nbsp;: un graphique empilé et un
+              graphique de taux sur la même ligne de données.</li>
+            <li><strong>Des phrases calculées.</strong> Une clé constante (<code>k = 'r'</code>) permet de joindre
+              des lignes uniques — 2021, la dernière année close, l'année en cours — et
+              <code>dsfr-data-repeat</code> écrit le chapeau avec leurs chiffres.</li>
+            <li><strong>Un texte libre filtré par le portail.</strong> <code>search(motif_rappel, 'éthylène')</code>
+              dans le <code>where</code> de la source, insensible aux accents&nbsp;: le motif (texte long) ne
+              descend jamais.</li>
+            <li><strong>Des listes peuplées depuis la donnée.</strong> <code>dsfr-data-facets context</code>
+              remplace les 67 <code>&lt;option&gt;</code> écrites à la main de la version fidèle, avec la cascade
+              catégorie → famille que celle-ci n'avait pas (AM-043).</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Une date, trois formats.</strong> <code>year-of</code> lit «&nbsp;AAAA&nbsp;»,
-              <code>month-of</code> lit «&nbsp;AAAA-MM&nbsp;», <code>lt-day-after</code> lit
-              «&nbsp;AAAA-MM-JJ&nbsp;». Un seul <code>&lt;input type="date"&gt;</code> ne peut pas nourrir
-              les trois, et la valeur au mauvais format ne produit <em>aucune erreur</em>&nbsp;: le filtre est
-              simplement absent et le compteur «&nbsp;année&nbsp;» affiche le total. Il a fallu deux champs
-              cachés dérivés de la date par un script de dix lignes (AM-029).</li>
-            <li><strong>Pas de «&nbsp;aujourd'hui&nbsp;» déclaratif.</strong> Le tableau de bord doit
-              s'ouvrir sur la date du jour. Aucun attribut ne pose une valeur par défaut dynamique sur
-              l'entrée&nbsp;; c'est le même script qui s'en charge. Sans lui, les compteurs année et mois
-              afficheraient le total. <em>Relecture du lot 11</em>&nbsp;: la bibliothèque a bien un
-              opérateur dynamique, <code>operator="current-year"</code>, piloté par une case à cocher
-              cochée au montage. Essayé sur une page de test&nbsp;: sans une ligne de script, il émet
-              <code>date_publication &gt;= "2026-01-01" AND &lt; "2027-01-01"</code> et le compteur
-              affiche 2&nbsp;402 — la fenêtre annuelle de cette page au jour d'ouverture. Il ne remplace
-              pourtant pas le script ici&nbsp;: le portail compte «&nbsp;l'année <em>de la date
-              choisie</em>&nbsp;», et <code>current-year</code> ne connaît que l'année du jour — choisir
-              une date de 2024 donnerait une fenêtre vide. AM-030 se réduit donc à «&nbsp;pas de
-              <code>current-month</code>, pas de «&nbsp;aujourd'hui&nbsp;» comme valeur d'un champ
-              date&nbsp;»&nbsp;; pour un tableau de bord qui ne s'ouvrirait <em>que</em> sur l'année en
-              cours, l'attribut suffit.</li>
-            <li><strong>Les listes de catégories sont écrites en dur</strong>, 10 catégories et
-              57&nbsp;sous-catégories relevées sur l'endpoint <code>/facets</code>. Même cause qu'au lot 1
-              (AM-001)&nbsp;: <code>dsfr-data-facets</code> sait interroger les facettes serveur mais ne
-              pilote que sa propre source, alors que sept sources sont à piloter ici. Conséquence visible&nbsp;:
-              dans l'original, choisir une catégorie restreint la liste des sous-catégories&nbsp;; ici non.</li>
-            <li><strong>Les modalités de compensation sont un champ multivalué</strong> stocké avec des
-              <code>|</code> («&nbsp;remboursement|echange&nbsp;»). Le camembert compte donc des combinaisons,
-              pas des modalités — exactement comme l'original. C'est le jeu de données, pas l'outil
-              (LIM-003).</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> La fiche d'audit
-              (<code>docs/portail/rappel-conso.md</code>) est couverte point par point&nbsp;: titre
-              dynamique, sélecteur de date à trois fenêtres, deux listes (10 catégories&nbsp;; 57
-              sous-catégories ici contre 55 relevées sur le portail — l'endpoint <code>/facets</code> en
-              renvoie 57 ce jour), trois compteurs, quatre graphiques dont le top 20 des
-              sous-catégories, bouton vers le jeu. Vérifié contre l'API au 15 mars 2024&nbsp;:
-              10&nbsp;687 / 528 / 98, puis 8&nbsp;141 avec la catégorie alimentation — chiffres identiques
-              à la requête directe. Trois retouches en sont sorties. Les deux camemberts comptaient un
-              groupe vide de 2&nbsp;001 fiches (sans nature juridique ni modalité) que le portail
-              n'affiche pas&nbsp;: écarté par un <code>where="… is not null"</code> statique sur la
-              source, combiné en AND avec les deux contextes&nbsp;; les parts sont maintenant
-              14&nbsp;402 / 2&nbsp;178 et 12&nbsp;401 / 1&nbsp;346 / 1&nbsp;317…, les valeurs de la fiche.
-              Les en-têtes des compteurs suivent la date choisie («&nbsp;Sur l'année 2024&nbsp;»,
-              «&nbsp;Sur le mois de mars 2024&nbsp;») comme sur le portail&nbsp;: deux lignes de plus dans
-              le script existant, <code>heading</code> étant une propriété réactive du KPI — il n'y a
-              pas de voie déclarative pour qu'un libellé lise la valeur d'un filtre. Et la mention
-              «&nbsp;depuis mars 2021&nbsp;» du portail est reprise, mais nuancée&nbsp;: le jeu contient
-              251 fiches antérieures, la plus ancienne du 19 janvier 2018 (<code>min(date_publication)</code>).
-              <em>Ce qui manque encore&nbsp;:</em> la borne haute reste inclusive (18&nbsp;581 au 9
-              septembre contre 18&nbsp;573 sur le portail, qui exclut le jour même — choix assumé,
-              voir l'encadré), les listes de catégories ne se restreignent pas l'une l'autre (AM-001),
-              et la carte «&nbsp;Filtres&nbsp;» n'est pas collante au défilement — c'est de la mise en
-              page, hors périmètre.</li>
+            <li><strong>Le motif qui fait l'histoire n'a pas de champ.</strong> L'oxyde d'éthylène est rangé tantôt
+              sous «&nbsp;pesticides&nbsp;», tantôt sous «&nbsp;contaminants chimiques&nbsp;»&nbsp;; seul le motif
+              libre le nomme, avec ses fautes de frappe. C'est le jeu, pas l'outil — mais le chiffre est une
+              borne basse, et la page le dit.</li>
+            <li><strong><code>like</code> et les accents, côté ODSQL.</strong> <code>like '%éthylène%'</code> et
+              <code>search(…)</code> rendent la même chose, mais <code>like 'impos%'</code> sur la nature juridique
+              ne rend rien là où l'égalité exacte fonctionne&nbsp;: vérifié à l'API, non élucidé. D'où l'égalité
+              sur le libellé complet.</li>
+            <li><strong>Pas de <code>now()</code> dans un <code>select</code> ni un <code>group_by</code>
+              ODSQL.</strong> Impossible d'étiqueter «&nbsp;année en cours&nbsp;» côté serveur&nbsp;: une source
+              par fenêtre, et des jointures sur une clé constante pour les réunir.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.23.0</h4>
-            <p class="fr-text--sm">
-              4 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#AM-029">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-029</strong> — <strong>0.21.1</strong> (#646)&nbsp;: <code>year-of</code> et <code>month-of</code> acceptent une date complète et la tronquent&nbsp;: les deux champs cachés dérivés par script deviennent inutiles.</li>
-              <li><strong>PG-015</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code> nomme le groupe null au lieu de le laisser anonyme (l'écarter demande toujours un <code>where … is not null</code>).</li>
-              <li><strong>AM-030</strong> — <strong>0.23.0</strong> (#682)&nbsp;: <code>default="today | first-of-month | first-of-year"</code> sur <code>dsfr-data-context-filter</code>, et opérateur <code>current-month</code>.</li>
-              <li><strong>AM-043</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="ctx"</code> peuple ses valeurs et diffuse dans le contexte&nbsp;: plus de <code>&lt;select&gt;</code> généré hors ligne.</li>
-            </ul>
-          </div>
         </div>
       </div>
 
@@ -471,13 +468,10 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>4 contextes sur le même jeu, synchronisés à la main</td><td>2 <code>dsfr-data-context</code> (période, produit), filtres avec <code>apply-to</code></td><td>Nettement plus simple</td></tr>
-            <tr><td>5 expressions <code>moment</code> calculant les bornes</td><td>opérateurs <code>lt-day-after</code>, <code>year-of</code>, <code>month-of</code></td><td>Équivalent, déclaratif — mais trois formats d'entrée</td></tr>
-            <tr><td><code>&lt;input type="date"&gt;</code> initialisé par <code>ods-datetime="now"</code></td><td>script d'une douzaine de lignes</td><td>Le seul JavaScript de la page (titre et en-têtes de compteurs compris)</td></tr>
-            <tr><td><code>ods-facet-results</code> → <code>&lt;select ng-repeat&gt;</code></td><td><code>&lt;select&gt;</code> en dur + <code>dsfr-data-context-filter</code></td><td>Valeurs à écrire à la main (AM-001)</td></tr>
-            <tr><td><code>{{ctx.nhits}}</code> ×3</td><td><code>dsfr-data-kpi value="nb:max"</code> ×3</td><td>Équivalent, mieux présenté</td></tr>
-            <tr><td><code>ods-chart</code> / <code>-query</code> / <code>-serie</code> ×4</td><td><code>dsfr-data-chart</code> ×4</td><td>3 balises → 1</td></tr>
-            <tr><td>tags <code>ng-if</code> / <code>ng-click</code> de rappel des filtres</td><td><code>dsfr-data-context-tags</code></td><td>Équivalent, natif</td></tr>
+            <tr><td>4 contextes et 5 expressions <code>moment</code> pour les fenêtres de dates</td><td><code>where</code> à <code>now()</code> sur <code>dsfr-data-source</code></td><td>Plus simple, sans script</td></tr>
+            <tr><td><code>{{ctx.nhits}}</code> ×3</td><td><code>dsfr-data-kpi</code> ×2 et un chapeau <code>dsfr-data-repeat</code></td><td>Les chiffres deviennent des phrases</td></tr>
+            <tr><td><code>ods-facet-results</code> → <code>&lt;select ng-repeat&gt;</code></td><td><code>dsfr-data-facets context</code>, cascade serveur</td><td>Natif, zéro option écrite</td></tr>
+            <tr><td><code>ods-chart</code> ×4 (répartitions, camemberts)</td><td><code>dsfr-data-join</code> + <code>normalize compute</code> + <code>dsfr-data-chart</code> empilé et taux</td><td>Forme choisie, pas transposée</td></tr>
             <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>databox-*</code></td><td>Sans équivalent&nbsp;: gain net</td></tr>
           </tbody>
         </table>
@@ -485,24 +479,19 @@
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile, et la page d'origine est le meilleur argument pour
-          <code>dsfr-data-context</code>.</strong> Là où Opendatasoft oblige à dupliquer le contexte
-          pour chaque borne de date et à synchroniser les facettes à la main dans le template, un seul
-          contexte et deux <code>apply-to</code> font le même travail. Les deux frictions rencontrées
-          sont étroites et précises&nbsp;: les opérateurs de date devraient accepter une date complète
-          et en tirer eux-mêmes l'année ou le mois, et l'entrée devrait pouvoir se pré-remplir à la date du
-          jour sans script. Corrigées, cette page n'aurait plus une ligne de JavaScript.</p>
+        <p><strong>La bibliothèque a suivi le récit sans une ligne de JavaScript.</strong> Ce qui a coûté, c'est
+          l'exploration du jeu&nbsp;: trouver que le record de 2021 est une crise identifiable, et que la
+          croissance d'après a un nom. Les outils — <code>now()</code>, <code>search()</code>, jointures sur
+          l'année, <code>compute</code>, <code>dsfr-data-repeat</code> — étaient tous là.</p>
         <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-029 (formats
-          des opérateurs de date), AM-030 (valeur par défaut dynamique — réduit au lot 11, <code>current-year</code> existe), PG-011 (un
-          <code>display</code> de page sur un composant écrase son <code>:host</code> — c'est cette page
-          qui a révélé que nos compteurs s'empilaient depuis le lot 1), LIM-006 (liens morts du
-          catalogue, c'est cette page qui l'a révélé).
+          Constats liés au <a href="/retours">registre des retours</a>&nbsp;: AM-029 et AM-030 (le script de date
+          de la version fidèle, retiré), AM-043 (listes peuplées par le contexte), PG-015 (groupe null de la
+          nature juridique, écarté et dit), PG-036 (chiffres écrits en dur, remplacés par des phrases calculées).
         </p>
       </div>
     </div>
-  
-      </details></section>
+    </details>
+  </section>
 
 </main>
 
@@ -510,37 +499,6 @@
 
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
-<script>
-  // Le seul JavaScript de la page (voir l'analyse, AM-029 et AM-030) :
-  // 1. ouvrir le tableau de bord à la date du jour ;
-  // 2. dériver « AAAA » et « AAAA-MM » de la date choisie pour les opérateurs
-  //    year-of et month-of, qui n'acceptent pas une date complète ;
-  // 3. refléter la période dans le titre et dans les en-têtes des compteurs
-  //    année / mois (« Sur l'année 2026 », « Sur le mois de septembre 2026 »).
-  // Exécuté AVANT le chargement de dsfr-data : les filtres trouvent une UI
-  // déjà remplie au montage et s'appliquent dès la première requête.
-  (() => {
-    const date = document.getElementById('filtre-date');
-    const annee = document.getElementById('filtre-annee');
-    const mois = document.getElementById('filtre-mois');
-    const titre = document.getElementById('titre-periode');
-    const refleter = () => {
-      const v = date.value;
-      annee.value = v.slice(0, 4);
-      mois.value = v.slice(0, 7);
-      titre.textContent = v
-        ? new Date(`${v}T12:00:00`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-        : 'toute la période';
-      document.getElementById('kpi-annee').setAttribute('heading', v ? `Sur l'année ${annee.value}` : "Sur l'année");
-      document.getElementById('kpi-mois').setAttribute('heading', v ? `Sur le mois de ${titre.textContent}` : 'Sur le mois');
-      for (const el of [annee, mois]) el.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    const aujourdhui = new Date();
-    date.max = date.value = aujourdhui.toISOString().slice(0, 10);
-    refleter();
-    date.addEventListener('change', refleter);
-  })();
-</script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.umd.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
