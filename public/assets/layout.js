@@ -88,7 +88,8 @@
           <a class="fr-footer__content-link" href="https://data.sports.gouv.fr/pages/accueil/"
              target="_blank" rel="noopener external">data.sports.gouv.fr</a>
           avec les composants <code>dsfr-data</code> (ChartsBuilder), puis documente ce qui a été
-          simple ou coûteux. Les données sont lues en direct sur l'API Opendatasoft des portails.
+          simple ou coûteux. Les données sont lues en direct sur les API des portails (Opendatasoft,
+          Tabular).
         </p>
         <ul class="fr-footer__content-list">
           <li class="fr-footer__content-item">
