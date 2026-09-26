@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Usagers en ligne des archives, 2014-2021 — open-data-viz</title>
+  <meta name="description" content="Qui consulte les archives en ligne, et qu'en pense-t-il ? D'une enquête à l'autre, le public reste celui de généalogistes retraités, un peu plus âgé ; ce qui change, c'est la note : en 2021, un répondant sur deux recommande le site, contre deux sur cinq en 2014. Création avec dsfr-data à partir des enquêtes 2014 et 2021 du Service interministériel des Archives de France (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 20 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page compare les deux enquêtes du Service interministériel
+       des Archives de France auprès des internautes des services d'archives (2014 :
+       18 556 réponses ; 2021 : 27 723), publiées dans un seul fichier de 106 colonnes.
+
+       LE CHARGEMENT. Une ressource Tabular avec export Parquet : fetch-mode="export"
+       lit 12 colonnes sur 106, 46 279 lignes, sans pagination. Tout le reste est
+       calculé dans le navigateur.
+
+       LES LIBELLÉS. Le fichier se dit « harmonisé », mais les modalités ne sont pas
+       les mêmes d'une édition à l'autre (« rech. généalogique » / « Pour une recherche
+       généalogique », « retraité » / « retraité-e », casse différente…). Un seul
+       `compute` les ramène à une modalité commune, par sous-chaîne (contains est
+       insensible à la casse) : sans lui, chaque graphique aurait deux barres par
+       réponse, une par édition.
+
+       LE FORMAT LONG. Un `unpivot` déplie les onze questions en lignes (question,
+       réponse, année), sans les non-réponses (drop-empty) : chaque part est calculée
+       parmi les répondants À CETTE QUESTION, cette année-là. Un `pivot` remet 2014 et
+       2021 côte à côte. Petits multiples par `dsfr-data-repeat scopes`.
+       ========================================================================== -->
+
+  <dsfr-data-source id="rep" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="bc564101-e2c8-407b-ab07-1396326bce50"
+    fetch-mode="export" max-records="60000"
+    select="Année, but_visite, age_num, situation_pro, sexe, diplome_plushaut, recommandation, info_trouvee, doc_num, frequence_connexion, arrive_site, 1ere_consult">
+  </dsfr-data-source>
+
+  <!-- Une ligne par répondant, réponses ramenées à des modalités communes aux deux éditions. -->
+  <dsfr-data-normalize id="r" source="rep"
+    rename="Année:annee | 1ere_consult:premiere"
+    compute="motif = when is_empty(but_visite) then null
+                     when contains(but_visite, 'généalog') then 'Généalogie'
+                     when contains(but_visite, 'hasard') or contains(but_visite, 'information pratique') then 'Pas de recherche (2021)'
+                     when contains(but_visite, 'hist') then 'Recherche historique'
+                     when contains(but_visite, 'cultiver') then 'Se cultiver, curiosité'
+                     when contains(but_visite, 'travail') then 'Travail'
+                     when contains(but_visite, 'admin') then 'Démarche administrative'
+                     else 'Autre';
+             tranche = when is_null(age_num) then null
+                       when age_num &lt; 30 then 'Moins de 30 ans'
+                       when age_num &lt; 45 then '30 à 44 ans'
+                       when age_num &lt; 60 then '45 à 59 ans'
+                       when age_num &lt; 75 then '60 à 74 ans'
+                       else '75 ans et plus';
+             situation = when is_empty(situation_pro) then null
+                         when contains(situation_pro, 'retrait') then 'Retraité'
+                         when contains(situation_pro, 'activit') then 'En activité'
+                         when contains(situation_pro, 'emploi') then 'En recherche d’emploi'
+                         when contains(situation_pro, 'tudiant') then 'Élève ou étudiant'
+                         when contains(situation_pro, 'foyer') or contains(situation_pro, 'sans prof') then 'Au foyer ou sans profession'
+                         else 'Autre situation';
+             genre = when is_empty(sexe) then null
+                     when contains(sexe, 'femme') then 'Femme'
+                     when contains(sexe, 'homme') then 'Homme'
+                     else null;
+             diplome = when is_empty(diplome_plushaut) then null
+                       when contains(diplome_plushaut, 'bac+5') or contains(diplome_plushaut, 'bac+8') then 'Bac+5 et plus'
+                       when contains(diplome_plushaut, 'bac+3') or contains(diplome_plushaut, 'bac+4') then 'Bac+3 ou +4'
+                       when contains(diplome_plushaut, 'bac+2') then 'Bac+2'
+                       when contains(diplome_plushaut, 'bac') then 'Bac'
+                       when contains(diplome_plushaut, 'cap') then 'CAP, BEP'
+                       when contains(diplome_plushaut, 'bepc') then 'BEPC, brevet'
+                       when contains(diplome_plushaut, 'certificat') or contains(diplome_plushaut, 'aucun') then 'Aucun diplôme ou certificat d’études'
+                       else 'Formation continue';
+             reco = when is_null(recommandation) then null
+                    when recommandation &gt;= 9 then '9 ou 10'
+                    when recommandation &gt;= 7 then '7 ou 8'
+                    else '0 à 6';
+             info = when is_empty(info_trouvee) then null
+                    when contains(info_trouvee, 'totalement') then 'Oui, totalement'
+                    when contains(info_trouvee, 'partiellement') then 'Oui, partiellement'
+                    when contains(info_trouvee, 'découvertes') then 'Non, mais d’autres découvertes'
+                    else 'Non, absolument pas';
+             docnum = when is_empty(doc_num) then null
+                      when contains(doc_num, 'très') then 'Très facile'
+                      when contains(doc_num, 'assez') then 'Assez facile'
+                      when contains(doc_num, 'trop') then 'Trop compliqué'
+                      else 'Compliqué';
+             freq = when is_empty(frequence_connexion) then null
+                    when contains(frequence_connexion, 'semaine') then 'Plusieurs fois par semaine'
+                    when contains(frequence_connexion, 'mois') then 'Plusieurs fois par mois'
+                    else 'Moins souvent';
+             arrivee = when is_empty(arrive_site) then null
+                       when contains(arrive_site, 'favoris') then 'Favoris, raccourci'
+                       when contains(arrive_site, 'moteur') then 'Moteur de recherche'
+                       when contains(arrive_site, 'tapant') then 'Adresse tapée'
+                       when contains(arrive_site, 'lien') then 'Lien depuis un autre site'
+                       when contains(arrive_site, 'sociaux') then 'Réseaux sociaux'
+                       else 'Autre accès';
+             visite = when is_null(premiere) then null
+                      when premiere = true then 'Première visite'
+                      else 'Déjà venu';
+             y14 = when annee = 2014 then 1 else 0;
+             y21 = when annee = 2021 then 1 else 0;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- Effectifs par édition, lus dans la donnée. -->
+  <dsfr-data-query id="eff" source="r" group-by="k" aggregate="y14:sum:n14, y21:sum:n21"></dsfr-data-query>
+
+  <!-- Format long : une ligne par répondant et par question répondue. -->
+  <dsfr-data-unpivot id="long" source="r" id-cols="annee, k"
+    value-cols="motif:Motif de la visite, tranche:Âge, situation:Situation, genre:Sexe, diplome:Diplôme, reco:Note de recommandation, info:Information trouvée, docnum:Lecture des documents numérisés, freq:Fréquence de connexion, arrivee:Arrivée sur le site, visite:Première visite"
+    var-name="question" value-name="reponse" drop-empty></dsfr-data-unpivot>
+  <dsfr-data-query id="q-n" source="long" group-by="question, reponse, annee" aggregate="k:sum:n"></dsfr-data-query>
+  <dsfr-data-query id="q-t" source="long" group-by="question, annee" aggregate="k:sum:tot"></dsfr-data-query>
+  <dsfr-data-join id="q-j" left="q-n" right="q-t" on="question,annee" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="q-p" source="q-j" compute="pct = n / tot * 100"></dsfr-data-normalize>
+  <!-- 2014 et 2021 côte à côte : parts (p2014, p2021) et répondants à la question (t2014, t2021). -->
+  <dsfr-data-pivot id="q-w" source="q-p" row="question, reponse" column="annee" value="pct" aggregate="max" column-format="x{value}"></dsfr-data-pivot>
+  <dsfr-data-pivot id="q-tw" source="q-t" row="question" column="annee" value="tot" aggregate="max" column-format="t{value}"></dsfr-data-pivot>
+  <dsfr-data-join id="q-wj" left="q-w" right="q-tw" on="question" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="wide" source="q-wj"
+    compute="p2014 = round(x2014, 1);
+             p2021 = round(x2021, 1);
+             ecart = round(p2021 - p2014, 1);
+             absecart = abs(ecart);
+             code = when question = 'Motif de la visite' then 'motif'
+                    when question = 'Âge' then 'age'
+                    when question = 'Situation' then 'situation'
+                    when question = 'Sexe' then 'sexe'
+                    when question = 'Diplôme' then 'diplome'
+                    when question = 'Note de recommandation' then 'reco'
+                    when question = 'Information trouvée' then 'info'
+                    when question = 'Lecture des documents numérisés' then 'docnum'
+                    when question = 'Fréquence de connexion' then 'freq'
+                    when question = 'Arrivée sur le site' then 'arrivee'
+                    else 'visite';
+             groupe = when code = 'age' or code = 'situation' or code = 'sexe' or code = 'diplome' then 'profil'
+                      when code = 'motif' or code = 'reco' then 'recit'
+                      else 'usage';
+             ordre = when reponse = 'Moins de 30 ans' then 1 when reponse = '30 à 44 ans' then 2
+                     when reponse = '45 à 59 ans' then 3 when reponse = '60 à 74 ans' then 4
+                     when reponse = '75 ans et plus' then 5
+                     when reponse = 'Aucun diplôme ou certificat d’études' then 1 when reponse = 'BEPC, brevet' then 2
+                     when reponse = 'CAP, BEP' then 3 when reponse = 'Bac' then 4 when reponse = 'Bac+2' then 5
+                     when reponse = 'Bac+3 ou +4' then 6 when reponse = 'Bac+5 et plus' then 7
+                     when reponse = 'Formation continue' then 8
+                     when reponse = '9 ou 10' then 1 when reponse = '7 ou 8' then 2 when reponse = '0 à 6' then 3
+                     when reponse = 'Oui, totalement' then 1 when reponse = 'Oui, partiellement' then 2
+                     when reponse = 'Non, mais d’autres découvertes' then 3 when reponse = 'Non, absolument pas' then 4
+                     when reponse = 'Très facile' then 1 when reponse = 'Assez facile' then 2
+                     when reponse = 'Compliqué' then 3 when reponse = 'Trop compliqué' then 4
+                     when reponse = 'Plusieurs fois par semaine' then 1 when reponse = 'Plusieurs fois par mois' then 2
+                     when reponse = 'Moins souvent' then 3
+                     when reponse = 'Autre' or reponse = 'Autre situation' or reponse = 'Autre accès' then 200
+                     else 100 - x2021;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="wide-s" source="wide" order-by="ordre:asc"></dsfr-data-query>
+
+  <!-- Chiffres du texte : chaque repère isolé par `when reponse = … then … else 0`, puis sommé. -->
+  <dsfr-data-normalize id="rep-x" source="wide"
+    compute="gen14 = when reponse = 'Généalogie' then x2014 else 0;
+             gen21 = when reponse = 'Généalogie' then x2021 else 0;
+             his14 = when reponse = 'Recherche historique' then x2014 else 0;
+             his21 = when reponse = 'Recherche historique' then x2021 else 0;
+             nr21 = when reponse = 'Pas de recherche (2021)' then x2021 else 0;
+             a75_14 = when reponse = '75 ans et plus' then x2014 else 0;
+             a75_21 = when reponse = '75 ans et plus' then x2021 else 0;
+             a45_14 = when reponse = '45 à 59 ans' then x2014 else 0;
+             a45_21 = when reponse = '45 à 59 ans' then x2021 else 0;
+             ret14 = when reponse = 'Retraité' then x2014 else 0;
+             ret21 = when reponse = 'Retraité' then x2021 else 0;
+             fem14 = when reponse = 'Femme' then x2014 else 0;
+             fem21 = when reponse = 'Femme' then x2021 else 0;
+             b5_14 = when reponse = 'Bac+5 et plus' then x2014 else 0;
+             b5_21 = when reponse = 'Bac+5 et plus' then x2021 else 0;
+             cap14 = when reponse = 'CAP, BEP' then x2014 else 0;
+             cap21 = when reponse = 'CAP, BEP' then x2021 else 0;
+             r9_14 = when reponse = '9 ou 10' then x2014 else 0;
+             r9_21 = when reponse = '9 ou 10' then x2021 else 0;
+             r06_14 = when reponse = '0 à 6' then x2014 else 0;
+             r06_21 = when reponse = '0 à 6' then x2021 else 0;
+             rt14 = when reponse = '9 ou 10' then t2014 else 0;
+             rt21 = when reponse = '9 ou 10' then t2021 else 0;
+             tot14 = when reponse = 'Oui, totalement' then x2014 else 0;
+             tot21 = when reponse = 'Oui, totalement' then x2021 else 0;
+             tf14 = when reponse = 'Très facile' then x2014 else 0;
+             tf21 = when reponse = 'Très facile' then x2021 else 0;
+             sem14 = when reponse = 'Plusieurs fois par semaine' then x2014 else 0;
+             sem21 = when reponse = 'Plusieurs fois par semaine' then x2021 else 0;
+             mot14 = when reponse = 'Moteur de recherche' then x2014 else 0;
+             mot21 = when reponse = 'Moteur de recherche' then x2021 else 0;
+             fav14 = when reponse = 'Favoris, raccourci' then x2014 else 0;
+             fav21 = when reponse = 'Favoris, raccourci' then x2021 else 0;
+             lien14 = when reponse = 'Lien depuis un autre site' then x2014 else 0;
+             lien21 = when reponse = 'Lien depuis un autre site' then x2021 else 0;
+             rs14 = when reponse = 'Réseaux sociaux' then x2014 else 0;
+             rs21 = when reponse = 'Réseaux sociaux' then x2021 else 0;
+             pv14 = when reponse = 'Première visite' then x2014 else 0;
+             pv21 = when reponse = 'Première visite' then x2021 else 0;
+             at14 = when question = 'Âge' and ordre = 1 then t2014 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="syn0" source="rep-x" group-by="k"
+    aggregate="gen14:sum:gen14, gen21:sum:gen21, his14:sum:his14, his21:sum:his21, nr21:sum:nr21,
+               a75_14:sum:a75_14, a75_21:sum:a75_21, a45_14:sum:a45_14, a45_21:sum:a45_21,
+               ret14:sum:ret14, ret21:sum:ret21, fem14:sum:fem14, fem21:sum:fem21,
+               b5_14:sum:b5_14, b5_21:sum:b5_21, cap14:sum:cap14, cap21:sum:cap21,
+               r9_14:sum:r9_14, r9_21:sum:r9_21, r06_14:sum:r06_14, r06_21:sum:r06_21, rt14:sum:rt14, rt21:sum:rt21,
+               tot14:sum:tot14, tot21:sum:tot21, tf14:sum:tf14, tf21:sum:tf21, sem14:sum:sem14, sem21:sum:sem21,
+               mot14:sum:mot14, mot21:sum:mot21, fav14:sum:fav14, fav21:sum:fav21, lien14:sum:lien14, lien21:sum:lien21,
+               rs14:sum:rs14, rs21:sum:rs21, pv14:sum:pv14, pv21:sum:pv21, at14:sum:at14"></dsfr-data-query>
+  <dsfr-data-join id="syn-j" left="syn0" right="eff" on="k" type="left"></dsfr-data-join>
+  <!-- Parts arrondies au point pour le texte ; les tableaux gardent une décimale. -->
+  <dsfr-data-normalize id="syn" source="syn-j"
+    compute="g14 = round(gen14, 0); g21 = round(gen21, 0);
+             h14 = round(his14, 0); h21 = round(his21, 0); nr = round(nr21, 0);
+             ng14 = round(100 - gen14, 0); ng21 = round(100 - gen21, 0);
+             v14 = round(a75_14, 0); v21 = round(a75_21, 0);
+             m14 = round(a45_14, 0); m21 = round(a45_21, 0);
+             re14 = round(ret14, 0); re21 = round(ret21, 0);
+             f14 = round(fem14, 0); f21 = round(fem21, 0);
+             s14 = round(b5_14, 0); s21 = round(b5_21, 0);
+             c14 = round(cap14, 0); c21 = round(cap21, 0);
+             n9_14 = round(r9_14, 0); n9_21 = round(r9_21, 0);
+             n06_14 = round(r06_14, 0); n06_21 = round(r06_21, 0);
+             d9 = round(r9_21 - r9_14, 0); d06 = round(r06_14 - r06_21, 0);
+             it14 = round(tot14, 0); it21 = round(tot21, 0);
+             t14 = round(tf14, 0); t21 = round(tf21, 0);
+             w14 = round(sem14, 0); w21 = round(sem21, 0);
+             mo14 = round(mot14, 0); mo21 = round(mot21, 0);
+             fa14 = round(fav14, 0); fa21 = round(fav21, 0);
+             li14 = round(lien14, 0); li21 = round(lien21, 0);
+             so14 = round(rs14, 0); so21 = round(rs21, 0);
+             p14 = round(pv14, 0); p21 = round(pv21, 0);
+             sa14 = n14 - at14">
+  </dsfr-data-normalize>
+
+  <!-- Une query par bloc de récit ; les petits multiples lisent `wide-s` partitionné par `code`. -->
+  <dsfr-data-query id="w-motif" source="wide-s" where="code:eq:motif"></dsfr-data-query>
+  <dsfr-data-query id="w-reco" source="wide-s" where="code:eq:reco"></dsfr-data-query>
+  <dsfr-data-query id="w-q" source="wide" group-by="code, question, groupe"
+    aggregate="t2014:max:r14, t2021:max:r21, absecart:max:emax_s"></dsfr-data-query>
+  <dsfr-data-normalize id="w-qt" source="w-q" compute="emax = round(emax_s, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="w-profil" source="w-qt" where="groupe:eq:profil"></dsfr-data-query>
+  <dsfr-data-query id="w-usage" source="w-qt" where="groupe:eq:usage"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Usagers en ligne des archives</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Archives en ligne&nbsp;: le même public de généalogistes retraités qu'en 2014, un peu plus âgé, et nettement plus satisfait</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          En 2021, <strong>{{n9_21}}&nbsp;%</strong> des internautes interrogés sur le site de leur service d'archives
+          lui donnent 9 ou 10 sur 10 quand on leur demande s'ils le recommanderaient, contre {{n9_14}}&nbsp;% en 2014&nbsp;; ceux
+          qui donnent 6 ou moins passent de {{n06_14}} à {{n06_21}}&nbsp;%. C'est la question posée dans les mêmes termes aux
+          deux enquêtes, et c'est celle qui bouge le plus. Le public, lui, a peu changé&nbsp;: la généalogie reste le motif de
+          {{g21}}&nbsp;% des visites ({{g14}}&nbsp;% en 2014), {{re21}}&nbsp;% des répondants sont retraités ({{re14}}&nbsp;%), et
+          les 75&nbsp;ans et plus sont passés de {{v14}} à {{v21}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--sm fr-hint-text fr-mb-4w">
+          Service interministériel des Archives de France — enquêtes auprès des internautes des services publics d'archives,
+          <strong>{{n14:number}}&nbsp;réponses en 2014</strong> (questionnaires recueillis de septembre 2013 à janvier 2014) et
+          <strong>{{n21:number}}&nbsp;en 2021</strong> (100 services volontaires). Enquêtes en ligne auto-administrées&nbsp;: elles
+          décrivent ceux qui ont répondu, pas l'ensemble des internautes ni «&nbsp;les Français&nbsp;». Données lues à
+          l'ouverture de la page sur
+          <a href="https://www.data.gouv.fr/datasets/les-usagers-en-ligne-des-services-donnees-des-enquetes-2014-et-2021/" target="_blank" rel="noopener external">data.gouv.fr</a>
+          (API Tabular, export Parquet).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <dsfr-data-kpi-group class="fr-mb-6w" per-row="1 md:2 lg:4" aria-label="Quatre repères, 2021 comparé à 2014">
+          <dsfr-data-kpi source="syn" value="n9_21:max" format="decimal" decimals="0" unit="%"
+            heading="Recommandent le site (9 ou 10 sur 10)" label="en 2021, contre {{n9_14}} % en 2014" color-token="blue-ecume"></dsfr-data-kpi>
+          <dsfr-data-kpi source="syn" value="g21:max" format="decimal" decimals="0" unit="%"
+            heading="Viennent pour la généalogie" label="en 2021, contre {{g14}} % en 2014" color-token="green-emeraude"></dsfr-data-kpi>
+          <dsfr-data-kpi source="syn" value="re21:max" format="decimal" decimals="0" unit="%"
+            heading="Retraités" label="en 2021, contre {{re14}} % en 2014" color-token="purple-glycine"></dsfr-data-kpi>
+          <dsfr-data-kpi source="syn" value="v21:max" format="decimal" decimals="0" unit="%"
+            heading="75 ans et plus" label="en 2021, contre {{v14}} % en 2014" color-token="orange-terre-battue"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+      </template>
+    </dsfr-data-repeat>
+  </div>
+
+  <!-- ======================= PREUVE — la note ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-note">
+    <h2 id="t-note" class="fr-h3">Un répondant sur deux recommande désormais le site, et les mécontents ont été divisés par deux</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          À la même question («&nbsp;Sur une échelle de 0 à 10, jusqu'à quel point recommanderiez-vous la consultation de ce
+          site&nbsp;?&nbsp;»), la part des 9 et 10 gagne {{d9}}&nbsp;points, de {{n9_14}} à {{n9_21}}&nbsp;%, et celle des notes
+          de 0 à 6 en perd {{d06}}, de {{n06_14}} à {{n06_21}}&nbsp;%. La classe du milieu (7 ou 8) ne bouge presque pas&nbsp;:
+          ce que gagnent les notes hautes, les notes basses le perdent. Parts calculées sur {{rt14:number}}&nbsp;répondants à cette question
+          en 2014 et {{rt21:number}} en 2021.
+        </p>
+        <div class="odv-chart-slot odv-viz" data-code="Note de recommandation du site, 2014 et 2021">
+          <dsfr-data-chart id="g-reco" source="w-reco" type="bar"
+            label-field="reponse" value-field="p2014:2014" value-fields="p2021:2021"
+            color-map="2014:#929292,2021:#000091" unit-tooltip="%" y-min="0"
+            databox databox-title="Note donnée à la question « recommanderiez-vous ce site ? », 2014 et 2021 (% des répondants)"
+            databox-source="Service interministériel des Archives de France — enquêtes internautes 2014 et 2021, data.gouv.fr" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-reco" source="w-reco" label-field="reponse" value-field="p2014, p2021, ecart"
+            description="Barres groupées, trois classes de note (9 ou 10, 7 ou 8, 0 à 6), en gris 2014, en bleu 2021. Les 9 ou 10 passent de {{n9_14}} % à {{n9_21}} %, les 0 à 6 de {{n06_14}} % à {{n06_21}} %. Colonne ecart : différence en points.">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Les classes 9-10 / 7-8 / 0-6 sont celles de l'indicateur de recommandation usuel&nbsp;; elles sont un choix de la page, le
+      fichier publie la note brute de 0 à 10.
+    </p>
+  </section>
+
+  <!-- ======================= PREUVE — le motif ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-motif">
+    <h2 id="t-motif" class="fr-h3">La généalogie reste le motif de huit visites sur dix&nbsp;; la recherche historique a doublé</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          En 2014, {{g14}}&nbsp;% des répondants venaient pour une recherche généalogique&nbsp;; en 2021, {{g21}}&nbsp;%. Les autres
+          motifs passent de {{ng14}} à {{ng21}}&nbsp;%&nbsp;: la recherche historique de {{h14}} à {{h21}}&nbsp;%, et {{nr}}&nbsp;%
+          des répondants de 2021 cochent une réponse qui n'existait pas en 2014 (arrivé par hasard, ou venu chercher une
+          information pratique)&nbsp;; elle est dessinée à 0 en 2014.
+        </p>
+        <div class="odv-chart-slot odv-viz" data-code="Motif de la visite, 2014 et 2021">
+          <dsfr-data-chart id="g-motif" source="w-motif" type="bar" horizontal
+            label-field="reponse" value-field="p2014:2014" value-fields="p2021:2021"
+            color-map="2014:#929292,2021:#000091" unit-tooltip="%"
+            databox databox-title="Motif de la visite sur le site des archives, 2014 et 2021 (% des répondants)"
+            databox-source="Service interministériel des Archives de France — enquêtes internautes 2014 et 2021, data.gouv.fr" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-motif" source="w-motif" label-field="reponse" value-field="p2014, p2021, ecart"
+            description="Barres horizontales groupées, une paire par motif, triées par part en 2021 : en gris 2014, en bleu 2021. La généalogie domine les deux années ({{g14}} % puis {{g21}} %) ; tous les autres motifs sont sous 10 %. « Pas de recherche (2021) » n'a pas de valeur en 2014 : la réponse n'existait pas.">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-callout fr-icon-information-line">
+      <p class="fr-callout__text">
+        Cette comparaison est la plus fragile de la page. En 2021, le motif est la première question, obligatoire, à choix
+        unique, avec huit réponses dont deux nouvelles. Le questionnaire de 2014 publié avec le jeu pose la question autrement
+        («&nbsp;Si vous êtes venu consulter des archives, c'était…&nbsp;», cases à cocher, neuf réponses), alors que le fichier ne
+        porte qu'une réponse par personne&nbsp;; il ne dit pas comment les deux ont été rapprochées. Le recul de la généalogie
+        est réel dans le fichier&nbsp;; son ampleur exacte dépend de ce rapprochement.
+      </p>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — qui répond ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-profil">
+    <h2 id="t-profil" class="fr-h3">Qui répond&nbsp;: plus âgé, un peu plus diplômé, presque autant de femmes que d'hommes</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Les 75&nbsp;ans et plus passent de {{v14}} à {{v21}}&nbsp;% des répondants, les 45-59&nbsp;ans reculent de {{m14}} à
+          {{m21}}&nbsp;%&nbsp;: le profil de 2021 ressemble à celui de 2014 décalé vers les âges élevés (le fichier ne dit pas si ce sont les
+          mêmes personnes). Les femmes passent
+          de {{f14}} à {{f21}}&nbsp;%, les diplômés d'un bac+5 ou plus de {{s14}} à {{s21}}&nbsp;%, les titulaires d'un CAP ou d'un
+          BEP de {{c14}} à {{c21}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="w-profil" key-field="code" scopes="wide-s:code:s" per-row="1 md:2">
+      <template>
+        <div class="odv-chart-slot odv-viz fr-mb-2w" data-code="{{question}}, 2014 et 2021">
+          <dsfr-data-chart id="g-{{code}}" source="{{$scope.s}}" type="bar" horizontal
+            label-field="reponse" value-field="p2014:2014" value-fields="p2021:2021"
+            color-map="2014:#929292,2021:#000091" unit-tooltip="%"
+            databox databox-title="{{question}} : au plus {{emax}} points d’écart entre 2014 et 2021 (% des répondants)"
+            databox-source="SIAF — enquêtes internautes 2014 ({{r14:number}} répondants à la question) et 2021 ({{r21:number}})">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-{{code}}" source="{{$scope.s}}" label-field="reponse" value-field="p2014, p2021, ecart"
+            description="Barres horizontales groupées pour la question « {{question}} » : en gris 2014 ({{r14:number}} répondants), en bleu 2021 ({{r21:number}}). L'écart le plus grand entre les deux années est de {{emax}} points. Colonne ecart : différence en points.">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Chaque part est calculée parmi les répondants à la question, cette année-là. L'âge manque pour {{sa14:number}}&nbsp;répondants
+          de 2014&nbsp;: les tranches de 2014 portent sur les autres. «&nbsp;Autre situation&nbsp;» n'existe qu'en 2021 et est dessinée à 0 en 2014. Les
+          modalités de 2014 et de 2021 ont été rapprochées par la page (libellés et casse différents d'une édition à l'autre).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= NUANCE — ce qu'ils font ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-usage">
+    <h2 id="t-usage" class="fr-h3">Ce qu'ils font sur le site n'a presque pas bougé&nbsp;: ils trouvent aussi souvent ce qu'ils cherchent</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          {{it21}}&nbsp;% trouvent «&nbsp;totalement&nbsp;» l'information cherchée en 2021, {{it14}}&nbsp;% en 2014&nbsp;; {{t21}}&nbsp;%
+          jugent la lecture des documents numérisés très facile ({{t14}}&nbsp;% en 2014)&nbsp;; {{w21}}&nbsp;% se connectent plusieurs
+          fois par semaine ({{w14}}&nbsp;%). Une note qui monte sans que l'information soit mieux trouvée&nbsp;: les données ne
+          disent pas pourquoi. Le mouvement le plus net est l'accès&nbsp;: les favoris reculent de {{fa14}} à {{fa21}}&nbsp;%, au profit
+          des liens depuis un autre site ({{li14}} → {{li21}}&nbsp;%) et des réseaux sociaux ({{so14}} → {{so21}}&nbsp;%)&nbsp;; le
+          moteur de recherche reste à {{mo21}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="w-usage" key-field="code" scopes="wide-s:code:s" per-row="1 md:2">
+      <template>
+        <div class="odv-chart-slot odv-viz fr-mb-2w" data-code="{{question}}, 2014 et 2021">
+          <dsfr-data-chart id="g-{{code}}" source="{{$scope.s}}" type="bar" horizontal
+            label-field="reponse" value-field="p2014:2014" value-fields="p2021:2021"
+            color-map="2014:#929292,2021:#000091" unit-tooltip="%"
+            databox databox-title="{{question}} : au plus {{emax}} points d’écart entre 2014 et 2021 (% des répondants)"
+            databox-source="SIAF — enquêtes internautes 2014 ({{r14:number}} répondants à la question) et 2021 ({{r21:number}})">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-{{code}}" source="{{$scope.s}}" label-field="reponse" value-field="p2014, p2021, ecart"
+            description="Barres horizontales groupées pour la question « {{question}} » : en gris 2014 ({{r14:number}} répondants), en bleu 2021 ({{r21:number}}). L'écart le plus grand entre les deux années est de {{emax}} points. Colonne ecart : différence en points.">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      «&nbsp;Information trouvée&nbsp;»&nbsp;: le fichier porte les mêmes quatre réponses pour les deux éditions, mais le
+      questionnaire de 2014 publié avec le jeu en propose d'autres («&nbsp;Oui&nbsp;», «&nbsp;Non, pas vraiment&nbsp;»…). La page
+      lit le fichier tel qu'il est publié.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <!-- Branche séparée : les facettes filtrent les répondants, puis le même calcul de parts. -->
+  <dsfr-data-unpivot id="x-long" source="x-f" id-cols="annee, k"
+    value-cols="motif:Motif de la visite, tranche:Âge, situation:Situation, genre:Sexe, diplome:Diplôme, reco:Note de recommandation, info:Information trouvée, docnum:Lecture des documents numérisés, freq:Fréquence de connexion, arrivee:Arrivée sur le site, visite:Première visite"
+    var-name="question" value-name="reponse" drop-empty></dsfr-data-unpivot>
+  <dsfr-data-query id="x-n" source="x-long" group-by="question, reponse, annee" aggregate="k:sum:n"></dsfr-data-query>
+  <dsfr-data-query id="x-t" source="x-long" group-by="question, annee" aggregate="k:sum:tot"></dsfr-data-query>
+  <dsfr-data-join id="x-j" left="x-n" right="x-t" on="question,annee" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="x-p" source="x-j" compute="pct = n / tot * 100"></dsfr-data-normalize>
+  <dsfr-data-pivot id="x-w" source="x-p" row="question, reponse" column="annee" value="pct" aggregate="max" column-format="x{value}"></dsfr-data-pivot>
+  <dsfr-data-pivot id="x-tw" source="x-t" row="question" column="annee" value="tot" aggregate="max" column-format="t{value}"></dsfr-data-pivot>
+  <dsfr-data-join id="x-wj" left="x-w" right="x-tw" on="question" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="x-wide" source="x-wj" compute="p2014 = round(x2014, 1); p2021 = round(x2021, 1); ecart = round(p2021 - p2014, 1)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: toutes les questions, pour le public de votre choix</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Choisissez un motif, une tranche d'âge, une situation ou un sexe&nbsp;: les parts de 2014 et de 2021 sont recalculées
+      parmi les seuls répondants retenus. Les colonnes «&nbsp;répondants&nbsp;» donnent la base de chaque part&nbsp;: sous quelques
+      centaines, un écart de quelques points ne dit rien.
+    </p>
+    <dsfr-data-facets id="x-f" source="r" fields="motif, tranche, situation, genre"
+      labels="motif:Motif de la visite | tranche:Âge | situation:Situation | genre:Sexe"
+      display="motif:select | tranche:select | situation:select | genre:select"></dsfr-data-facets>
+    <dsfr-data-list source="x-wide"
+      columns="question:Question, reponse:Réponse, p2014:2014 (%), p2021:2021 (%), ecart:Écart (points), t2014:Répondants 2014, t2021:Répondants 2021"
+      filters="question" sort="question:asc" pagination="60" count-label="réponse|réponses" export="csv"
+      caption="Réponses aux enquêtes internautes des archives, 2014 et 2021, en % des répondants à chaque question">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Les internautes des archives en général.</strong> Deux enquêtes en ligne auto-administrées, {{n14:number}} et
+            {{n21:number}}&nbsp;réponses&nbsp;: ceux qui ont vu le questionnaire et choisi d'y répondre. Un habitué qui se connecte
+            chaque semaine a plus de chances de tomber dessus qu'un visiteur de passage&nbsp;; aucune pondération n'est publiée.</li>
+          <li><strong>Les mêmes services d'archives d'une enquête à l'autre.</strong> Environ cent services dans les deux cas,
+            pas forcément les mêmes&nbsp;; le type de service (départemental, municipal…) n'est renseigné qu'en 2021. Une part
+            de la hausse de la note peut tenir à ce changement de périmètre&nbsp;: le fichier ne permet pas de le mesurer.</li>
+          <li><strong>Pourquoi la note monte.</strong> Refonte des sites, habitude, confinements de 2020-2021, public
+            différent&nbsp;: aucune de ces explications n'est dans les données, et l'information n'est pas mieux trouvée
+            qu'en 2014.</li>
+          <li><strong>Les non-réponses.</strong> Chaque part est calculée parmi les répondants à la question&nbsp;; les absents
+            ne sont ni comptés à zéro ni répartis. Ils sont nombreux sur certaines questions (l'âge pour {{sa14:number}}&nbsp;répondants
+            de 2014) et comptent dans les colonnes «&nbsp;répondants&nbsp;» du tableau.</li>
+          <li><strong>Les réponses multiples.</strong> Certaines colonnes de 2021 portent plusieurs
+            réponses séparées par un point-virgule (le statut professionnel, par exemple)&nbsp;; la page ne les lit pas. Les onze questions retenues ont une seule
+            réponse par personne dans le fichier.</li>
+          <li><strong>Des âges déclarés invraisemblables.</strong> Quelques âges sous 15&nbsp;ans (trois en 2014, onze en 2021,
+            dont un «&nbsp;1&nbsp;an&nbsp;») sont gardés tels quels dans la tranche «&nbsp;moins de 30 ans&nbsp;».</li>
+          <li><strong>La centaine d'autres colonnes</strong> du fichier (réseaux sociaux, sites consultés ailleurs, services
+            souhaités, pratiques culturelles…), dont la plupart n'existent qu'en 2021 et ne se comparent donc pas.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'un fichier d'enquête de 46&nbsp;279 lignes et 106 colonnes, servi
+        par l'API Tabular. Le cadrage proposait de raconter «&nbsp;qui répond&nbsp;» autant que «&nbsp;ce qu'ils disent&nbsp;»&nbsp;;
+        la donnée a déplacé l'accent&nbsp;: la seule question posée dans les mêmes termes aux deux éditions, la recommandation,
+        est aussi celle qui bouge le plus.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Une requête pour 46&nbsp;279 lignes.</strong> La ressource a un export Parquet&nbsp;:
+              <code>fetch-mode="export"</code> et <code>select</code> ne lisent que 12 colonnes sur 106, sans pagination.</li>
+            <li><strong>Harmoniser deux éditions en une balise.</strong> <code>contains()</code> de <code>compute</code>,
+              insensible à la casse, ramène «&nbsp;rech. généalogique&nbsp;» et «&nbsp;Pour une recherche généalogique&nbsp;» à
+              la même modalité, sans table de correspondance à maintenir.</li>
+            <li><strong>Onze questions, un seul calcul.</strong> <code>unpivot drop-empty</code> met les questions en lignes,
+              deux <code>group-by</code> et une jointure donnent la part parmi les répondants, <code>pivot</code> remet les
+              deux années côte à côte&nbsp;; <code>repeat scopes</code> en fait des petits multiples.</li>
+            <li><strong>L'exploration rejoue tout.</strong> La même chaîne derrière des facettes recalcule chaque part pour
+              un sous-public.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Une part «&nbsp;dans son groupe&nbsp;».</strong> <code>share_percent</code> rapporte chaque ligne au total
+              de toutes les lignes de sortie, pas à celui de sa question et de son année&nbsp;: il faut un second
+              <code>group-by</code> pour les totaux et une jointure multi-clé.</li>
+            <li><strong>Lire «&nbsp;la valeur de telle réponse&nbsp;».</strong> Chaque chiffre du texte passe par
+              <code>when reponse = … then … else 0</code> puis une somme&nbsp;: une quarantaine de lignes <code>compute</code>
+              pour écrire le chapô et les phrases de lecture.</li>
+            <li><strong>Pas d'apostrophe dans un littéral de <code>compute</code>.</strong> Les chaînes sont entre quotes
+              simples&nbsp;: «&nbsp;En recherche d'emploi&nbsp;» s'écrit avec l'apostrophe typographique.</li>
+            <li><strong>La comparabilité n'est pas dans le fichier.</strong> Que le motif de 2014 venait d'une question à
+              cases multiples, et que la recommandation est posée dans les mêmes termes, se lit dans les questionnaires PDF
+              joints au jeu&nbsp;: la page l'écrit à la main.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 46&nbsp;279 lignes, 12 colonnes sur 106</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif (Parquet)</td></tr>
+            <tr><td>Rapprocher les modalités de deux éditions</td><td><code>normalize compute</code> (<code>when contains(…)</code>)</td><td>Natif</td></tr>
+            <tr><td>Tranches d'âge, classes de note</td><td><code>compute when … &lt; …</code></td><td>Natif</td></tr>
+            <tr><td>Onze questions en lignes, sans les non-réponses</td><td><code>dsfr-data-unpivot drop-empty</code></td><td>Natif</td></tr>
+            <tr><td>Part parmi les répondants d'une question, une année</td><td>deux <code>query group-by</code> + <code>join on="question,annee"</code> + <code>compute</code></td><td>Contournement (<code>share_percent</code> n'a pas de partition)</td></tr>
+            <tr><td>2014 et 2021 côte à côte</td><td><code>dsfr-data-pivot column-format</code></td><td>Natif</td></tr>
+            <tr><td>Un graphique par question</td><td><code>dsfr-data-repeat scopes</code></td><td>Natif</td></tr>
+            <tr><td>Chiffres du texte</td><td><code>compute when … else 0</code> + <code>group-by</code> constant</td><td>Contournement (verbeux)</td></tr>
+            <tr><td>Explorer un sous-public</td><td><code>dsfr-data-facets</code> sur les répondants, même chaîne en aval</td><td>Natif</td></tr>
+            <tr><td>Tableau accessible et export</td><td><code>dsfr-data-a11y</code>, <code>dsfr-data-list export</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Une enquête se prête bien à dsfr-data&nbsp;; ce qui coûte, c'est la part par groupe et la phrase.</strong>
+          Charger, recoder, déplier, remettre deux éditions côte à côte et multiplier les graphiques sont natifs. Deux gestes
+          reviennent pourtant à chaque page d'enquête et restent des contournements&nbsp;: une part calculée dans son groupe
+          (ici question × année) et la lecture d'une valeur précise pour l'écrire dans une phrase. Le vrai travail n'est pas
+          technique&nbsp;: c'est de savoir quelles questions se comparent, et cela ne se lit que dans les questionnaires.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

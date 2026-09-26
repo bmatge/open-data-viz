@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moulins à eau, moulins à vent en 1809 — open-data-viz</title>
+  <meta name="description" content="En 1809, quatre moulins à farine sur cinq recensés par l'enquête impériale tournent à l'eau ; le vent ne l'emporte que dans le Nord et sur les buttes de Paris, et l'enquête ne couvre qu'un tiers des départements d'aujourd'hui. Création avec dsfr-data sur les enquêtes des Archives nationales (API Tabular de data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 19 de docs/portail-culture/proposition.md.
+
+       LE JEU. « Enquêtes sur les moulins de 1794 à 1809 » (Archives nationales,
+       sous-série F/20, inventaire Illaire), ressource 912c2c2f… : 20 313 notices,
+       une par commune × type de moulin × enquête, avec un `Nombre de moulins`
+       (1 à 52, jamais vide). Trois enquêtes : an II (1794), an X (1801), 1809.
+
+       CHARGEMENT. 20 313 lignes : `fetch-mode="export"` lit l'export Parquet en une
+       requête, `select` écarte la description initiale et la cote. Aucun where /
+       group-by / order-by sur la source (sinon repli sur 102 pages de 200).
+       `max-records` posé au-dessus du total.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué sur l'export le 2026-09-27) :
+       - « 4 258 notices moulin à vent » additionnait les trois enquêtes. En 1809
+         seule : 1 408 notices, 2 339 moulins à vent (2 285 en France actuelle).
+       - La somme de `Nombre de moulins` n'est pas le nombre de notices : 1809 =
+         8 999 notices mais 12 766 moulins. La description du jeu (« près de 9 000
+         moulins ») compte en fait des notices.
+       - « La France de 1809 » : l'enquête ne couvre que 33 départements d'aujourd'hui
+         (dont trois à moins de trente moulins). La page le dit dès le chapô.
+       - `Département actuel` porte 34 notices « Seine » : ce sont Montmartre,
+         Belleville, La Chapelle, Passy, Vaugirard (codes INSEE 751xx), communes
+         annexées à Paris en 1860. Recodées « Paris ».
+       ========================================================================== -->
+
+  <dsfr-data-source id="m" api-type="tabular"
+    resource="912c2c2f-9a5f-4316-8671-c2d995f55ca5"
+    fetch-mode="export" max-records="25000"
+    select="Pays, Commune actuelle, Commune ancienne, Département actuel, Date de l'enquête, Type de moulin, Nombre de moulins, Nom du moulin, URL de la notice, Géolocalisation">
+  </dsfr-data-source>
+  <!-- `split` s'exécute AVANT `rename` : il porte le nom d'origine. « 46.57, 4.96 »
+       devient [lat, lon], lu tel quel par `geo-field` de la couche carte. -->
+  <dsfr-data-normalize id="mn" source="m"
+    split="Géolocalisation"
+    rename="Commune actuelle:commune | Commune ancienne:commune_anc | Département actuel:dep_brut | Date de l'enquête:date | Type de moulin:type_brut | Nombre de moulins:n | Nom du moulin:nom | URL de la notice:url | Géolocalisation:geo"
+    compute="ord = when date = 'an II' then 1 when date = 'an X' then 2 when date = '1809' then 3 else 9;
+             enquete = when ord = 1 then 'An II (1794)' when ord = 2 then 'An X (1801)' when ord = 3 then '1809' else 'Autre';
+             type = when type_brut = 'moulin à eau' then 'Eau' when type_brut = 'moulin à vent' then 'Vent' else 'Autre ou non précisé';
+             dep = when dep_brut = 'Seine' then 'Paris' else coalesce(dep_brut, 'Hors France, sans département');
+             eau = when type = 'Eau' then n else 0;
+             vent = when type = 'Vent' then n else 0;
+             fr = when Pays = 'France' then 1 else 0;
+             sans_geo = when is_empty(geo) then 1 else 0;
+             un = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 1809, France actuelle, par département ---------- -->
+  <dsfr-data-query id="d9" source="mn" where="ord:eq:3, fr:eq:1" group-by="dep"
+    aggregate="n:sum:n, eau:sum:eau, vent:sum:vent, un:sum:notices">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="d9n" source="d9"
+    compute="pv = round(vent / n * 100, 1);
+             nord_v = when dep = 'Nord' then vent else 0;
+             paris_v = when dep = 'Paris' then vent else 0;
+             paris_n = when dep = 'Paris' then n else 0;
+             grand = when n >= 30 then 1 else 0;
+             ventmaj = when vent > eau and n >= 30 then 1 else 0;
+             sans_vent = when vent = 0 and n >= 30 then 1 else 0;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="s9" source="d9n" group-by="k"
+    aggregate="n:sum:total, eau:sum:eau, vent:sum:vent, notices:sum:notices, n:count:ndep, grand:sum:ngrand, ventmaj:sum:nventmaj, sans_vent:sum:nsans_vent, nord_v:sum:nord_v, paris_v:sum:paris_v, paris_n:sum:paris_n">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn" source="s9"
+    compute="p_eau = eau / total * 100;
+             p_vent = vent / total * 100;
+             p_nord = nord_v / vent * 100;
+             petits = ndep - ngrand;
+             par_notice = total / notices">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Les trois enquêtes, France actuelle ---------- -->
+  <dsfr-data-query id="ed" source="mn" where="fr:eq:1" group-by="ord, enquete, dep"
+    aggregate="n:sum:n, eau:sum:eau, vent:sum:vent, un:sum:notices">
+  </dsfr-data-query>
+  <dsfr-data-query id="e" source="ed" group-by="ord, enquete"
+    aggregate="n:sum:n, eau:sum:eau, vent:sum:vent, notices:sum:notices, n:count:ndep" order-by="ord:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="en" source="e"
+    compute="pv = round(vent / n * 100, 1);
+             lib = enquete + ' : ' + ndep + ' départements';
+             n1 = when ord = 1 then n else 0; d1 = when ord = 1 then ndep else 0; v1 = when ord = 1 then vent else 0;
+             n2 = when ord = 2 then n else 0; d2 = when ord = 2 then ndep else 0; v2 = when ord = 2 then vent else 0;
+             n3 = when ord = 3 then n else 0; d3 = when ord = 3 then ndep else 0; v3 = when ord = 3 then vent else 0;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="en-t" source="en"
+    rename="enquete:Enquête | ndep:Départements actuels couverts | notices:Notices | n:Moulins recensés | eau:Moulins à eau | vent:Moulins à vent | pv:Part du vent (%)">
+  </dsfr-data-normalize>
+  <!-- La Manche, témoin de l'hétérogénéité de couverture d'une enquête à l'autre. -->
+  <dsfr-data-normalize id="edm" source="ed"
+    compute="m1 = when dep = 'Manche' and ord = 1 then n else 0;
+             m3 = when dep = 'Manche' and ord = 3 then n else 0;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="se" source="en" group-by="k"
+    aggregate="n1:sum:n1, d1:sum:d1, v1:sum:v1, n2:sum:n2, d2:sum:d2, v2:sum:v2, n3:sum:n3, d3:sum:d3, v3:sum:v3">
+  </dsfr-data-query>
+  <dsfr-data-query id="sm" source="edm" group-by="k" aggregate="m1:sum:m1, m3:sum:m3"></dsfr-data-query>
+  <dsfr-data-join id="se-j" left="se" right="sm" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="syn-e" source="se-j"
+    compute="p1 = v1 / n1 * 100; p2 = v2 / n2 * 100; p3 = v3 / n3 * 100;
+             somme = n1 + n2 + n3;
+             fois_manche = m3 / m1">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Moulins à eau, moulins à vent en 1809</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>En 1809, quatre moulins sur cinq tournent à l'eau&nbsp;; le vent ne l'emporte que dans le Nord et sur les buttes de Paris</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          En 1809, l'administration impériale fait recenser les moulins à farine pour savoir combien de pain la France peut
+          moudre. Dans les communes aujourd'hui françaises, l'enquête compte {{total:number}}&nbsp;moulins&nbsp;:
+          <strong>{{p_eau:number:0}}&nbsp;% tournent à l'eau</strong>, {{p_vent:number:0}}&nbsp;% au vent. Le Nord concentre à lui seul
+          {{p_nord:number:0}}&nbsp;% des moulins à vent recensés, et Paris n'a que des moulins à vent, sur les buttes de Montmartre et
+          de Belleville. Mais cette France est en pointillés&nbsp;: l'enquête ne couvre que {{ndep:number}}&nbsp;départements
+          d'aujourd'hui, dont {{petits:number}} où elle ne compte même pas trente moulins.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Archives nationales, sous-série F/20 (statistique), inventaire des enquêtes sur les moulins établi par M.&nbsp;Illaire&nbsp;:
+      <a href="https://www.data.gouv.fr/datasets/enquetes-sur-les-moulins-de-1794-a-1809" target="_blank" rel="noopener external">enquêtes
+      sur les moulins de 1794 à 1809</a>, publiées par le ministère de la Culture, lues à l'ouverture de la page (export Parquet de
+      l'API Tabular de data.gouv.fr). Les départements sont ceux d'aujourd'hui, rattachés par la commune actuelle.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="total:max" format="nombre" span="3"
+        heading="Moulins recensés en 1809" label="communes aujourd'hui françaises"
+        lines='[{"value":"notices:max","format":"nombre","decimals":0,"suffix":"notices communales"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_eau:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="À eau" label="des moulins recensés"
+        lines='[{"value":"eau:max","format":"nombre","decimals":0,"suffix":"moulins"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_vent:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="À vent" label="des moulins recensés"
+        lines='[{"value":"vent:max","format":"nombre","decimals":0,"suffix":"moulins"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="ndep:max" format="nombre" span="3"
+        heading="Départements couverts" label="sur les 96 de la métropole d'aujourd'hui"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — où tourne le vent ======================= -->
+  <!-- Seuil de 30 moulins : trois départements (1, 2 et 10 moulins) sont écartés du
+       graphique, où une part sur un ou deux moulins ne veut rien dire ; ils restent
+       dans tous les totaux. Trié par part décroissante : les trois premières barres
+       sont les départements où le vent est majoritaire (vérifié : Paris, Hauts-de-Seine,
+       Nord), d'où highlight-index. -->
+  <dsfr-data-query id="pv" source="d9n" where="n:gte:30" order-by="pv:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="pv-g" source="pv"
+    rename="dep:Département | pv:Part des moulins à vent (%) | n:Moulins recensés | vent:Moulins à vent | eau:Moulins à eau"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-vent">
+    <h2 id="t-vent" class="fr-h3">Le vent ne l'emporte que dans trois départements&nbsp;: le Nord et deux départements parisiens</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Sur les {{ngrand:number}}&nbsp;départements où l'enquête de 1809 compte au moins 30&nbsp;moulins, <strong>{{nventmaj:number}}
+          seulement ont plus de moulins à vent que de moulins à eau</strong>&nbsp;: Paris ({{paris_v:number}}&nbsp;moulins, tous à vent),
+          les Hauts-de-Seine et le Nord, où {{nord_v:number}}&nbsp;moulins à vent tournent dans les plaines sans rivière rapide. À
+          l'autre bout, {{nsans_vent:number}}&nbsp;départements n'en déclarent aucun, dont la Creuse, le Jura, l'Ain, le
+          Bas-Rhin, la Moselle, pays de rivières et de reliefs. Entre les deux, le Midi (Bouches-du-Rhône, Lot, Tarn-et-Garonne) et
+          le Finistère font tourner au vent entre un moulin sur quatre et deux sur cinq.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Part des moulins à vent en 1809, par département">
+      <dsfr-data-chart id="g-vent" source="pv-g" type="bar" horizontal
+        label-field="Département" value-field="Part des moulins à vent (%)" name="Part des moulins à vent (%)"
+        selected-palette="neutral" highlight-index="[0, 1, 2]" unit-tooltip="%" x-min="0" x-max="100"
+        databox databox-title="Part des moulins à vent parmi les moulins recensés en 1809, par département actuel (départements d'au moins 30 moulins, %)"
+        databox-source="Archives nationales, F/20 — enquêtes sur les moulins (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-vent" source="pv-g" table download filename="moulins-1809-vent-par-departement.csv"
+        label-field="Département" value-field="Moulins recensés, Moulins à eau, Moulins à vent, Part des moulins à vent (%)"
+        description="Barres horizontales triées de la plus longue à la plus courte, sur une échelle de 0 à 100 % : pour chaque département actuel où l'enquête de 1809 compte au moins 30 moulins, la part des moulins à vent. Les trois premières, mises en évidence, dépassent la moitié : Paris (100 %), les Hauts-de-Seine (près de 90 %) et le Nord (près des trois quarts). Viennent ensuite le Val-de-Marne, autour de la moitié, puis une dizaine de départements entre 20 et 40 % (Bouches-du-Rhône, Lot, Tarn-et-Garonne, Aube, Oise, Finistère). La Manche, la Saône-et-Loire, l'Orne ou les Landes restent sous 10 % ; la Creuse, le Jura, l'Ain, le Bas-Rhin, la Moselle, la Haute-Vienne et la Meurthe-et-Moselle n'ont aucun moulin à vent. Le tableau donne les nombres de moulins à eau et à vent.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Départements d'aujourd'hui, rattachés par la commune actuelle. Trois départements où l'enquête ne compte qu'un, deux et dix
+      moulins (Alpes-Maritimes, Rhône, Pyrénées-Atlantiques) ne sont pas tracés&nbsp;: ils restent dans les totaux de la page.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — trois enquêtes, trois France ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-enquetes">
+    <h2 id="t-enquetes" class="fr-h3">Trois enquêtes, trois France&nbsp;: les additionner n'aurait aucun sens</h2>
+    <dsfr-data-repeat source="syn-e">
+      <template>
+        <p class="odv-lecture">
+          Le fichier réunit trois enquêtes qui ne recensent pas le même territoire. Celle de l'an&nbsp;II (1794) couvre
+          {{d1:number}}&nbsp;départements actuels et {{n1:number}}&nbsp;moulins&nbsp;; celle de l'an&nbsp;X (1801), seulement les
+          {{d2:number}}&nbsp;départements d'aujourd'hui qui approvisionnaient Paris en farine ({{n2:number}}&nbsp;moulins)&nbsp;; celle
+          de 1809, {{d3:number}}&nbsp;départements ({{n3:number}}&nbsp;moulins). Additionner les trois donnerait
+          {{somme:number}}&nbsp;«&nbsp;moulins&nbsp;», dont beaucoup comptés deux ou trois fois. Et comparer une enquête à
+          l'autre ne mesure pas une évolution&nbsp;: la Manche passe de {{m1:number}}&nbsp;moulins en l'an&nbsp;II à
+          <strong>{{m3:number}} en 1809</strong>, parce que ses communes n'ont presque pas répondu la première fois.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Moulins à eau et à vent recensés par chacune des trois enquêtes">
+      <dsfr-data-chart id="g-enq" source="en" type="bar"
+        label-field="lib" value-field="eau:Moulins à eau" value-fields="vent:Moulins à vent"
+        color-map="Moulins à eau:#0063CB,Moulins à vent:#E4794A" stacked y-min="0"
+        databox databox-title="Moulins à eau et à vent recensés par chaque enquête, dans les communes aujourd'hui françaises (le nombre de départements couverts change d'une enquête à l'autre)"
+        databox-source="Archives nationales, F/20 — enquêtes sur les moulins (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-enq" source="en-t" table download filename="moulins-trois-enquetes.csv"
+        label-field="Enquête" value-field="Départements actuels couverts, Notices, Moulins recensés, Moulins à eau, Moulins à vent, Part du vent (%)"
+        description="Barres empilées, une par enquête dans l'ordre chronologique, eau en bleu et vent en orange ; le libellé de chaque barre donne le nombre de départements actuels couverts. L'an II (1794), sur près de 80 départements, recense le plus de moulins, environ 15 000 ; l'an X (1801), limité aux départements qui nourrissaient Paris, un peu plus de 5 000, avec la plus forte part de vent (un tiers : la Beauce et la plaine picarde) ; 1809, sur une trentaine de départements, environ 12 000. La hauteur d'une barre dépend d'abord du nombre de départements couverts, pas d'une évolution du nombre de moulins.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="syn-e">
+      <template>
+        <p class="fr-text--sm">
+          Une chose se retrouve pourtant d'une enquête nationale à l'autre&nbsp;: la part du vent. Elle est de
+          {{p1:number:0}}&nbsp;% en l'an&nbsp;II, sur un territoire plus de deux fois plus large, et de {{p3:number:0}}&nbsp;% en 1809.
+          L'an&nbsp;X monte à {{p2:number:0}}&nbsp;% parce qu'il ne regarde que le Bassin parisien, pays de plaines à blé et de
+          moulins à vent. L'eau domine partout où l'on regarde largement&nbsp;; le vent reste un fait régional.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= NUANCE — le vent de l'an II ======================= -->
+  <!-- L'an II couvre 78 départements : il montre des terres à vent que 1809 ne voit
+       pas (façade atlantique, Beauce). Seuil de 100 moulins : 56 départements. -->
+  <dsfr-data-query id="d2" source="mn" where="ord:eq:1, fr:eq:1" group-by="dep"
+    aggregate="n:sum:n, eau:sum:eau, vent:sum:vent">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="d2n" source="d2"
+    compute="pv = round(vent / n * 100, 1); grand = when n >= 100 then 1 else 0; ventmaj = when vent > eau and n >= 100 then 1 else 0; k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="s2" source="d2n" group-by="k" aggregate="grand:sum:ngrand, ventmaj:sum:nventmaj"></dsfr-data-query>
+  <dsfr-data-query id="pv2" source="d2n" where="n:gte:100" order-by="pv:desc" limit="12"></dsfr-data-query>
+  <dsfr-data-normalize id="pv2-g" source="pv2"
+    rename="dep:Département | pv:Part des moulins à vent (%) | n:Moulins recensés | vent:Moulins à vent | eau:Moulins à eau"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-an2">
+    <h2 id="t-an2" class="fr-h3">Quinze ans plus tôt, l'an&nbsp;II montrait d'autres terres à vent&nbsp;: la façade atlantique et la Beauce</h2>
+    <dsfr-data-repeat source="s2">
+      <template>
+        <p class="odv-lecture">
+          L'enquête de l'an&nbsp;II couvre des départements que celle de 1809 ne voit pas. Sur les {{ngrand:number}} où elle compte
+          au moins 100&nbsp;moulins, <strong>{{nventmaj:number}} ont plus de moulins à vent que de moulins à eau</strong>&nbsp;: la
+          Loire-Atlantique, la Vendée, la Charente-Maritime et le Maine-et-Loire sur l'Atlantique, le Loiret dans la Beauce, et le
+          Nord et le Pas-de-Calais. La carte du vent de 1809 n'est donc pas celle de la France&nbsp;: c'est celle des départements qui
+          ont répondu.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Les douze départements où le vent pèse le plus en l'an II">
+      <dsfr-data-chart id="g-an2" source="pv2-g" type="bar" horizontal
+        label-field="Département" value-field="Part des moulins à vent (%)" name="Part des moulins à vent (%)"
+        selected-palette="neutral" highlight-index="[0, 1, 2, 3, 4, 5, 6]" unit-tooltip="%" x-min="0" x-max="100"
+        databox databox-title="An II (1794) : les douze départements où la part des moulins à vent est la plus forte (départements d'au moins 100 moulins, %)"
+        databox-source="Archives nationales, F/20 — enquêtes sur les moulins (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-an2" source="pv2-g" table download filename="moulins-an-II-vent-par-departement.csv"
+        label-field="Département" value-field="Moulins recensés, Moulins à eau, Moulins à vent, Part des moulins à vent (%)"
+        description="Barres horizontales triées, sur une échelle de 0 à 100 % : les douze départements où, en l'an II, la part des moulins à vent est la plus forte, parmi ceux qui en comptent au moins 100. Les sept premières, mises en évidence, dépassent la moitié : la Loire-Atlantique et le Nord (plus de 80 %), le Loiret, la Vendée, la Charente-Maritime, le Maine-et-Loire (plus de 70 %) et le Pas-de-Calais (environ 60 %). Suivent l'Eure-et-Loir, autour de la moitié, puis l'Ille-et-Vilaine, la Gironde, l'Oise et le Gers, entre un tiers et 45 %.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <div class="fr-container">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: les moulins de votre commune, enquête par enquête</h2>
+    <p class="fr-text--sm">Un point par notice communale, bleu pour l'eau, orange pour le vent, d'autant plus grand que la
+      commune compte de moulins. La page s'ouvre sur l'enquête de 1809&nbsp;; les boutons passent à l'an&nbsp;II ou à l'an&nbsp;X.
+      Les zones vides ne sont pas des pays sans moulins&nbsp;: ce sont des départements qui n'ont pas répondu à l'enquête choisie.</p>
+  </div>
+  <section class="odv-bandeau" aria-label="Recherche">
+    <div class="fr-container">
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="mq" source="mn"
+          fields="commune, commune_anc, nom"
+          label="Rechercher une commune" placeholder="Commune d'aujourd'hui ou de 1809, nom du moulin…"
+          operator="words" count count-label="notice|notices">
+        </dsfr-data-search>
+      </div>
+    </div>
+  </section>
+
+  <div class="fr-container fr-mb-8w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="mf" value="n:sum" format="nombre"
+        heading="Moulins" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="mf" value="vent:sum / n:sum" format="pourcentage" decimals="0"
+        heading="À vent" label="part des moulins de la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="mf" value="count" format="nombre"
+        heading="Notices" label="une par commune, type et enquête"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- Facettes CLIENT sur le jeu entier. `default` : l'enquête porte TOUJOURS
+             une valeur — sans elle, la carte superposerait trois enquêtes et
+             compterait deux ou trois fois les mêmes moulins. -->
+        <dsfr-data-facets id="mf" source="mq"
+          fields="enquete, type, dep, Pays"
+          labels="enquete:Enquête | type:Type de moulin | dep:Département actuel | Pays:Pays actuel"
+          display="enquete:radio-inline | type:checkbox | dep:select | Pays:select"
+          default="enquete:1809">
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des moulins recensés, colorée par type">
+          <!-- 19 614 notices géolocalisées au total, 8 430 en 1809 : `max-items` relevé
+               au-dessus du total (PG-013). Hors de France, aucune coordonnée. -->
+          <dsfr-data-map id="carte-m"
+            name="Moulins recensés par les enquêtes de 1794 à 1809, selon leur type"
+            height="620px" tiles="ign-plan" tiles-style="muted"
+            fit-bounds fit-zone="41,-5.5,51.5,10" fit-max-zoom="12">
+            <dsfr-data-map-layer id="couche-m" source="mf" type="circle"
+              geo-field="geo" radius-field="n" radius-min="3" radius-max="16" fill-opacity="0.75"
+              color-field="type"
+              color-map="Eau:#0063CB,Vent:#E4794A,Autre ou non précisé:#3a3a3a"
+              tooltip-field="commune"
+              max-items="25000">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-legend for="couche-m" label="Type de moulin"></dsfr-data-map-legend>
+            <dsfr-data-map-popup mode="panel-right" title-field="commune" width="360px">
+              <template>
+                <p class="fr-badge fr-badge--sm fr-mb-2v">Enquête {{enquete}}</p>
+                <p class="fr-text--sm fr-mb-1v"><strong>{{n:number}} moulin(s) — {{type}}</strong><br>
+                  {{dep}} ; commune en 1809&nbsp;: {{commune_anc|non précisée}}</p>
+                <p class="fr-text--sm fr-mb-1v">Nom du moulin&nbsp;: {{nom|non précisé}}</p>
+                <p class="fr-text--xs fr-mb-0"><a href="{{url}}" target="_blank" rel="noopener external">Notice aux Archives nationales</a></p>
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
+          <dsfr-data-a11y for="carte-m" source="mf" download
+            filename="moulins-selection.csv"
+            label="Données de la carte"
+            description="Carte de France, un cercle par notice communale de l'enquête choisie (1809 à l'ouverture), bleu pour les moulins à eau, orange pour les moulins à vent, de taille proportionnelle au nombre de moulins. En 1809, les cercles orange se serrent dans le Nord et autour de Paris ; le bleu couvre la Normandie, la Bourgogne, le Limousin, la Franche-Comté et les Landes ; de larges pans du pays restent vides, faute de réponse à l'enquête. Le tableau sous la carte donne les mêmes notices.">
+          </dsfr-data-a11y>
+        </div>
+
+        <h3 class="fr-h5 fr-mt-6w">Les notices de la sélection</h3>
+        <dsfr-data-list source="mf"
+          columns="commune:Commune actuelle, commune_anc:Commune en son temps, dep:Département actuel, Pays:Pays, enquete:Enquête, type:Type, n:Moulins, nom:Nom du moulin"
+          sort="n:desc" pagination="15" count-label="notice|notices" export="csv"
+          caption="Notices des enquêtes sur les moulins de la sélection : commune, département, enquête, type et nombre de moulins">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <dsfr-data-query id="nogeo" source="mn" where="ord:eq:3, fr:eq:1, sans_geo:eq:1" group-by="ord" aggregate="un:sum:k"></dsfr-data-query>
+  <dsfr-data-query id="hors9" source="mn" where="ord:eq:3, fr:eq:0" group-by="ord"
+    aggregate="n:sum:n, un:sum:notices"></dsfr-data-query>
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>Une France complète.</strong> Aucune des trois enquêtes ne couvre tout le pays&nbsp;: des sous-préfectures n'ont
+        pas répondu, des arrondissements sont lacunaires, et treize départements ne figurent dans aucune (dont l'Ardèche, le Cher,
+        la Loire, la Marne, la Sarthe, selon la description du jeu). Un département sans point n'est pas un département sans
+        moulin.</li>
+      <li><strong>Une évolution entre 1794 et 1809.</strong> Les enquêtes ne couvrent ni les mêmes départements ni, dans un même
+        département, les mêmes communes. La page ne trace aucune courbe d'une enquête à l'autre.</li>
+      <dsfr-data-repeat source="syn">
+        <template>
+          <li><strong>Des moulins, pas des notices.</strong> Une notice est une commune pour un type de moulin&nbsp;: elle peut en
+            compter un comme cinquante-deux (Marseille, 1809). En 1809, {{notices:number}}&nbsp;notices françaises décrivent
+            {{total:number}}&nbsp;moulins, {{par_notice:number:1}} par notice en moyenne. La description du jeu parle de «&nbsp;près de
+            9&nbsp;000 moulins&nbsp;» pour 1809&nbsp;: c'est le nombre de notices, frontières de l'Empire comprises. La page compte
+            les moulins.</li>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="hors9">
+        <template>
+          <li><strong>L'Empire hors des frontières actuelles.</strong> En 1809, l'enquête s'étend à la Belgique, aux Pays-Bas, à
+            l'Allemagne rhénane et à l'Italie&nbsp;: {{notices:number}}&nbsp;notices, {{n:number}}&nbsp;moulins, sans coordonnées ni
+            département actuel. Ils sont hors des chiffres de la page, mais dans le tableau d'exploration (filtre «&nbsp;Pays
+            actuel&nbsp;»).</li>
+        </template>
+      </dsfr-data-repeat>
+      <li><strong>Le département de la Seine.</strong> Le fichier range Montmartre, Belleville, La Chapelle, Passy et Vaugirard
+        dans un département «&nbsp;Seine&nbsp;» supprimé en 1968&nbsp;; ce sont des quartiers de Paris depuis 1860. La page les
+        compte dans Paris.</li>
+      <dsfr-data-repeat source="nogeo">
+        <template>
+          <li><strong>Les notices sans commune retrouvée</strong>&nbsp;: {{k:number}}&nbsp;notices françaises de 1809 n'ont pas de
+            coordonnées et manquent à la carte&nbsp;; elles restent dans les comptes et le tableau.</li>
+        </template>
+      </dsfr-data-repeat>
+      <li><strong>Les autres moulins.</strong> Les enquêtes portent sur les moulins à farine. Quelques moulins à marée, moulins
+        bateaux et un moulin à foulon (moins de vingt en tout, surtout en l'an&nbsp;II) sont dans la catégorie «&nbsp;Autre ou non
+        précisé&nbsp;», ni eau ni vent dans les parts de la page.</li>
+      <li><strong>La production.</strong> Les enquêtes demandaient aussi la farine produite, l'état des moulins et les chemins
+        d'accès&nbsp;; ces réponses sont dans les dossiers d'archives, pas dans le fichier.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création sur un fonds d'archives, 20&nbsp;313&nbsp;notices des Archives nationales servies
+        par l'API Tabular. Le cadrage annonçait «&nbsp;4&nbsp;258 notices moulin à vent, la France de 1809&nbsp;»&nbsp;: le chiffre
+        additionnait trois enquêtes, et la France de 1809 n'en est qu'un tiers. L'histoire tient — l'eau domine, le vent est
+        régional — à condition de dire à chaque bloc quel territoire l'enquête voit.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le jeu entier en une lecture.</strong> <code>fetch-mode="export"</code> lit l'export Parquet&nbsp;; dix
+              colonnes sur quatorze par <code>select</code>, noms à espaces et apostrophe compris.</li>
+            <li><strong>Des coordonnées en texte.</strong> «&nbsp;46.57, 4.96&nbsp;» devient un tableau par
+              <code>split="Géolocalisation"</code>, que <code>geo-field</code> lit comme [lat, lon]&nbsp;: aucune colonne à
+              recalculer.</li>
+            <li><strong>Recoder le fichier.</strong> Les dates révolutionnaires, les types et le département «&nbsp;Seine&nbsp;»
+              tiennent dans un <code>compute</code> à <code>when</code>.</li>
+            <li><strong>Une enquête à la fois.</strong> <code>default="enquete:1809"</code> sur les facettes&nbsp;: l'exploration ne
+              superpose jamais les trois enquêtes.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Compter les départements d'une enquête.</strong> Pas d'agrégat <code>distinct</code>&nbsp;: une
+              <code>dsfr-data-query</code> par département, puis une seconde qui compte ses lignes.</li>
+            <li><strong>Mettre plusieurs chiffres dans une phrase.</strong> Les nombres de chaque enquête et le cas de la Manche
+              viennent de deux regroupements différents&nbsp;: colonnes pivotées à la main par <code>when</code>, puis une
+              jointure sur une clé constante pour les réunir sur une ligne.</li>
+            <li><strong>La mise en évidence par position.</strong> <code>highlight-index</code> désigne des rangs, pas des
+              valeurs&nbsp;: «&nbsp;les départements où le vent est majoritaire&nbsp;» s'écrit <code>[0, 1, 2]</code>, vrai
+              pour ce fichier historique figé, faux dès que la donnée bougerait.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 20&nbsp;313 notices Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif</td></tr>
+            <tr><td>Coordonnées « lat, lon » en texte</td><td><code>normalize split</code> + <code>map-layer geo-field</code></td><td>Natif</td></tr>
+            <tr><td>Recoder enquêtes, types, départements</td><td><code>normalize compute</code> (<code>when</code>, <code>coalesce</code>)</td><td>Natif</td></tr>
+            <tr><td>Part du vent par département</td><td><code>dsfr-data-query group-by aggregate</code> + ratio en <code>compute</code></td><td>Natif</td></tr>
+            <tr><td>Départements couverts par enquête</td><td>deux <code>dsfr-data-query</code> chaînées (<code>count</code> des groupes)</td><td>Natif, détour (pas de <code>distinct</code>)</td></tr>
+            <tr><td>Chiffres de plusieurs regroupements dans une phrase</td><td><code>dsfr-data-join</code> sur clé constante + <code>dsfr-data-repeat</code></td><td>Natif, verbeux</td></tr>
+            <tr><td>Carte eau / vent, une enquête à la fois</td><td><code>dsfr-data-map-layer type="circle" color-map radius-field</code> + <code>facets default</code></td><td>Natif</td></tr>
+            <tr><td>Recherche et tableau</td><td><code>dsfr-data-search</code> + <code>dsfr-data-list</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un fonds d'archives se raconte dans la balise.</strong> Chargement, recodage, coordonnées, carte et facettes
+          sont natifs. Le vrai travail est de lecture&nbsp;: trois enquêtes dans un fichier, une notice qui n'est pas un moulin, un
+          territoire qui change d'une enquête à l'autre. Ce sont ces trois pièges, pas la bibliothèque, qui font dire au même
+          fichier «&nbsp;4&nbsp;258&nbsp;» ou «&nbsp;2&nbsp;285&nbsp;» moulins à vent.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la carte Leaflet (dsfr-data-map) n'est pas dans `core`. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

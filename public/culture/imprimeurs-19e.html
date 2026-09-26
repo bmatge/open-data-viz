@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Imprimeurs, libraires et lithographes du 19e siècle — open-data-viz</title>
+  <meta name="description" content="Entre 1810 et 1881, près d'un brevet d'imprimeur, de libraire ou de lithographe sur cinq est délivré à une femme — surtout des libraires, et au moins une sur trois est dite veuve ; à Paris, leur part triple à la fin du régime. Création avec dsfr-data à partir des brevets conservés aux Archives nationales (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 18 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte « Imprimeurs, libraires et lithographes en France
+       au 19e siècle » (Archives nationales, ministère de la Culture), servi par Tabular.
+
+       LE CHAMP. Un dossier par personne brevetée entre 1810 et 1881 (plusieurs brevets
+       d'une même personne sont regroupés). Les notices DÉTAILLÉES (dates, adresses,
+       prédécesseurs) ne concernent que Paris / la Seine, Bordeaux, Lille, Marseille et
+       Rouen (description du jeu) : toute série dans le temps est donc parisienne.
+
+       LE CHARGEMENT. 17 969 lignes : `fetch-mode="export"` lit l'export Parquet en une
+       requête (sinon 90 pages de 200). `select` garde onze colonnes sur vingt-quatre.
+       `max-records` relevé à 20 000 (défaut Tabular 25 000, fixé pour le dire).
+
+       LES DÉRIVATIONS (`compute`) :
+       - `metier` : « libraire,imprimeur » découpé par `split` en tableau, puis `explode`
+         dans la query par métier — un breveté à deux métiers compte dans les deux.
+       - `etat` : lu dans « Précision sur l'individu » par `contains()` (veuve, épouse,
+         demoiselle, née…), ordre des `when` = priorité (« veuve, née X » → Veuve).
+       - `dec` : décennie du PREMIER brevet. Les dates sont en texte libre (« 1er octobre
+         1812,30 mars 1820 ») ; sans sous-chaîne ni regex, on teste `contains(debut, '181')`,
+         puis '182'… dans l'ordre : la première décennie trouvée est la plus ancienne.
+         Tient sur CE jeu parce que les jours s'écrivent « 18 février » (espace) : aucune
+         suite « 18x » ne vient d'un jour. Cesserait de marcher dès qu'un nombre collé
+         formerait « 18x » hors de l'année (dates numériques « 1812/1830 », cotes, numéros
+         de rue dans la même cellule). Vérifié contre une
+         extraction par expression régulière en Python sur les 5 096 lignes de la Seine :
+         3 écarts, où c'est la regex qui se trompe (numéros de brevet « n° 1765 » glissés dans
+         la cellule). Un numéro « n° 1812 » tromperait la cascade de la même façon.
+       ========================================================================== -->
+
+  <dsfr-data-source id="brev" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="1c3f80c4-ace5-41ef-b6e1-983a8ccb5c69"
+    fetch-mode="export" max-records="20000"
+    select="Nom, Prénom, Sexe, Précision sur l'individu, Type de brevet, Commune, Département, Date de début du brevet, Motif de fin du brevet, URL de la notice, Nom d'épouse">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="b-n" source="brev" trim split="Type de brevet"
+    rename="Nom:nom | Prénom:prenom | Sexe:sexe_brut | Précision sur l'individu:precision | Type de brevet:metier | Commune:commune | Département:departement | Date de début du brevet:debut | Motif de fin du brevet:motif | URL de la notice:url | Nom d'épouse:epouse"
+    compute="un = 1;
+             k = 1;
+             fem = when sexe_brut = 'femme' then 1 else 0;
+             pct_f = fem * 100;
+             sexe = when sexe_brut = 'femme' then 'Femme' when sexe_brut = 'homme' then 'Homme' else 'Non précisé';
+             sexe_np = when sexe = 'Non précisé' then 1 else 0;
+             p = lower(coalesce(precision, ''));
+             etat = when fem = 0 then null
+                    when contains(p, 'veuve') then 'Veuve'
+                    when contains(p, 'épouse') then 'Épouse'
+                    when contains(p, 'demoiselle') then 'Demoiselle'
+                    when contains(p, 'née') then 'Nom de naissance seul'
+                    else 'Rien de précisé';
+             ordre_etat = when etat = 'Veuve' then 1 when etat = 'Épouse' then 2
+                          when etat = 'Nom de naissance seul' then 3 when etat = 'Demoiselle' then 4 else 5;
+             veuve = when etat = 'Veuve' then 1 else 0;
+             f_prec = when fem = 1 and not is_empty(precision) then 1 else 0;
+             paris = when departement = 'Seine' then 1 else 0;
+             f_paris = fem * paris;
+             f_paris_prec = f_paris * f_prec;
+             v_paris = veuve * paris;
+             date_ok = when is_empty(debut) then 0 else 1;
+             dec = when paris = 0 or is_empty(debut) then null
+                   when contains(debut, '180') then 1800 when contains(debut, '181') then 1810
+                   when contains(debut, '182') then 1820 when contains(debut, '183') then 1830
+                   when contains(debut, '184') then 1840 when contains(debut, '185') then 1850
+                   when contains(debut, '186') then 1860 when contains(debut, '187') then 1870
+                   when contains(debut, '188') then 1880 else null;
+             dec_lib = when is_null(dec) then null else 'Années ' + dec;
+             metier_txt = join(metier, ', ');
+             multi = when contains(metier_txt, ',') then 1 else 0;
+             debut_txt = replace(coalesce(debut, ''), ',', ' ; ')">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="b-n" group-by="k"
+    aggregate="un:sum:n, fem:sum:f, veuve:sum:v, f_prec:sum:f_prec, paris:sum:paris, f_paris:sum:f_paris,
+               f_paris_prec:sum:f_paris_prec, v_paris:sum:v_paris, date_ok:sum:date_ok, sexe_np:sum:sexe_np, multi:sum:multi">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="part_f = f / n * 100;
+             un_sur = n / f;
+             part_v = v / f * 100;
+             part_v_prec = v / f_prec * 100;
+             f_sans = f - f_prec;
+             part_paris = paris / n * 100;
+             date_hors_paris = date_ok - paris">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Imprimeurs, libraires et lithographes du 19e siècle</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Imprimeurs, libraires, lithographes au 19e siècle&nbsp;: 18&nbsp;% de femmes brevetées, dont au moins une sur trois veuve</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          De 1810 à 1881, nul ne peut imprimer ni vendre de livres sans un brevet du ministère de l'Intérieur. Sur les
+          {{n:number}}&nbsp;dossiers conservés, {{f:number}} concernent une femme&nbsp;: <strong>{{part_f:number:1}}&nbsp;%</strong>,
+          près d'un sur cinq. Elles sont libraires bien plus qu'imprimeuses ou lithographes, et {{v:number}} d'entre elles,
+          au moins {{part_v:number:0}}&nbsp;%, sont désignées comme veuves.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Archives nationales, ministère de la Culture — <em>Imprimeurs, libraires et lithographes en France au 19e siècle</em>,
+      issu de l'inventaire <em>Brevets des imprimeurs, libraires et lithographes (par département) (1810-1881)</em>. Un
+      dossier par personne. Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/imprimeurs-libraires-et-lithographes-en-france-au-19e-siecle/" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="4"
+        heading="Brevetés" label="dossiers, 1810-1881"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_f:max" format="decimal" decimals="1" unit="%" span="4"
+        heading="Femmes" label="part des dossiers"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_v:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Veuves" label="au moins, parmi les femmes brevetées"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les métiers ======================= -->
+  <!-- `explode` : un dossier « libraire, imprimeur » compte dans les deux barres. Les
+       parts ne somment donc pas, et chaque barre est une part DANS le métier. Métiers de
+       moins de 100 brevetés écartés du graphique (typographe 80, cabinet de lecture 7…),
+       comptés dans la liste. -->
+  <dsfr-data-query id="met" source="b-n" group-by="metier" explode="metier"
+    aggregate="pct_f:avg:part, un:sum:n, fem:sum:f"></dsfr-data-query>
+  <dsfr-data-query id="met-tri" source="met" where="n:gte:100" order-by="part:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="met-g" source="met-tri" round="part:1"
+    rename="metier:Métier | part:Part des femmes (%) | n:Brevetés | f:Femmes"></dsfr-data-normalize>
+  <dsfr-data-query id="met-lib" source="met-tri" where="metier:eq:libraire"></dsfr-data-query>
+  <dsfr-data-query id="met-lit" source="met-tri" where="metier:eq:lithographe"></dsfr-data-query>
+  <dsfr-data-query id="met-imp" source="met-tri" where="metier:eq:imprimeur"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-met">
+    <h2 id="t-met" class="fr-h3">Un libraire sur cinq est une femme, un lithographe sur quatorze</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="met-lib"><template>Parmi les {{n:number}}&nbsp;brevetés libraires, {{f:number}} sont des
+        femmes, soit {{part:number:1}}&nbsp;%.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="met-imp"><template>Chez les imprimeurs, {{part:number:1}}&nbsp;% ({{f:number}} sur {{n:number}}).</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="met-lit"><template>Chez les lithographes, métier né au début du siècle, {{part:number:1}}&nbsp;%
+        seulement ({{f:number}} sur {{n:number}}).</template></dsfr-data-repeat>
+      Tenir boutique de livres est la porte d'entrée des femmes dans ces métiers&nbsp;; la presse, bien moins.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Part des femmes parmi les brevetés, par métier">
+      <dsfr-data-chart id="g-met" source="met-g" type="bar" horizontal
+        label-field="Métier" value-field="Part des femmes (%)" name="Part des femmes (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%" x-min="0"
+        databox databox-title="Part des femmes parmi les brevetés de chaque métier, 1810-1881 (%)"
+        databox-source="Archives nationales — Imprimeurs, libraires et lithographes en France au 19e siècle (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-met" source="met-g" label-field="Métier" value-field="Part des femmes (%), Femmes, Brevetés"
+        description="Barres horizontales triées de la plus longue à la plus courte : part des femmes parmi les brevetés de chaque métier comptant au moins 100 brevetés. Libraire, mis en évidence, dépasse 20 % ; imprimeur est autour de 11 % ; taille-doucier et lithographe sont sous 10 %.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Un dossier peut porter plusieurs brevets ({{multi:number}}&nbsp;dossiers en cumulent au moins deux, par exemple
+          «&nbsp;imprimeur, libraire&nbsp;»)&nbsp;: il compte alors dans chacun de ses métiers. Métiers de moins de 100 brevetés
+          (typographe, cabinet de lecture…) non représentés.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= PREUVE — l'état civil ======================= -->
+  <dsfr-data-query id="etat" source="b-n" where="fem:eq:1" group-by="etat, ordre_etat"
+    aggregate="un:sum, un__sum:share_percent:part" order-by="ordre_etat:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="etat-g" source="etat" round="part:1"
+    rename="etat:Désignation dans la notice | un__sum:Femmes brevetées | part:Part (%)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-etat">
+    <h2 id="t-etat" class="fr-h3">Plus d'une femme brevetée sur trois est désignée comme veuve</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{v:number}}&nbsp;femmes sur {{f:number}} portent la mention «&nbsp;veuve&nbsp;» dans leur notice
+          ({{part_v:number:0}}&nbsp;%). C'est un plancher&nbsp;: {{f_sans:number}} notices de femmes ne disent rien de leur état
+          civil. Parmi celles qui en disent quelque chose, {{part_v_prec:number:0}}&nbsp;% désignent une veuve. Le veuvage
+          est la voie d'accès la plus visible dans ces dossiers&nbsp;; la notice ne dit pas toujours de qui la veuve a repris
+          le brevet.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Femmes brevetées selon leur désignation dans la notice">
+      <dsfr-data-chart id="g-etat" source="etat-g" type="bar" horizontal
+        label-field="Désignation dans la notice" value-field="Femmes brevetées" name="Femmes brevetées"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="femmes"
+        databox databox-title="Femmes brevetées, selon la façon dont la notice les désigne (1810-1881)"
+        databox-source="Archives nationales — Imprimeurs, libraires et lithographes en France au 19e siècle (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-etat" source="etat-g" label-field="Désignation dans la notice" value-field="Femmes brevetées, Part (%)"
+        description="Barres horizontales, une par désignation : veuve (mise en évidence), épouse, nom de naissance seul, demoiselle, puis les notices qui ne précisent rien. Veuve dépasse 1 200 femmes ; « rien de précisé » est la barre la plus longue, au-dessus de 1 300 ; épouse est autour de 450 ; les deux autres restent sous 250.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Désignation lue dans le champ «&nbsp;Précision sur l'individu&nbsp;» («&nbsp;veuve BERNARD&nbsp;», «&nbsp;épouse COURTOIS&nbsp;»,
+      «&nbsp;née BETOULLE&nbsp;», «&nbsp;(mademoiselle)&nbsp;»). Une notice «&nbsp;veuve, née X&nbsp;» compte comme veuve.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — Paris dans le temps ======================= -->
+  <!-- Seules les notices détaillées ont des dates : en pratique Paris / la Seine (et
+       quelques centaines à Bordeaux, Marseille, Lille, Rouen, trop peu par décennie).
+       Série restreinte à la Seine, décennie du premier brevet, décennies de 100 dossiers
+       et plus (la décennie 1800 n'a qu'un dossier). -->
+  <dsfr-data-query id="dec" source="b-n" where="paris:eq:1, dec:isnotnull" group-by="dec_lib, dec"
+    aggregate="pct_f:avg:part, un:sum:n, fem:sum:f" order-by="dec:asc"></dsfr-data-query>
+  <dsfr-data-query id="dec-f" source="dec" where="n:gte:100"></dsfr-data-query>
+  <dsfr-data-normalize id="dec-g" source="dec-f" round="part:1"
+    rename="dec_lib:Décennie du premier brevet | part:Part des femmes (%) | n:Brevetés | f:Femmes"></dsfr-data-normalize>
+  <dsfr-data-query id="dec-10" source="dec-f" where="dec:eq:1810"></dsfr-data-query>
+  <dsfr-data-query id="dec-60" source="dec-f" where="dec:eq:1860"></dsfr-data-query>
+  <dsfr-data-query id="dec-70" source="dec-f" where="dec:eq:1870"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dec">
+    <h2 id="t-dec" class="fr-h3">À Paris, la part des femmes triple à la fin du régime du brevet</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="dec-10"><template>Dans la Seine, {{part:number:0}}&nbsp;% des brevets accordés dans les années
+        1810 vont à des femmes.</template></dsfr-data-repeat>
+      La part oscille ensuite entre 11 et 21&nbsp;% pendant quarante ans, puis bondit&nbsp;:
+      <dsfr-data-repeat source="dec-60"><template>{{part:number:0}}&nbsp;% dans les années 1860 ({{f:number}} femmes sur
+        {{n:number}}),</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dec-70"><template>{{part:number:0}}&nbsp;% dans les années 1870 ({{f:number}} sur
+        {{n:number}}).</template></dsfr-data-repeat>
+      Les dossiers des années 1870 sont surtout des autorisations de 1870, l'année où le régime s'assouplit.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Part des femmes parmi les brevetés de la Seine, par décennie">
+      <dsfr-data-chart id="g-dec" source="dec-g" type="bar"
+        label-field="Décennie du premier brevet" value-field="Part des femmes (%)" name="Part des femmes (%)"
+        selected-palette="neutral" highlight-index="[5, 6]" unit-tooltip="%" y-min="0"
+        databox databox-title="Seine : part des femmes parmi les brevetés, selon la décennie de leur premier brevet (%)"
+        databox-source="Archives nationales — Imprimeurs, libraires et lithographes en France au 19e siècle (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dec" source="dec-g" label-field="Décennie du premier brevet" value-field="Part des femmes (%), Femmes, Brevetés"
+        description="Barres verticales, une par décennie, des années 1810 aux années 1870, pour le seul département de la Seine. La part des femmes reste entre 11 et 21 % jusqu'aux années 1850, puis monte à environ 30 % dans les années 1860 et 44 % dans les années 1870 ; ces deux dernières barres sont mises en évidence.">
+      </dsfr-data-a11y>
+    </div>
+    <div class="fr-callout fr-icon-information-line fr-mt-4w">
+      <dsfr-data-repeat source="syn-t">
+        <template>
+          <p class="fr-callout__text">
+            <strong>Cette série est parisienne, et ne peut pas être nationale.</strong> Les dates de brevet ne figurent que
+            dans les notices détaillées&nbsp;: les {{paris:number}}&nbsp;dossiers de la Seine et {{date_hors_paris:number}}
+            autres (Bordeaux, Marseille, Lille, Rouen), sur {{n:number}}. Ailleurs, la notice ne dit pas quand le brevet a
+            été accordé. La date retenue est celle du premier brevet de la personne.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+  </section>
+
+  <!-- ======================= OÙ — les départements ======================= -->
+  <!-- Département d'époque, tel que saisi (Seine, Seine-et-Oise, Seine-Inférieure ET
+       Seine-Maritime…) : aucune carte, aucune jointure avec le code INSEE actuel. Seuil de
+       100 brevetés pour qu'un pourcentage ait du sens. -->
+  <dsfr-data-query id="dep" source="b-n" group-by="departement"
+    aggregate="pct_f:avg:part, un:sum:n, fem:sum:f, k:max:k"></dsfr-data-query>
+  <dsfr-data-query id="dep-tri" source="dep" where="n:gte:100" order-by="part:desc"></dsfr-data-query>
+  <dsfr-data-query id="dep-petits" source="dep" where="n:lt:100" group-by="k"
+    aggregate="n:sum:n, n:count:deps"></dsfr-data-query>
+  <dsfr-data-normalize id="dep-g" source="dep-tri" round="part:1"
+    rename="departement:Département | part:Part des femmes (%) | n:Brevetés | f:Femmes"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-max" source="dep-tri" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-min" source="dep-tri" order-by="part:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-nb" source="dep-tri" group-by="k" aggregate="n:count:deps"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dep">
+    <h2 id="t-dep" class="fr-h3">Des brevetées trois fois plus fréquentes en Bretagne que dans le Rhône</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="dep-max"><template>En tête, {{departement}}&nbsp;: {{part:number:0}}&nbsp;% de femmes
+        ({{f:number}} sur {{n:number}}).</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dep-min"><template>En dernier, {{departement}}&nbsp;: {{part:number:0}}&nbsp;%
+        ({{f:number}} sur {{n:number}}).</template></dsfr-data-repeat>
+      La Bretagne, l'Allier et le Val de Loire sont en haut du classement&nbsp;; le Rhône, la Loire, la Marne, l'Oise
+      et le Midi méditerranéen (Bouches-du-Rhône, Hérault) en bas&nbsp;;
+      la Seine, qui pèse plus d'un dossier sur quatre, est dans la moyenne.
+    </p>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Part des femmes parmi les brevetés, par département d'époque">
+      <dsfr-data-chart id="g-dep" source="dep-g" type="bar" horizontal
+        label-field="Département" value-field="Part des femmes (%)" name="Part des femmes (%)"
+        unit-tooltip="%" x-min="0"
+        databox databox-title="Part des femmes parmi les brevetés, par département d'époque (départements de 100 brevetés et plus, %)"
+        databox-source="Archives nationales — Imprimeurs, libraires et lithographes en France au 19e siècle (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dep" source="dep-g" label-field="Département" value-field="Part des femmes (%), Femmes, Brevetés"
+        description="Barres horizontales triées de la plus longue à la plus courte, une par département d'époque comptant au moins 100 brevetés. Le Morbihan est en tête, au-dessus de 30 % ; les Côtes-d'Armor, l'Allier et le Finistère suivent, entre 25 et 30 %. La Seine est au milieu, autour de 20 %. Le Rhône et l'Oise ferment le classement, sous 10 %.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      <dsfr-data-repeat source="dep-nb"><template>{{deps:number}}&nbsp;départements comptent 100 brevetés ou plus et figurent
+        ici.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="dep-petits"><template>Les {{deps:number}} autres ({{n:number}}&nbsp;dossiers) sont trop petits
+        pour qu'un pourcentage ait du sens&nbsp;; ils sont dans la liste plus bas.</template></dsfr-data-repeat>
+      Départements tels que saisis dans le jeu, souvent aux noms d'époque (Seine, Seine-et-Oise, Seine-Inférieure),
+      parfois aux noms actuels.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: retrouver un imprimeur, une libraire, une veuve</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Chercher un nom ou une commune, filtrer par sexe, métier, désignation ou département. Chaque fiche renvoie vers la
+      notice des Archives nationales.
+    </p>
+
+    <div class="fr-mb-4w">
+      <dsfr-data-search id="b-q" source="b-n"
+        fields="nom, prenom, commune, epouse"
+        label="Rechercher un breveté" placeholder="Nom, prénom, nom d'épouse ou commune : Didot, Lyon, veuve Martin…"
+        operator="words" count count-label="breveté|brevetés">
+      </dsfr-data-search>
+    </div>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="b-fac" value="count" format="nombre"
+        heading="Brevetés" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="b-fac" value="fem:sum / un:sum" format="pourcentage" decimals="1"
+        heading="Femmes" label="part de la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="b-fac" value="veuve:sum / fem:sum" format="pourcentage" decimals="0"
+        heading="Veuves" label="au moins, parmi les femmes de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="b-fac" source="b-q"
+          fields="sexe, metier, etat, departement"
+          labels="sexe:Sexe | metier:Métier | etat:Désignation (femmes) | departement:Département d'époque"
+          display="sexe:checkbox | metier:checkbox | etat:checkbox | departement:multiselect"
+          disjunctive="sexe, metier, etat, departement"
+          searchable="departement"
+          sort="departement:alpha:asc"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-display source="b-fac" per-row="2" pagination="12"
+          count-label="breveté|brevetés"
+          empty="Aucun breveté ne correspond à cette recherche.">
+          <template>
+            <div class="fr-card fr-card--sm">
+              <div class="fr-card__body">
+                <div class="fr-card__content">
+                  <h4 class="fr-card__title">{{nom}} {{prenom}}</h4>
+                  <p class="fr-card__desc fr-text--sm">{{metier_txt}}<br>{{commune}} — {{departement}}</p>
+                  <div class="fr-card__start">
+                    <p class="fr-text--xs fr-mb-1v">{{sexe}}{{#if precision}} · {{precision}}{{/if}}</p>
+                  </div>
+                  <div class="fr-card__end">
+                    {{#if debut}}<p class="fr-text--xs fr-mb-1v">Brevet&nbsp;: {{debut_txt}}</p>{{/if}}
+                    {{#if motif}}<p class="fr-text--xs fr-mb-1v">Fin&nbsp;: {{motif}}</p>{{/if}}
+                    {{#if url}}<p class="fr-text--xs fr-mb-0"><a href="{{url:url}}" target="_blank" rel="noopener external">Notice des Archives nationales</a></p>{{/if}}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </dsfr-data-display>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Une série nationale dans le temps.</strong> Hors des notices détaillées, le jeu ne date pas les
+            brevets&nbsp;: la courbe se limite à la Seine ({{part_paris:number:0}}&nbsp;% des dossiers). Les dates y sont en
+            texte libre («&nbsp;1er octobre 1812, 30 mars 1820&nbsp;»)&nbsp;; la page n'en tire que la décennie du premier brevet.</li>
+          <li><strong>La part exacte des veuves.</strong> {{f_sans:number}} notices de femmes sur {{f:number}} ne précisent
+            pas leur état civil, et à Paris la précision n'est presque portée que pour les veuves
+            ({{f_paris_prec:number}} notices précisées sur {{f_paris:number}} femmes de la Seine, dont {{v_paris:number}} veuves). «&nbsp;Au moins une sur
+            trois&nbsp;» est un plancher, pas une estimation.</li>
+          <li><strong>Des personnes, pas des brevets.</strong> Un dossier regroupe tous les brevets d'une personne, y compris
+            dans plusieurs communes&nbsp;: la page compte des brevetés. Qui a cumulé ou transmis combien de brevets n'est
+            pas lisible de façon fiable (prédécesseurs et successeurs en texte libre, souvent «&nbsp;Non précisé&nbsp;»).</li>
+          <li><strong>{{sexe_np:number}}&nbsp;dossiers au sexe non précisé.</strong> Ils comptent dans le total, donc au
+            dénominateur des parts de femmes.</li>
+          <li><strong>Une carte.</strong> La géolocalisation est celle de la commune, pas de l'adresse&nbsp;: Paris seul
+            empile 4&nbsp;884 dossiers sur un point. Et les départements sont ceux de l'époque, sans code actuel&nbsp;: pas de
+            carte départementale sans table de passage.</li>
+          <li><strong>Le nombre d'imprimeries ou de librairies en activité.</strong> Un brevet est une autorisation, pas une
+            preuve d'activité, et la date de fin n'est connue que pour une minorité de dossiers.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'un inventaire des Archives nationales servi par l'API Tabular.
+        Le titre provisoire du cadrage («&nbsp;18&nbsp;% de femmes&nbsp;») tient au chiffre près. Deux choses que le cadrage
+        tenait pour impossibles ou à vérifier se sont faites&nbsp;: la part des veuves se compte, et une série dans le temps
+        existe — mais seulement pour Paris.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Tout le jeu en une requête.</strong> <code>fetch-mode="export"</code> lit l'export Parquet&nbsp;:
+              17&nbsp;969 lignes au lieu de 90 pages de 200.</li>
+            <li><strong>Un métier multivalué.</strong> «&nbsp;imprimeur,libraire&nbsp;» devient un tableau par
+              <code>split</code>, que <code>explode</code> éclate dans la query et que les facettes lisent élément par
+              élément&nbsp;: les deux comptent pareil.</li>
+            <li><strong>Une part par groupe sans seconde source.</strong> Un indicateur 0/100 par ligne et
+              <code>avg</code> donnent la part des femmes de chaque métier et de chaque département — une proportion, pas une
+              moyenne de taux.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Des dates en français, en texte libre.</strong> «&nbsp;1er octobre 1812,30 mars 1820&nbsp;»&nbsp;:
+              <code>year()</code> n'y peut rien (pas d'ISO), et <code>compute</code> n'a ni sous-chaîne ni regex. La décennie
+              s'obtient par une cascade de <code>contains(debut, '181')</code>… qui ne tient que parce que les jours sont
+              suivis d'un espace. Vérifiée contre une extraction par regex, elle reste un contournement propre à ce jeu.</li>
+            <li><strong>Un seuil d'effectif sur un agrégat.</strong> Écarter les métiers et départements de moins de
+              100 brevetés demande une seconde query en aval (<code>where="n:gte:100"</code>)&nbsp;: un filtre ne vise pas un
+              agrégat dans la même balise.</li>
+            <li><strong>Des départements d'époque.</strong> «&nbsp;Seine-Inférieure&nbsp;» et «&nbsp;Seine-Maritime&nbsp;»
+              coexistent, sans code INSEE&nbsp;: pas de carte choroplèthe sans table de passage, que la page ne fabrique pas.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 17&nbsp;969 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Métier multivalué</td><td><code>normalize split</code> + <code>query explode</code> + facette</td><td>Natif</td></tr>
+            <tr><td>Part des femmes par groupe</td><td><code>compute pct_f = fem * 100</code> + <code>aggregate="pct_f:avg"</code></td><td>Natif</td></tr>
+            <tr><td>Répartition de l'état civil</td><td><code>un__sum:share_percent</code></td><td>Natif</td></tr>
+            <tr><td>Lire « veuve » dans un texte</td><td><code>compute</code> <code>contains()</code> + <code>when</code></td><td>Natif</td></tr>
+            <tr><td>Décennie d'une date « 4 décembre 1837 »</td><td>cascade <code>contains(debut, '183')</code></td><td>Contournement (tient sur ce jeu)</td></tr>
+            <tr><td>Seuil d'effectif après agrégation</td><td>seconde <code>dsfr-data-query where="n:gte:100"</code></td><td>Natif</td></tr>
+            <tr><td>Recherche par nom et fiche avec lien</td><td><code>dsfr-data-search</code> → facettes → <code>dsfr-data-display</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>L'outil a suivi&nbsp;; c'est l'archive qui a fixé les limites.</strong> Tout se calcule côté client sur un
+          seul chargement, y compris l'état civil lu dans un champ libre. Ce qui borne la page, c'est la manière dont
+          l'inventaire a été dépouillé&nbsp;: des notices détaillées pour cinq villes seulement, des dates en toutes lettres,
+          un état civil noté inégalement. La page le dit plutôt que de le lisser.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

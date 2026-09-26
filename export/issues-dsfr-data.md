@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 17 demandes cadrées — 8 bugs,
-> 6 améliorations,
+> 20 demandes cadrées — 10 bugs,
+> 7 améliorations,
 > 3 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -42,7 +42,7 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-52 critiques ont été **retirées** au fil du
+59 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
 `faux-probleme` du registre), et 109
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
@@ -71,8 +71,9 @@ version du dépôt, qui établit qu'il tient encore.
 | BUG-026 | Une source groupée perd son `group_by` quand un `dsfr-data-normalize` s'intercale devant une `dsfr-data-query group-by` seule lectrice | bug | S | 1 | Déposer chez dsfr-data |
 | BUG-027 | Un `where` de `dsfr-data-query` sur un alias d'agrégat est délégué au portail (HTTP 400), et l'échec de l'export fait passer les autres sources du même jeu en pagination | bug | S | 1 | Déposer chez dsfr-data |
 | BUG-028 | `dsfr-data-query` : `avg`, `sum`, `min` et `max` rendent 0 pour un groupe dont toutes les valeurs sont nulles, au lieu de null | bug | S | 3 | Déposer chez dsfr-data |
+| BUG-036 | Une query en aval de `normalize(rename) → query → normalize(valeurs)` est déléguée à la source sous les noms renommés : l'export Parquet est abandonné, l'API Tabular refuse, et toute la source tombe | bug | S | 1 | Déposer chez dsfr-data |
 
-_4 demandes — S 4, M 0, L 0._
+_5 demandes — S 5, M 0, L 0._
 
 ### P2 — prochain cycle : gain net, effort mesuré
 
@@ -83,13 +84,14 @@ _4 demandes — S 4, M 0, L 0._
 | BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 3 | Déposer chez dsfr-data |
 | AM-089 | `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro | amelioration | S | 1 | Déposer chez dsfr-data |
 | BUG-029 | `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul | bug | S | 7 | Déposer chez dsfr-data |
-| AM-103 | `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune | amelioration | S | 2 | Déposer chez dsfr-data |
+| AM-103 | `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune | amelioration | S | 5 | Déposer chez dsfr-data |
 | BUG-033 | `color-map` sur `type="line"` recolore le trait et la légende, pas les points : quatrième surface de la famille BUG-016 / BUG-022 | bug | S | 3 | Déposer chez dsfr-data |
 | BUG-035 | La vue tableau de la DataBox ne montre que `label-field` et `value-field` : les séries de `value-fields` en sont absentes, et les lignes sont coupées à 100 | bug | S | 1 | Déposer chez dsfr-data |
+| AM-107 | `radius-field` fait croître le rayon, pas l'aire, et la plus petite valeur prend `radius-min` : pas de cercles proportionnels honnêtes, et `compute` n'a pas de racine carrée pour compenser | amelioration | S | 1 | Déposer chez dsfr-data |
 | BUG-034 | Un encart de carte clone la couche entière : chaque encart dessine tous les points, parfois en double, et garde les anciens après un filtre | bug | M | 2 | Déposer chez dsfr-data |
 | AM-087 | La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-_10 demandes — S 8, M 1, L 0._
+_11 demandes — S 9, M 1, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -98,8 +100,9 @@ _10 demandes — S 8, M 1, L 0._
 | AM-088 | `subtitle-field` du podium affiche le nombre brut : ni séparateur de milliers, ni format, ni suffixe | amelioration | S | 1 | Déposer chez dsfr-data |
 | AM-102 | Préréglages d'encart : La Réunion (zoom 9) coupe le sud de l'île, et Wallis-et-Futuna (zoom 7) laisse ses deux îles hors cadre | amelioration | S | 2 | Déposer chez dsfr-data |
 | AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 3 | Déposer chez dsfr-data |
+| BUG-037 | Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2 | bug | XS | 1 | Déposer chez dsfr-data |
 
-_3 demandes — S 2, M 0, L 0._
+_4 demandes — S 2, M 0, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -286,6 +289,47 @@ Rendre `null` pour `avg`, `min`, `max` (et `sum`, à trancher) quand le groupe n
 - [ ] `avg`, `min`, `max` d'un groupe entièrement nul rendent null.
 - [ ] Un groupe partiellement nul garde sa moyenne sur les valeurs présentes.
 - [ ] Le comportement de `sum` est tranché et documenté.
+
+---
+
+## BUG-036 — Une query en aval de `normalize(rename) → query → normalize(valeurs)` est déléguée à la source sous les noms renommés : l'export Parquet est abandonné, l'API Tabular refuse, et toute la source tombe
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-normalize`, `dsfr-data-query`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : culture/architecture-contemporaine
+
+### Constat
+
+Chaîne sur une source Tabular `fetch-mode="export"` : `normalize` qui renomme (`Date_de_Label:d`), `query where="d:isnotnull"` (ou `explode`), `normalize numeric="d"`, puis `query group-by="d" aggregate="ref:count:n"`. La dernière query est jugée délégable. La source abandonne l'export Parquet (« fetch-mode="export" ignoré… la clause est exécutée par l'API paginée ») et envoie `?d__groupby&ref__count`, sous des noms que l'API ne connaît pas. La réponse arrive sans CORS, et **toute la source** passe en « Failed to fetch » : sur la page, tous les blocs qui la lisent sont vides. **Cause, lue au source** : `transformsSchema()` du second normalize, qui ne touche que des valeurs, renvoie la réponse de sa source. Or cette source est une `dsfr-data-query`, qui n'implémente pas `transformsSchema`. La remontée s'arrête donc là, et le `rename` du premier normalize est oublié. Sans la query intermédiaire, ou sans le second normalize, rien n'est délégué. Même famille que BUG-026 et BUG-009 : la délégation dépend de la topologie de la chaîne.
+
+### Impact de l'erreur ou du manque
+
+Une chaîne légale fait tomber toute une source, donc tous les blocs qui la lisent. L'erreur visible (CORS) ne désigne pas la cause.
+
+### Objectif métier de la correction
+
+Ne jamais déléguer une clause sous un nom créé par un `rename` en amont.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : `rename` puis filtre puis typage est une chaîne ordinaire.
+
+### Comment ça a été vérifié
+
+Rejoué à la consignation (2026-09-27), page minimale Playwright, bundle `dsfr-data@0.42.0` du CDN (`dsfr-data.core.esm.js`), ressource Tabular `80b6ac20-…` par le tunnel : variante `normalize(rename) → query(where) → normalize(numeric) → query(group-by)` → requête `/data/?page_size=200&page=1&d__groupby&ref__count`, erreur CORS, « dsfr-data-source[s]: Erreur de chargement TypeError: Failed to fetch » ; variante avec `explode` → `?ref__groupby&d__min`, même échec ; sans le second normalize → 1 809 lignes, aucune requête `tabular-api`. Scripts : `scratchpad/culture-architecture-contemporaine/repro.mjs`. Source relu sur origin/main (5b3bf7e, pas de commit de code depuis la 0.42.0) : `dsfr-data-normalize.ts` l. 316-326 ; `transformsSchema` n'existe que dans normalize, pivot et unpivot (`git grep`).
+
+### Contournement actuel
+
+Un `rename` (même neutre) dans le second normalize : `transformsSchema()` rend alors `true` et coupe la délégation.
+
+### Demande
+
+`dsfr-data-query` (et tout transformateur) doit répondre à `transformsSchema()` en remontant sa propre source, ou la remontée doit traverser les éléments qui ne l'implémentent pas.
+
+### Critères d'acceptation
+
+- [ ] La chaîne rename → query → normalize(numeric) → query(group-by) calcule côté client, sans requête `tabular-api`.
+- [ ] Test de non-régression pour les sources ODS et Tabular.
 
 ---
 
@@ -531,11 +575,13 @@ Remplir de `null` dans `_processTidyData`, comme `dsfr-data-pivot`. Même règle
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-normalize`
-**Rencontré sur** 2 page(s) : culture/entrepreneurs-spectacles, culture/depenses-culturelles-collectivites
+**Rencontré sur** 5 page(s) : culture/entrepreneurs-spectacles, culture/depenses-culturelles-collectivites, developpement-durable/reseaux-chaleur, developpement-durable/entrepots, culture/architecture-contemporaine
 
 ### Constat
 
 Entrepreneurs de spectacles : impossible de tirer le SIREN (les 9 premiers caractères) du SIRET. Le renouvellement des licences est donc mesuré au SIRET (45 %), alors qu'il vaut 58 % au SIREN : une entreprise qui change d'établissement n'est pas une nouvelle entreprise. Dépenses culturelles : impossible de filtrer les communes par département, faute de lire les deux premiers caractères du code INSEE. La liste blanche de `compute` compte `lower`, `upper`, `trim`, `len`, `concat`, `replace` et `contains`, mais ni `left` ni `substr`. Distinct d'AM-038 (`replace-fields` sans motif).
+
+**Vague 3 de création (2026-09-27)** : Trois pages de plus. **Entrepôts** : lire la borne basse d'une tranche « ] 6 500 000 ; 6 600 000 ] m² » demande quatre `replace()` imbriqués puis `floor()`. Ce contournement tient tant que les bornes sont entières et séparées par un seul « ; ». Il cesse de marcher sur « 50 à 99 » ou « Moins de 171 » (règle 5 du lot 11). **Architecture contemporaine** : il n'y a pas non plus d'index de tableau. Tirer la première année d'une datation multivaluée coûte quatre étapes (`split`, `explode`, `numeric`, `min`) et une jointure, et la dénomination principale (le premier terme) reste hors d'atteinte. **Réseaux de chaleur** : le département ne se dérive pas du code commune. Une carte a été écartée pour cette raison, entre autres. La demande s'élargit : `left`, `substr`, et un accès au n-ième élément d'un tableau.
 
 ### Impact de l'erreur ou du manque
 
@@ -552,6 +598,8 @@ Structurel : SIRET/SIREN et commune/département sont les deux hiérarchies de c
 ### Comment ça a été vérifié
 
 Liste blanche relue à la consignation (origin/main, `packages/shared/src/utils/compute.ts`, objet `FUNCTIONS`, 2026-09-27). 45 % et 58 % : DuckDB, agent, 2026-09-26, non rejoués.
+
+Vague 3 (2026-09-27) : Liste blanche relue sur origin/main (5b3bf7e, 2026-09-27), `packages/shared/src/utils/compute.ts`, objet `FUNCTIONS` : ni `left`, ni `substr`, ni index de tableau. Entrepôts : 88,2 M m² en somme des bornes basses, identiques au calcul Python sur l'export (agent). Architecture : agent, 2026-09-27.
 
 ### Contournement actuel
 
@@ -647,6 +695,48 @@ Prendre les colonnes de `_getAllValueFields()` (et les séries de `series-field`
 
 - [ ] Avec `value-fields`, le tableau a une colonne par série, avec les libellés d'alias.
 - [ ] La troncature à 100 lignes est dite, ou supprimée.
+
+---
+
+## AM-107 — `radius-field` fait croître le rayon, pas l'aire, et la plus petite valeur prend `radius-min` : pas de cercles proportionnels honnêtes, et `compute` n'a pas de racine carrée pour compenser
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-map-layer`, `dsfr-data-normalize`
+**Rencontré sur** 1 page(s) : culture/musees-monuments
+
+### Constat
+
+Pour des symboles proportionnels, c'est l'aire du cercle qui doit être proportionnelle à la valeur. `radius-field` fait l'inverse : le rayon est une fonction affine de la valeur, entre `radius-min` et `radius-max`. Une valeur dix fois plus grande a donc un cercle jusqu'à cent fois plus grand. Et la plus petite valeur prend `radius-min` au lieu d'un rayon proche de 0, si bien que même les rapports de rayon sont faux. Côté page, `compute` n'a ni `sqrt` ni puissance, ce qui interdit de passer la racine de la valeur. La page des musées (fréquentation de 0 à 9 M d'entrées) garde un rayon fixe.
+
+### Impact de l'erreur ou du manque
+
+Une carte à symboles proportionnels surestime les grandes valeurs au carré : c'est l'erreur de lecture que la sémiologie graphique proscrit en premier.
+
+### Objectif métier de la correction
+
+Que l'aire d'un cercle soit proportionnelle à la valeur.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : toute carte de volumes (entrées, effectifs, montants) par point.
+
+### Comment ça a été vérifié
+
+Source relu sur origin/main (5b3bf7e) : `dsfr-data-map-layer.ts` l. 1119-1132, `rMin + ((val - min) / range) * (rMax - rMin)` ; liste blanche `FUNCTIONS` de `packages/shared/src/utils/compute.ts` sans `sqrt` ni `pow`. Verdict ADR-120 : absent du source. Page : agent, 2026-09-27.
+
+### Contournement actuel
+
+Rayon fixe, ou classes de taille par `compute` (trois ou quatre paliers), légende écrite à la main.
+
+### Demande
+
+Une échelle en aire pour `radius-field` (`radius-scale="sqrt"`, et pourquoi pas par défaut), ancrée à 0 ; et `sqrt()` dans `compute`.
+
+### Critères d'acceptation
+
+- [ ] Avec `radius-scale="sqrt"`, une valeur quatre fois plus grande a un rayon deux fois plus grand.
+- [ ] Une valeur nulle a un rayon nul (ou `radius-min` documenté comme plancher visuel, non comme origine).
+- [ ] `sqrt(x)` dans `compute`, `null` pour un négatif.
 
 ---
 
@@ -861,3 +951,43 @@ Accepter `''` dans un littéral, comme SQL et ODSQL ; à défaut, le dire dans l
 
 - [ ] `when libelle = 'J''en ai' then 1 else 0` compare au libellé « J'en ai ».
 - [ ] Les littéraux sans quote gardent leur comportement.
+
+---
+
+## BUG-037 — Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2
+
+**Priorité** P3 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:basse`, `dsfr-data-facets`, `dsfr-data-query`
+**Rencontré sur** 1 page(s) : culture/lieux-culturels-ouverts
+
+### Constat
+
+Avec deux lignes `["Patrimoine","Patrimoine"]` et `["Patrimoine"]`, la facette affiche « Patrimoine 3 ». Cocher la valeur rend 2 lignes. Le compteur promet donc plus que la sélection ne donne. `facetValuesOf` renvoie chaque élément du tableau sans dédoublonner, et le comptage ajoute un poids par élément. `query explode` compte aussi 3, ce qui se défend pour un éclatement, mais fausse un « nombre de lieux par domaine ». La base des lieux a 2 851 lignes à tableaux collés (PG-073) : le doublon y est courant.
+
+### Impact de l'erreur ou du manque
+
+Compteur de facette supérieur au nombre de lignes que la sélection rend.
+
+### Objectif métier de la correction
+
+Le compteur d’une valeur égale le nombre de lignes rendues par sa sélection.
+
+### Pérennité et reproductibilité du besoin
+
+Jeux à champs multivalués saisis à la main ou concaténés.
+
+### Comment ça a été vérifié
+
+Agent, page minimale injectée, 0.42.0, 2026-09-27 : « Patrimoine 3 » pour 2 lignes, `explode` 3. Source relu sur origin/main (5b3bf7e) : `packages/core/src/components/facets/facets-client.ts` l. 37-43 (`facetValuesOf`, sans `Set`) et l. 131-145 (`countFacetValues`, un poids par élément).
+
+### Contournement actuel
+
+Dédoublonner la cellule en amont (réécriture du texte avant `split`, PG-073).
+
+### Demande
+
+Dédoublonner les valeurs d'une cellule dans `facetValuesOf` : une ligne compte une fois par valeur distincte.
+
+### Critères d'acceptation
+
+- [ ] `["A","A"]` et `["A"]` → « A 2 ».

@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portrait communal : logements, voitures, énergie — open-data-viz</title>
+  <meta name="description" content="La France met en chantier plus d'un quart de logements de moins qu'avant 2020 : choisissez une commune pour voir si elle suit, combien ses logements consomment d'électricité et de gaz, et comment son parc de voitures quitte le diesel. Trois fichiers du SDES de 2 à 4 millions de lignes, lus commune par commune avec dsfr-data.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://geo.api.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — deuxième vague (§ 5) de
+       docs/portail-developpement-durable/proposition.md : « Portrait communal :
+       logements, véhicules, énergie ».
+
+       TROIS JEUX DE 2 À 4 M DE LIGNES, LUS COMMUNE PAR COMMUNE. DiDo n'agrège
+       pas : on ne charge jamais un fichier entier, on lui demande les lignes
+       d'UNE commune (filtre serveur dans l'URL). Mesuré le 2026-09-27 pour
+       Rennes : logements 65 lignes / 8 Ko / 2,8 s ; parc de véhicules 205
+       lignes / 83 Ko / 3,4 s (44 lignes de voitures particulières) ; électricité
+       IRIS 2024, 1 190 lignes / 494 Ko / 1,3 s (92 lignes résidentielles).
+
+       L'URL DÉPEND DU CHOIX DU LECTEUR, SANS SCRIPT : la commune choisie est UNE
+       ligne (deux facettes chaînées puis limit=1) ; un dsfr-data-repeat estampe
+       pour cette ligne tout le pipeline — sources comprises, dont l'URL porte
+       {{code}}. Changer de commune change la clé : le repeat retire l'ancien
+       pipeline et en estampe un neuf.
+
+       LA RÉFÉRENCE FRANCE vient de fichiers PETITS du même SDES, pas des fichiers
+       communaux : logements par département (1 313 lignes), énergie par région
+       (975 et 282 lignes). Pour les voitures, aucune référence nationale
+       chargeable : le parc n'existe qu'à la commune (2,1 M lignes).
+
+       PARIS, LYON, MARSEILLE : le parc de véhicules et l'énergie IRIS sont
+       publiés par ARRONDISSEMENT (75101…, 69381…, 13201…), les logements sous
+       le code de la commune. Le champ `pfx` (préfixe d'arrondissement) sert de
+       filtre startsWith pour ces deux fichiers.
+
+       DiDo : 3 connexions simultanées au plus par adresse IP (au-delà : 429 sans
+       en-tête CORS, « Failed to fetch »). Au montage : les trois sources France
+       (≈ 0,2 s chacune), puis les logements de la commune, qui attendent le
+       référentiel des communes. Énergie (2 sources) et voitures (1) en `lazy`,
+       chacune déclenchée par SON graphique (lazy-target), pas par le titre du bloc.
+       ========================================================================== -->
+
+  <!-- ---------- Référentiel des communes (geo.api.gouv.fr) ---------- -->
+  <dsfr-data-source id="com" url="https://geo.api.gouv.fr/communes?fields=code,nom,codeDepartement,population&amp;format=json"></dsfr-data-source>
+  <dsfr-data-source id="deps" url="https://geo.api.gouv.fr/departements?fields=code,nom"></dsfr-data-source>
+  <!-- Noms renommés AVANT la jointure : les deux jeux ont `code` et `nom`. -->
+  <dsfr-data-normalize id="deps-r" source="deps" rename="code:dep_code | nom:dep_nom"></dsfr-data-normalize>
+  <dsfr-data-join id="com-d" left="com" right="deps-r" on="codeDepartement=dep_code" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="com-n" source="com-d"
+    compute="dep = codeDepartement + ' — ' + dep_nom;
+             pfx = when code = '75056' then '751' when code = '69123' then '6938' when code = '13055' then '132' else code;
+             plm = when code = '75056' or code = '69123' or code = '13055' then 1 else 0;
+             k = 'x'">
+  </dsfr-data-normalize>
+  <!-- Du plus peuplé au moins peuplé : quand le département change et que la
+       commune précédente n'y est plus, limit=1 prend la plus peuplée. -->
+  <dsfr-data-query id="com-o" source="com-n" order-by="population:desc"></dsfr-data-query>
+
+  <!-- ---------- France : logements commencés (fichier départemental) ---------- -->
+  <dsfr-data-source id="fr-log"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/a0ae7112-5184-4ad7-842d-87b09fd27df1/json?TYPE_LGT=eq:Tous%20Logements&amp;columns=ANNEE,LOG_COM">
+  </dsfr-data-source>
+  <dsfr-data-query id="fr-log-a" source="fr-log" where="LOG_COM:isnotnull" group-by="ANNEE" aggregate="LOG_COM:sum:n" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="fr-log-k" source="fr-log-a" compute="k = 'x'"></dsfr-data-normalize>
+  <!-- Dernière année où les mises en chantier sont publiées (lue dans la donnée). -->
+  <dsfr-data-query id="der" source="fr-log-k" group-by="k" aggregate="ANNEE:max:L"></dsfr-data-query>
+  <dsfr-data-join id="fr-log-j" left="fr-log-k" right="der" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="fr-log-p" source="fr-log-j"
+    compute="base = when ANNEE >= 2017 and ANNEE &lt;= 2019 then n else 0;
+             rec = when ANNEE > L - 3 then n else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="fr-log-s" source="fr-log-p" group-by="k, L" aggregate="base:sum:b, rec:sum:r"></dsfr-data-query>
+  <dsfr-data-normalize id="fr-log-e" source="fr-log-s"
+    compute="evol = round((r / b - 1) * 100, 0);
+             baisse = round((1 - r / b) * 100, 0);
+             moy_b = round(b / 3, 0);
+             moy_r = round(r / 3, 0);
+             L2 = L - 2;
+             fr_sens = when evol &lt; 0 then round(0 - evol, 0) + ' % de moins' when evol > 0 then evol + ' % de plus' else 'autant';
+             fr_moy_b = moy_b;
+             fr_moy_r = moy_r">
+  </dsfr-data-normalize>
+
+  <!-- ---------- France : gaz résidentiel par point de livraison (maille région) ---------- -->
+  <dsfr-data-source id="fr-gaz"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/f42f0a8f-36bf-413b-b404-5fd8a4c8da36/json?CODE_GRAND_SECTEUR=eq:R&amp;columns=ANNEE,CONSO,PDL">
+  </dsfr-data-source>
+  <dsfr-data-query id="fr-gaz-a" source="fr-gaz" group-by="ANNEE" aggregate="CONSO:sum:c, PDL:sum:p"></dsfr-data-query>
+  <dsfr-data-normalize id="fr-gaz-n" source="fr-gaz-a" compute="mwh = c / p; k = 'x'"></dsfr-data-normalize>
+  <dsfr-data-query id="fr-gaz-der" source="fr-gaz-n" group-by="k" aggregate="ANNEE:max:ader"></dsfr-data-query>
+  <dsfr-data-join id="fr-gaz-last" left="fr-gaz-n" right="fr-gaz-der" on="k,ANNEE=ader" type="inner"></dsfr-data-join>
+  <dsfr-data-query id="fr-gaz-19" source="fr-gaz-n" where="ANNEE:eq:2019"></dsfr-data-query>
+  <dsfr-data-join id="fr-gaz-cmp" left="fr-gaz-last" right="fr-gaz-19" on="k" type="inner" prefix-right="b_"></dsfr-data-join>
+  <dsfr-data-normalize id="fr-gaz-e" source="fr-gaz-cmp"
+    compute="baisse = round((1 - mwh / b_mwh) * 100, 0);
+             m1 = round(mwh, 1);
+             b1 = round(b_mwh, 1)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- France : électricité résidentielle par point de livraison ---------- -->
+  <dsfr-data-source id="fr-el"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/e841c15d-03e0-4289-b336-8c97b2d3a594/json?CODE_GRAND_SECTEUR=eq:R&amp;columns=ANNEE,CONSO,PDL">
+  </dsfr-data-source>
+  <dsfr-data-query id="fr-el-a" source="fr-el" group-by="ANNEE" aggregate="CONSO:sum:c, PDL:sum:p"></dsfr-data-query>
+  <dsfr-data-normalize id="fr-el-n" source="fr-el-a" compute="fr_mwh = round(c / p, 2)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="fr-gaz-r" source="fr-gaz-a" compute="fr_mwh = round(c / p, 2)"></dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Portrait communal</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>On commence plus d'un quart de logements de moins qu'avant 2020&nbsp;: votre commune suit-elle la France&nbsp;?</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="fr-log-e">
+        <template>
+          En France, <strong>{{moy_r:number}}&nbsp;logements ont été mis en chantier par an de {{L2}} à {{L}}, contre
+          {{moy_b:number}} de 2017 à 2019&nbsp;: {{baisse}}&nbsp;% de moins</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="fr-gaz-e">
+        <template>
+          Dans le même temps, chaque logement raccordé au gaz en a consommé {{m1:number:1}}&nbsp;MWh en {{ANNEE}}, contre
+          {{b1:number:1}} en 2019&nbsp;: {{baisse}}&nbsp;% de moins (consommation réelle, non corrigée du climat).
+        </template>
+      </dsfr-data-repeat>
+      Une moyenne nationale ne dit rien d'une commune&nbsp;: de 2022 à 2024, Paris a commencé moins de la moitié des
+      logements de 2017-2019 (−56&nbsp;%), Rennes deux cinquièmes de moins (−39&nbsp;%) — chiffres lus le 27&nbsp;septembre 2026. Le portrait ci-dessous rapporte la commune choisie à la France pour la construction et
+      l'énergie des logements, et y ajoute ce qu'aucun fichier national ne publie&nbsp;: comment son parc de voitures
+      quitte le diesel.
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: logements autorisés et commencés
+      (Sitadel, séries annuelles communales et départementales), parc de véhicules routiers au 1<sup>er</sup>&nbsp;janvier
+      par commune, données locales de consommation d'électricité et de gaz (maille IRIS et région). Référentiel des
+      communes&nbsp;: geo.api.gouv.fr. Chiffres lus au chargement de la page.
+    </p>
+  </div>
+
+  <!-- ======================= LE CHOIX DE LA COMMUNE ======================= -->
+  <!-- Deux facettes chaînées : le département restreint les communes. La valeur
+       diffusée (et écrite dans l'URL) est le CODE ; le libellé vient de
+       value-labels. `default` : la page répond avant qu'on ait choisi. -->
+  <section class="fr-container fr-mb-4w" aria-labelledby="t-choix">
+    <h2 id="t-choix" class="fr-h3">Choisissez une commune</h2>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <dsfr-data-facets id="fd" source="com-o" fields="codeDepartement"
+          labels="codeDepartement:Département" value-labels="codeDepartement:dep"
+          display="codeDepartement:select" default="codeDepartement:35"
+          sort="codeDepartement:alpha:asc" hide-counts no-reset
+          url-params url-sync url-param-map="departement:codeDepartement">
+        </dsfr-data-facets>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <dsfr-data-facets id="fc" source="fd" fields="code"
+          labels="code:Commune (« Tous » : la plus peuplée du département)" value-labels="code:nom"
+          display="code:select"
+          sort="code:alpha:asc" hide-counts no-reset
+          url-params url-sync url-param-map="commune:code">
+        </dsfr-data-facets>
+      </div>
+    </div>
+    <dsfr-data-query id="sel" source="fc" limit="1"></dsfr-data-query>
+  </section>
+
+  <!-- ======================= LE PORTRAIT (un pipeline par commune choisie) ======================= -->
+  <dsfr-data-repeat source="sel" key-field="code"
+    empty="Choisissez une commune dans la liste du département.">
+    <template>
+      <section class="fr-container fr-mb-6w" aria-labelledby="t-log-{{code}}">
+        <p class="fr-text--lead fr-mb-3w">Portrait de <strong>{{nom}}</strong> ({{dep}}), {{population:number}}&nbsp;habitants.</p>
+
+        <!-- ---------- 1. Logements ---------- -->
+        <dsfr-data-source id="log-{{code}}"
+          url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/9c90a880-4ba0-49b4-b99d-d7dd6c810dd0/json?COMM=eq:{{code}}&amp;TYPE_LGT=eq:Tous%20Logements&amp;columns=ANNEE,LOG_AUT,LOG_COM">
+        </dsfr-data-source>
+        <dsfr-data-query id="log-{{code}}-t" source="log-{{code}}" order-by="ANNEE:asc"></dsfr-data-query>
+        <dsfr-data-normalize id="log-{{code}}-k" source="log-{{code}}" compute="k = 'x'"></dsfr-data-normalize>
+        <dsfr-data-join id="log-{{code}}-j" left="log-{{code}}-k" right="der" on="k" type="inner"></dsfr-data-join>
+        <dsfr-data-normalize id="log-{{code}}-p" source="log-{{code}}-j"
+          compute="base = when ANNEE >= 2017 and ANNEE &lt;= 2019 then coalesce(LOG_COM, 0) else 0;
+                   rec = when ANNEE > L - 3 and ANNEE &lt;= L then coalesce(LOG_COM, 0) else 0">
+        </dsfr-data-normalize>
+        <dsfr-data-query id="log-{{code}}-s" source="log-{{code}}-p" group-by="k, L" aggregate="base:sum:b, rec:sum:r"></dsfr-data-query>
+        <dsfr-data-join id="log-{{code}}-f" left="log-{{code}}-s" right="fr-log-e" on="k" type="inner" prefix-right="france_"></dsfr-data-join>
+        <dsfr-data-normalize id="log-{{code}}-e" source="log-{{code}}-f"
+          compute="evol = round((r / b - 1) * 100, 0);
+                   moy_b = round(b / 3, 0);
+                   moy_r = round(r / 3, 0);
+                   L2 = L - 2;
+                   titre = when b &lt; 30 then 'trop peu de logements commencés pour mesurer une évolution (moins de dix par an en 2017-2019)'
+                           when evol &lt; 0 then round(0 - evol, 0) + ' % de logements commencés en moins de ' + L2 + ' à ' + L + ' qu’en 2017-2019'
+                           when evol > 0 then evol + ' % de logements commencés en plus de ' + L2 + ' à ' + L + ' qu’en 2017-2019'
+                           else 'autant de logements commencés de ' + L2 + ' à ' + L + ' qu’en 2017-2019'">
+        </dsfr-data-normalize>
+        <dsfr-data-join id="log-{{code}}-n" left="log-{{code}}-e" right="sel-k" on="k" type="inner"></dsfr-data-join>
+
+        <dsfr-data-repeat source="log-{{code}}-n">
+          <template>
+            <h2 id="t-log-{{code}}" class="fr-h3">{{nom}}&nbsp;: {{titre}}</h2>
+            <p class="odv-lecture">
+              Logements commencés par an, en moyenne&nbsp;: {{moy_b:number}} de 2017 à 2019, {{moy_r:number}} de {{L2}} à {{L}}.
+              En France, sur les mêmes années&nbsp;: {{fr_sens}} ({{fr_moy_b:number}} puis {{fr_moy_r:number}} logements par an).
+            </p>
+          </template>
+        </dsfr-data-repeat>
+        <div class="odv-chart-slot odv-viz" data-code="Logements autorisés et commencés">
+          <dsfr-data-chart id="g-log-{{code}}" source="log-{{code}}-t" type="bar"
+            label-field="ANNEE" value-field="LOG_AUT:Logements autorisés" value-fields="LOG_COM:Logements commencés"
+            unit-tooltip="logements"
+            databox databox-title="Logements autorisés et commencés à {{nom}}, par année (tous logements)"
+            databox-source="SDES — Sitadel, séries annuelles communales, données non estimées (DiDo)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-log-{{code}}" source="log-{{code}}-t" label-field="ANNEE" value-field="LOG_AUT,LOG_COM"
+            description="Barres groupées, une paire par année depuis 2013 : logements autorisés, puis logements commencés, dans la commune de {{nom}}. La dernière année n'a que des autorisations : les mises en chantier n'y sont pas encore publiées.">
+          </dsfr-data-a11y>
+        </div>
+        <p class="fr-text--xs fr-hint-text">
+          La dernière année n'a pas de barre «&nbsp;commencés&nbsp;»&nbsp;: le SDES publie les autorisations avant les mises
+          en chantier (valeur absente, pas zéro). Les séries sont «&nbsp;non estimées, en date réelle&nbsp;»&nbsp;: les
+          dernières années s'étoffent encore à mesure que les déclarations arrivent.
+        </p>
+      </section>
+
+      <!-- ---------- 2. Énergie des logements ---------- -->
+      <!-- DEUX PIPELINES INDÉPENDANTS, et c'est voulu : DiDo répond HTTP 400
+           « Le fichier est vide. » quand un filtre ne garde aucune ligne (une
+           commune sans gaz de réseau), au lieu d'un tableau vide. Une jointure ou
+           un concat électricité + gaz tomberait alors en erreur avec le gaz, et
+           l'électricité disparaîtrait avec lui. -->
+      <section class="fr-container fr-mb-6w" aria-labelledby="t-en-{{code}}">
+        <dsfr-data-source id="el-{{code}}" lazy lazy-target="#g-el-{{code}}"
+          url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/a2752bf0-2100-47c3-bfc3-2a16153aba5b/json?CODE_IRIS_CODE=startsWith:{{pfx}}&amp;CODE_GRAND_SECTEUR=eq:R&amp;columns=ANNEE,CODE_IRIS_CODE,CONSO,PDL">
+        </dsfr-data-source>
+        <dsfr-data-source id="ga-{{code}}" lazy lazy-target="#g-ga-{{code}}"
+          url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/54208342-9895-4971-9dd2-559193d893ff/json?CODE_IRIS_CODE=startsWith:{{pfx}}&amp;CODE_GRAND_SECTEUR=eq:R&amp;columns=ANNEE,CODE_IRIS_CODE,CONSO,PDL">
+        </dsfr-data-source>
+        <!-- Une ligne IRIS sous secret porte « secret » à la place de la consommation
+             ET du nombre de points : on l'écarte des deux sommes, et on la compte. -->
+        <dsfr-data-normalize id="el-{{code}}-n" source="el-{{code}}"
+          compute="sec = when CONSO = 'secret' then 1 else 0;
+                   c = when CONSO = 'secret' then null else CONSO;
+                   p = when CONSO = 'secret' then null else PDL">
+        </dsfr-data-normalize>
+        <dsfr-data-normalize id="ga-{{code}}-n" source="ga-{{code}}"
+          compute="sec = when CONSO = 'secret' then 1 else 0;
+                   c = when CONSO = 'secret' then null else CONSO;
+                   p = when CONSO = 'secret' then null else PDL">
+        </dsfr-data-normalize>
+        <dsfr-data-query id="el-{{code}}-a" source="el-{{code}}-n" group-by="ANNEE" aggregate="c:sum, p:sum, sec:sum, CODE_IRIS_CODE:count:n"></dsfr-data-query>
+        <dsfr-data-query id="ga-{{code}}-a" source="ga-{{code}}-n" group-by="ANNEE" aggregate="c:sum, p:sum, sec:sum, CODE_IRIS_CODE:count:n"></dsfr-data-query>
+        <dsfr-data-join id="el-{{code}}-f" left="el-{{code}}-a" right="fr-el-n" on="ANNEE" type="inner"></dsfr-data-join>
+        <dsfr-data-join id="ga-{{code}}-f" left="ga-{{code}}-a" right="fr-gaz-r" on="ANNEE" type="inner"></dsfr-data-join>
+        <dsfr-data-normalize id="el-{{code}}-r" source="el-{{code}}-f"
+          compute="fil = 'Électricité';
+                   mwh = round(c__sum / p__sum, 2);
+                   ecart = round((c__sum / p__sum / fr_mwh - 1) * 100, 0);
+                   sens = when ecart &lt; 0 then round(0 - ecart, 0) + ' % de moins' when ecart > 0 then ecart + ' % de plus' else 'autant';
+                   k = 'x'"></dsfr-data-normalize>
+        <dsfr-data-normalize id="ga-{{code}}-r" source="ga-{{code}}-f"
+          compute="fil = 'Gaz naturel';
+                   mwh = round(c__sum / p__sum, 2);
+                   ecart = round((c__sum / p__sum / fr_mwh - 1) * 100, 0);
+                   sens = when ecart &lt; 0 then round(0 - ecart, 0) + ' % de moins' when ecart > 0 then ecart + ' % de plus' else 'autant';
+                   k = 'x'"></dsfr-data-normalize>
+        <dsfr-data-join id="el-{{code}}-s" left="el-{{code}}-r" right="sel-k" on="k" type="inner"></dsfr-data-join>
+
+        <dsfr-data-repeat source="el-{{code}}-s">
+          <template>
+            <h2 id="t-en-{{code}}" class="fr-h3">{{nom}}&nbsp;: un logement consomme {{mwh:number:1}}&nbsp;MWh d'électricité par an, {{sens}} que la moyenne française</h2>
+            <p class="odv-lecture">
+              En {{ANNEE}}, les {{p__sum:number}}&nbsp;points de livraison d'électricité résidentiels de {{nom}} ont consommé en
+              moyenne {{mwh:number:1}}&nbsp;MWh chacun (France&nbsp;: {{fr_mwh:number:1}}). L'écart dit surtout comment on se
+              chauffe&nbsp;: un logement chauffé à l'électricité en consomme plusieurs fois plus qu'un logement chauffé au gaz,
+              au fioul ou par un réseau de chaleur.
+            </p>
+          </template>
+        </dsfr-data-repeat>
+        <dsfr-data-repeat source="ga-{{code}}-r">
+          <template>
+            <p class="odv-lecture">
+              Gaz naturel&nbsp;: {{p__sum:number}}&nbsp;points de livraison résidentiels, qui ont consommé en moyenne
+              {{mwh:number:1}}&nbsp;MWh chacun en {{ANNEE}}, {{sens}} qu'en France ({{fr_mwh:number:1}}).
+            </p>
+          </template>
+        </dsfr-data-repeat>
+
+        <div class="fr-grid-row fr-grid-row--gutters">
+          <div class="fr-col-12 fr-col-md-6">
+            <div class="odv-chart-slot odv-viz" data-code="Électricité par point de livraison">
+              <dsfr-data-chart id="g-el-{{code}}" source="el-{{code}}-r" type="bar" horizontal
+                label-field="fil" value-field="mwh:{{nom}}" value-fields="fr_mwh:France"
+                unit-tooltip="MWh par point de livraison" x-min="0"
+                databox databox-title="Électricité : consommation résidentielle par point de livraison, {{nom}} et France (MWh par an)"
+                databox-source="SDES — données locales de consommation, mailles IRIS et région (DiDo)" databox-download>
+              </dsfr-data-chart>
+              <dsfr-data-a11y for="g-el-{{code}}" source="el-{{code}}-r" label-field="fil" value-field="mwh,fr_mwh,p__sum,n,sec__sum"
+                description="Deux barres horizontales : la consommation résidentielle moyenne d'électricité d'un point de livraison à {{nom}}, puis en France, dernière année publiée. Le tableau donne aussi le nombre de points, d'IRIS et d'IRIS sous secret.">
+              </dsfr-data-a11y>
+            </div>
+          </div>
+          <div class="fr-col-12 fr-col-md-6">
+            <div class="odv-chart-slot odv-viz" data-code="Gaz par point de livraison">
+              <dsfr-data-chart id="g-ga-{{code}}" source="ga-{{code}}-r" type="bar" horizontal
+                label-field="fil" value-field="mwh:{{nom}}" value-fields="fr_mwh:France"
+                unit-tooltip="MWh par point de livraison" x-min="0"
+                databox databox-title="Gaz naturel : consommation résidentielle par point de livraison, {{nom}} et France (MWh par an)"
+                databox-source="SDES — données locales de consommation, mailles IRIS et région (DiDo)" databox-download>
+              </dsfr-data-chart>
+              <dsfr-data-a11y for="g-ga-{{code}}" source="ga-{{code}}-r" label-field="fil" value-field="mwh,fr_mwh,p__sum,n,sec__sum"
+                description="Deux barres horizontales : la consommation résidentielle moyenne de gaz naturel d'un point de livraison à {{nom}}, puis en France, dernière année publiée. Le tableau donne aussi le nombre de points, d'IRIS et d'IRIS sous secret.">
+              </dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+        <dsfr-data-repeat source="el-{{code}}-r">
+          <template>
+            <p class="fr-text--xs fr-hint-text fr-mb-0">
+              Secret statistique, électricité&nbsp;: {{sec__sum}}&nbsp;ligne(s) IRIS sur {{n}} ont leur consommation et leur nombre de
+              points masqués («&nbsp;secret&nbsp;»)&nbsp;; elles sont écartées des deux sommes, pas comptées à zéro.
+            </p>
+          </template>
+        </dsfr-data-repeat>
+        <dsfr-data-repeat source="ga-{{code}}-r">
+          <template>
+            <p class="fr-text--xs fr-hint-text fr-mb-0">
+              Secret statistique, gaz&nbsp;: {{sec__sum}}&nbsp;ligne(s) IRIS sur {{n}}, écartées de la même façon.
+            </p>
+          </template>
+        </dsfr-data-repeat>
+        <p class="fr-text--xs fr-hint-text">
+          Un point de livraison n'est pas tout à fait un logement&nbsp;: une chaufferie collective au gaz est un seul point pour
+          tout un immeuble, ce qui gonfle la moyenne du gaz dans les villes chauffées collectivement. Consommations réelles,
+          non corrigées du climat. Une commune sans gaz de réseau n'a pas de graphique du gaz&nbsp;: la plateforme du SDES
+          répond alors par une erreur («&nbsp;fichier vide&nbsp;»), pas par zéro ligne.
+        </p>
+      </section>
+
+      <!-- ---------- 3. Voitures ---------- -->
+      <section class="fr-container fr-mb-6w" aria-labelledby="t-vp-{{code}}">
+        <dsfr-data-source id="vp-{{code}}" lazy lazy-target="#g-vp-{{code}}"
+          url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/1582861b-e042-4490-9161-6429d8229703/json?COMMUNE_CODE=startsWith:{{pfx}}&amp;GROUPE=eq:VP">
+        </dsfr-data-source>
+        <dsfr-data-normalize id="vp-{{code}}-f" source="vp-{{code}}"
+          compute="fam = when CARBURANT = 'Electrique' then 'elec'
+                         when CARBURANT = 'Essence HR' or CARBURANT = 'Diesel HR' or CARBURANT = 'Gaz HR' then 'hr'
+                         when CARBURANT = 'Essence HNR' or CARBURANT = 'Diesel HNR' or CARBURANT = 'Gaz HNR' then 'hnr'
+                         when CARBURANT = 'Diesel' or CARBURANT = 'Biodiesel' then 'diesel'
+                         when CARBURANT = 'Essence' then 'essence'
+                         else 'autre'">
+        </dsfr-data-normalize>
+        <dsfr-data-unpivot id="vp-{{code}}-l" source="vp-{{code}}-f" id-cols="fam"
+          value-cols-pattern="PARC_{YYYY}" var-name="annee" var-format="{YYYY}" value-name="v">
+        </dsfr-data-unpivot>
+        <dsfr-data-pivot id="vp-{{code}}-w" source="vp-{{code}}-l" row="annee" column="fam" value="v" aggregate="sum"></dsfr-data-pivot>
+        <dsfr-data-normalize id="vp-{{code}}-p" source="vp-{{code}}-w"
+          compute="tot = coalesce(diesel, 0) + coalesce(essence, 0) + coalesce(hnr, 0) + coalesce(hr, 0) + coalesce(elec, 0) + coalesce(autre, 0);
+                   p_diesel = round(coalesce(diesel, 0) / tot * 100, 1);
+                   p_essence = round(coalesce(essence, 0) / tot * 100, 1);
+                   p_hnr = round(coalesce(hnr, 0) / tot * 100, 1);
+                   p_hr = round(coalesce(hr, 0) / tot * 100, 1);
+                   p_elec = round(coalesce(elec, 0) / tot * 100, 1);
+                   p_autre = round(coalesce(autre, 0) / tot * 100, 1);
+                   p_rech = round((coalesce(elec, 0) + coalesce(hr, 0)) / tot * 100, 1);
+                   k = 'x'">
+        </dsfr-data-normalize>
+        <dsfr-data-query id="vp-{{code}}-t" source="vp-{{code}}-p" where="tot:gt:0" order-by="annee:asc"></dsfr-data-query>
+        <dsfr-data-query id="vp-{{code}}-b" source="vp-{{code}}-t" group-by="k" aggregate="annee:min:a0, annee:max:a1"></dsfr-data-query>
+        <dsfr-data-join id="vp-{{code}}-j0" left="vp-{{code}}-b" right="vp-{{code}}-t" on="k,a0=annee" type="inner" ></dsfr-data-join>
+        <dsfr-data-join id="vp-{{code}}-j1" left="vp-{{code}}-j0" right="vp-{{code}}-t" on="k,a1=annee" type="inner" prefix-right="f_"></dsfr-data-join>
+        <dsfr-data-join id="vp-{{code}}-n" left="vp-{{code}}-j1" right="sel-k" on="k" type="inner"></dsfr-data-join>
+
+        <dsfr-data-repeat source="vp-{{code}}-n">
+          <template>
+            <h2 id="t-vp-{{code}}" class="fr-h3">{{nom}}&nbsp;: le diesel est passé de {{p_diesel:number:1}}&nbsp;% à {{f_p_diesel:number:1}}&nbsp;% des voitures entre {{a0}} et {{a1}}&nbsp;; électriques et hybrides rechargeables en font {{f_p_rech:number:1}}&nbsp;%</h2>
+            <p class="odv-lecture">
+              Au 1<sup>er</sup>&nbsp;janvier {{a1}}, {{f_tot:number}}&nbsp;voitures particulières sont immatriculées à {{nom}}&nbsp;:
+              {{f_p_essence:number:1}}&nbsp;% à essence, {{f_p_diesel:number:1}}&nbsp;% au diesel, {{f_p_hnr:number:1}}&nbsp;% hybrides
+              non rechargeables, {{f_p_hr:number:1}}&nbsp;% hybrides rechargeables et {{f_p_elec:number:1}}&nbsp;% électriques.
+              En {{a0}}, les électriques faisaient {{p_elec:number:1}}&nbsp;%.
+            </p>
+          </template>
+        </dsfr-data-repeat>
+        <div class="odv-chart-slot odv-viz" data-code="Parc de voitures par motorisation">
+          <dsfr-data-chart id="g-vp-{{code}}" source="vp-{{code}}-t" type="bar" stacked
+            label-field="annee"
+            value-field="p_diesel:Diesel"
+            value-fields="p_essence:Essence, p_hnr:Hybride non rechargeable, p_hr:Hybride rechargeable, p_elec:Électrique, p_autre:Gaz et autres"
+            unit-tooltip="%" y-max="100"
+            databox databox-title="Voitures particulières immatriculées à {{nom}}, par motorisation, au 1er janvier (% du parc)"
+            databox-source="SDES — parc de véhicules routiers au niveau communal (DiDo)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-vp-{{code}}" source="vp-{{code}}-t" label-field="annee"
+            value-field="tot,p_diesel,p_essence,p_hnr,p_hr,p_elec,p_autre"
+            description="Barres empilées à 100 %, une par année depuis 2011 : la part de chaque motorisation dans les voitures particulières immatriculées à {{nom}}. Le diesel est en bas ; électriques et hybrides rechargeables sont les deux tranches du haut avant « gaz et autres ». Le tableau donne aussi le nombre total de voitures.">
+          </dsfr-data-a11y>
+        </div>
+        <p class="fr-text--xs fr-hint-text">
+          Voitures particulières (catégorie VP) immatriculées dans la commune, particuliers et professionnels, selon le
+          lieu d'immatriculation — une flotte d'entreprise compte là où elle est déclarée. Le SDES estime ce parc et le
+          révise d'un millésime à l'autre.
+        </p>
+      </section>
+
+    </template>
+  </dsfr-data-repeat>
+  <dsfr-data-normalize id="sel-k" source="sel" compute="k = 'x'"></dsfr-data-normalize>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>Aucune référence nationale pour les voitures.</strong> Le parc n'est publié qu'à la commune (2,1&nbsp;millions
+        de lignes)&nbsp;: la somme nationale demanderait de tout charger, et la plateforme n'agrège pas. L'indicateur
+        national voisin des ITDD («&nbsp;part des voitures Crit'Air&nbsp;1 ou électriques&nbsp;») n'est pas comparable&nbsp;:
+        pour Paris il vaut 58,3&nbsp;% en 2024 quand le parc communal donne 56,6&nbsp;% au 1<sup>er</sup>&nbsp;janvier 2024 et
+        61,5&nbsp;% au 1<sup>er</sup>&nbsp;janvier 2025 (relevé le 27&nbsp;septembre 2026). La commune est donc comparée à
+        elle-même dans le temps.</li>
+      <li><strong>Les dernières années de construction sont provisoires.</strong> Les séries communales sont «&nbsp;non
+        estimées, en date réelle&nbsp;»&nbsp;: les déclarations tardives les relèvent encore. La baisse de la dernière période
+        est donc un maximum, pour la commune comme pour la France (même source, même traitement).</li>
+      <li><strong>Pas d'évolution en pourcentage sous dix logements par an.</strong> Quand la commune a commencé moins de
+        trente logements de 2017 à 2019, le titre le dit au lieu de calculer un pourcentage qui n'aurait pas de sens
+        (passer de 4 à 1 logement par an ferait «&nbsp;−75&nbsp;%&nbsp;»).</li>
+      <li><strong>Le secret statistique, compté et écarté.</strong> Une ligne IRIS sous secret porte «&nbsp;secret&nbsp;» à la
+        place de la consommation <em>et</em> du nombre de points&nbsp;: elle sort des deux sommes, et le nombre de lignes
+        écartées est affiché sous les graphiques de l'énergie (Rennes&nbsp;: 1 sur 92 pour l'électricité, 4 sur 91 pour le
+        gaz&nbsp;; Paris&nbsp;: 27 sur 971 pour l'électricité, le 27&nbsp;septembre 2026).</li>
+      <li><strong>Un point de livraison n'est pas un logement.</strong> Une chaufferie collective au gaz est un point pour
+        un immeuble&nbsp;; c'est pourquoi le gaz «&nbsp;par point&nbsp;» de Paris (10,9&nbsp;MWh) dépasse la moyenne française
+        alors que son électricité par point est très inférieure. Aucune de ces moyennes n'est corrigée du climat.</li>
+      <li><strong>Paris, Lyon, Marseille.</strong> Le parc de véhicules et l'énergie sont publiés par arrondissement&nbsp;: la
+        page les additionne. Les lignes du parc codées au niveau de la commune entière (75056 pour Paris&nbsp;: 31&nbsp;lignes de voitures
+        particulières, 3&nbsp;672&nbsp;voitures au 1<sup>er</sup>&nbsp;janvier 2024) sont laissées de côté.</li>
+      <li><strong>Les communes nouvelles et l'outre-mer hors départements.</strong> Le référentiel des communes est celui
+        d'aujourd'hui (geo.api.gouv.fr)&nbsp;; une commune fusionnée depuis n'a pas forcément ses anciennes années sous son
+        code actuel. Les 94 communes que le référentiel ne rattache à aucun département —
+        Polynésie française, Nouvelle-Calédonie, Wallis-et-Futuna, Saint-Pierre-et-Miquelon, Saint-Barthélemy,
+        Saint-Martin, Terres australes, Clipperton — ne sont pas proposés.</li>
+      <li><strong>Une commune sans gaz de réseau</strong> n'a pas de graphique du gaz&nbsp;: la plateforme du SDES répond
+        «&nbsp;fichier vide&nbsp;» (erreur HTTP 400) au lieu d'une liste vide.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: un portrait communal construit sur trois fichiers du SDES de 2 à 4&nbsp;millions de
+        lignes, servis par DiDo sans adaptateur ni agrégation serveur. La page ne charge jamais un fichier entier&nbsp;: elle
+        demande les lignes d'une commune, choisie par le lecteur, et compare à des fichiers nationaux petits.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Une URL qui dépend du choix du lecteur, sans script.</strong> Deux facettes chaînées et une
+              <code>dsfr-data-query limit="1"</code> font de la commune choisie une ligne&nbsp;; un
+              <code>dsfr-data-repeat key-field="code"</code> estampe pour elle tout le pipeline, sources comprises, dont
+              l'URL porte <code>{{code}}</code>. Changer de commune remplace le pipeline.</li>
+            <li><strong>Des requêtes petites.</strong> Rennes&nbsp;: 8&nbsp;Ko de logements, 18&nbsp;Ko de voitures, 170 et
+              490&nbsp;Ko d'énergie, au lieu de fichiers de 2 à 4&nbsp;millions de lignes.</li>
+            <li><strong>Un parc large par année devenu un 100&nbsp;% empilé</strong>&nbsp;: <code>unpivot</code>
+              (<code>PARC_{YYYY}</code>), <code>pivot</code> par motorisation, parts par <code>compute</code>.</li>
+            <li><strong>Une commune partageable</strong>&nbsp;: <code>url-params url-sync</code> sur les deux facettes
+              (<code>?departement=75&amp;commune=75056</code>).</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Trois connexions simultanées au plus.</strong> Au-delà, DiDo répond 429 sans en-tête CORS, et le
+              navigateur ne montre qu'un «&nbsp;Failed to fetch&nbsp;». Il a fallu répartir les sept sources entre le montage
+              et deux <code>lazy</code> déclenchés par leur propre graphique (<code>lazy-target</code>)&nbsp;; un lecteur qui
+              défile très vite peut encore dépasser le plafond. La bibliothèque n'a ni file d'attente par hôte ni reprise
+              sur échec.</li>
+            <li><strong>Un filtre qui ne garde rien est une erreur</strong> (HTTP 400 «&nbsp;Le fichier est vide.&nbsp;») côté
+              DiDo. Un <code>concat</code> ou une <code>join</code> électricité + gaz tombait en erreur avec le gaz&nbsp;:
+              les deux énergies ont dû devenir deux pipelines indépendants.</li>
+            <li><strong>Une cascade de facettes garde une commune orpheline.</strong> Changer de département laisse la
+              commune précédente sélectionnée, «&nbsp;(indisponible)&nbsp;», et le portrait disparaît jusqu'au choix d'une
+              commune du nouveau département. Sans <code>default</code> sur la commune, le premier affichage prend la plus
+              peuplée (tri + <code>limit="1"</code>).</li>
+            <li><strong>Un champ calculé par comparaison de deux années</strong> (première et dernière) demande deux
+              jointures sur le maximum et le minimum&nbsp;: pas de «&nbsp;valeur à la première / dernière ligne&nbsp;».</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Lire UNE commune dans un fichier de 2 à 4 M lignes</td><td><code>dsfr-data-source url=</code>, filtre DiDo dans l'URL</td><td>Natif</td></tr>
+            <tr><td>URL paramétrée par le choix du lecteur</td><td><code>facets</code> + <code>query limit="1"</code> + <code>dsfr-data-repeat</code> dont le gabarit porte la source</td><td>Natif, détourné</td></tr>
+            <tr><td>Choisir département puis commune, partager le lien</td><td>deux <code>dsfr-data-facets</code> chaînées, <code>value-labels</code>, <code>url-sync</code></td><td>Natif ; orpheline au changement de département</td></tr>
+            <tr><td>Référence France</td><td>fichiers départemental et régional + <code>query</code> + <code>join</code></td><td>Natif</td></tr>
+            <tr><td>Parc large par année → parts par motorisation</td><td><code>unpivot</code> + <code>pivot</code> + <code>normalize compute</code></td><td>Natif</td></tr>
+            <tr><td>Écarter et compter le secret statistique</td><td><code>normalize compute when</code> + <code>query sum</code></td><td>Natif</td></tr>
+            <tr><td>Paris, Lyon, Marseille par arrondissement</td><td><code>compute</code> d'un préfixe + filtre <code>startsWith</code> de DiDo</td><td>Natif</td></tr>
+            <tr><td>Rester sous 3 connexions</td><td><code>lazy</code> + <code>lazy-target</code></td><td>Partiel : pas de file d'attente</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un portrait communal sur des fichiers de plusieurs millions de lignes tient en balises, sans script,
+          à condition de ne jamais les charger.</strong> Le geste qui le permet — une source estampée dans un
+          <code>dsfr-data-repeat</code> avec le code de la commune dans son URL — n'est écrit nulle part comme tel, mais
+          il marche. Ce qui coûte vient de la plateforme&nbsp;: trois connexions au plus, et une erreur à la place d'un
+          résultat vide, qui obligent à découper la page en pipelines indépendants et chargés à la demande.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
