@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Comptabilité générale de l'État — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la datavisualisation des comptes de l'État de data.economie.gouv.fr.">
+  <meta name="description" content="Dix exercices de comptes de l'État : la dette financière creuse le bilan plus vite que l'actif ne grossit, et le déficit annuel a doublé depuis 2020. Recréation avec dsfr-data.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,128 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       PIPELINE — trois requêtes agrégées sur 517 489 lignes, tout le reste est
+       calculé dans le navigateur sur quelques dizaines de lignes.
+
+       balance_sortie_3 est en Md€, balance_sortie_4 en M€ ; toutes deux sont
+       des valeurs absolues (le signe comptable ne vit que dans balance_sortie).
+       Les soldes se calculent donc par différence de colonnes après pivot, et
+       non par une somme signée : le calcul se lit dans le HTML.
+       ========================================================================== -->
+
+  <!-- 1. Bilan : actif et passif par poste et par exercice (140 lignes) -->
+  <dsfr-data-source id="cg-bp" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="categorie, postes, year(annee) as an"
+    where='categorie in ("Actif","Passif")'>
+  </dsfr-data-source>
+  <!-- Trois séries seulement : l'actif, la dette financière, le reste du passif. -->
+  <dsfr-data-normalize id="cg-bp-s" source="cg-bp"
+    compute="serie = when postes = 'Dettes financières' then 'Dette financière' when categorie = 'Actif' then 'Actif' else 'Autres passifs'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cg-trio" source="cg-bp-s"
+    group-by="serie, an" aggregate="montant:sum:montant" order-by="an:asc">
+  </dsfr-data-query>
+  <dsfr-data-pivot id="cg-trio-l" source="cg-trio" row="an" column="serie" value="montant"
+    labels="Actif:actif | Dette financière:dette | Autres passifs:autres">
+  </dsfr-data-pivot>
+
+  <!-- 2. Compte de résultat : charges et produits par poste et par exercice (80 lignes) -->
+  <dsfr-data-source id="cg-cr" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="categorie, postes, year(annee) as an"
+    where='categorie in ("Charges","Produits")'>
+  </dsfr-data-source>
+  <dsfr-data-query id="cg-cr-an" source="cg-cr"
+    group-by="categorie, an" aggregate="montant:sum:montant" order-by="an:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="cg-charges-postes" source="cg-cr"
+    where="categorie:eq:Charges" group-by="postes, an" aggregate="montant:sum:montant" order-by="an:asc">
+  </dsfr-data-query>
+  <dsfr-data-pivot id="cg-cr-l" source="cg-cr-an" row="an" column="categorie" value="montant"
+    labels="Charges:charges | Produits:produits">
+  </dsfr-data-pivot>
+
+  <!-- 3. Une ligne par exercice, tout ce qu'il faut pour les soldes -->
+  <dsfr-data-join id="cg-an-j" left="cg-trio-l" right="cg-cr-l" on="an" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="cg-annuel" source="cg-an-j"
+    compute="passif = dette + autres;
+             solde = actif - passif;
+             resultat = produits - charges;
+             ratio = dette / actif;
+             deficit = when resultat < 0 then 1 else 0;
+             res_avant = when an < 2020 then resultat else null;
+             res_depuis = when an >= 2020 then resultat else null;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cg-sn" source="cg-annuel"
+    group-by="an" aggregate="solde:sum:solde, solde:diff:variation" order-by="an:asc">
+  </dsfr-data-query>
+
+  <!-- 4. Premier et dernier exercice sur une même ligne, pour les phrases calculées -->
+  <dsfr-data-query id="cg-fin" source="cg-annuel" order-by="an:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="cg-deb" source="cg-annuel" order-by="an:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="cg-deb-r" source="cg-deb"
+    rename="an:an0 | actif:actif0 | dette:dette0 | autres:autres0 | passif:passif0 | solde:solde0 | charges:charges0 | produits:produits0 | resultat:resultat0 | ratio:ratio0 | deficit:deficit0 | res_avant:res_avant0 | res_depuis:res_depuis0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="cg-cumul" source="cg-annuel" group-by="k"
+    aggregate="deficit:sum:nb_def, an:count:nb_ex, res_avant:avg:moy_avant, res_depuis:avg:moy_depuis">
+  </dsfr-data-query>
+  <dsfr-data-join id="cg-bornes" left="cg-fin" right="cg-deb-r" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="cg-bornes-c" left="cg-bornes" right="cg-cumul" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="cg-recit" source="cg-bornes-c"
+    compute="d_dette = dette - dette0;
+             d_passif = passif - passif0;
+             d_actif = actif - actif0;
+             part_dette = round(d_dette / d_passif * 100, 0);
+             fois = d_dette / d_actif;
+             moy_avant_abs = abs(moy_avant);
+             moy_depuis_abs = abs(moy_depuis);
+             facteur = moy_depuis / moy_avant;
+             resultat_abs = abs(resultat)">
+  </dsfr-data-normalize>
+
+  <!-- 5. Charges par mission, dernier exercice publié (2025) -->
+  <dsfr-data-source id="cg-mis" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="sum(balance_sortie_3) as montant"
+    group-by="libellemission"
+    where='categorie = "Charges" and year(annee) = 2025'>
+  </dsfr-data-source>
+  <dsfr-data-query id="cg-mis-p" source="cg-mis"
+    group-by="libellemission" aggregate="montant:sum:montant, montant:share_percent:part">
+  </dsfr-data-query>
+  <dsfr-data-query id="cg-mis-top" source="cg-mis-p"
+    where="libellemission:isnotnull" order-by="montant:desc" limit="15">
+  </dsfr-data-query>
+  <dsfr-data-query id="cg-mis-un" source="cg-mis-top" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="cg-mis-sans" source="cg-mis-p" where="libellemission:isnull"></dsfr-data-query>
+
+  <!-- 6. Exploration par mission : liste des missions + charges par poste (M€) -->
+  <dsfr-data-source id="cg-mis-liste" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    fetch-mode="export" api-key-ref="ods-mef"
+    select="count(*) as n" group-by="libellemission"
+    where="libellemission is not null">
+  </dsfr-data-source>
+  <dsfr-data-source id="cgm-postes" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
+    api-key-ref="ods-mef"
+    select="sum(balance_sortie_4) as montant"
+    group-by="postes, year(annee) as an"
+    where='categorie = "Charges"' order-by="an">
+  </dsfr-data-source>
+  <dsfr-data-context id="ctx-mission" sources="cgm-postes" url-sync></dsfr-data-context>
+  <!-- Regroupement client sur 40 lignes : l'exercice devient une clé texte (« 2016 », pas « 2 016 » au tableau). -->
+  <dsfr-data-query id="cgm-q" source="cgm-postes" group-by="postes, an" aggregate="montant:sum:montant" order-by="an:asc"></dsfr-data-query>
+
+  <!-- ====================== EN-TÊTE ET CHAPEAU ====================== -->
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,617 +154,360 @@
       </div>
     </nav>
 
-    <h1>Datavisualisation des comptes de l'État</h1>
+    <h1>Les comptes de l'État&nbsp;: la dette creuse le bilan plus vite que l'actif ne grossit</h1>
+
+    <dsfr-data-repeat source="cg-recit">
+      <template>
+        <p class="fr-text--lead">À la clôture de l'exercice {{an}}, l'État possède
+          <strong>{{actif:number:0}}&nbsp;Md€</strong> et doit <strong>{{passif:number:0}}&nbsp;Md€</strong>&nbsp;:
+          sa situation nette est de <strong>{{solde:number:0}}&nbsp;Md€</strong>, contre
+          {{solde0:number:0}}&nbsp;Md€ en {{an0}}. Sur la période, sa dette financière a augmenté de
+          <strong>{{d_dette:number:0}}&nbsp;Md€</strong> — {{part_dette}}&nbsp;% de la hausse du passif,
+          et {{fois:number:1}} fois plus que l'actif. Chaque exercice se solde par un déficit&nbsp;:
+          {{nb_def}} sur {{nb_ex}}, de {{moy_avant_abs:number:0}}&nbsp;Md€ par an en moyenne avant 2020,
+          de {{moy_depuis_abs:number:0}}&nbsp;Md€ depuis.</p>
+      </template>
+    </dsfr-data-repeat>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">D'où viennent ces chiffres</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.economie.gouv.fr/explore/dataset/balances_des_comptes_etat/"
            target="_blank" rel="noopener external"><code>balances_des_comptes_etat</code></a>
-        — 517&nbsp;489 lignes de balances générales des comptes, de 2016 à 2025, produites par la
-        DGFiP. Ce sont les données ayant servi à la production du Compte général de l'État.
-        Aucune ligne ne descend dans le navigateur&nbsp;: les quatorze vues de cette page sont
-        autant d'agrégations calculées par le serveur.
+        (DGFiP) — les balances générales des comptes de l'État, exercices 2016 à 2025, qui ont
+        servi à produire le Compte général de l'État. C'est de la <strong>comptabilité
+        générale</strong> (en droits constatés, comme une entreprise), pas le budget voté en loi de
+        finances. Montants en milliards d'euros courants, non corrigés de l'inflation. Toutes les
+        agrégations sont calculées par le portail&nbsp;: aucune des 517&nbsp;489 lignes ne descend
+        dans le navigateur.
       </p>
     </details>
   </div>
 
-  <!-- ==========================================================================
-       Toutes les agrégations passent par l'endpoint d'export du portail, qui
-       accepte `group_by` ET renvoie tous les groupes en une fois — l'endpoint
-       /records paginé s'arrêtait à 100 groupes sans le dire (BUG-001).
-
-       Historique : au lot 3, la seule façon d'atteindre /exports/json était
-       d'écrire la source en mode générique (`url=` + `params`), ce qui faisait
-       perdre le mode adaptateur (plus de délégation serveur du where /
-       order-by / group-by, plus de server-facets, plus de meta.truncated, et
-       une déclaration qui n'indique plus quel jeu elle lit). C'était le
-       contournement mesuré du registre — AM-011 — dont la mesure d'origine
-       reste : sur /records, 3 080 lignes coûtaient 31 requêtes en série,
-       931 ms en moyenne, 28,9 s cumulées, contre 1 requête et 0,62 s en export.
-       Depuis dsfr-data 0.25.0 (#689), `fetch-mode="export"` fait la même
-       requête unique EN RESTANT en mode adaptateur : les neuf sources
-       ci-dessous sont redevenues des sources déclaratives sur le jeu.
-
-       Colonnes : balance_sortie_3 est en Md€ (celle des graphiques « Générale »
-       de l'original). balance_sortie (en €) est la seule SIGNÉE — débit positif,
-       crédit négatif — ce qui permet de calculer les soldes actif − passif et
-       produits − charges en une expression ODSQL, sans arithmétique entre séries.
-       ========================================================================== -->
-
-  <!-- KPI 2025 : une ligne par catégorie, un query par KPI -->
-  <dsfr-data-source id="cg-2025" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="categorie, sum(balance_sortie_3) as montant"
-    group-by="categorie" where="year(annee) = 2025">
-  </dsfr-data-source>
-  <dsfr-data-query id="cg-actif-2025"    source="cg-2025" where="categorie:eq:Actif"></dsfr-data-query>
-  <dsfr-data-query id="cg-passif-2025"   source="cg-2025" where="categorie:eq:Passif"></dsfr-data-query>
-  <dsfr-data-query id="cg-produits-2025" source="cg-2025" where="categorie:eq:Produits"></dsfr-data-query>
-  <dsfr-data-query id="cg-charges-2025"  source="cg-2025" where="categorie:eq:Charges"></dsfr-data-query>
-
-  <!-- Bilan : Actif / Passif par année, puis par postes, puis solde -->
-  <dsfr-data-source id="cg-bilan-an" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="sum(balance_sortie_3) as montant"
-    group-by="categorie, year(annee) as an"
-    where='categorie in ("Actif","Passif")' order-by="categorie, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cg-actif-postes" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="sum(balance_sortie_3) as montant"
-    group-by="postes, year(annee) as an"
-    where='categorie = "Actif"' order-by="postes, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cg-passif-postes" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="sum(balance_sortie_3) as montant"
-    group-by="postes, year(annee) as an"
-    where='categorie = "Passif"' order-by="postes, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cg-solde-bilan" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="sum(balance_sortie)/1000000000 as solde"
-    group-by="year(annee) as an"
-    where='categorie in ("Actif","Passif")' order-by="an">
-  </dsfr-data-source>
-
-  <!-- Compte de résultat : Charges / Produits -->
-  <dsfr-data-source id="cg-cr-an" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="sum(balance_sortie_3) as montant"
-    group-by="categorie, year(annee) as an"
-    where='categorie in ("Charges","Produits")' order-by="categorie, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cg-charges-postes" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="sum(balance_sortie_3) as montant"
-    group-by="postes, year(annee) as an"
-    where='categorie = "Charges"' order-by="postes, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cg-produits-postes" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="sum(balance_sortie_3) as montant"
-    group-by="postes, year(annee) as an"
-    where='categorie = "Produits"' order-by="postes, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cg-solde-cr" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    fetch-mode="export" api-key-ref="ods-mef"
-    select="-sum(balance_sortie)/1000000000 as solde"
-    group-by="year(annee) as an"
-    where='categorie in ("Charges","Produits")' order-by="an">
-  </dsfr-data-source>
-
-  <!-- Vue par mission : régime adaptateur, comme tout le reste de la page
-       désormais. 20 à 60 groupes par requête. Montants en M€ (balance_sortie_4).
-       Ces quatre sources portaient le contournement de PG-014 : l'adaptateur
-       entourait d'accents graves un group-by contenant une fonction (HTTP 400),
-       on groupait donc sur la date brute `annee` en calculant `year(annee)` dans
-       le select — ce qui n'est PAS un groupement par année, et ne coïncidait que
-       parce que `annee` n'a qu'une valeur par an dans ce jeu (vérifié à l'API,
-       lot 11 : `group_by=annee` → 10 dates distinctes pour 10 années). Corrigé
-       par #641 (0.21.1) : une expression aliasée passe telle quelle, le
-       group-by par année est redevenu déclaratif et vrai. -->
-  <dsfr-data-source id="cgm-cr" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    api-key-ref="ods-mef"
-    select="sum(balance_sortie_4) as montant"
-    group-by="categorie, year(annee) as an"
-    where='categorie in ("Charges","Produits")' order-by="categorie, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cgm-charges" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    api-key-ref="ods-mef"
-    select="sum(balance_sortie_4) as montant"
-    group-by="postes, year(annee) as an"
-    where='categorie = "Charges"' order-by="postes, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cgm-produits" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    api-key-ref="ods-mef"
-    select="sum(balance_sortie_4) as montant"
-    group-by="postes, year(annee) as an"
-    where='categorie = "Produits"' order-by="postes, an">
-  </dsfr-data-source>
-  <dsfr-data-source id="cgm-bilan" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="balances_des_comptes_etat"
-    api-key-ref="ods-mef"
-    select="sum(balance_sortie_4) as montant"
-    group-by="categorie, year(annee) as an"
-    where='categorie in ("Actif","Passif")' order-by="categorie, an">
-  </dsfr-data-source>
-
-  <dsfr-data-context sources="cgm-cr cgm-charges cgm-produits cgm-bilan" url-sync>
-    <dsfr-data-context-filter field="libellemission" operator="eq" ui="sel-mission" label="Mission"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
   <div class="fr-container fr-mb-8w">
 
-    <h2 class="fr-h3" id="bilan">Bilan&nbsp;: Actif / Passif</h2>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="cg-actif-2025" value="montant:max" format="nombre" color-token="bleu"
-        heading="Actif en 2025" label="Md€" col="6"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cg-passif-2025" value="montant:max" format="nombre" color-token="rouge"
-        heading="Passif en 2025" label="Md€" col="6"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
+    <!-- ====================== PREUVE 1 — LE BILAN ====================== -->
+    <h2 class="fr-h3" id="bilan">La dette financière grossit plus vite que tout ce que l'État possède</h2>
 
-    <p class="odv-lecture">
-      Dix exercices de suite&nbsp;: l'actif et le passif de l'État, côte à côte. Une
-      <strong>évolution se lit en courbe</strong> — la même donnée en barres obligeait l'œil à
-      comparer dix paires au lieu de suivre deux trajectoires.
-    </p>
-    <div class="odv-chart-slot fr-mb-4w odv-viz" data-code="Bilan — actif et passif par exercice">
-      <dsfr-data-chart id="g-bilan-an" source="cg-bilan-an" type="line"
-        label-field="an" value-field="montant" series-field="categorie"
+    <dsfr-data-repeat source="cg-recit">
+      <template>
+        <p class="odv-lecture">En {{an0}}, la dette financière de l'État représentait
+          {{ratio0:number:1}} fois son actif&nbsp;; en {{an}}, {{ratio:number:1}} fois. Le reste du
+          passif (dettes non financières, provisions, trésorerie passive…) passe de
+          {{autres0:number:0}} à {{autres:number:0}}&nbsp;Md€&nbsp;: c'est la dette financière,
+          et elle seule, qui écarte les deux courbes.</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <div class="odv-chart-slot fr-mb-4w odv-viz" data-code="Actif, dette financière et autres passifs de l'État">
+      <dsfr-data-chart id="g-trio" source="cg-trio" type="line"
+        label-field="an" value-field="montant" series-field="serie"
         unit-tooltip=" Md€"
-        databox databox-title="Bilan — vue générale : actif et passif par exercice (Md€)"
+        databox databox-title="Actif, dette financière et reste du passif, fin d'exercice (Md€)"
         databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-        databox-date="2016-2025" databox-download>
+        databox-date="Exercices 2016-2025" databox-download>
       </dsfr-data-chart>
-      <dsfr-data-a11y for="g-bilan-an" source="cg-bilan-an" table download
-        description="L'actif passe de 1 000 Md€ en 2016 à 1 326 Md€ en 2025 ; le passif de 2 180 à 3 442 Md€. L'écart se creuse chaque année.">
+      <dsfr-data-a11y for="g-trio" source="cg-trio" table download series-field="serie"
+        label-field="an" value-field="montant" filename="bilan-etat-trois-series.csv"
+        label="Actif, dette financière et autres passifs, par exercice (Md€)"
+        description="Trois courbes sur dix exercices. La dette financière est au-dessus de l'actif dès le premier exercice et s'en écarte chaque année ; l'actif progresse plus lentement ; les autres passifs restent presque plats.">
       </dsfr-data-a11y>
     </div>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <dsfr-data-chart id="g-actif-postes" source="cg-actif-postes" type="bar" stacked
-            label-field="an" value-field="montant" series-field="postes"
-            unit-tooltip=" Md€"
-            databox databox-title="Actif par postes (Md€)"
-            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-            databox-date="2016-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-actif-postes" source="cg-actif-postes" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <dsfr-data-chart id="g-passif-postes" source="cg-passif-postes" type="bar" stacked
-            label-field="an" value-field="montant" series-field="postes"
-            unit-tooltip=" Md€"
-            databox databox-title="Passif par postes (Md€)"
-            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-            databox-date="2016-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-passif-postes" source="cg-passif-postes" table download></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-
-    <p class="odv-lecture">
-      Le solde, c'est-à-dire la situation nette. La <strong>ligne d'équilibre à zéro</strong> est ce
-      qui rend le graphique lisible&nbsp;: sans elle, on compare des barres entre elles au lieu de
-      voir de quel côté du zéro elles tombent.
-    </p>
-    <div class="odv-chart-slot fr-mb-6w odv-viz" data-code="Bilan — situation nette par exercice">
-      <dsfr-data-chart id="g-solde-bilan" source="cg-solde-bilan" type="bar"
-        label-field="an" value-field="solde" name='["Situation nette (actif − passif)"]'
+    <h3 class="fr-h5">Le solde se creuse chaque année</h3>
+    <dsfr-data-repeat source="cg-recit">
+      <template>
+        <p class="odv-lecture">La situation nette — actif moins passif — passe de
+          {{solde0:number:0}}&nbsp;Md€ en {{an0}} à {{solde:number:0}}&nbsp;Md€ en {{an}}. Le
+          tableau équivalent donne la variation de chaque exercice.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot fr-mb-6w odv-viz" data-code="Situation nette de l'État par exercice">
+      <dsfr-data-chart id="g-sn" source="cg-sn" type="bar"
+        label-field="an" value-field="solde:Situation nette (actif − passif)"
         unit-tooltip=" Md€" selected-palette="neutral"
         reference-lines='[{"axis":"y","value":0,"label":"Équilibre","dash":true}]'
-        databox databox-title="Bilan — soldes : actif − passif par exercice (Md€)"
+        databox databox-title="Situation nette de l'État : actif − passif, fin d'exercice (Md€)"
         databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-        databox-date="2016-2025" databox-download>
+        databox-date="Exercices 2016-2025" databox-download>
       </dsfr-data-chart>
-      <dsfr-data-a11y for="g-solde-bilan" source="cg-solde-bilan" table download
-        description="Le solde actif − passif se creuse de −1 203 Md€ en 2016 à −2 116 Md€ en 2025.">
+      <dsfr-data-a11y for="g-sn" source="cg-sn" table download decimals="0"
+        label-field="an" value-field="solde, variation" filename="situation-nette-etat.csv"
+        label="Situation nette et variation annuelle (Md€)"
+        description="Une barre par exercice, toutes sous zéro, de plus en plus longues : la situation nette se dégrade chaque année. La colonne variation donne l'écart avec l'exercice précédent.">
       </dsfr-data-a11y>
     </div>
 
-    <h2 class="fr-h3" id="compte-de-resultat">Compte de résultat&nbsp;: Produits / Charges</h2>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="cg-produits-2025" value="montant:max" format="nombre" color-token="bleu"
-        heading="Produits en 2025" label="Md€" col="6"></dsfr-data-kpi>
-      <dsfr-data-kpi source="cg-charges-2025" value="montant:max" format="nombre" color-token="rouge"
-        heading="Charges en 2025" label="Md€" col="6"></dsfr-data-kpi>
+    <!-- ====================== PREUVE 2 — LE COMPTE DE RÉSULTAT ====================== -->
+    <h2 class="fr-h3" id="compte-de-resultat">Depuis 2020, le déficit annuel a doublé, et il ne s'est pas résorbé</h2>
+
+    <dsfr-data-kpi-group per-row="3" class="fr-mb-2w">
+      <dsfr-data-kpi source="cg-annuel" where="an:lt:2020" value="resultat:avg" format="decimal" decimals="0"
+        heading="Résultat moyen, 2016-2019" unit="Md€" color-token="rouge"
+        label="par exercice"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cg-annuel" where="an:gte:2020" value="resultat:avg" format="decimal" decimals="0"
+        heading="Résultat moyen depuis 2020" unit="Md€" color-token="rouge"
+        label="par exercice"></dsfr-data-kpi>
+      <dsfr-data-kpi source="cg-annuel" value="count{deficit:eq:1}" format="nombre"
+        heading="Exercices déficitaires" color-token="rouge"
+        lines='[{"value":"count","format":"nombre","prefix":"sur","suffix":"exercices publiés"}]'
+        label="charges supérieures aux produits"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
-    <div class="odv-chart-slot fr-mb-4w">
-      <dsfr-data-chart id="g-cr-an" source="cg-cr-an" type="line"
-        label-field="an" value-field="montant" series-field="categorie"
-        unit-tooltip=" Md€"
-        databox databox-title="Compte de résultat — vue générale : charges et produits par exercice (Md€)"
-        databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-        databox-date="2016-2025" databox-download>
-      </dsfr-data-chart>
-      <dsfr-data-a11y for="g-cr-an" source="cg-cr-an" table download
-        description="Les charges passent de 495 Md€ en 2016 à 655 Md€ en 2025, les produits de 420 à 526 Md€. Les charges dépassent les produits chaque année.">
-      </dsfr-data-a11y>
-    </div>
+    <dsfr-data-repeat source="cg-recit">
+      <template>
+        <p class="odv-lecture">Le déficit moyen depuis 2020 vaut {{facteur:number:1}} fois celui de
+          2016-2019. En {{an}}, les produits ({{produits:number:0}}&nbsp;Md€) couvrent les charges
+          ({{charges:number:0}}&nbsp;Md€) à {{resultat_abs:number:0}}&nbsp;Md€ près.</p>
+      </template>
+    </dsfr-data-repeat>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <dsfr-data-chart id="g-charges-postes" source="cg-charges-postes" type="bar" stacked
-            label-field="an" value-field="montant" series-field="postes"
-            unit-tooltip=" Md€"
-            databox databox-title="Charges par postes (Md€)"
-            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-            databox-date="2016-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-charges-postes" source="cg-charges-postes" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <dsfr-data-chart id="g-produits-postes" source="cg-produits-postes" type="bar" stacked
-            label-field="an" value-field="montant" series-field="postes"
-            unit-tooltip=" Md€"
-            databox databox-title="Produits par postes (Md€)"
-            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-            databox-date="2016-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-produits-postes" source="cg-produits-postes" table download></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-
-    <div class="odv-chart-slot fr-mb-6w">
-      <dsfr-data-chart id="g-solde-cr" source="cg-solde-cr" type="bar"
-        label-field="an" value-field="solde" name='["Résultat (produits − charges)"]'
+    <div class="odv-chart-slot fr-mb-4w odv-viz" data-code="Résultat patrimonial de l'État par exercice">
+      <dsfr-data-chart id="g-res" source="cg-annuel" type="bar"
+        label-field="an" value-field="resultat:Résultat (produits − charges)"
         unit-tooltip=" Md€" selected-palette="neutral"
-        reference-lines='[{"axis":"y","value":0,"label":"Équilibre","dash":true}]'
-        databox databox-title="Compte de résultat — soldes : produits − charges par exercice (Md€)"
+        reference-lines='[{"axis":"y","value":0,"label":"Équilibre","dash":true},{"axis":"x","value":"2020","label":"Crise sanitaire","dash":true}]'
+        databox databox-title="Résultat de l'État : produits − charges, par exercice (Md€)"
         databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-        databox-date="2016-2025" databox-download>
+        databox-date="Exercices 2016-2025" databox-download>
       </dsfr-data-chart>
-      <dsfr-data-a11y for="g-solde-cr" source="cg-solde-cr" table download
-        description="Le résultat est négatif chaque année : −76 Md€ en 2016, −166 Md€ en 2020, −129 Md€ en 2025.">
+      <dsfr-data-a11y for="g-res" source="cg-annuel" table download decimals="0"
+        label-field="an" value-field="produits, charges, resultat" filename="resultat-etat.csv"
+        label="Produits, charges et résultat par exercice (Md€)"
+        description="Dix barres sous zéro. Les quatre premières sont courtes ; à partir de 2020 elles s'allongent brusquement et restent longues jusqu'au dernier exercice.">
       </dsfr-data-a11y>
     </div>
 
-    <h2 class="fr-h3" id="mission">Vue par mission</h2>
+    <h3 class="fr-h5">Ce qui a sauté en 2020 reflue&nbsp;; ce qui monte chaque année, c'est le fonctionnement</h3>
+    <p class="odv-lecture">Les charges d'intervention (aides, transferts, subventions) bondissent en
+      2020 puis reculent sans revenir à leur niveau d'avant-crise. Les charges de fonctionnement
+      direct — personnel, achats, dotations — montent presque chaque année&nbsp;: c'est la hausse
+      qui dure.</p>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-cp" source="cg-cr-an" type="line"
+            label-field="an" value-field="montant" series-field="categorie"
+            unit-tooltip=" Md€"
+            databox databox-title="Charges et produits de l'État, par exercice (Md€)"
+            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
+            databox-date="Exercices 2016-2025" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-cp" source="cg-cr-an" table download series-field="categorie"
+            label-field="an" value-field="montant" filename="charges-produits-etat.csv"
+            label="Charges et produits par exercice (Md€)"
+            description="Deux courbes : les charges au-dessus des produits sur toute la période, avec un saut des charges en 2020 que les produits ne rattrapent pas.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-6">
+        <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-charges-postes" source="cg-charges-postes" type="line"
+            label-field="an" value-field="montant" series-field="postes"
+            unit-tooltip=" Md€"
+            databox databox-title="Charges de l'État par poste (Md€)"
+            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
+            databox-date="Exercices 2016-2025" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-charges-postes" source="cg-charges-postes" table download series-field="postes"
+            label-field="an" value-field="montant" filename="charges-par-poste-etat.csv"
+            label="Charges par poste et par exercice (Md€)"
+            description="Quatre courbes. Les charges d'intervention font un saut en 2020 puis reculent ; les charges de fonctionnement direct montent presque chaque année ; les charges financières et de fonctionnement indirect restent bien en dessous.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== NUANCE ====================== -->
+    <div class="fr-callout fr-icon-information-line fr-mb-6w">
+      <h2 class="fr-callout__title fr-h5">Ce que ces chiffres ne disent pas</h2>
+      <ul class="fr-callout__text fr-text--md">
+        <li><strong>Une situation nette négative n'est pas une faillite.</strong> Le bilan de
+          l'État n'inscrit pas à son actif sa capacité à lever l'impôt&nbsp;: ce qui fait sa
+          solvabilité n'apparaît donc pas dans ces comptes.</li>
+        <li><strong>La «&nbsp;dette financière&nbsp;» est celle de l'État seul, en valeur
+          comptable.</strong> Ce n'est pas la dette publique au sens de Maastricht, qui ajoute les
+          administrations de sécurité sociale et les collectivités.</li>
+        <li><strong>La coupure en 2020 est un choix de lecture</strong>, pas une donnée du jeu&nbsp;:
+          c'est l'exercice où les charges d'intervention font leur saut. Le graphique montre les dix
+          exercices, pour que chacun puisse la contester.</li>
+        <li><strong>Euros courants.</strong> Rien n'est corrigé de l'inflation ni rapporté au PIB&nbsp;:
+          une partie de la hausse des montants est une hausse des prix.</li>
+      </ul>
+    </div>
+
+    <!-- ====================== EXPLORATION — LES MISSIONS ====================== -->
+    <h2 class="fr-h3" id="missions">Quelques missions portent l'essentiel des charges</h2>
+
+    <dsfr-data-repeat source="cg-mis-un">
+      <template>
+        <p class="odv-lecture">En 2025, la première mission par ses charges est
+          <strong>{{libellemission}}</strong>&nbsp;: {{montant:number:1}}&nbsp;Md€, soit
+          {{part:number:1}}&nbsp;% de toutes les charges de l'État.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="cg-mis-sans">
+      <template>
+        <p class="fr-text--sm fr-hint-text">{{montant:number:1}}&nbsp;Md€ de charges
+          ({{part:number:1}}&nbsp;%) ne sont rattachés à aucune mission&nbsp;: ils comptent dans le
+          total, pas dans le classement.</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <div class="odv-chart-slot fr-mb-4w odv-viz" data-code="Les quinze missions aux charges les plus élevées en 2025">
+      <dsfr-data-chart id="g-mis" source="cg-mis-top" type="bar" horizontal
+        label-field="libellemission" value-field="montant:Charges 2025"
+        unit-tooltip=" Md€" selected-palette="neutral" highlight-index="[0]"
+        databox databox-title="Les quinze missions aux charges les plus élevées, exercice 2025 (Md€)"
+        databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
+        databox-date="Exercice 2025" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-mis" source="cg-mis-top" table download decimals="1"
+        label-field="libellemission" value-field="montant, part" filename="charges-par-mission-2025.csv"
+        label="Charges 2025 par mission (Md€) et part du total (%)"
+        description="Barres horizontales triées de la plus longue à la plus courte : quelques missions dépassent nettement toutes les autres, puis la longueur décroît vite.">
+      </dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5">
+      Charges par poste&nbsp;:
+      <dsfr-data-context-value for="ctx-mission" field="libellemission"
+        fallback="l'État entier (toutes missions)" live></dsfr-data-context-value>
+    </h3>
     <p class="fr-text--sm fr-hint-text">
-      Les 56 missions de l'original (72 valeurs du champ <code>libellemission</code>, moins les
-      16 que la page d'origine exclut en dur). Montants en M€. Sans mission choisie, les graphiques
-      montrent l'État entier.
+      Choisissez une mission pour voir ce qu'elle coûte, poste par poste, sur dix exercices
+      (en M€). Seules les <strong>charges</strong> sont montrées&nbsp;: 95&nbsp;% des produits de
+      l'État en 2025 — les impôts, pour l'essentiel — ne sont rattachés à aucune mission. Mettre en
+      regard les charges et les produits d'une mission ferait apparaître un «&nbsp;déficit&nbsp;»
+      qui n'est qu'un effet de nomenclature.
     </p>
-    <div class="fr-select-group fr-mb-4w" style="max-width: 40rem;">
-      <label class="fr-label" for="sel-mission">Mission</label>
-      <select class="fr-select" id="sel-mission">
-        <option value="">Toutes les missions</option>
-          <option>Action extérieure de l'État</option>
-          <option>Administration générale et territoriale de l'État</option>
-          <option>Agriculture, alimentation, forêt et affaires rurales</option>
-          <option>Aide publique au développement</option>
-          <option>Anciens combattants, mémoire et liens avec la nation</option>
-          <option>Approvisionnement de l'État et des forces armées en produits pétroliers et énergies alternatives, biens et services complémentaires</option>
-          <option>Avances au fonds d’aide à l’acquisition de véhicules propres</option>
-          <option>Avances aux collectivités territoriales et aux collectivités régies par les articles 73, 74 et 76 de la Constitution</option>
-          <option>Cantine et travail des détenus dans le cadre pénitentiaire</option>
-          <option>Cohésion des territoires</option>
-          <option>Conseil et contrôle de l'État</option>
-          <option>Contrôle de la circulation et du stationnement routiers</option>
-          <option>Culture</option>
-          <option>Défense</option>
-          <option>Développement agricole et rural</option>
-          <option>Direction de l'action du Gouvernement</option>
-          <option>Ecologie, développement et mobilité durables</option>
-          <option>Economie</option>
-          <option>Engagements financiers de l'État</option>
-          <option>Enseignement scolaire</option>
-          <option>Exploitations industrielles des ateliers aéronautiques de l'État</option>
-          <option>Financement des aides aux collectivités pour l'électrification rurale</option>
-          <option>Financement national du développement et de la modernisation de l'apprentissage</option>
-          <option>Gestion de la dette et de la trésorerie de l'État</option>
-          <option>Gestion des finances publiques</option>
-          <option>Gestion du patrimoine immobilier de l'État</option>
-          <option>Gestion et valorisation des ressources tirées de l'utilisation du spectre hertzien, des systèmes et des infrastructures de télécommunications de l'État</option>
-          <option>Immigration, asile et intégration</option>
-          <option>Investir pour la France de 2030</option>
-          <option>Justice</option>
-          <option>Médias, livre et industries culturelles</option>
-          <option>Opérations avec le Fonds monétaire international</option>
-          <option>Opérations commerciales des domaines</option>
-          <option>Outre-mer</option>
-          <option>Participation de la France au désendettement de la Grèce</option>
-          <option>Participations financières de l'État</option>
-          <option>Pensions</option>
-          <option>Pertes et bénéfices de change</option>
-          <option>Plan d'urgence face à la crise sanitaire</option>
-          <option>Plan de relance</option>
-          <option>Pouvoirs publics</option>
-          <option>Prêts à des États étrangers</option>
-          <option>Prêts et avances à des particuliers ou à des organismes privés</option>
-          <option>Publications officielles et information administrative</option>
-          <option>Recherche et enseignement supérieur</option>
-          <option>Régie industrielle des établissements pénitentiaires</option>
-          <option>Régimes sociaux et de retraite</option>
-          <option>Relations avec les collectivités territoriales</option>
-          <option>Santé</option>
-          <option>Sécurités</option>
-          <option>Solidarité, insertion et égalité des chances</option>
-          <option>Soutien financier au commerce extérieur</option>
-          <option>Sport, jeunesse et vie associative</option>
-          <option>Transformation et fonction publiques</option>
-          <option>Transition énergétique</option>
-          <option>Travail, emploi et administration des ministères sociaux</option>
-      </select>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+      <div class="fr-col-12 fr-col-md-6">
+        <dsfr-data-facets id="f-mission" source="cg-mis-liste" context="ctx-mission"
+          fields="libellemission" labels="libellemission:Mission"
+          display="libellemission:select" sort="alpha" hide-counts no-reset>
+        </dsfr-data-facets>
+      </div>
+    </div>
+    <div class="odv-chart-slot fr-mb-6w odv-viz" data-code="Charges de la mission choisie, par poste">
+      <dsfr-data-chart id="g-mission" source="cgm-q" type="bar" stacked
+        label-field="an" value-field="montant" series-field="postes"
+        unit-tooltip=" M€"
+        databox databox-title="Charges de la mission choisie, par poste et par exercice (M€)"
+        databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
+        databox-date="Exercices 2016-2025" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-mission" source="cgm-q" table download series-field="postes"
+        label-field="an" value-field="montant" decimals="0" filename="charges-mission.csv"
+        label="Charges de la mission choisie par poste et par exercice (M€)"
+        description="Barres empilées, une par exercice, découpées par poste de charges de la mission choisie dans la liste.">
+      </dsfr-data-a11y>
     </div>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <dsfr-data-chart id="gm-cr" source="cgm-cr" type="bar"
-            label-field="an" value-field="montant" series-field="categorie"
-            unit-tooltip=" M€"
-            databox databox-title="Compte de résultat de la mission : charges et produits (M€)"
-            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-            databox-date="2016-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="gm-cr" source="cgm-cr" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <dsfr-data-chart id="gm-bilan" source="cgm-bilan" type="bar"
-            label-field="an" value-field="montant" series-field="categorie"
-            unit-tooltip=" M€"
-            databox databox-title="Bilan de la mission : actif et passif (M€)"
-            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-            databox-date="2016-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="gm-bilan" source="cgm-bilan" table download></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <dsfr-data-chart id="gm-charges" source="cgm-charges" type="bar" stacked
-            label-field="an" value-field="montant" series-field="postes"
-            unit-tooltip=" M€"
-            databox databox-title="Postes des charges de la mission (M€)"
-            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-            databox-date="2016-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="gm-charges" source="cgm-charges" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <dsfr-data-chart id="gm-produits" source="cgm-produits" type="bar" stacked
-            label-field="an" value-field="montant" series-field="postes"
-            unit-tooltip=" M€"
-            databox databox-title="Postes des produits de la mission (M€)"
-            databox-source="DGFiP — balances_des_comptes_etat, via data.economie.gouv.fr"
-            databox-date="2016-2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="gm-produits" source="cgm-produits" table download></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
+    <!-- ====================== CE QU'ON NE MONTRE PAS ====================== -->
+    <h2 class="fr-h4" id="hors-champ">Ce que cette page laisse de côté</h2>
+    <ul class="fr-text--sm">
+      <li>La catégorie comptable <em>Situation nette</em> du jeu (réserves et report à nouveau)
+        n'est pas la situation nette calculée ici&nbsp;: elle n'intègre pas le résultat de
+        l'exercice. On lui préfère l'écart actif − passif, qui est celui de la page d'origine.</li>
+      <li>La catégorie <em>EHB</em> (engagements hors bilan) somme à zéro chaque année dans le jeu
+        et n'est pas représentée&nbsp;: les engagements hors bilan de l'État n'apparaissent donc
+        nulle part ici.</li>
+      <li>Le détail des postes d'actif et de passif (huit et six postes) est dans les exports du
+        jeu&nbsp;; la page n'en garde que ce qui porte le message&nbsp;: la dette financière face au
+        reste.</li>
+      <li>Le classement des missions porte sur le seul exercice 2025, le dernier publié. Les
+        missions sans aucune charge cette année-là n'y figurent pas, mais restent dans la liste de
+        choix.</li>
+      <li>Le glossaire et les descriptifs de missions de la page d'origine vivent dans des jeux en
+        visibilité restreinte, illisibles avec une clé publique (LIM-013).</li>
+    </ul>
 
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Comptabilité générale de l'État — ce que la reproduction a coûté</summary>
+    <details class="odv-technique">
+      <summary>Analyse de la recréation — Comptabilité générale de l'État</summary>
 
-    <div class="fr-container">
-      <p class="fr-text--lead">
-        Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/comptabilite-generale/"
-        target="_blank" rel="noopener external">comptabilite-generale</a> — 49&nbsp;400 caractères,
-        23 <code>ods-adv-analysis</code>, 8 <code>ods-chart</code> (soit 2 graphiques distincts,
-        dupliqués pour les points de rupture) et des KPI calculés en expressions AngularJS. Sur
-        517&nbsp;489 lignes.
-      </p>
+      <div class="fr-container">
+        <p class="fr-text--lead">
+          Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/comptabilite-generale/"
+          target="_blank" rel="noopener external">comptabilite-generale</a> — un tableau de bord
+          pédagogique (quatre KPI, six histogrammes, deux vues «&nbsp;Soldes&nbsp;», une vue par
+          mission). Cette version ne le reproduit plus&nbsp;: elle raconte ce que le même jeu
+          dit, à partir de trois requêtes agrégées sur 517&nbsp;489 lignes.
+        </p>
 
-      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-        <div class="fr-col-12 fr-col-md-6">
-          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
-          <ul>
-            <li><strong>Un demi-million de lignes, treize requêtes.</strong> Aucune ligne ne
-              descend dans le navigateur&nbsp;: chaque vue est une agrégation
-              <code>select</code>&nbsp;+&nbsp;<code>group_by</code> résolue par le serveur. Le
-              volume du jeu de données n'a aucun effet sur le poids de la page.</li>
-            <li><strong>Les fonctions ODSQL passent telles quelles.</strong>
-              <code>group_by="year(annee) as an"</code> et
-              <code>select="sum(balance_sortie_3) as montant"</code> sont transmis à l'API sans
-              traduction. On écrit de l'ODSQL quand on en a besoin, sans quitter le mode déclaratif.</li>
-            <li><strong>Les séries multiples en un attribut.</strong> Le
-              <code>series-breakdown="categorie"</code> d'Opendatasoft devient
-              <code>series-field="categorie"</code>&nbsp;: les valeurs distinctes du champ
-              deviennent autant de séries. Même chose pour l'empilement des postes, avec
-              <code>stacked</code>&nbsp;: les 8 postes d'actif, 6 de passif, 4 de charges et 4 de
-              produits de l'original sortent tels quels, un <code>where</code> par graphique.</li>
-            <li><strong>Les soldes tiennent dans une expression ODSQL.</strong> La colonne
-              <code>balance_sortie</code> est <em>signée</em> (débit positif, crédit négatif),
-              contrairement à ses trois dérivées en €, Md€ et M€. <code>sum(balance_sortie)/10⁹</code>
-              sur <code>categorie in ("Actif","Passif")</code> renvoie donc directement
-              −1&nbsp;203 → −2&nbsp;116&nbsp;Md€, les dix valeurs de la vue «&nbsp;Soldes&nbsp;»
-              de l'original, sans aucune arithmétique entre séries (vérifié contre l'API à
-              l'unité près). Même chose pour le résultat avec <code>-sum(…)</code>.</li>
-            <li><strong>Six graphiques au lieu de huit.</strong> L'original duplique ses
-              graphiques pour couvrir les points de rupture — le même travers que les pages
-              d'annuaire du lot précédent.</li>
-            <li><strong>La vue par mission est un <code>dsfr-data-context</code>.</strong> Un
-              <code>select</code> DSFR, un <code>dsfr-data-context-filter
-              field="libellemission"</code>, quatre sources en mode adaptateur&nbsp;: les
-              quatre graphiques se refiltrent ensemble, et <code>url-sync</code> met la mission
-              dans l'URL — ce que l'original fait avec dix contextes et un
-              <code>refine.libellemission</code> répété.</li>
-          </ul>
-        </div>
-
-        <div class="fr-col-12 fr-col-md-6">
-          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
-          <ul>
-            <li><strong>Le graphique « postes × année » a failli être faux.</strong> Il compte
-              <strong>264 groupes</strong>. En mode adaptateur, la pagination s'arrête à 100 sans
-              rien dire (BUG-001)&nbsp;: le graphique aurait affiché un peu plus du tiers des
-              données, avec l'aplomb d'un graphique complet. C'est le premier cas où ce bug
-              <em>bloque réellement</em> une reproduction. La sortie&nbsp;: <code>/exports/json</code>
-              accepte <code>group_by</code> et renvoie les 264 groupes en une requête de
-              0,5&nbsp;s. Ce contournement, découvert ici, vaut pour tous les tableaux de bord
-              à agrégats nombreux. Il coûtait cependant le mode adaptateur&nbsp;: neuf des
-              treize sources de la page étaient écrites en <code>url</code>&nbsp;+&nbsp;<code>params</code>,
-              donc sans délégation serveur, sans <code>server-facets</code> et sans jeu de
-              données lisible dans la déclaration (AM-011). Depuis
-              <code>fetch-mode="export"</code>, les neuf sont redevenues déclaratives — même
-              requête unique, mode adaptateur retrouvé (voir l'encadré ci-dessous).</li>
-            <li><strong>Un KPI ne sait pas filtrer.</strong> «&nbsp;L'actif en 2025&nbsp;» suppose de
-              prendre une ligne parmi six. <code>dsfr-data-kpi</code> agrège tout ce que sa source
-              lui donne&nbsp;; il faut intercaler un <code>dsfr-data-query where="categorie:eq:Actif"</code>
-              par KPI. Le pipeline reste lisible, mais trois KPI coûtent trois transformateurs
-              là où l'original écrit une expression.</li>
-            <li><strong>Pas d'arithmétique entre lignes.</strong> L'écart actif − passif, que
-              cette page avait d'abord déclaré hors de portée (AM-018), est finalement une
-              expression ODSQL sur la colonne signée — voir ci-contre. Ce qui reste vrai&nbsp;:
-              l'<strong>évolution N/N-1</strong> que l'original affiche sous chaque barre
-              (+&nbsp;5&nbsp;%, +&nbsp;3&nbsp;%, +&nbsp;6&nbsp;%…) suppose de rapprocher deux
-              lignes, et <code>dsfr-data-normalize compute</code> ne calcule que ligne à ligne.
-              Elle n'est pas reproduite.</li>
-            <li><strong>Un tri qui doit changer de camp.</strong> Trier les postes par montant
-              décroissant dans la requête échoue en 400&nbsp;: sur <code>/exports</code>, Opendatasoft
-              refuse un <code>order_by</code> portant sur une fonction d'agrégation sans
-              <code>limit</code> inférieur à 20&nbsp;001. Le tri est donc fait par un
-              <code>dsfr-data-query order-by</code> côté client — sans conséquence sur 27 lignes,
-              mais c'est une règle de plus à connaître (registre&nbsp;: PG-007).</li>
-            <li><strong>Un <code>group-by</code> avec fonction passe par un détour.</strong> En
-              mode adaptateur, <code>group-by="year(annee) as an"</code> est entouré d'accents
-              graves et l'API répond 400 (PG-014). La vue par mission groupe sur la date brute
-              <code>annee</code> et calcule <code>year(annee) as an</code> dans le
-              <code>select</code>. La relecture du lot 11 a remis ce détour à sa place&nbsp;: ce
-              n'est <strong>pas</strong> un groupement par année, c'est un groupement par valeur
-              de date distincte. Il ne coïncide ici que parce que <code>annee</code> n'a qu'une
-              valeur par an (vérifié à l'API&nbsp;: <code>group_by=annee</code> renvoie 10 dates
-              pour 10 années). Sur un jeu quotidien il produirait 365 barres par an. Le seul
-              contournement général était alors la source générique, qui n'écoute pas le contexte.
-              PG-014 est corrigé depuis (#641)&nbsp;: les quatre sources de la vue par mission
-              groupent désormais sur <code>categorie, year(annee) as an</code>, ce qui est un
-              vrai groupement par année et ne dépend plus de la propriété du jeu.</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> La première version
-              de cette page couvrait 2 des 6 graphiques de la vue générale (elle mélangeait les
-              six catégories dans un seul histogramme et les 27 postes dans un seul empilement),
-              montrait 3 KPI dont un faux — «&nbsp;situation nette 1&nbsp;986&nbsp;Md€&nbsp;»
-              était la somme de la <em>catégorie</em> comptable «&nbsp;Situation nette&nbsp;»,
-              alors que l'original affiche l'écart actif − passif, −2&nbsp;116&nbsp;Md€ — et
-              n'avait ni soldes, ni vue par mission. Corrigé&nbsp;: les 4 KPI 2025 de l'original
-              (1&nbsp;326 / 3&nbsp;442 / 526 / 655&nbsp;Md€, sur <code>balance_sortie_3</code>,
-              vérifiés contre l'API), les 6 graphiques (2 groupés, 4 empilés) avec les postes
-              exacts, les 2 graphiques de soldes, et la vue par mission avec ses 56 missions
-              (les 72 valeurs de <code>libellemission</code> moins les 16 exclues en dur dans le
-              source d'origine — dont une qui reste, parce que l'exclusion est écrite avec une
-              apostrophe droite et la donnée avec une typographique). Ce qui manque encore, et
-              pourquoi&nbsp;: <em>(a)</em> le glossaire de 46 fiches, les accordéons
-              «&nbsp;Comprendre la légende&nbsp;», le descriptif et les faits marquants par
-              mission — leurs trois jeux (<code>comptabilite_generale_glossaires_et_references_07052025</code>,
-              <code>missions_glossaires_et_references</code>, <code>nomenclature-programme</code>)
-              sont en visibilité <em>restricted</em>&nbsp;: l'API répond «&nbsp;does not exist&nbsp;»
-              avec la clé publique de ce dépôt. Ce n'est pas de l'open data, et la page d'origine
-              ne les lit qu'avec sa propre clé&nbsp;; <em>(b)</em> le contrôle segmenté
-              Générale / Par postes / Soldes, remplacé par un empilement vertical&nbsp;;
-              <em>(c)</em> les couleurs de lecture (bleu = actif/produits, rouge =
-              passif/charges), <code>selected-palette</code> ne fixant pas une couleur par
-              série&nbsp;; <em>(d)</em> les évolutions N/N-1 sous les soldes&nbsp;; <em>(e)</em>
-              la liste des missions, codée en dur (56 options générées depuis l'API) faute d'un
-              moyen déclaratif de remplir un <code>select</code> depuis une source&nbsp;;
-              <em>(f)</em> la page Références, purement statique (7 cartes). Couverture
-              estimée&nbsp;: 8 graphiques sur 8 en vue générale, 4 KPI sur 4, vue par mission
-              sans ses textes, 0 fiche de glossaire sur 46.</li>
-          </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
-            <p class="fr-text--sm">
-              8 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai. Deux de ces correctifs sont <strong>appliqués dans le code de la page</strong>
-              (AM-011 et PG-014, signalés ci-dessous)&nbsp;; pour les autres, la page porte encore son
-              contournement, qui n'est simplement plus nécessaire.
-              Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689) — <em>appliqué</em>&nbsp;: <code>fetch-mode="export"</code> charge le jeu en <strong>une seule requête</strong> tout en restant en mode adaptateur. Les 9 sources génériques (<code>url</code>&nbsp;+&nbsp;<code>params</code>) de cette page sont redevenues des sources déclaratives, à comportement réseau inchangé — chronométré au navigateur avant et après&nbsp;: 13 requêtes dans les deux cas (9 sur l'endpoint d'export, 4 sur <code>/records</code> pour la vue par mission), toutes concurrentes, page complète en 0,5 à 1,6&nbsp;s selon le tirage. Ce qui revient, c'est la délégation serveur, le jeu de données lisible dans la déclaration et la détection de troncature.</li>
-              <li><strong>PG-014</strong> — <strong>0.21.1</strong> (#641) — <em>appliqué</em>&nbsp;: un élément de <code>group-by</code> contenant une parenthèse est transmis tel quel au lieu d'être backquoté. La vue par mission groupe désormais sur <code>year(annee) as an</code> — un vrai groupement par année, au lieu du groupement par date brute qui ne coïncidait que sur ce jeu-ci.</li>
-              <li><strong>AM-005</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code>&nbsp;: plus de «&nbsp;Série N&nbsp;» en légende pour un groupe sans valeur.</li>
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>BUG-001</strong> — <strong>0.21.1</strong> (#641)&nbsp;: l'adaptateur Opendatasoft ne se fie plus au <code>total_count</code> d'un <code>group-by</code>&nbsp;: toutes les pages de l'agrégat sont lues.</li>
-              <li><strong>AM-043</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="ctx"</code> peuple ses valeurs et diffuse dans le contexte&nbsp;: plus de <code>&lt;select&gt;</code> généré hors ligne.</li>
-              <li><strong>AM-018</strong> — <strong>0.24.0</strong> (#675)&nbsp;: agrégat <code>evolution</code> sur le KPI, grammaire v2 de <code>compute</code> (#671) et <code>dsfr-data-pivot</code> (#255) — reste sans <code>lag</code> ni cumul.</li>
-              <li><strong>AM-019</strong> — <strong>0.24.0</strong> (#674)&nbsp;: attribut <code>where</code> sur <code>dsfr-data-kpi</code> (dialecte colon, côté client)&nbsp;: plus de query par KPI.</li>
+        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+          <div class="fr-col-12 fr-col-md-6">
+            <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+            <ul>
+              <li><strong>Toutes les phrases sont calculées.</strong> Un <code>dsfr-data-pivot</code>
+                par bloc met actif, dette, charges et produits en colonnes, un <code>compute</code>
+                fait les soldes, et deux <code>dsfr-data-query limit="1"</code> (premier et dernier
+                exercice) sont réunis par un <code>dsfr-data-join</code> sur une clé constante&nbsp;:
+                une seule ligne porte alors «&nbsp;avant&nbsp;» et «&nbsp;après&nbsp;», que
+                <code>dsfr-data-repeat</code> écrit en toutes lettres.</li>
+              <li><strong>L'évolution N/N-1 n'est plus hors de portée.</strong> L'agrégat
+                <code>diff</code> de <code>dsfr-data-query</code> donne la variation de chaque
+                exercice (tableau équivalent de la situation nette) — ce que la reproduction
+                déclarait impossible (AM-018).</li>
+              <li><strong>La liste des missions vient de la donnée.</strong>
+                <code>dsfr-data-facets context</code> peuple le <code>select</code>&nbsp;: les 56
+                <code>&lt;option&gt;</code> écrites en dur ont disparu (AM-043).</li>
+              <li><strong>Part du total en un agrégat.</strong> <code>share_percent</code> donne la
+                part de chaque mission et celle des charges sans mission.</li>
+            </ul>
+          </div>
+          <div class="fr-col-12 fr-col-md-6">
+            <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+            <ul>
+              <li><strong>Deux lignes sur une seule demandent une jointure.</strong> Il n'existe pas
+                d'agrégat «&nbsp;première / dernière ligne&nbsp;» dans <code>dsfr-data-query</code>
+                (le KPI a <code>first</code>/<code>last</code>, pas la query)&nbsp;: réunir début et
+                fin de période coûte deux queries, un renommage champ par champ et une jointure sur
+                <code>k = 1</code>. Ça marche, mais le motif est à connaître.</li>
+              <li><strong>Le classement des missions reste figé sur 2025.</strong> Le <code>where</code>
+                ODSQL ne sait pas viser «&nbsp;le dernier exercice&nbsp;» sans sous-requête&nbsp;;
+                l'année est écrite dans la source et dans le titre.</li>
+              <li><strong>La couleur de sens (bleu = actif, rouge = passif) n'est pas posée.</strong>
+                <code>color-map</code> recolore courbes et légende mais pas les pastilles de
+                l'infobulle (BUG-022)&nbsp;: la palette par défaut évite une infobulle qui mentirait.</li>
             </ul>
           </div>
         </div>
-      </div>
 
-      <div class="fr-table fr-table--bordered">
-        <table>
-          <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
-          <thead>
-            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>23 × <code>ods-adv-analysis</code></td><td>13 sources <code>select</code> + <code>group_by</code></td><td>Moins de balises, même délégation serveur</td></tr>
-            <tr><td><code>series-breakdown</code> + <code>stacked</code></td><td><code>series-field</code> + <code>stacked</code></td><td>Équivalent</td></tr>
-            <tr><td>8 <code>ods-chart</code> (2 × 4 ruptures)</td><td>6 <code>dsfr-data-chart</code></td><td>Responsive par construction</td></tr>
-            <tr><td>2 graphiques de soldes en HTML/CSS + expression AngularJS</td><td><code>sum(balance_sortie)/10⁹</code> + <code>dsfr-data-chart</code></td><td>Une expression ODSQL sur la colonne signée</td></tr>
-            <tr><td>10 contextes <code>refine.libellemission</code> + <code>ods-select</code></td><td><code>dsfr-data-context url-sync</code> + <code>select</code></td><td>Équivalent, mission dans l'URL</td></tr>
-            <tr><td>glossaire, descriptifs de mission (jeux <em>restricted</em>)</td><td>—</td><td><strong>Inaccessible sans la clé privée du portail</strong></td></tr>
-            <tr><td>KPI en expression AngularJS</td><td><code>dsfr-data-query where</code> + <code>dsfr-data-kpi</code></td><td>Plus verbeux, mais typé</td></tr>
-            <tr><td>évolution N/N-1 dans le template</td><td>—</td><td><strong>Sans équivalent (calcul entre lignes)</strong></td></tr>
-            <tr><td>—</td><td><code>fetch-mode="export"</code> + <code>group-by</code></td><td>Une requête par source, sans quitter le mode adaptateur (#689)</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>unit-tooltip</code></td><td>Sans équivalent</td></tr>
-          </tbody>
-        </table>
-      </div>
+        <div class="fr-table fr-table--bordered">
+          <table>
+            <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
+            <thead>
+              <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>23 × <code>ods-adv-analysis</code></td><td>5 sources <code>select</code> + <code>group_by</code></td><td>Trois requêtes suffisent au récit</td></tr>
+              <tr><td>KPI en expressions AngularJS</td><td><code>dsfr-data-kpi where</code> + <code>resultat:avg</code></td><td>Équivalent, sans query intermédiaire</td></tr>
+              <tr><td>Soldes en barres HTML/CSS + N/N-1</td><td><code>pivot</code> + <code>compute</code> + <code>aggregate="solde:diff"</code></td><td>Équivalent, lisible dans le HTML</td></tr>
+              <tr><td>Textes figés dans le gabarit</td><td><code>dsfr-data-repeat</code> sur une ligne jointe</td><td>Chiffres calculés, jamais recopiés</td></tr>
+              <tr><td><code>ods-select</code> + 10 contextes <code>refine</code></td><td><code>dsfr-data-facets context</code> + <code>dsfr-data-context-value</code></td><td>Liste tirée de la donnée, titre qui suit le filtre</td></tr>
+              <tr><td>—</td><td><code>dsfr-data-a11y</code></td><td>Sans équivalent</td></tr>
+            </tbody>
+          </table>
+        </div>
 
-      <div class="odv-verdict fr-mt-4w">
-        <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile sur un très gros jeu — à condition de connaître le
-          contournement.</strong> 517&nbsp;489 lignes ne coûtent rien tant que tout est agrégé côté
-          serveur, et les fonctions ODSQL passent sans friction. Mais c'est la première page où
-          BUG-001 bloque pour de bon&nbsp;: sans <code>/exports/json</code>, le graphique principal
-          aurait montré 100 groupes sur 264, silencieusement. Le manque déclaré au premier passage —
-          «&nbsp;rien ne permet de calculer entre deux séries&nbsp;» — était en partie un faux
-          problème&nbsp;: le solde actif − passif est une expression ODSQL sur la colonne signée
-          du jeu. Ce qui reste hors de portée est plus étroit&nbsp;: <strong>le calcul entre deux
-          lignes</strong> (l'évolution N/N-1). Et le vrai plafond de fidélité n'est pas dans la
-          bibliothèque&nbsp;: les textes de la page — glossaire, descriptifs de mission — vivent
-          dans des jeux <em>restricted</em> que la clé publique ne lit pas.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: BUG-001 (enrichi
-          d'un contournement et d'un cas bloquant réel), AM-011 (enrichi&nbsp;: l'export accepte
-          <code>group_by</code>&nbsp;; corrigé en 0.25.0 par <code>fetch-mode="export"</code>, appliqué
-          ici), PG-014 (<code>group-by</code> avec fonction, corrigé en 0.21.1, appliqué ici),
-          AM-018 (arithmétique entre séries), AM-019 (un KPI ne sait pas filtrer).
-        </p>
+        <div class="odv-verdict fr-mt-4w">
+          <p class="fr-text--lead fr-mb-1v">Verdict</p>
+          <p><strong>Le récit tient entièrement dans le pipeline déclaratif.</strong> Ce que la
+            reproduction jugeait hors de portée — l'évolution d'un exercice à l'autre, un chiffre de
+            début et de fin de période dans une phrase — passe par <code>diff</code>, <code>pivot</code>
+            et une jointure. La seule vraie dépense est ce détour pour réunir deux lignes en une.
+            Et la trouvaille est dans la donnée, pas dans la bibliothèque&nbsp;: la vue par mission
+            de l'original compare charges et produits d'une mission alors que 95&nbsp;% des produits
+            ne sont rattachés à aucune.</p>
+        </div>
       </div>
-    </div>
-  
-      </details></section>
+    </details>
+  </section>
 
 </main>
 

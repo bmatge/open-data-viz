@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fiscalité locale des particuliers — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz Fiscalité locale des particuliers de data.economie.gouv.fr : moyennes par département et région, choroplèthe communale, tableau serveur sur 174 668 lignes.">
+  <meta name="description" content="Fiscalité locale des particuliers (DGFiP, 2021-2025) : la majoration de la taxe d'habitation sur les résidences secondaires a changé d'échelle en 2024, pendant que la taxe foncière montait à petits pas. Puis les taux commune par commune, département par département.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,94 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — ce que la page raconte, et pourquoi.
+
+       L'original (et la reproduction qui l'a précédée ici) est un OUTIL : un
+       exercice, une région, un département, puis quatre moyennes et une carte.
+       Il ne dit rien avant qu'on ait cliqué. L'exploration du jeu à l'API
+       (group_by exercice × ind_majothrs) a trouvé une RUPTURE que ni l'un ni
+       l'autre ne montrait : les communes qui majorent la taxe d'habitation sur
+       les résidences secondaires passent de 233 (2021) à 1 628 (2025), et le
+       saut a lieu en UNE année, 2024 (308 → 1 461). La page ouvre donc sur cette
+       rupture, la nuance par la taxe foncière (hausse générale mais lente),
+       puis rend l'outil départemental de l'original.
+
+       Toutes les moyennes de taux sont PONDÉRÉES par la population
+       (sum(taux × mpoid) / sum(mpoid)) : la moyenne simple des communes, celle de
+       l'original, donne à un village de 5 habitants le poids de Marseille.
+       ========================================================================== -->
+
+  <!-- ─── Le jeu national, en DIX lignes ────────────────────────────────────
+       Un groupement exercice × majoration (oui / non) porte tout le récit
+       national : nombre de communes, habitants, et les deux sommes qui font la
+       moyenne pondérée de TFB (Σ taux × habitants, Σ taux). Une requête. -->
+  <dsfr-data-source id="fl-fr" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
+    api-key-ref="ods-mef" fetch-mode="export"
+    select="exercice, ind_majothrs, count(*) as communes, sum(mpoid) as habitants, sum(taux_global_tfb*mpoid) as tfb_x_hab, sum(taux_global_tfb) as tfb_somme"
+    group-by="exercice, ind_majothrs"
+    order-by="exercice">
+  </dsfr-data-source>
+
+  <!-- Les communes qui majorent, une ligne par exercice -->
+  <dsfr-data-query id="fl-maj-ans" source="fl-fr"
+    where="ind_majothrs:eq:OUI" order-by="exercice:asc"></dsfr-data-query>
+  <!-- Pour la phrase : une seule ligne, une colonne par exercice (c_2021 … c_2025) -->
+  <dsfr-data-pivot id="fl-maj-large" source="fl-maj-ans"
+    row="ind_majothrs" column="exercice" value="communes" column-format="c_{value}"></dsfr-data-pivot>
+  <dsfr-data-normalize id="fl-maj-phrase" source="fl-maj-large"
+    compute="fois = round(c_2025 / c_2021, 1); saut = c_2024 - c_2023; avant = c_2023 - c_2021"></dsfr-data-normalize>
+
+  <!-- Taux de majoration choisis en 2025 : une ligne par taux voté (≈ 45 valeurs),
+       regroupées en quatre tranches, dont le plafond légal de 60 %. -->
+  <dsfr-data-source id="fl-taux" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
+    api-key-ref="ods-mef" fetch-mode="export"
+    select="thsurtaxrstau, count(*) as communes"
+    where='exercice = "2025" and ind_majothrs = "OUI"'
+    group-by="thsurtaxrstau">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="fl-taux-t" source="fl-taux"
+    compute="ordre = when thsurtaxrstau >= 60 then 4 when thsurtaxrstau >= 40 then 3 when thsurtaxrstau >= 20 then 2 else 1;
+             tranche = when thsurtaxrstau >= 60 then '60 % (plafond)' when thsurtaxrstau >= 40 then '40 à 59 %' when thsurtaxrstau >= 20 then '20 à 39 %' else '5 à 19 %'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="fl-tranches" source="fl-taux-t"
+    group-by="ordre, tranche" aggregate="communes:sum:communes" order-by="ordre:asc"></dsfr-data-query>
+
+  <!-- Géographie 2025 : habitants par département et par majoration, repliés
+       en une ligne par département (h_OUI, h_NON), puis la part. `coalesce` :
+       un département sans commune qui majore n'a pas de cellule h_OUI (null),
+       et Paris, commune unique qui majore, n'a pas de h_NON. -->
+  <dsfr-data-source id="fl-dep-maj" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
+    api-key-ref="ods-mef" fetch-mode="export"
+    select="dep, libdep, ind_majothrs, sum(mpoid) as habitants"
+    where='exercice = "2025"'
+    group-by="dep, libdep, ind_majothrs">
+  </dsfr-data-source>
+  <dsfr-data-pivot id="fl-dep-large" source="fl-dep-maj"
+    row="dep, libdep" column="ind_majothrs" value="habitants" column-format="h_{value}"></dsfr-data-pivot>
+  <dsfr-data-normalize id="fl-dep-part" source="fl-dep-large"
+    compute="h_maj = coalesce(h_OUI, 0); habitants = h_maj + coalesce(h_NON, 0); part = round(h_maj * 100 / habitants, 1); sans_maj = when h_maj = 0 then 1 else 0; plus_moitie = when part > 50 then 1 else 0; pays = 'France'">
+  </dsfr-data-normalize>
+  <!-- Pour la phrase : combien de départements sans aucune commune qui majore -->
+  <dsfr-data-query id="fl-dep-zero" source="fl-dep-part" group-by="pays"
+    aggregate="sans_maj:sum:departements, plus_moitie:sum:majoritaires, dep:count:total"></dsfr-data-query>
+  <dsfr-data-query id="fl-dep-top" source="fl-dep-part" order-by="part:desc" limit="15"></dsfr-data-query>
+
+  <!-- Taxe foncière sur le bâti : moyenne par habitant et moyenne par commune -->
+  <dsfr-data-query id="fl-tfb-ans" source="fl-fr" group-by="exercice"
+    aggregate="communes:sum:communes, habitants:sum:habitants, tfb_x_hab:sum:tfb_x_hab, tfb_somme:sum:tfb_somme"
+    order-by="exercice:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="fl-tfb" source="fl-tfb-ans"
+    compute="tfb_habitant = round(tfb_x_hab / habitants, 2); tfb_commune = round(tfb_somme / communes, 2); pays = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-pivot id="fl-tfb-large" source="fl-tfb"
+    row="pays" column="exercice" value="tfb_habitant" column-format="t_{value}"></dsfr-data-pivot>
+  <dsfr-data-normalize id="fl-tfb-phrase" source="fl-tfb-large"
+    compute="ecart = round(t_2025 - t_2021, 1)"></dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,545 +120,524 @@
       </div>
     </nav>
 
-    <h1>Fiscalité locale des particuliers</h1>
+    <p class="fr-badge fr-badge--info fr-mb-2v">Fiscalité locale des particuliers · exercices 2021 à 2025</p>
+    <h1>En 2024, la surtaxe des résidences secondaires a changé d'échelle</h1>
+
+    <dsfr-data-repeat source="fl-maj-phrase">
+      <template>
+        <p class="fr-text--lead">
+          En 2025, <strong>{{c_2025:number}} communes</strong> majorent la taxe d'habitation due sur
+          les résidences secondaires, contre {{c_2021:number}} en 2021&nbsp;: <strong>{{fois:number:1}}
+          fois plus</strong>. Le mouvement ne s'est pas étalé&nbsp;: il tient en une année,
+          2024, avec {{saut:number}} communes de plus qu'en 2023. La taxe foncière, elle, monte
+          aussi — mais à petits pas.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.economie.gouv.fr/explore/dataset/fiscalite-locale-des-particuliers/"
            target="_blank" rel="noopener external"><code>fiscalite-locale-des-particuliers</code></a>
-        — 174&nbsp;668 lignes&nbsp;: les taux globaux «&nbsp;vision contribuable&nbsp;» reconstitués
-        par la DGFiP pour chaque commune, de 2021 à 2025. Taxe foncière sur le bâti et le
-        non-bâti, taxe d'enlèvement des ordures ménagères, taxe d'habitation sur les résidences
-        secondaires et logements vacants. Sa variante <code>-geo</code> porte en plus les
-        contours communaux.
+        (DGFiP, fichier de recensement des éléments d'imposition) — une ligne par commune et par
+        exercice, 2021 à 2025&nbsp;: les taux globaux «&nbsp;vision contribuable&nbsp;» (commune,
+        intercommunalité, syndicats et taxes annexes additionnés) de la taxe foncière bâtie et non
+        bâtie, de la taxe d'enlèvement des ordures ménagères et de la taxe d'habitation sur les
+        résidences secondaires et logements vacants, plus l'indicateur de majoration de cette
+        dernière et son taux. La variante <code>-geo</code> porte les contours communaux.
+        <strong>Le jeu ne contient que des taux</strong>, ni bases ni montants&nbsp;: il dit combien
+        on taxe, pas combien on paie.
       </p>
     </details>
   </div>
 
-  <!-- ==========================================================================
-       Deux régimes dans la même page, à dessein :
-       - le TABLEAU DE BORD DÉPARTEMENTAL (l'écran 2 de l'original) travaille en
-         mode adaptateur : un <dsfr-data-context> diffuse exercice, région et
-         département à quatre sources — moyennes départementales, moyennes
-         régionales, communes paginées côté serveur, géométries communales ;
-       - la VUE NATIONALE (absente de l'original) travaille sur des agrégats
-         départementaux (101 lignes, une requête d'export).
-
-       Lot 13 — les deux sources de la vue nationale étaient en mode générique
-       (`url=` vers /exports/json + `params`), contournement d'AM-011 : le mode
-       adaptateur chargeait par /records, 100 lignes par requête et en série
-       (mesure d'origine : 31 allers-retours, 28,9 s pour 3 080 lignes, contre
-       1 requête et 0,62 s par l'export). Le prix payé était le mode adaptateur
-       lui-même — d'où le « que le contexte ne sait pas refiltrer (#288) » qui
-       figurait ici. `fetch-mode="export"` (#689, dsfr-data 0.25.0) rend la
-       requête unique EN mode adaptateur : ces deux sources redeviennent donc
-       des sources adaptateur, avec `select`/`where`/`group-by`/`order-by` en
-       attributs. 101 et 5 groupes (relevés à l'API le 2026-09-10), loin sous le
-       plafond `max-records` par défaut (1 000).
-       Les quatre sources du tableau de bord départemental restent inchangées ;
-       `fl-communes` est en `server-side`, qui ne se combine pas avec
-       `fetch-mode="export"` — elle garde donc sa pagination serveur.
-       ========================================================================== -->
-
-  <!-- Moyennes du département : exercice + département -->
-  <dsfr-data-source id="fl-moy-dep" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
-    api-key-ref="ods-mef"
-    select="avg(taux_global_tfb) as tfb, avg(taux_global_tfnb) as tfnb, avg(taux_plein_teom) as teom, avg(taux_global_th) as th, count(*) as communes"
-    limit="1">
-  </dsfr-data-source>
-  <!-- Moyennes de la région : exercice + région (le filtre département ne s'y applique pas) -->
-  <dsfr-data-source id="fl-moy-reg" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
-    api-key-ref="ods-mef"
-    select="avg(taux_global_tfb) as tfb, avg(taux_global_tfnb) as tfnb, avg(taux_plein_teom) as teom, avg(taux_global_th) as th, count(*) as communes"
-    limit="1">
-  </dsfr-data-source>
-  <!-- Communes du département : pagination serveur, 20 lignes par page -->
-  <dsfr-data-source id="fl-communes" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
-    api-key-ref="ods-mef" server-side page-size="20"
-    select="libcom, insee_com, mpoid, q03, optepci, taux_global_tfb, taux_global_tfnb, taux_plein_teom, taux_global_th, ind_majothrs, thsurtaxrstau"
-    order-by="libcom">
-  </dsfr-data-source>
-  <!-- Géométries communales du département (jeu -geo, ~700 lignes par département,
-       jusqu'à 890 dans le Pas-de-Calais : max-records relevé en conséquence) -->
-  <!-- `fetch-mode="export"` (2026-09-19) : la couche partait en SEPT requêtes
-       `/records` paginées (revue critique, § 3.6) ; l'export en fait une. Le
-       plafond passe de 1 000 à 5 000 par la même occasion : le Pas-de-Calais
-       compte 890 communes par exercice — sous 1 000, mais de peu, et un plafond
-       atteint tronque EN SILENCE. -->
-  <dsfr-data-source id="fl-geo" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers-geo"
-    api-key-ref="ods-mef" fetch-mode="export" max-records="5000"
-    select="libcom, insee_com, mpoid, q03, taux_global_tfb, taux_global_tfnb, taux_plein_teom, taux_global_th, geom">
-  </dsfr-data-source>
-
-  <dsfr-data-context sources="fl-moy-dep fl-moy-reg fl-communes fl-geo" url-sync>
-    <dsfr-data-context-filter field="exercice" operator="eq" ui="sel-exercice" label="Exercice"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="reg" operator="eq" ui="sel-region" label="Région" apply-to="fl-moy-reg"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="dep" operator="eq" ui="sel-departement" label="Département" apply-to="fl-moy-dep fl-communes fl-geo"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <!-- Vue nationale (hors original) : agrégats départementaux 2025 -->
-  <dsfr-data-source id="fl-dep" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
-    fetch-mode="export"
-    select="dep, libdep, avg(taux_global_tfb) as tfb, avg(taux_global_tfnb) as tfnb, avg(taux_plein_teom) as teom, avg(taux_global_th) as th, count(*) as communes"
-    group-by="dep, libdep"
-    where='exercice = "2025"'
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <dsfr-data-query id="fl-dep-tri" source="fl-dep" order-by="tfb:desc" limit="15"></dsfr-data-query>
-
-  <dsfr-data-source id="fl-annees" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
-    fetch-mode="export"
-    select="exercice, avg(taux_global_tfb) as tfb, avg(taux_global_tfnb) as tfnb, avg(taux_plein_teom) as teom, avg(taux_global_th) as th"
-    group-by="exercice"
-    order-by="exercice"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
   <div class="fr-container fr-mb-8w">
 
-    <h2 class="fr-h3" id="departement">Taux globaux appliqués par type de taxe</h2>
-    <p class="fr-text--sm fr-hint-text">
-      L'écran 2 de l'original&nbsp;: un exercice, une région, un département — puis les moyennes
-      par taxe, la carte des communes et leurs taux. Les trois sélecteurs sont repris dans l'URL.
-      Le département ne dépend pas de la région choisie (voir l'analyse)&nbsp;: la région ne pilote
-      que les moyennes régionales.
-    </p>
+    <!-- ====================== 1. L'accroche ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-accroche">
+      <h2 class="fr-h3" id="t-accroche">Un habitant sur quatre vit dans une commune qui surtaxe les résidences secondaires</h2>
+      <dsfr-data-kpi-group per-row="4" class="fr-mb-3w">
+        <dsfr-data-kpi source="fl-fr" value="communes:sum" where="exercice:eq:2025, ind_majothrs:eq:OUI"
+          format="nombre" heading="Communes qui majorent" label="en 2025"
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-fr"
+          value="communes:sum{exercice:eq:2025, ind_majothrs:eq:OUI} / communes:sum{exercice:eq:2021, ind_majothrs:eq:OUI}"
+          format="decimal" decimals="1" unit="fois plus" heading="Depuis 2021" label="de communes qui majorent qu'en 2021"
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-fr"
+          value="habitants:sum{exercice:eq:2025, ind_majothrs:eq:OUI} / habitants:sum{exercice:eq:2025}"
+          format="pourcentage" decimals="1" heading="Part des habitants" label="vivant dans une commune qui majore, 2025"
+          lines='[{"value":"habitants:sum{exercice:eq:2021, ind_majothrs:eq:OUI} / habitants:sum{exercice:eq:2021}","format":"pourcentage","decimals":1,"prefix":"contre ","suffix":" en 2021"}]'
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-taux"
+          value="communes:sum{thsurtaxrstau:eq:60} / communes:sum"
+          format="pourcentage" decimals="0" heading="Au plafond de 60 %" label="des communes qui majorent, 2025"
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+      </dsfr-data-kpi-group>
+      <p class="fr-text--sm fr-hint-text">
+        Habitants&nbsp;: population totale INSEE portée par le jeu (<code>mpoid</code>, population
+        municipale et comptée à part). La majoration porte sur la seule part communale de la taxe
+        d'habitation des résidences secondaires&nbsp;; elle ne touche donc que leurs propriétaires,
+        pas les habitants de la commune en général.
+      </p>
+    </section>
 
-    <form class="fr-grid-row fr-grid-row--gutters fr-mb-4w" aria-label="Choisir un exercice, une région et un département">
-      <div class="fr-col-12 fr-col-md-3">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-exercice">Exercice</label>
-          <select class="fr-select" id="sel-exercice">
-            <option value="2021">2021</option>
-            <option value="2022">2022</option>
-            <option value="2023">2023</option>
-            <option value="2024">2024</option>
-            <option value="2025" selected>2025</option>
-          </select>
+    <!-- ====================== 2. La preuve : la rupture ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-rupture">
+      <h2 class="fr-h3" id="t-rupture">La bascule tient en une année&nbsp;: 2024</h2>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-7">
+          <dsfr-data-repeat source="fl-maj-phrase">
+            <template>
+              <p class="odv-lecture">De 2021 à 2023, le nombre de communes qui majorent progresse
+                lentement ({{c_2021:number}}, {{c_2022:number}}, {{c_2023:number}}). En 2024, il passe
+                à <strong>{{c_2024:number}}</strong>&nbsp;: {{saut:number}} communes de plus en un an, quand
+                les deux années précédentes réunies n'en avaient ajouté que {{avant:number}}.</p>
+            </template>
+          </dsfr-data-repeat>
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Communes qui majorent la taxe d'habitation sur les résidences secondaires, par exercice">
+            <dsfr-data-chart id="g-rupture" source="fl-maj-ans" type="bar"
+              label-field="exercice" value-field="communes:Communes qui majorent"
+              selected-palette="neutral" highlight-index="[3]"
+              databox databox-title="Communes qui majorent la taxe d'habitation sur les résidences secondaires, par exercice"
+              databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
+              databox-date="Exercices 2021 à 2025" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-rupture" source="fl-maj-ans" table download
+              label-field="exercice" value-field="communes, habitants"
+              description="Barres verticales, une par exercice de 2021 à 2025 : nombre de communes appliquant la majoration de taxe d'habitation sur les résidences secondaires. L'exercice 2024 est mis en évidence : c'est l'année du saut."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-5">
+          <p class="odv-lecture">Quand une commune majore, elle va souvent au bout&nbsp;: le taux de
+            60&nbsp;%, plafond légal, est de loin le plus choisi en 2025.</p>
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Taux de majoration retenu par les communes qui majorent, 2025">
+            <dsfr-data-chart id="g-tranches" source="fl-tranches" type="bar" horizontal
+              label-field="tranche" value-field="communes:Communes"
+              selected-palette="neutral" highlight-index="[3]"
+              databox databox-title="Taux de majoration retenu, 2025"
+              databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
+              databox-date="Exercice 2025" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-tranches" source="fl-tranches" table download
+              label-field="tranche" value-field="communes"
+              description="Barres horizontales : nombre de communes selon le taux de majoration voté en 2025, en quatre tranches (5 à 19 %, 20 à 39 %, 40 à 59 %, 60 %). La tranche du plafond de 60 % est mise en évidence."></dsfr-data-a11y>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-region">Région (moyennes régionales)</label>
-          <select class="fr-select" id="sel-region">
-            <option value="84">AUVERGNE-RHONE-ALPES</option>
-            <option value="27" selected>BOURGOGNE-FRANCHE-COMTE</option>
-            <option value="53">BRETAGNE</option>
-            <option value="24">CENTRE-VAL DE LOIRE</option>
-            <option value="94">CORSE</option>
-            <option value="44">GRAND-EST</option>
-            <option value="01">GUADELOUPE</option>
-            <option value="03">GUYANE</option>
-            <option value="11">ILE-DE-FRANCE</option>
-            <option value="04">LA REUNION</option>
-            <option value="32">LES-HAUTS-DE-FRANCE</option>
-            <option value="02">MARTINIQUE</option>
-            <option value="06">MAYOTTE</option>
-            <option value="28">NORMANDIE</option>
-            <option value="75">NOUVELLE-AQUITAINE</option>
-            <option value="76">OCCITANIE</option>
-            <option value="52">PAYS DE LA LOIRE</option>
-            <option value="93">PROVENCE-ALPES-COTE D'AZUR</option>
-          </select>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-5">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-departement">Département</label>
-          <select class="fr-select" id="sel-departement">
-            <option value="01">AIN (01)</option>
-            <option value="02">AISNE (02)</option>
-            <option value="03">ALLIER (03)</option>
-            <option value="04">ALPES-DE-HAUTE-PROVENCE (04)</option>
-            <option value="05">HAUTES-ALPES (05)</option>
-            <option value="06">ALPES-MARITIMES (06)</option>
-            <option value="07">ARDECHE (07)</option>
-            <option value="08">ARDENNES (08)</option>
-            <option value="09">ARIEGE (09)</option>
-            <option value="10">AUBE (10)</option>
-            <option value="11">AUDE (11)</option>
-            <option value="12">AVEYRON (12)</option>
-            <option value="13">BOUCHES-DU-RHONE (13)</option>
-            <option value="14">CALVADOS (14)</option>
-            <option value="15">CANTAL (15)</option>
-            <option value="16">CHARENTE (16)</option>
-            <option value="17">CHARENTE-MARITIME (17)</option>
-            <option value="18">CHER (18)</option>
-            <option value="19">CORREZE (19)</option>
-            <option value="2A">CORSE-DU-SUD (2A)</option>
-            <option value="2B">HAUTE-CORSE (2B)</option>
-            <option value="21" selected>COTE-D'OR (21)</option>
-            <option value="22">COTES-D'ARMOR (22)</option>
-            <option value="23">CREUSE (23)</option>
-            <option value="24">DORDOGNE (24)</option>
-            <option value="25">DOUBS (25)</option>
-            <option value="26">DROME (26)</option>
-            <option value="27">EURE (27)</option>
-            <option value="28">EURE-ET-LOIR (28)</option>
-            <option value="29">FINISTERE (29)</option>
-            <option value="30">GARD (30)</option>
-            <option value="31">HAUTE-GARONNE (31)</option>
-            <option value="32">GERS (32)</option>
-            <option value="33">GIRONDE (33)</option>
-            <option value="34">HERAULT (34)</option>
-            <option value="35">ILLE-ET-VILAINE (35)</option>
-            <option value="36">INDRE (36)</option>
-            <option value="37">INDRE-ET-LOIRE (37)</option>
-            <option value="38">ISERE (38)</option>
-            <option value="39">JURA (39)</option>
-            <option value="40">LANDES (40)</option>
-            <option value="41">LOIR-ET-CHER (41)</option>
-            <option value="42">LOIRE (42)</option>
-            <option value="43">HAUTE-LOIRE (43)</option>
-            <option value="44">LOIRE-ATLANTIQUE (44)</option>
-            <option value="45">LOIRET (45)</option>
-            <option value="46">LOT (46)</option>
-            <option value="47">LOT-ET-GARONNE (47)</option>
-            <option value="48">LOZERE (48)</option>
-            <option value="49">MAINE-ET-LOIRE (49)</option>
-            <option value="50">MANCHE (50)</option>
-            <option value="51">MARNE (51)</option>
-            <option value="52">HAUTE-MARNE (52)</option>
-            <option value="53">MAYENNE (53)</option>
-            <option value="54">MEURTHE-ET-MOSELLE (54)</option>
-            <option value="55">MEUSE (55)</option>
-            <option value="56">MORBIHAN (56)</option>
-            <option value="57">MOSELLE (57)</option>
-            <option value="58">NIEVRE (58)</option>
-            <option value="59">NORD (59)</option>
-            <option value="60">OISE (60)</option>
-            <option value="61">ORNE (61)</option>
-            <option value="62">PAS-DE-CALAIS (62)</option>
-            <option value="63">PUY-DE-DOME (63)</option>
-            <option value="64">PYRENEES-ATLANTIQUES (64)</option>
-            <option value="65">HAUTES-PYRENEES (65)</option>
-            <option value="66">PYRENEES-ORIENTALES (66)</option>
-            <option value="67">BAS-RHIN (67)</option>
-            <option value="68">HAUT-RHIN (68)</option>
-            <option value="69">RHONE (69)</option>
-            <option value="70">HAUTE-SAONE (70)</option>
-            <option value="71">SAONE-ET-LOIRE (71)</option>
-            <option value="72">SARTHE (72)</option>
-            <option value="73">SAVOIE (73)</option>
-            <option value="74">HAUTE-SAVOIE (74)</option>
-            <option value="75">PARIS (75)</option>
-            <option value="76">SEINE-MARITIME (76)</option>
-            <option value="77">SEINE-ET-MARNE (77)</option>
-            <option value="78">YVELINES (78)</option>
-            <option value="79">DEUX-SEVRES (79)</option>
-            <option value="80">SOMME (80)</option>
-            <option value="81">TARN (81)</option>
-            <option value="82">TARN-ET-GARONNE (82)</option>
-            <option value="83">VAR (83)</option>
-            <option value="84">VAUCLUSE (84)</option>
-            <option value="85">VENDEE (85)</option>
-            <option value="86">VIENNE (86)</option>
-            <option value="87">HAUTE-VIENNE (87)</option>
-            <option value="88">VOSGES (88)</option>
-            <option value="89">YONNE (89)</option>
-            <option value="90">TERRITOIRE DE BELFORT (90)</option>
-            <option value="91">ESSONNE (91)</option>
-            <option value="92">HAUTS-DE-SEINE (92)</option>
-            <option value="93">SEINE-SAINT-DENIS (93)</option>
-            <option value="94">VAL-DE-MARNE (94)</option>
-            <option value="95">VAL-D'OISE (95)</option>
-            <option value="971">GUADELOUPE (971)</option>
-            <option value="972">MARTINIQUE (972)</option>
-            <option value="973">GUYANE (973)</option>
-            <option value="974">LA REUNION (974)</option>
-            <option value="976">MAYOTTE (976)</option>
-          </select>
-        </div>
-      </div>
-    </form>
+    </section>
 
-    <h3 class="fr-h6">Moyenne départementale</h3>
-    <dsfr-data-kpi-group class="fr-mb-3w">
-      <dsfr-data-kpi source="fl-moy-dep" value="tfb:max" format="decimal" color-token="orange"
-        heading="TFB" label="% — taxe foncière sur les propriétés bâties" col="3"></dsfr-data-kpi>
-      <dsfr-data-kpi source="fl-moy-dep" value="tfnb:max" format="decimal" color-token="vert"
-        heading="TFNB" label="% — taxe foncière sur les propriétés non bâties" col="3"></dsfr-data-kpi>
-      <dsfr-data-kpi source="fl-moy-dep" value="teom:max" format="decimal"
-        heading="TEOM" label="% — taxe d'enlèvement des ordures ménagères" col="3"></dsfr-data-kpi>
-      <dsfr-data-kpi source="fl-moy-dep" value="th:max" format="decimal" color-token="bleu"
-        heading="THRS et THLV" label="% — taxe d'habitation (résidences secondaires, logements vacants)" col="3"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    <h3 class="fr-h6">Moyenne régionale</h3>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="fl-moy-reg" value="tfb:max" format="decimal" color-token="orange"
-        heading="TFB" label="% — moyenne de la région" col="3"></dsfr-data-kpi>
-      <dsfr-data-kpi source="fl-moy-reg" value="tfnb:max" format="decimal" color-token="vert"
-        heading="TFNB" label="% — moyenne de la région" col="3"></dsfr-data-kpi>
-      <dsfr-data-kpi source="fl-moy-reg" value="teom:max" format="decimal"
-        heading="TEOM" label="% — moyenne de la région" col="3"></dsfr-data-kpi>
-      <dsfr-data-kpi source="fl-moy-reg" value="th:max" format="decimal" color-token="bleu"
-        heading="THRS et THLV" label="% — moyenne de la région" col="3"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <h3 class="fr-h6">Les communes du département — taux global de TFB</h3>
-    <div class="odv-viz" data-code="Taux global de taxe foncière sur les propriétés bâties, par commune">
-    <dsfr-data-map name="Taux global de taxe foncière sur les propriétés bâties, par commune"
-      center="47.3,4.8" zoom="8" height="560px" fit-bounds class="fr-mb-2w">
-      <!-- ⚠️ Jusqu'au 2026-09-19, cette choroplèthe n'avait NI classes NI légende :
-           un dégradé continu sur neuf couleurs, sans moyen de savoir ce qu'une
-           teinte vaut. L'analyse de cette page citait pourtant `classes` / `method`
-           / `breaks` et `dsfr-data-map-legend` comme « corrigés en 0.22 » — la page
-           annonçait la correction sans l'avoir consommée (§ 3.5 de la revue). -->
-      <dsfr-data-map-layer id="fl-couche-tfb" source="fl-geo" type="geoshape" geo-field="geom"
-        fill-field="taux_global_tfb" selected-palette="sequentialAscending" fill-opacity="0.8"
-        classes="5" method="quantile"
-        label="Taux global de TFB (%)" color="#666" tooltip-field="libcom">
-      </dsfr-data-map-layer>
-      <dsfr-data-map-legend for="fl-couche-tfb" label="Taux global de TFB (%)"></dsfr-data-map-legend>
-      <dsfr-data-map-popup mode="panel-right" title-field="libcom" width="380px">
+    <!-- ====================== 3. Où : la concentration ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-ou">
+      <h2 class="fr-h3" id="t-ou">La surtaxe se concentre sur le littoral méditerranéen, en Corse, en Haute-Savoie et à Paris</h2>
+      <dsfr-data-repeat source="fl-dep-zero">
         <template>
-          <p class="fr-text--sm fr-mb-1v"><strong>{{libcom|}} ({{insee_com|}})</strong> — {{mpoid|n.d.}} hab.</p>
-          <p class="fr-text--sm fr-mb-2v"><em>{{q03|Sans EPCI}}</em></p>
-          <p class="fr-text--sm fr-mb-1v"><strong>TFB&nbsp;:</strong> {{taux_global_tfb|n.d.}} %</p>
-          <p class="fr-text--sm fr-mb-1v"><strong>TFNB&nbsp;:</strong> {{taux_global_tfnb|n.d.}} %</p>
-          <p class="fr-text--sm fr-mb-1v"><strong>TEOM&nbsp;:</strong> {{taux_plein_teom|n.d.}} %</p>
-          <p class="fr-text--sm fr-mb-1v"><strong>THRS et THLV&nbsp;:</strong> {{taux_global_th|n.d.}} %</p>
+          <p class="odv-lecture">En 2025, la part des habitants qui vivent dans une commune qui
+            majore dépasse la moitié dans <strong>{{majoritaires:number}} départements</strong>&nbsp;:
+            Paris et deux voisins (Hauts-de-Seine, Val-de-Marne), le littoral méditerranéen
+            (Alpes-Maritimes, Var, Bouches-du-Rhône, Hérault), les deux départements corses et la
+            Haute-Savoie. À l'inverse, dans <strong>{{departements:number}} départements sur {{total:number}}</strong>,
+            aucune commune ne l'applique.</p>
         </template>
-      </dsfr-data-map-popup>
-    </dsfr-data-map>
-    </div>
-    <p class="fr-text--xs fr-hint-text fr-mb-4w">
-      Classes par quantiles sur les communes du département, sans légende (voir l'analyse). Cliquer
-      une commune ouvre sa fiche&nbsp;: population, EPCI, quatre taux.
-    </p>
-
-    <h3 class="fr-h6">Les communes du département — tableau</h3>
-    <div class="odv-viz" data-code="Graphique">
-    <dsfr-data-list source="fl-communes"
-      columns="libcom:Commune, insee_com:INSEE, mpoid:Population, q03:EPCI, taux_global_tfb:TFB (%), taux_global_tfnb:TFNB (%), taux_plein_teom:TEOM (%), taux_global_th:THRS-THLV (%), thsurtaxrstau:Majoration TH (%)"
-      pagination="20" export="csv" class="fr-mb-8w" count-label="commune">
-    </dsfr-data-list>
-    </div>
-
-    <h2 class="fr-h3" id="national">Vue nationale, 2025 (hors original)</h2>
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="fl-dep" value="tfb:avg" format="decimal"
-        heading="Taxe foncière bâti" label="% — moyenne des moyennes départementales" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="fl-dep" value="th:avg" format="decimal"
-        heading="Taxe d'habitation (THRS-THLV)" label="% — moyenne des moyennes départementales" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="fl-dep" value="communes:sum" format="nombre"
-        heading="Périmètre" label="communes couvertes" col="4"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Taxe foncière sur le bâti : taux moyen par département (2025)">
-          <dsfr-data-chart id="g-carte-tfb" source="fl-dep" type="map"
-            code-field="dep" value-field="tfb" name="Taux moyen TFB (%)"
-            selected-palette="sequentialAscending" unit-tooltip=" %"
-            databox databox-title="Taxe foncière sur le bâti : taux moyen par département (2025)"
-            databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
-            databox-date="2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-carte-tfb" source="fl-dep" table download></dsfr-data-a11y>
+      </dsfr-data-repeat>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-7">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Part des habitants vivant dans une commune qui majore, par département, 2025">
+            <dsfr-data-chart id="g-carte-part" source="fl-dep-part" type="map"
+              code-field="dep" value-field="part" name="Part des habitants (%)"
+              selected-palette="sequentialAscending" unit-tooltip=" %"
+              map-summary="weighted" map-summary-weight="habitants"
+              databox databox-title="Part des habitants vivant dans une commune qui majore, 2025"
+              databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
+              databox-date="Exercice 2025" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-carte-part" source="fl-dep-part" table download
+              label-field="libdep" value-field="part, h_maj, habitants"
+              description="Carte des départements colorée selon la part de leurs habitants qui vivent dans une commune appliquant la majoration en 2025. Le chiffre national affiché sous le titre est pondéré par la population."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-5">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Les quinze départements où la part des habitants concernés est la plus forte, 2025">
+            <dsfr-data-chart id="g-top" source="fl-dep-top" type="bar" horizontal
+              label-field="libdep" value-field="part:Part des habitants (%)" unit-tooltip=" %"
+              selected-palette="neutral"
+              databox databox-title="Les quinze départements les plus concernés, 2025"
+              databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
+              databox-date="Exercice 2025" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-top" source="fl-dep-top" table download
+              label-field="libdep" value-field="part"
+              description="Barres horizontales triées : les quinze départements où la part des habitants vivant dans une commune qui majore est la plus élevée en 2025."></dsfr-data-a11y>
+            </div>
           </div>
         </div>
       </div>
-      <div class="fr-col-12 fr-col-lg-6">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Taxe d'habitation : taux moyen par département (2025)">
-          <dsfr-data-chart id="g-carte-th" source="fl-dep" type="map"
-            code-field="dep" value-field="th" name="Taux moyen THRS-THLV (%)"
-            selected-palette="sequentialAscending" unit-tooltip=" %"
-            databox databox-title="Taxe d'habitation : taux moyen par département (2025)"
-            databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
-            databox-date="2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-carte-th" source="fl-dep" table download></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-    </div>
+    </section>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
-      <div class="fr-col-12 fr-col-lg-7">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Les quinze départements aux taux de foncier bâti les plus élevés">
-          <dsfr-data-chart id="g-top" source="fl-dep-tri" type="bar" horizontal
-            label-field="libdep" value-field="tfb" name="Taux moyen TFB (%)"
-            unit-tooltip=" %"
-            databox databox-title="Les quinze départements aux taux de foncier bâti les plus élevés"
-            databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
-            databox-date="2025" databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-top" source="fl-dep-tri" table download></dsfr-data-a11y>
+    <!-- ====================== 4. La nuance : la taxe foncière ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-tfb">
+      <h2 class="fr-h3" id="t-tfb">La taxe foncière, qui touche tous les propriétaires, monte, mais à petits pas</h2>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-5">
+          <dsfr-data-repeat source="fl-tfb-phrase">
+            <template>
+              <p class="odv-lecture">Le taux global de taxe foncière sur le bâti de l'habitant moyen
+                passe de {{t_2021:number:1}}&nbsp;% en 2021 à <strong>{{t_2025:number:1}}&nbsp;%</strong>
+                en 2025&nbsp;: <strong>+{{ecart:number:1}} point</strong> en quatre ans.</p>
+            </template>
+          </dsfr-data-repeat>
+          <p class="fr-text--sm">Des barres qui partent de zéro, à dessein&nbsp;: la hausse est
+            réelle, mais lente, sans commune mesure avec la bascule de la majoration. La barre
+            «&nbsp;par habitant&nbsp;» dépasse chaque année la barre «&nbsp;par commune&nbsp;»&nbsp;: les communes peuplées taxent plus que les petites, et une moyenne
+            simple des communes sous-estime le taux que vit la population.</p>
+          <p class="fr-text--sm fr-hint-text">Un taux n'est pas une facture&nbsp;: la taxe due est ce
+            taux appliqué à la valeur locative, revalorisée chaque année par la loi. Le jeu ne porte
+            pas les bases, cette page ne peut donc rien dire des montants payés.</p>
+        </div>
+        <div class="fr-col-12 fr-col-lg-7">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Taux global moyen de taxe foncière sur le bâti, 2021-2025">
+            <dsfr-data-chart id="g-tfb" source="fl-tfb" type="bar"
+              label-field="exercice" value-field="tfb_habitant:Par habitant (pondéré par la population)"
+              value-fields="tfb_commune:Par commune (moyenne simple)"
+              unit-tooltip=" %"
+              databox databox-title="Taux global moyen de taxe foncière sur le bâti (%)"
+              databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
+              databox-date="Exercices 2021 à 2025" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-tfb" source="fl-tfb" table download
+              label-field="exercice" value-field="tfb_habitant, tfb_commune"
+              description="Barres groupées de 2021 à 2025, axe partant de zéro : le taux global moyen de taxe foncière sur le bâti pondéré par la population, et la moyenne simple des communes. Les deux montent lentement ; la moyenne par habitant reste au-dessus."></dsfr-data-a11y>
+            </div>
           </div>
         </div>
       </div>
-      <div class="fr-col-12 fr-col-lg-5">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Évolution des taux moyens, 2021-2025">
-          <dsfr-data-chart id="g-annees" source="fl-annees" type="line"
-            label-field="exercice" value-field="tfb" value-fields="tfnb,teom,th"
-            name='["Foncier bâti","Foncier non bâti","Ordures ménagères","Taxe d’habitation"]'
-            unit-tooltip=" %"
-            databox databox-title="Évolution des taux moyens, 2021-2025"
-            databox-source="DGFiP — fiscalite-locale-des-particuliers, via data.economie.gouv.fr"
-            databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-annees" source="fl-annees" table download></dsfr-data-a11y>
+    </section>
+
+    <!-- ====================== 5. L'exploration : l'outil de l'original ====================== -->
+    <!-- Quatre sources pilotées par un contexte (exercice + département) et une
+         source nationale pilotée par l'exercice seul, pour la comparaison.
+         La région de l'original disparaît : sans cascade, elle permettait de
+         comparer un département aux moyennes d'une AUTRE région ; la France
+         entière est la référence qui ne ment pas. -->
+    <dsfr-data-source id="fl-x-dep" api-type="opendatasoft"
+      base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
+      api-key-ref="ods-mef"
+      select="ind_majothrs, count(*) as communes, sum(mpoid) as habitants, sum(taux_global_tfb*mpoid) as tfb_x_hab, sum(taux_global_th*mpoid) as th_x_hab"
+      group-by="ind_majothrs">
+    </dsfr-data-source>
+    <dsfr-data-source id="fl-x-fr" api-type="opendatasoft"
+      base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
+      api-key-ref="ods-mef"
+      select="ind_majothrs, count(*) as communes, sum(mpoid) as habitants, sum(taux_global_tfb*mpoid) as tfb_x_hab, sum(taux_global_th*mpoid) as th_x_hab"
+      group-by="ind_majothrs">
+    </dsfr-data-source>
+    <!-- Communes du département : pagination serveur, 20 lignes par page -->
+    <dsfr-data-source id="fl-communes" api-type="opendatasoft"
+      base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers"
+      api-key-ref="ods-mef" server-side page-size="20"
+      select="libcom, insee_com, mpoid, q03, taux_global_tfb, taux_global_tfnb, taux_plein_teom, taux_global_th, ind_majothrs, thsurtaxrstau"
+      order-by="libcom">
+    </dsfr-data-source>
+    <!-- Contours communaux : une requête d'export ; 887 communes au plus par
+         département et par exercice (Pas-de-Calais) — plafond relevé à 5 000,
+         `max-records` tronquant en silence. -->
+    <dsfr-data-source id="fl-geo" api-type="opendatasoft"
+      base-url="https://data.economie.gouv.fr" dataset-id="fiscalite-locale-des-particuliers-geo"
+      api-key-ref="ods-mef" fetch-mode="export" max-records="5000"
+      select="libcom, insee_com, mpoid, q03, taux_global_tfb, taux_global_tfnb, taux_plein_teom, taux_global_th, ind_majothrs, thsurtaxrstau, geom">
+    </dsfr-data-source>
+
+    <dsfr-data-context sources="fl-x-dep fl-x-fr fl-communes fl-geo" url-sync>
+      <dsfr-data-context-filter field="exercice" operator="eq" ui="sel-exercice" label="Exercice"></dsfr-data-context-filter>
+      <dsfr-data-context-filter field="dep" operator="eq" ui="sel-departement" label="Département" apply-to="fl-x-dep fl-communes fl-geo"></dsfr-data-context-filter>
+    </dsfr-data-context>
+
+    <section class="fr-mb-6w" aria-labelledby="t-explorer" id="departement">
+      <h2 class="fr-h3" id="t-explorer">Et dans votre département&nbsp;?</h2>
+      <p class="fr-text--sm fr-hint-text">
+        L'outil de l'original&nbsp;: un exercice, un département, puis les taux du département
+        comparés à la France, la carte des communes et leur tableau. Les deux choix sont repris dans
+        l'URL. Moyennes pondérées par la population, ici comme plus haut.
+      </p>
+
+      <form class="fr-grid-row fr-grid-row--gutters fr-mb-3w" aria-label="Choisir un exercice et un département">
+        <div class="fr-col-12 fr-col-md-3">
+          <div class="fr-select-group">
+            <label class="fr-label" for="sel-exercice">Exercice</label>
+            <select class="fr-select" id="sel-exercice">
+              <option value="2021">2021</option>
+              <option value="2022">2022</option>
+              <option value="2023">2023</option>
+              <option value="2024">2024</option>
+              <option value="2025" selected>2025</option>
+            </select>
           </div>
         </div>
+        <div class="fr-col-12 fr-col-md-5">
+          <div class="fr-select-group">
+            <label class="fr-label" for="sel-departement">Département</label>
+            <select class="fr-select" id="sel-departement">
+              <option value="01">AIN (01)</option>
+              <option value="02">AISNE (02)</option>
+              <option value="03">ALLIER (03)</option>
+              <option value="04">ALPES-DE-HAUTE-PROVENCE (04)</option>
+              <option value="05">HAUTES-ALPES (05)</option>
+              <option value="06">ALPES-MARITIMES (06)</option>
+              <option value="07">ARDECHE (07)</option>
+              <option value="08">ARDENNES (08)</option>
+              <option value="09">ARIEGE (09)</option>
+              <option value="10">AUBE (10)</option>
+              <option value="11">AUDE (11)</option>
+              <option value="12">AVEYRON (12)</option>
+              <option value="13">BOUCHES-DU-RHONE (13)</option>
+              <option value="14">CALVADOS (14)</option>
+              <option value="15">CANTAL (15)</option>
+              <option value="16">CHARENTE (16)</option>
+              <option value="17">CHARENTE-MARITIME (17)</option>
+              <option value="18">CHER (18)</option>
+              <option value="19">CORREZE (19)</option>
+              <option value="2A">CORSE-DU-SUD (2A)</option>
+              <option value="2B">HAUTE-CORSE (2B)</option>
+              <option value="21">COTE-D'OR (21)</option>
+              <option value="22">COTES-D'ARMOR (22)</option>
+              <option value="23">CREUSE (23)</option>
+              <option value="24">DORDOGNE (24)</option>
+              <option value="25">DOUBS (25)</option>
+              <option value="26">DROME (26)</option>
+              <option value="27">EURE (27)</option>
+              <option value="28">EURE-ET-LOIR (28)</option>
+              <option value="29">FINISTERE (29)</option>
+              <option value="30">GARD (30)</option>
+              <option value="31">HAUTE-GARONNE (31)</option>
+              <option value="32">GERS (32)</option>
+              <option value="33">GIRONDE (33)</option>
+              <option value="34">HERAULT (34)</option>
+              <option value="35">ILLE-ET-VILAINE (35)</option>
+              <option value="36">INDRE (36)</option>
+              <option value="37">INDRE-ET-LOIRE (37)</option>
+              <option value="38">ISERE (38)</option>
+              <option value="39">JURA (39)</option>
+              <option value="40">LANDES (40)</option>
+              <option value="41">LOIR-ET-CHER (41)</option>
+              <option value="42">LOIRE (42)</option>
+              <option value="43">HAUTE-LOIRE (43)</option>
+              <option value="44">LOIRE-ATLANTIQUE (44)</option>
+              <option value="45">LOIRET (45)</option>
+              <option value="46">LOT (46)</option>
+              <option value="47">LOT-ET-GARONNE (47)</option>
+              <option value="48">LOZERE (48)</option>
+              <option value="49">MAINE-ET-LOIRE (49)</option>
+              <option value="50">MANCHE (50)</option>
+              <option value="51">MARNE (51)</option>
+              <option value="52">HAUTE-MARNE (52)</option>
+              <option value="53">MAYENNE (53)</option>
+              <option value="54">MEURTHE-ET-MOSELLE (54)</option>
+              <option value="55">MEUSE (55)</option>
+              <option value="56">MORBIHAN (56)</option>
+              <option value="57">MOSELLE (57)</option>
+              <option value="58">NIEVRE (58)</option>
+              <option value="59">NORD (59)</option>
+              <option value="60">OISE (60)</option>
+              <option value="61">ORNE (61)</option>
+              <option value="62">PAS-DE-CALAIS (62)</option>
+              <option value="63">PUY-DE-DOME (63)</option>
+              <option value="64">PYRENEES-ATLANTIQUES (64)</option>
+              <option value="65">HAUTES-PYRENEES (65)</option>
+              <option value="66">PYRENEES-ORIENTALES (66)</option>
+              <option value="67">BAS-RHIN (67)</option>
+              <option value="68">HAUT-RHIN (68)</option>
+              <option value="69">RHONE (69)</option>
+              <option value="70">HAUTE-SAONE (70)</option>
+              <option value="71">SAONE-ET-LOIRE (71)</option>
+              <option value="72">SARTHE (72)</option>
+              <option value="73">SAVOIE (73)</option>
+              <option value="74" selected>HAUTE-SAVOIE (74)</option>
+              <option value="75">PARIS (75)</option>
+              <option value="76">SEINE-MARITIME (76)</option>
+              <option value="77">SEINE-ET-MARNE (77)</option>
+              <option value="78">YVELINES (78)</option>
+              <option value="79">DEUX-SEVRES (79)</option>
+              <option value="80">SOMME (80)</option>
+              <option value="81">TARN (81)</option>
+              <option value="82">TARN-ET-GARONNE (82)</option>
+              <option value="83">VAR (83)</option>
+              <option value="84">VAUCLUSE (84)</option>
+              <option value="85">VENDEE (85)</option>
+              <option value="86">VIENNE (86)</option>
+              <option value="87">HAUTE-VIENNE (87)</option>
+              <option value="88">VOSGES (88)</option>
+              <option value="89">YONNE (89)</option>
+              <option value="90">TERRITOIRE DE BELFORT (90)</option>
+              <option value="91">ESSONNE (91)</option>
+              <option value="92">HAUTS-DE-SEINE (92)</option>
+              <option value="93">SEINE-SAINT-DENIS (93)</option>
+              <option value="94">VAL-DE-MARNE (94)</option>
+              <option value="95">VAL-D'OISE (95)</option>
+              <option value="971">GUADELOUPE (971)</option>
+              <option value="972">MARTINIQUE (972)</option>
+              <option value="973">GUYANE (973)</option>
+              <option value="974">LA REUNION (974)</option>
+              <option value="976">MAYOTTE (976)</option>
+            </select>
+          </div>
+        </div>
+      </form>
+
+      <h3 class="fr-h6">Le département choisi</h3>
+      <dsfr-data-kpi-group per-row="4" class="fr-mb-2w">
+        <dsfr-data-kpi source="fl-x-dep" value="communes:sum{ind_majothrs:eq:OUI}" format="nombre"
+          heading="Majoration résidences secondaires" label="l'appliquent"
+          lines='[{"value":"communes:sum","format":"nombre","prefix":"sur ","suffix":" communes"}]'
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-x-dep" value="habitants:sum{ind_majothrs:eq:OUI} / habitants:sum" format="pourcentage" decimals="1"
+          heading="Habitants concernés" label="part vivant dans une commune qui majore"
+          color-token="orange-terre-battue"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-x-dep" value="tfb_x_hab:sum / habitants:sum" format="decimal" decimals="2" unit="%"
+          heading="Taxe foncière bâti" label="taux global moyen par habitant"
+          color-token="blue-cumulus"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-x-dep" value="th_x_hab:sum / habitants:sum" format="decimal" decimals="2" unit="%"
+          heading="Taxe d'habitation (RS et LV)" label="taux global moyen par habitant, hors majoration"
+          color-token="blue-cumulus"></dsfr-data-kpi>
+      </dsfr-data-kpi-group>
+      <h3 class="fr-h6">La France entière, même exercice</h3>
+      <dsfr-data-kpi-group per-row="4" class="fr-mb-4w">
+        <dsfr-data-kpi source="fl-x-fr" value="communes:sum{ind_majothrs:eq:OUI}" format="nombre"
+          heading="Majoration résidences secondaires" label="l'appliquent, en France"
+          lines='[{"value":"communes:sum","format":"nombre","prefix":"sur ","suffix":" communes"}]'
+          color-token="orange-terre-battue" tint="975"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-x-fr" value="habitants:sum{ind_majothrs:eq:OUI} / habitants:sum" format="pourcentage" decimals="1"
+          heading="Habitants concernés" label="en France"
+          color-token="orange-terre-battue" tint="975"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-x-fr" value="tfb_x_hab:sum / habitants:sum" format="decimal" decimals="2" unit="%"
+          heading="Taxe foncière bâti" label="en France, par habitant"
+          color-token="blue-cumulus" tint="975"></dsfr-data-kpi>
+        <dsfr-data-kpi source="fl-x-fr" value="th_x_hab:sum / habitants:sum" format="decimal" decimals="2" unit="%"
+          heading="Taxe d'habitation (RS et LV)" label="en France, par habitant"
+          color-token="blue-cumulus" tint="975"></dsfr-data-kpi>
+      </dsfr-data-kpi-group>
+
+      <h3 class="fr-h6">Les communes du département — taux global de taxe foncière sur le bâti</h3>
+      <div class="odv-viz" data-code="Taux global de taxe foncière sur le bâti, par commune">
+      <dsfr-data-map name="Taux global de taxe foncière sur le bâti, par commune"
+        center="46.0,6.4" zoom="9" height="560px" fit-bounds class="fr-mb-2w">
+        <dsfr-data-map-layer id="fl-couche-tfb" source="fl-geo" type="geoshape" geo-field="geom"
+          fill-field="taux_global_tfb" selected-palette="sequentialAscending" fill-opacity="0.8"
+          classes="5" method="quantile"
+          label="Taux global de TFB (%)" color="#666" tooltip-field="libcom">
+        </dsfr-data-map-layer>
+        <dsfr-data-map-legend for="fl-couche-tfb" label="Taux global de TFB (%)"></dsfr-data-map-legend>
+        <dsfr-data-map-popup mode="panel-right" title-field="libcom" width="380px">
+          <template>
+            <p class="fr-text--sm fr-mb-1v"><strong>{{libcom|}} ({{insee_com|}})</strong> — {{mpoid:number|n.d.}} hab.</p>
+            <p class="fr-text--sm fr-mb-2v"><em>{{q03|Sans EPCI}}</em></p>
+            <p class="fr-text--sm fr-mb-1v"><strong>TFB&nbsp;:</strong> {{taux_global_tfb:number:2|n.d.}} %</p>
+            <p class="fr-text--sm fr-mb-1v"><strong>TFNB&nbsp;:</strong> {{taux_global_tfnb:number:2|n.d.}} %</p>
+            {{#if taux_plein_teom}}<p class="fr-text--sm fr-mb-1v"><strong>TEOM&nbsp;:</strong> {{taux_plein_teom:number:2}} %</p>{{/if}}
+            {{#unless taux_plein_teom}}<p class="fr-text--sm fr-mb-1v"><strong>TEOM&nbsp;:</strong> sans TEOM</p>{{/unless}}
+            <p class="fr-text--sm fr-mb-1v"><strong>THRS et THLV&nbsp;:</strong> {{taux_global_th:number:2|n.d.}} %</p>
+            {{#if thsurtaxrstau}}<p class="fr-text--sm fr-mb-1v"><strong>Majoration résidences secondaires&nbsp;:</strong> {{thsurtaxrstau:number}} %</p>{{/if}}
+          </template>
+        </dsfr-data-map-popup>
+      </dsfr-data-map>
       </div>
-    </div>
+      <p class="fr-text--xs fr-hint-text fr-mb-4w">
+        Cinq classes par quantiles, calculées sur les communes du département affiché&nbsp;: les
+        couleurs ne se comparent pas d'un département à l'autre. Cliquer une commune ouvre sa fiche.
+      </p>
+
+      <h3 class="fr-h6">Les communes du département — tableau</h3>
+      <div class="odv-viz" data-code="Communes du département : taux et majoration">
+      <dsfr-data-list source="fl-communes"
+        columns="libcom:Commune, insee_com:INSEE, mpoid:Population, q03:EPCI, taux_global_tfb:TFB (%), taux_global_tfnb:TFNB (%), taux_plein_teom:TEOM (%), taux_global_th:THRS-THLV (%), thsurtaxrstau:Majoration RS (%)"
+        pagination="20" export="csv" count-label="commune">
+      </dsfr-data-list>
+      </div>
+    </section>
+
+    <!-- ====================== 6. Ce qu'on ne montre pas ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-limites">
+      <h2 class="fr-h4" id="t-limites">Ce que cette page ne montre pas</h2>
+      <ul class="fr-text--sm">
+        <li><strong>Des montants.</strong> Le jeu ne porte que des taux&nbsp;: ni valeur locative,
+          ni nombre de résidences secondaires, ni produit fiscal. «&nbsp;Un habitant sur quatre
+          vit dans une commune qui majore&nbsp;» ne veut pas dire qu'un habitant sur quatre paie la
+          majoration&nbsp;: seuls les propriétaires de résidences secondaires la paient.</li>
+        <li><strong>La cause de la bascule de 2024.</strong> Le jeu dit <em>quand</em>, pas
+          <em>pourquoi</em>. Elle coïncide avec l'élargissement, par décret de l'été 2023, de la
+          liste des communes autorisées à majorer (zones tendues)&nbsp;; ce rapprochement est une
+          hypothèse de lecture, pas une donnée du jeu.</li>
+        <li><strong>Une moyenne pondérée par les bases.</strong> Les moyennes de cette page sont
+          pondérées par la population, faute de mieux&nbsp;: le vrai taux moyen supporté se
+          pondérerait par les bases imposables, absentes du jeu. La moyenne simple des communes,
+          celle de l'original, figure sur le graphique de taxe foncière pour comparaison.</li>
+        <li><strong>La taxe d'enlèvement des ordures ménagères en moyenne.</strong> Environ trois
+          communes sur dix n'en ont pas (financement par redevance ou budget général&nbsp;: relevé
+          à l'API le 26/09/2026, 10&nbsp;470 communes sans taux en 2025). Une moyenne qui les
+          ignorerait décrirait un autre pays&nbsp;; la TEOM reste dans la fiche de chaque commune
+          («&nbsp;sans TEOM&nbsp;») et dans le tableau communal (tiret).</li>
+        <li><strong>Les communes fusionnées.</strong> Le nombre de communes varie d'un exercice à
+          l'autre (fusions)&nbsp;; les comptes annuels portent sur les communes de l'exercice. Douze
+          communes de 2025 n'ont pas de contour dans le jeu <code>-geo</code> et manquent à la
+          carte, pas au tableau.</li>
+        <li><strong>Les professionnels.</strong> La cotisation foncière des entreprises vit dans un
+          jeu voisin (<code>fiscalite-locale-des-entreprises</code>), hors de cette page.</li>
+      </ul>
+    </section>
 
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
       <details class="odv-technique">
-        <summary>Analyse de reproduction — Fiscalité locale — ce que la reproduction a coûté</summary>
+        <summary>Analyse de reproduction — Fiscalité locale — ce que la recréation a coûté</summary>
 
     <div class="fr-container">
       <p class="fr-text--lead">
         Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/fiscalite-locale-particuliers/"
-        target="_blank" rel="noopener external">fiscalite-locale-particuliers</a> —
-        36&nbsp;200 caractères, quatre <code>ods-color-gradient</code> (choroplèthes), quatre
-        <code>ods-map</code>, douze <code>ods-table</code>, seize <code>ods-select</code>, des
-        <code>ods-pop-in</code> et des <code>ods-legend</code>. C'était la page réputée la plus
-        difficile du catalogue.
+        target="_blank" rel="noopener external">fiscalite-locale-particuliers</a> — un outil en deux
+        écrans (sélection, puis tableau de bord départemental). Recréée le 26/09/2026 en page qui
+        raconte d'abord, puis rend l'outil.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>La choroplèthe, réputée difficile, est un attribut.</strong> Le montage
-              d'origine — <code>ods-color-gradient</code> avec <code>color-gradient-low</code>,
-              <code>-high</code>, <code>-nb-classes</code>, <code>-x</code>, <code>-serie</code>,
-              plus un <code>ods-map-layer</code> et un jeu de géométries à joindre — devient
-              <code>&lt;dsfr-data-chart type="map" code-field="dep" value-field="tfb"&gt;</code>.
-              Trois attributs. Les contours départementaux sont embarqués&nbsp;: aucune géométrie à
-              charger, aucune jointure à écrire.</li>
-            <li><strong>Deux cartes pour le prix d'une.</strong> Changer d'indicateur revient à
-              changer <code>value-field</code>. La page affiche donc le foncier bâti et les ordures
-              ménagères côte à côte, ce que l'original ne fait pas (il bascule d'un onglet à l'autre).</li>
-            <li><strong>174&nbsp;668 lignes consultables sans les charger.</strong> Le tableau
-              communal fonctionne en <code>server-side</code>&nbsp;: il demande vingt lignes à la
-              fois, filtrées par le contexte (698 résultats en Côte-d'Or 2025, le compteur de
-              l'original). Une première version lisait ses filtres sur <code>/facets</code>&nbsp;;
-              les trois sélecteurs de l'original l'ont remplacé.</li>
-            <li><strong>La cascade de l'original, en un contexte.</strong> Exercice, région,
-              département&nbsp;: trois <code>select</code> DSFR, un <code>dsfr-data-context</code>
-              et trois <code>dsfr-data-context-filter</code>. <code>apply-to</code> fait le
-              tri&nbsp;: la région ne pilote que les moyennes régionales, le département pilote
-              les moyennes départementales, le tableau et la carte. <code>url-sync</code> reprend
-              les trois valeurs dans l'URL (<code>?exercice=2025&amp;reg=27&amp;dep=21</code>).
-              Les huit moyennes de la Côte-d'Or 2025 sont celles de l'original à la décimale
-              (37,97 / 39,12 · 79,87 / 83,35 · 10,00 / 10,59 · 17,97 / 20,94).</li>
-            <li><strong>La choroplèthe communale existe, et elle est déclarative.</strong>
-              <code>dsfr-data-map</code> + <code>dsfr-data-map-layer type="geoshape"
-              geo-field="geom" fill-field="taux_global_tfb"</code> sur le jeu <code>-geo</code>
-              filtré par le contexte&nbsp;: les 698 contours de la Côte-d'Or arrivent en sept
-              requêtes de 100, 1,4&nbsp;s en tout, et se recolorent au changement de
-              département. Le clic ouvre une <code>dsfr-data-map-popup</code> qui est la
-              «&nbsp;carte-commune&nbsp;» de l'original&nbsp;: nom, code INSEE, population, EPCI,
-              quatre taux.</li>
-            <li><strong>Quatre séries sur un même graphique.</strong> <code>value-fields</code> suffit
-              à superposer les quatre taxes sur la chronique 2021-2025.</li>
+            <li><strong>Tout le récit national tient dans une requête de dix lignes.</strong> Un
+              <code>group-by="exercice, ind_majothrs"</code> avec <code>sum(taux*mpoid)</code> dans
+              le <code>select</code>&nbsp;: la moyenne pondérée se finit côté client
+              (<code>value="tfb_x_hab:sum / habitants:sum"</code>), et chaque KPI filtre ses lignes
+              par accolades (<code>communes:sum{exercice:eq:2025, ind_majothrs:eq:OUI}</code>).</li>
+            <li><strong>Des phrases qui se recalculent.</strong> <code>dsfr-data-pivot</code> replie
+              les cinq exercices en une ligne (<code>c_2021 … c_2025</code>),
+              <code>compute</code> en tire le rapport et le saut, un <code>dsfr-data-repeat</code>
+              les écrit (pas <code>display</code>, qui annonce un compteur «&nbsp;1 resultat&nbsp;»). Aucun chiffre du chapeau n'est dans le HTML.</li>
+            <li><strong>Une part par département sans jointure.</strong> Pivot sur
+              <code>ind_majothrs</code> puis <code>coalesce</code>&nbsp;: les départements sans
+              commune qui majore sortent à 0, pas absents. Résumé de carte pondéré par
+              <code>map-summary-weight</code>, égal au KPI national.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le contexte ne traverse pas une source en mode URL.</strong> La première
-              version de cette page concluait que «&nbsp;les deux moitiés ne se parlent pas&nbsp;»
-              (AM-001). C'était vrai des <code>dsfr-data-facets</code>, qui ne pilotent que leur
-              source&nbsp;; ce ne l'est plus avec <code>dsfr-data-context</code>, qui refiltre
-              ensemble les quatre sources du tableau de bord. Ce qui reste vrai&nbsp;: les
-              sources en mode URL (<code>url=</code> + <code>params</code>, celles de la vue
-              nationale sur <code>/exports/json</code>) ignorent les commandes du contexte, avec
-              un avertissement console (#288). Pour être pilotée, une source doit être en mode
-              adaptateur — donc sur <code>/records</code>, avec sa pagination par 100 et son
-              plafond de 100 groupes (BUG-001).</li>
-            <li><strong>Pas de cascade région → département.</strong> L'original ne montre les
-              départements de la région choisie qu'une fois celle-ci sélectionnée. Ici les 101
-              départements sont toujours listés, et rien ne lie les deux <code>select</code>&nbsp;:
-              remplir un <code>select</code> depuis une source, ou depuis un autre
-              <code>select</code>, n'a pas d'équivalent déclaratif. On peut donc comparer un
-              département aux moyennes d'une autre région — ce qui n'a pas de sens.</li>
-            <li><strong>Pas de choix de classes, et pas de légende communale.</strong>
-              <code>ods-color-gradient</code> expose le nombre de classes, les couleurs et la
-              méthode (classes égales sur l'original, quatre paliers, une palette par taxe).
-              <code>type="map"</code> applique un dégradé continu min→max, et
-              <code>dsfr-data-map-layer fill-field</code> découpe en quantiles, en autant de
-              classes que la palette compte de couleurs, <em>sans légende</em>&nbsp;: la carte
-              communale se lit, mais ne se chiffre pas — la légende «&nbsp;24,1 - 32,5 · 32,5 -
-              40,9…&nbsp;» de l'original n'a pas d'équivalent. La relecture du lot 11 a resserré
-              AM-022 sur deux points&nbsp;: j'avais écrit que <code>selected-palette</code>
-              «&nbsp;n'agit que sur les séries catégorielles&nbsp;» — faux, il est transmis aux
-              cartes, et passer de <code>categorical</code> à <code>divergentAscending</code> puis
-              <code>sequentialDescending</code> change les 101 remplissages (vérifié dans le DOM, les
-              deux cartes départementales portent désormais <code>sequentialAscending</code>)&nbsp;;
-              et l'échelle continue de <code>type="map"</code> est celle de <strong>DSFR Chart</strong>
-              (<code>chroma.scale</code> entre deux couleurs, aucune prop de classes), donc une limite
-              amont à remonter chez <code>GouvernementFR/dsfr-chart</code>. Ce qui reste vrai, et
-              imputable à <code>dsfr-data</code>&nbsp;: les quantiles imposés et l'absence de légende de
-              <code>map-layer fill-field</code>.</li>
-            <li><strong>Un jeu de données au vocabulaire hermétique.</strong> <code>b12vote</code>,
-              <code>e52ggemapi</code>, <code>p32_2uvote</code>… 45 colonnes dont les libellés ne
-              sont pas renseignés. Ni l'un ni l'autre outil n'y peut rien, mais cela conditionne
-              tout&nbsp;: seules six colonnes sont exploitables sans documentation externe.
-              L'original s'en tient d'ailleurs aux mêmes.</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> La première version
-              de cette page reproduisait le <em>mauvais jeu</em>&nbsp;:
-              <code>fiscalite-locale-des-entreprises</code> (professionnels, CFE), alors que la
-              page du catalogue est celle des <em>particuliers</em> et que son source AngularJS
-              ne déclare que <code>fiscalite-locale-des-particuliers-geo</code> (quatre
-              contextes, vérifié dans <code>$scope.blocks</code>). Sa remarque «&nbsp;le titre du
-              portail ne correspond pas au jeu&nbsp;» était donc fausse&nbsp;; seul le
-              <code>?headless=true</code> (intégration en iframe dans impots.gouv.fr) est
-              exact. Corrigé&nbsp;: jeu des particuliers, taxe d'habitation ajoutée, et l'écran 2
-              de l'original reconstruit — trois sélecteurs dans l'URL, 8 moyennes sur 8, tableau
-              des communes (9 colonnes sur 16, dont la majoration de TH), choroplèthe communale
-              avec fiche par commune, export CSV. Ce qui manque encore, et pourquoi&nbsp;:
-              <em>(a)</em> la cascade des sélecteurs, sans équivalent déclaratif&nbsp;;
-              <em>(b)</em> les quatre tuiles qui changent la taxe cartographiée — la carte ne
-              montre que la TFB, il faudrait quatre couches ou quatre cartes&nbsp;; <em>(c)</em>
-              la légende à quatre classes égales et la palette par taxe&nbsp;; <em>(d)</em> la
-              sélection cumulative au clic (coche dans le select, contour noir) et la
-              pagination de cartes-communes — ici, une popup à la fois&nbsp;; <em>(e)</em> la
-              notice méthodologique et les textes d'en-tête, éditoriaux, non recopiés&nbsp;;
-              <em>(f)</em> la page sœur des professionnels (six taxes), qui serait la même page
-              sur l'autre jeu. Couverture estimée&nbsp;: sélection 3 filtres sur 3 (sans
-              cascade), moyennes 8 sur 8, carte 1 taxe sur 4 sans légende, table et export
-              complets, notice 0.</li>
+            <li><strong>La part de communes qui ont relevé leur taux n'est pas dans la page.</strong>
+              Apparier chaque commune entre 2021 et 2025 demande les 70&nbsp;000 lignes brutes&nbsp;:
+              l'export mesuré prend 9,7&nbsp;s. Ce n'est pas une limite de la bibliothèque mais un
+              coût&nbsp;; l'angle a été écarté de la page (voir l'analyse métier du dossier d'audit).</li>
+            <li><strong>La mise en évidence est un indice.</strong> <code>highlight-index="[3]"</code>
+              désigne 2024 par sa position, pas par sa valeur&nbsp;: juste tant que le jeu commence
+              en 2021.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.23.0</h4>
-            <p class="fr-text--sm">
-              8 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore son contournement, qui n'est simplement plus
-              nécessaire. Détail et vérification au <a href="/retours#AM-012">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>AM-023</strong> — <strong>0.21.1</strong> (#653)&nbsp;: un <code>name</code> écrit en JSON est déballé sur les cartes.</li>
-              <li><strong>BUG-003</strong> — <strong>0.21.1</strong> (#651)&nbsp;: plus de <code>console.error</code> de parsing au montage des cartes DSFR Chart.</li>
-              <li><strong>AM-022</strong> — <strong>0.22.0</strong> (#685)&nbsp;: <code>classes</code>, <code>method</code> et <code>breaks</code> sur <code>dsfr-data-map-layer</code>, avec <code>dsfr-data-map-legend</code>.</li>
-              <li><strong>LIM-009</strong> — <strong>0.22.0</strong> (#685)&nbsp;: composant <code>dsfr-data-map-legend</code>, dérivé du rendu réel de la couche — ce n'était donc pas une limite dure.</li>
-              <li><strong>AM-001</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="id"</code>&nbsp;: les facettes deviennent des filtres du contexte, qui pilote N sources.</li>
-              <li><strong>AM-003</strong> — <strong>0.23.0</strong> (#680)&nbsp;: <code>server-facets</code> sans <code>fields</code> découvre les facettes déclarées par le jeu.</li>
-              <li><strong>AM-043</strong> — <strong>0.23.0</strong> (#678)&nbsp;: <code>dsfr-data-facets context="ctx"</code> peuple ses valeurs et diffuse dans le contexte&nbsp;: plus de <code>&lt;select&gt;</code> généré hors ligne.</li>
-            </ul>
-          </div>
         </div>
       </div>
 
@@ -581,44 +648,26 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-color-gradient</code> + <code>ods-map-layer</code> + géométries</td><td><code>type="map" code-field="dep"</code></td><td><strong>Nettement plus simple</strong></td></tr>
-            <tr><td><code>ods-legend</code></td><td>incluse dans le composant</td><td>Équivalent</td></tr>
-            <tr><td>discrétisation paramétrable</td><td>—</td><td><strong>Manquant</strong></td></tr>
-            <tr><td>12 × <code>ods-table</code></td><td>1 × <code>dsfr-data-list</code> <code>server-side</code></td><td>Équivalent, pagination serveur incluse</td></tr>
-            <tr><td>16 × <code>ods-select</code> câblés, cascade région → département</td><td>3 <code>select</code> + <code>dsfr-data-context url-sync</code></td><td>Équivalent pour le filtrage&nbsp;; <strong>cascade manquante</strong></td></tr>
-            <tr><td>contexte partagé (moyennes, carte, tableau)</td><td><code>dsfr-data-context</code> sur 4 sources adaptateur</td><td>Équivalent — sauf pour les sources en mode URL (#288)</td></tr>
-            <tr><td>choroplèthe communale <code>ods-map-layer</code> + <code>ods-color-gradient</code> 4 classes + <code>ods-legend</code></td><td><code>dsfr-data-map-layer type="geoshape" fill-field</code></td><td>Carte équivalente, <strong>quantiles imposés, sans légende</strong></td></tr>
-            <tr><td>cartes-communes (pop., EPCI, 4 taux)</td><td><code>dsfr-data-map-popup</code> + <code>&lt;template&gt;</code></td><td>Équivalent, une commune à la fois</td></tr>
-            <tr><td>—</td><td><code>value-fields</code> (4 séries)</td><td>Équivalent, plus court</td></tr>
+            <tr><td>tuiles «&nbsp;Moy Dép / Moy Rég&nbsp;» (<code>AVG</code>)</td><td><code>dsfr-data-kpi value="tfb_x_hab:sum / habitants:sum"</code>, département et France</td><td>Plus juste (pondéré), région remplacée par la France</td></tr>
+            <tr><td>cascade de <code>ods-select</code> + contexte</td><td>2 <code>select</code> + <code>dsfr-data-context url-sync</code></td><td>Équivalent</td></tr>
+            <tr><td><code>ods-map-layer</code> + <code>ods-color-gradient</code> + <code>ods-legend</code></td><td><code>dsfr-data-map-layer classes method</code> + <code>dsfr-data-map-legend</code></td><td>Équivalent</td></tr>
+            <tr><td>cartes-communes</td><td><code>dsfr-data-map-popup</code> avec <code>{{#if}}</code> pour la majoration</td><td>Équivalent, une commune à la fois</td></tr>
+            <tr><td><code>ods-table</code> + export</td><td><code>dsfr-data-list</code> <code>server-side</code> <code>export="csv"</code></td><td>Équivalent</td></tr>
+            <tr><td>—</td><td>pivot + compute + repeat, <code>type="map"</code> pondéré, barres triées</td><td>Le récit, absent de l'original</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>La page réputée la plus difficile est l'une des plus faciles.</strong> Ce qui
-          faisait sa réputation — la choroplèthe départementale — est précisément ce que
-          <code>dsfr-data</code> fait le mieux&nbsp;: trois attributs, géométries embarquées, légende
-          comprise, là où Opendatasoft demande un montage de six attributs et un jeu de géométries.
-          Le tableau de 174&nbsp;668 lignes se consulte sans en charger une seule, avec des facettes
-          serveur exactes.</p>
-        <p>La relecture a déplacé le verdict. Le manque «&nbsp;structurel&nbsp;» du premier
-          passage — les vues ne partagent pas leurs filtres — tombe dès qu'on utilise
-          <code>dsfr-data-context</code> sur des sources en mode adaptateur&nbsp;: l'écran
-          départemental de l'original, moyennes, carte communale et tableau, se refiltre d'un
-          seul geste. Ce qui reste manque vraiment, et c'est plus étroit&nbsp;: <strong>la
-          discrétisation et la légende</strong> d'une choroplèthe (quantiles imposés, aucune
-          légende sur la couche communale), et <strong>la cascade entre deux sélecteurs</strong>,
-          qui reste du JavaScript à écrire.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats consignés au <a href="/retours">registre des retours</a>&nbsp;: AM-001 (enrichi&nbsp;:
-          forme la plus visible du manque), AM-022 (discrétisation d'une choroplèthe&nbsp;; réduit au lot 11 à <code>map-layer</code>), AM-023 réécrit (chaîne simple acceptée partout, seules les cartes n'enveloppent pas), AV-014
-          (choroplèthe départementale en trois attributs), AV-015 (pagination serveur + facettes
-          serveur sur 174&nbsp;668 lignes).
-        </p>
+        <p><strong>L'outil de l'original se reconstruit à l'identique&nbsp;; ce qui manquait, c'était
+          l'histoire.</strong> Le jeu en porte une — la majoration des résidences secondaires qui
+          change d'échelle en 2024 — que quatre moyennes départementales ne pouvaient pas montrer.
+          La raconter n'a demandé aucun script&nbsp;: une requête groupée, un pivot, des
+          colonnes calculées, des KPI à filtre et <code>dsfr-data-repeat</code> pour les phrases.</p>
       </div>
     </div>
-  
+
       </details></section>
 
 </main>

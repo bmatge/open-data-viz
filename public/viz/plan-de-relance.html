@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Plan de relance — projets industriels — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la dataviz Plan de relance de data.economie.gouv.fr.">
+  <meta name="description" content="France Relance, projets industriels lauréats : un plan de PME, une décarbonation de grands groupes. Recréation avec dsfr-data du jeu plan-de-relance de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,68 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION (2026-09-26) — la page ne reproduit plus l'original, elle
+       raconte le jeu. L'original répondait « où sont les projets ? » ; le jeu
+       répond à une question plus forte : QUI porte quoi.
+
+       UN chargement, tout le reste dans le navigateur.
+       - `fetch-mode="export"` : une requête pour les 3 080 lignes (AM-011) ;
+         `max-records="3500"` parce que le plafond par défaut (1 000) tronque
+         en silence.
+       - La description est gardée : c'est le seul champ qui dise ce qu'est un
+         projet (panneau de la carte).
+       - Le CO2 est publié en TEXTE (`tonnes_equivalent_co2_…`) : `numeric`
+         avant toute somme, sinon rien ne s'additionne.
+       ========================================================================== -->
+  <dsfr-data-source id="pdr" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="plan-de-relance"
+    fetch-mode="export" max-records="3500"
+    select="entreprise, type_entreprise, siren, volet_relance, mesure, mesure_light, filiere, nom_region, nom_departement, nom_commune, code_postal, coordonnees_gps, description_projet, tonnes_equivalent_co2_pour_les_projets_decarbonation, mise_a_jour"
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- Nettoyage et indicateurs par projet.
+       - `region = upper(nom_region)` : une ligne porte « Hauts-de-France » au
+         lieu de « HAUTS-DE-FRANCE » (21 modalités au lieu de 20 sinon).
+       - « Mode et luxe » (2) / « Mode et Luxe » (107) : même filière.
+       - p_* valent 0 ou 100 : leur MOYENNE sur un groupe est une part de
+         projets (un ratio de comptes), pas une moyenne de taux.
+       - etiquette en capitales : ArcelorMittal Méditerranée à Fos-sur-Mer est
+         écrit de deux façons pour deux projets du même site. -->
+  <dsfr-data-normalize id="pdr-n" source="pdr"
+    numeric="tonnes_equivalent_co2_pour_les_projets_decarbonation"
+    replace-fields="filiere:Mode et luxe:Mode et Luxe"
+    rename="tonnes_equivalent_co2_pour_les_projets_decarbonation:co2"
+    compute="region = upper(nom_region);
+             taille = when type_entreprise = 'GE' then 'Grande entreprise' when type_entreprise = 'ETI' then 'ETI' when type_entreprise = 'TPE / PME' then 'TPE / PME' when is_null(type_entreprise) then 'Non renseigné' else 'Autre statut';
+             tout = 'Ensemble des projets';
+             p_ge = when type_entreprise = 'GE' then 100 else 0;
+             p_eti = when type_entreprise = 'ETI' then 100 else 0;
+             p_pme = when type_entreprise = 'TPE / PME' then 100 else 0;
+             p_autre = when type_entreprise = 'GE' or type_entreprise = 'ETI' or type_entreprise = 'TPE / PME' then 0 else 100;
+             decarb = when mesure_light = 'Efficacité énergétique' or mesure_light = 'Soutien à la chaleur bas carbone' then 1 else 0;
+             ge_decarb = when decarb = 1 and type_entreprise = 'GE' then 1 else 0;
+             co2_ge = when type_entreprise = 'GE' then co2 else 0;
+             co2_nr = when is_null(type_entreprise) then co2 else 0;
+             a_co2 = when is_null(co2) then 0 else 1;
+             sans_gps = when is_null(coordonnees_gps) then 1 else 0;
+             etiquette = concat(upper(entreprise), ' (', upper(nom_commune), ')')">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, tous les chiffres du chapô ---------- -->
+  <dsfr-data-query id="syn" source="pdr-n" group-by="tout"
+    aggregate="decarb:count:n, p_pme:avg:part_pme, decarb:sum:n_dec, ge_decarb:sum:n_ge_dec, co2:sum:co2_tot, co2_ge:sum:co2_ge, co2_nr:sum:co2_nr, a_co2:sum:n_co2, sans_gps:sum:n_sans_gps">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="part_ge_dec = n_ge_dec / n_dec * 100;
+             part_co2_ge = co2_ge / co2_tot * 100;
+             part_co2_nr = co2_nr / co2_tot * 100;
+             co2_mt = co2_tot / 1000000">
+  </dsfr-data-normalize>
+  <!-- Le millésime lu dans la donnée : la dernière mise à jour d'une ligne. -->
+  <dsfr-data-query id="maj" source="pdr-n" order-by="mise_a_jour:desc" limit="1"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,344 +94,315 @@
       </div>
     </nav>
 
-    <h1>Plan de relance&nbsp;— soutien aux projets industriels</h1>
+    <h1>France Relance&nbsp;: un plan de PME, une décarbonation de grands groupes</h1>
 
-    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <a href="https://data.economie.gouv.fr/explore/dataset/plan-de-relance/"
-           target="_blank" rel="noopener external"><code>plan-de-relance</code></a>
-        — 3&nbsp;080 projets industriels soutenus, géolocalisés, produits par la DGE.
-        Assez petit pour tenir intégralement dans le navigateur&nbsp;: toutes les vues de cette page
-        sont recalculées côté client à partir d'<strong>un seul chargement</strong>.
-      </p>
-    </details>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          Sur les {{n:number}}&nbsp;projets industriels lauréats publiés, {{part_pme:number:0}}&nbsp;%
+          sont portés par des TPE et des PME. La décarbonation de l'industrie dit l'inverse&nbsp;:
+          {{part_ge_dec:number:0}}&nbsp;% de ses {{n_dec:number}}&nbsp;projets sont ceux de grandes
+          entreprises, qui annoncent {{part_co2_ge:number:0}}&nbsp;% des {{co2_mt:number:1}}&nbsp;millions
+          de tonnes équivalent CO₂ déclarées.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="maj">
+      <template>
+        <p class="fr-text--sm fr-hint-text fr-mb-4w">
+          Direction générale des Entreprises, jeu
+          <a href="https://data.economie.gouv.fr/explore/dataset/plan-de-relance/" target="_blank" rel="noopener external"><code>plan-de-relance</code></a>
+          — dernière mise à jour d'un projet le {{mise_a_jour:date}}&nbsp;; le jeu n'a pas bougé depuis.
+          Un projet est compté une fois, quel que soit son montant&nbsp;: le jeu n'en publie aucun.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <!-- Le contraste en deux cartes : même jeu, deux sous-ensembles, deux majorités. -->
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <div class="odv-avant-apres fr-mb-6w">
+          <div class="odv-avant-apres__carte">
+            <p class="fr-text--sm fr-mb-1w">Tous les projets lauréats ({{n:number}})</p>
+            <span class="odv-avant-apres__chiffre">{{part_pme:number:0}}&nbsp;%</span>
+            <p class="fr-mb-0">portés par une <strong>TPE ou une PME</strong></p>
+          </div>
+          <div class="odv-avant-apres__carte odv-avant-apres__carte--apres">
+            <p class="fr-text--sm fr-mb-1w">Les projets de décarbonation ({{n_dec:number}})</p>
+            <span class="odv-avant-apres__chiffre">{{part_ge_dec:number:0}}&nbsp;%</span>
+            <p class="fr-mb-0">portés par une <strong>grande entreprise</strong></p>
+          </div>
+        </div>
+      </template>
+    </dsfr-data-repeat>
   </div>
 
-  <!-- ==========================================================================
-       Un seul fetch, puis tout se dérive côté client :
-       source -> facettes -> (carte | 2 agrégations -> 2 graphiques | KPI)
+  <!-- ======================= PREUVE 1 — qui porte quelle mesure ======================= -->
+  <!-- Une ligne par mesure + une ligne « Ensemble » en tête, même schéma, empilées
+       par dsfr-data-concat. Les parts sont des moyennes d'indicateurs 0/100 par
+       projet, donc des parts de projets : elles somment à 100 par ligne. -->
+  <dsfr-data-query id="par-mesure" source="pdr-n" group-by="mesure_light"
+    aggregate="p_ge:avg:ge, p_eti:avg:eti, p_pme:avg:pme, p_autre:avg:autre, decarb:count:n"
+    order-by="ge:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="ensemble" source="pdr-n" group-by="tout"
+    aggregate="p_ge:avg:ge, p_eti:avg:eti, p_pme:avg:pme, p_autre:avg:autre, decarb:count:n">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="ensemble-r" source="ensemble" rename="tout:mesure_light"></dsfr-data-normalize>
+  <dsfr-data-concat id="mesures-c" sources="ensemble-r, par-mesure"></dsfr-data-concat>
+  <dsfr-data-normalize id="mesures" source="mesures-c"
+    rename="ge:Grande entreprise | eti:ETI | pme:TPE / PME | autre:Autre ou non renseigné"
+    compute="Mesure = concat(mesure_light, ' (', n, ')')"
+    round="ge:1, eti:1, pme:1, autre:1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="top-mesure" source="par-mesure" limit="1"></dsfr-data-query>
 
-       Le fetch passe par l'endpoint d'export et non par /records : l'export
-       renvoie les 3 080 lignes EN UNE REQUÊTE, là où /records plafonne à 100 et
-       impose 31 allers-retours séquentiels (mesure d'origine : concurrence 1,
-       28,9 s passées dans les requêtes, 29 s de chargement perçu).
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-mesures">
+    <h2 id="t-mesures" class="fr-h3">Plus une mesure touche au carbone, plus elle revient aux grands groupes</h2>
+    <dsfr-data-repeat source="top-mesure">
+      <template>
+        <p class="odv-lecture">
+          Les grandes entreprises portent <strong>{{ge:number:0}}&nbsp;% des projets «&nbsp;{{mesure_light}}&nbsp;»</strong>
+          ({{n:number}}&nbsp;projets), la mesure où elles pèsent le plus. En tête de graphique, l'ensemble
+          des projets sert de repère&nbsp;: les deux mesures de décarbonation, l'efficacité énergétique et la
+          chaleur bas carbone, s'en écartent le plus.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Part de chaque taille d'entreprise, par mesure">
+      <dsfr-data-chart id="g-mesures" source="mesures" type="bar" horizontal stacked
+        label-field="Mesure"
+        value-field="Grande entreprise" value-fields="ETI, TPE / PME, Autre ou non renseigné"
+        color-map="Grande entreprise:#000091,ETI:#6A6AF4,TPE / PME:#CACAFB,Autre ou non renseigné:#929292"
+        unit-tooltip="%"
+        databox databox-title="Part des projets lauréats selon la taille de l'entreprise, par mesure (en %)"
+        databox-source="DGE — plan-de-relance, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-mesures" source="mesures"
+        description="Barres empilées à 100 %, une par mesure du plan, plus une barre pour l'ensemble des projets. Chaque barre se partage entre grandes entreprises, ETI, TPE et PME, et autres statuts ou non renseigné. Le tableau de la boîte de données donne les parts exactes.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Entre parenthèses, le nombre de projets de la mesure. La taille est celle déclarée dans le jeu
+      (<code>type_entreprise</code>), non corrigée.
+    </p>
+  </section>
 
-       Lot 13 — cette source était écrite en mode générique (`url=` vers
-       /exports/json + `params`), contournement d'AM-011 : c'était le seul moyen
-       d'obtenir la requête unique, et il coûtait le mode adaptateur lui-même
-       (plus de délégation serveur du where/order-by, plus de server-facets, plus
-       de meta.truncated, et une source qui n'annonçait plus quel jeu elle lit).
-       `fetch-mode="export"` (#689, dsfr-data 0.25.0) rend la même requête unique
-       EN restant en mode adaptateur : le `select` redevient un attribut, délégué
-       au portail. Conséquence directe : `max-records` s'applique de nouveau, et
-       son plafond par défaut (1 000) tronquerait les 3 080 lignes en silence —
-       d'où le max-records="3500" ci-dessous.
+  <!-- ======================= PREUVE 2 — où est le CO2 ======================= -->
+  <!-- Seuls les projets de décarbonation portent un tonnage (186 lignes, dont une
+       « Projets territoriaux »). Regroupement par site (entreprise + commune) :
+       les deux lignes d'ArcelorMittal à Fos-sur-Mer n'en font qu'une.
+       La part est calculée AVANT le `limit` (JSDoc de share) : c'est une part du
+       total, et le cumul du dixième site dit ce que pèsent les dix. -->
+  <dsfr-data-query id="co2-sites" source="pdr-n" where="a_co2:eq:1" group-by="etiquette"
+    aggregate="co2:sum, co2__sum:share_percent:part, part:running_sum:cumul"
+    order-by="co2__sum:desc" limit="10">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="co2-top" source="co2-sites"
+    round="part:1, co2__sum"
+    rename="etiquette:Site | co2__sum:Tonnes éq. CO₂ | part:Part du total">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="co2-un" source="co2-sites" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="co2-dix" source="co2-sites" order-by="cumul:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="co2-nsites" source="pdr-n" where="a_co2:eq:1" group-by="tout" aggregate="etiquette:distinct:sites"></dsfr-data-query>
 
-       Le `select` écartait `description_projet` (85 % du poids du jeu) : la relecture
-       face au relevé du portail l'a réintégré, l'infobulle d'origine l'affiche.
-       Re-mesuré (lot 9, réponse compressée) : 0,65 s pour 13 champs avec la
-       description, contre 0,37 s sans — et non les 7,9 s notés au lot 1.
-       ========================================================================== -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-co2">
+    <h2 id="t-co2" class="fr-h3">Un site sidérurgique annonce à lui seul un cinquième du CO₂ évité</h2>
+    <dsfr-data-repeat source="co2-un">
+      <template>
+        <p class="odv-lecture">
+          <strong>{{etiquette}}</strong> déclare {{co2__sum:number}}&nbsp;tonnes équivalent CO₂, soit
+          <strong>{{part:number:1}}&nbsp;%</strong> du total annoncé par les projets de décarbonation.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="co2-dix">
+      <template>
+        <p class="fr-text--md">Les dix premiers sites en cumulent {{cumul:number:1}}&nbsp;%.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="co2-nsites">
+      <template>
+        <p class="fr-text--sm fr-hint-text">Sur {{sites:number}}&nbsp;sites chiffrés. Graphique limité aux dix premiers&nbsp;; la part de chacun est rapportée au total de tous les sites.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Les dix sites qui annoncent le plus de CO₂ évité">
+      <dsfr-data-chart id="g-co2" source="co2-top" type="bar" horizontal
+        label-field="Site" value-field="Part du total" name="Part du total annoncé"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Part du CO₂ évité annoncé, dix premiers sites (en % du total)"
+        databox-source="DGE — plan-de-relance, data.economie.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-co2" source="co2-top"
+        description="Barres horizontales triées : les dix sites industriels qui déclarent le plus de tonnes équivalent CO₂, en part du total déclaré par tous les projets de décarbonation. Le premier site est mis en évidence.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
 
-  <dsfr-data-source id="pdr" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="plan-de-relance"
-    fetch-mode="export" max-records="3500"
-    select="entreprise, type_entreprise, siren, volet_relance, mesure, mesure_light, filiere, nom_region, nom_departement, nom_commune, code_postal, coordonnees_gps, description_projet"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
+  <!-- ======================= NUANCE ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-nuance">
+    <h2 id="t-nuance" class="fr-h3">Ce qui complique la lecture</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul>
+          <li><strong>Un projet n'est pas un montant.</strong> Le jeu ne publie aucune somme — le
+            producteur invoque le secret statistique. «&nbsp;Six projets sur dix aux PME&nbsp;» ne dit
+            rien de la part des crédits qu'elles ont reçue.</li>
+          <li><strong>Le CO₂ est déclaratif et sans durée.</strong> Le champ s'intitule «&nbsp;tonnes
+            équivalent CO₂ (pour les projets décarbonation)&nbsp;» ; ni sa période (par an&nbsp;? sur la
+            durée du projet&nbsp;?) ni sa méthode ne sont données. {{n_co2:number}}&nbsp;projets seulement
+            en portent un.</li>
+          <li><strong>La taille a des trous, et ils sont tous dans la décarbonation.</strong> Les
+            projets sans type d'entreprise sont tous des projets de décarbonation&nbsp;; ils pèsent
+            {{part_co2_nr:number:0}}&nbsp;% du CO₂ déclaré. La part des grands groupes est donc un
+            minimum.</li>
+          <li><strong>La taille est celle du jeu.</strong> Certaines lignes surprennent — un site
+            cimentier ou papetier classé «&nbsp;TPE / PME&nbsp;» parmi les plus gros émetteurs évités.
+            Nous ne l'avons pas corrigée.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
 
+  <!-- ======================= EXPLORATION ======================= -->
+  <!-- Les facettes filtrent la carte et le graphique par région ; la preuve
+       au-dessus reste sur l'ensemble du jeu (elle ne bouge pas). -->
   <dsfr-data-query id="pdr-region" source="pdr-filtre"
-    group-by="nom_region, mesure_light" aggregate="entreprise:count:nb" order-by="nb:desc">
+    group-by="region" aggregate="decarb:count:Projets" order-by="Projets:desc">
   </dsfr-data-query>
 
-  <dsfr-data-query id="pdr-type" source="pdr-filtre"
-    group-by="type_entreprise" aggregate="entreprise:count:nb" order-by="nb:desc">
-  </dsfr-data-query>
-
-  <!-- Il n'existe pas d'agrégat `distinct` : on regroupe, puis on compte les groupes. -->
-  <dsfr-data-query id="pdr-departements" source="pdr-filtre"
-    group-by="nom_departement" aggregate="entreprise:count:nb">
-  </dsfr-data-query>
-
-  <dsfr-data-query id="pdr-filieres" source="pdr-filtre"
-    group-by="filiere" aggregate="entreprise:count:nb">
-  </dsfr-data-query>
-
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-
-      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer les projets, territoire par territoire</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Les filtres agissent sur le compteur, la carte et le classement des régions — pas sur les deux
+      graphiques précédents, qui portent sur l'ensemble du jeu.
+    </p>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Filtrer</h2>
-
-        <!-- Les cinq facettes de l'original (`ods-facets` automatique), plus la filière.
-             `mesure` porte les libellés complets, comme lui ; la carte et le graphique
-             gardent `mesure_light` (mêmes 9 catégories, libellés courts). -->
-        <dsfr-data-facets id="pdr-filtre" source="pdr"
-          fields="type_entreprise, nom_departement, volet_relance, nom_region, mesure, filiere"
-          labels="type_entreprise:Type d'entreprise | nom_departement:Département | volet_relance:Volet France Relance | nom_region:Région | mesure:Mesure | filiere:Filière"
-          max-values="6" searchable="nom_departement, nom_region, filiere"
-          display="type_entreprise:multiselect | nom_departement:multiselect | nom_region:multiselect | mesure:multiselect | filiere:multiselect">
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="pdr-filtre" source="pdr-n"
+          fields="taille, mesure_light, region, nom_departement, filiere"
+          labels="taille:Taille d'entreprise | mesure_light:Mesure | region:Région | nom_departement:Département | filiere:Filière"
+          max-values="6" searchable="nom_departement, region, filiere"
+          display="taille:multiselect | mesure_light:multiselect | region:multiselect | nom_departement:multiselect | filiere:multiselect">
         </dsfr-data-facets>
       </details>
 
-      <div class="fr-col-12 fr-col-lg-9">
+      <div>
         <dsfr-data-kpi-group class="fr-mb-4w">
           <dsfr-data-kpi source="pdr-filtre" value="count" format="nombre"
-            heading="Sélection courante" label="projets soutenus" col="4"></dsfr-data-kpi>
-          <dsfr-data-kpi source="pdr-departements" value="count" format="nombre"
-            heading="Couverture" label="départements concernés" col="4"></dsfr-data-kpi>
-          <dsfr-data-kpi source="pdr-filieres" value="count" format="nombre"
-            heading="Diversité" label="filières représentées" col="4"></dsfr-data-kpi>
+            heading="Sélection" label="projets lauréats" span="4"></dsfr-data-kpi>
+          <dsfr-data-kpi source="pdr-filtre" value="count{p_pme:eq:100} / count" format="pourcentage"
+            heading="TPE et PME" label="des projets de la sélection" span="4"></dsfr-data-kpi>
+          <dsfr-data-kpi source="pdr-filtre" value="count{p_ge:eq:100} / count" format="pourcentage"
+            heading="Grandes entreprises" label="des projets de la sélection" span="4"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
 
-        <h2 class="fr-h4">Localisation des projets</h2>
-        <p class="odv-lecture">
-          Chaque point est un projet industriel soutenu. Les filtres à gauche agissent sur la carte
-          et sur les deux graphiques qui la suivent&nbsp;: <strong>un seul contexte, trois vues qui
-          s'accordent</strong>. Cliquez un point pour ouvrir sa fiche complète.
+        <h3 class="fr-h5">Où sont les projets</h3>
+        <p class="fr-text--sm">
+          Un point par projet, coloré par mesure. Cliquez un point pour lire la description du projet.
         </p>
-        <div class="odv-viz" data-code="Carte des projets, filtrée et groupée">
-        <dsfr-data-map tiles-style="muted" name="Carte des projets industriels soutenus par le plan de relance"
-          center="46.55,2.5" zoom="5" height="600px" tiles="ign-plan"
+        <div class="odv-viz" data-code="Carte des projets, filtrée">
+        <dsfr-data-map tiles-style="muted" name="Carte des projets industriels lauréats de France Relance"
+          center="46.55,2.5" zoom="5" height="560px" tiles="ign-plan"
           fit-bounds max-bounds="41,-5.5,51.5,10" insets="drom">
-          <dsfr-data-map-layer source="pdr-filtre" type="circle" radius="5"
+          <dsfr-data-map-layer id="couche-projets" source="pdr-filtre" type="circle" radius="5"
             geo-field="coordonnees_gps"
             color-field="mesure_light"
             color-map="Projets territoriaux:#6D7A87, Automobile:#619FC8, Aéronautique:#F7C87E, Relocalisation:#CB516D, Efficacité énergétique:#F7AD84, Santé - Capacités Covid:#5D9FA3, Soutien à la chaleur bas carbone:#64905C, Nucléaire:#000091, Nucléaire - Compétences:#6A6AF4"
             tooltip-field="entreprise" cluster>
           </dsfr-data-map-layer>
-          <!-- Les neuf champs de l'infobulle d'origine (template par défaut d'ods-map) -->
           <dsfr-data-map-popup mode="panel-right" title-field="entreprise" width="420px">
             <template>
               <p class="fr-badge fr-badge--sm fr-badge--blue-ecume fr-mb-2v">{{mesure_light}}</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>Type d'entreprise&nbsp;:</strong> {{type_entreprise|non renseigné}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Taille&nbsp;:</strong> {{taille}}</p>
               <p class="fr-text--sm fr-mb-1v"><strong>SIREN&nbsp;:</strong> {{siren|non renseigné}}</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>Commune&nbsp;:</strong> {{code_postal|}} {{nom_commune|}} ({{nom_departement|}}, {{nom_region|}})</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>Volet France Relance&nbsp;:</strong> {{volet_relance|non renseigné}}</p>
-              <p class="fr-text--sm fr-mb-1v"><strong>Mesure&nbsp;:</strong> {{mesure|non renseignée}}</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Commune&nbsp;:</strong> {{code_postal|}} {{nom_commune|}} ({{nom_departement|}}, {{region|}})</p>
+              <p class="fr-text--sm fr-mb-1v"><strong>Mesure&nbsp;:</strong> {{mesure|non renseignée}} — volet {{volet_relance|non renseigné}}</p>
+              {{#if co2}}<p class="fr-text--sm fr-mb-1v"><strong>CO₂ évité déclaré&nbsp;:</strong> {{co2:number}}&nbsp;t éq. CO₂</p>{{/if}}
               <p class="fr-text--xs fr-mb-2v">Filière&nbsp;: {{filiere|non renseignée}}</p>
-              <p class="fr-text--sm"><strong>Description du projet.</strong> {{description_projet|Non renseignée.}}</p>
-              <p class="fr-text--xs">
-                <a href="https://data.economie.gouv.fr/explore/dataset/plan-de-relance/table/?q={{entreprise}}"
-                   target="_blank" rel="noopener external">Voir le projet sur data.economie.gouv.fr</a>
-              </p>
+              <p class="fr-text--sm">{{description_projet|Description non renseignée.}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
         </div>
+        <dsfr-data-map-legend for="couche-projets" label="Mesure"></dsfr-data-map-legend>
 
-        <h2 class="fr-h4 fr-mt-6w">Qui reçoit, et où</h2>
-        <p class="odv-lecture">
-          Deux lectures de la même sélection&nbsp;: la <strong>géographie</strong> à gauche, empilée
-          par type de mesure, et la <strong>taille des entreprises</strong> à droite. Les deux se
-          recalculent à chaque filtre.
-        </p>
-        <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w">
-          <div class="fr-col-12 fr-col-lg-7">
-            <div class="odv-chart-slot odv-viz" data-code="Décompte par région et par type de mesure">
-              <dsfr-data-chart id="g-region" source="pdr-region" type="bar" stacked horizontal
-                label-field="nom_region" value-field="nb" series-field="mesure_light"
-                databox databox-title="Décompte par région et par type de mesure"
-                databox-source="DGE — plan-de-relance, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-region" source="pdr-region" table download></dsfr-data-a11y>
-            </div>
-          </div>
-
-          <div class="fr-col-12 fr-col-lg-5">
-            <div class="odv-chart-slot odv-viz" data-code="Répartition par type d'entreprise">
-              <dsfr-data-chart id="g-type" source="pdr-type" type="pie"
-                label-field="type_entreprise" value-field="nb"
-                databox databox-title="Répartition par type d'entreprise"
-                databox-source="DGE — plan-de-relance, via data.economie.gouv.fr"
-                databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-type" source="pdr-type" table download></dsfr-data-a11y>
-            </div>
-          </div>
+        <h3 class="fr-h5 fr-mt-6w">Combien de projets par région</h3>
+        <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Projets par région, sélection courante">
+          <dsfr-data-chart id="g-region" source="pdr-region" type="bar" horizontal
+            label-field="region" value-field="Projets" name="Projets lauréats"
+            databox databox-title="Projets lauréats par région, sélection courante"
+            databox-source="DGE — plan-de-relance, data.economie.gouv.fr" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-region" source="pdr-region"
+            description="Barres horizontales triées : nombre de projets lauréats par région, pour la sélection courante des filtres.">
+          </dsfr-data-a11y>
         </div>
       </div>
-
     </div>
-  </div>
+  </section>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Aucun montant</strong>&nbsp;: le jeu n'en publie pas. Nous n'en inventons pas.</li>
+          <li><strong>Les projets après mars 2022</strong>&nbsp;: le jeu est figé, il ne couvre que les lauréats
+            publiés à cette date, et seulement sept mesures du plan.</li>
+          <li><strong>{{n_sans_gps:number}}&nbsp;projets sans coordonnées</strong> (Nouvelle-Calédonie et
+            Polynésie française pour l'essentiel)&nbsp;: comptés partout, absents de la carte.</li>
+          <li><strong>Deux corrections d'écriture</strong>&nbsp;: une région écrite en minuscules et une
+            filière en double casse sont fusionnées avec leur forme majoritaire.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Plan de relance — ce que la reproduction a coûté</summary>
+    <details class="odv-technique">
+      <summary>Analyse — ce que la recréation a coûté</summary>
 
-    <div class="fr-container">
       <p class="fr-text--lead">
         Page d'origine&nbsp;: <a href="https://data.economie.gouv.fr/pages/dataviz-plan-de-relance"
-        target="_blank" rel="noopener external">dataviz-plan-de-relance</a> — 5&nbsp;800 caractères,
-        un <code>ods-facets</code>, une <code>ods-map</code> avec une couche catégorielle et deux
-        <code>ods-chart</code>.
+        target="_blank" rel="noopener external">dataviz-plan-de-relance</a> — une carte, des facettes,
+        un histogramme région × mesure et un camembert des tailles. Elle montrait <em>où</em>&nbsp;;
+        la recréation part de <em>qui porte quoi</em>, que le même jeu établit.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le modèle «&nbsp;un fetch, N vues&nbsp;».</strong> 3&nbsp;080 lignes tiennent
-              en mémoire. Une source, une balise de facettes, et tout l'aval — carte, deux graphiques,
-              trois KPI — se recalcule sur la sélection courante sans une seule requête supplémentaire.
-              C'est plus réactif que l'original, qui repart au serveur à chaque clic de facette.</li>
-            <li><strong>Un chargement complet à 0,6&nbsp;s, via <code>/exports/json</code>.</strong>
-              La première version de cette page mettait <strong>31&nbsp;secondes</strong> à s'afficher.
-              Diagnostic&nbsp;: en mode adaptateur, un chargement complet passe par <code>/records</code>,
-              qui plafonne à 100 enregistrements — soit 31 allers-retours <em>strictement séquentiels</em>
-              (concurrence mesurée&nbsp;: 1&nbsp;; 28,9&nbsp;s passées dans les requêtes, 37&nbsp;ms entre
-              elles). Le poids n'y était pour rien&nbsp;: alléger le transfert d'un facteur 3,7 n'a fait
-              gagner aucune seconde. La sortie est ailleurs — Opendatasoft expose
-              <code>/exports/json</code>, qui renvoie le jeu <em>entier</em> en une requête et accepte un
-              <code>select</code>&nbsp;: <strong>1 requête, 0,62&nbsp;s, 185&nbsp;Ko</strong> au lieu de
-              31 requêtes, 31&nbsp;s et 3,4&nbsp;Mo. Rien d'autre n'a changé dans la page. Il a d'abord
-              fallu y aller en mode générique (<code>url=</code> + <code>params</code>)&nbsp;; depuis
-              <code>dsfr-data</code> 0.25.0 (#689), <code>fetch-mode="export"</code> donne la même
-              requête unique en restant en mode adaptateur, et c'est ce que la page emploie.</li>
-            <li><strong>La carte.</strong> <code>ods-map</code> + <code>ods-map-layer-group</code> +
-              <code>ods-map-layer</code> avec ses quinze attributs devient
-              <code>dsfr-data-map</code> + <code>dsfr-data-map-layer</code>. Le
-              <code>color-categories</code> d'Opendatasoft se transpose en <code>color-map</code>
-              presque mot pour mot, et le champ <code>geo_point_2d</code> d'Opendatasoft
-              (<code>{lat, lon}</code>) est reconnu tel quel par <code>geo-field</code>.</li>
-            <li><strong>Ce que l'original n'a pas.</strong> Fond de carte IGN souverain plutôt que
-              Jawg&nbsp;; encarts DROM en une option (<code>insets="drom"</code>) là où la carte
-              d'origine laisse l'outre-mer hors cadre&nbsp;; panneau latéral de détail
-              (<code>dsfr-data-map-popup mode="panel-right"</code>) au lieu d'une bulle&nbsp;; et
-              sous chaque graphique le tableau de données accessible.</li>
-            <li><strong>Le graphique empilé région × mesure.</strong> Un
-              <code>dsfr-data-query</code> avec <code>group-by="nom_region, mesure_light"</code> puis
-              un chart en <code>series-field="mesure_light" stacked</code>. L'original obtient le même
-              résultat via <code>series-breakdown</code> sur <code>ods-chart-query</code>&nbsp;:
-              match nul, les deux sont concis.</li>
+            <li><strong>Un chargement, tout le reste dans le navigateur.</strong>
+              <code>fetch-mode="export"</code> charge les 3&nbsp;080 lignes en une requête&nbsp;; chapô,
+              deux graphiques, nuances, carte et facettes en dérivent.</li>
+            <li><strong>Des parts de projets sans script.</strong> Un indicateur 0/100 par projet
+              (<code>compute</code>), puis sa moyenne par mesure&nbsp;: c'est un ratio de comptes, qui
+              somme à 100 par barre.</li>
+            <li><strong>La concentration en trois attributs.</strong> <code>share_percent</code> rapporte
+              chaque site au total <em>avant</em> le <code>limit</code>, <code>running_sum</code> donne le
+              poids des dix premiers.</li>
+            <li><strong>Un chapô vivant.</strong> Une requête à un seul groupe porte tous les chiffres,
+              un <code>dsfr-data-repeat</code> les écrit dans la phrase.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le bon endpoint ne se devine pas.</strong> Rien, dans les attributs de
-              <code>dsfr-data-source</code>, ne suggère que le mode adaptateur va enchaîner 31 requêtes
-              là où l'API sait tout renvoyer d'un coup. Il a fallu chronométrer pour le découvrir, et
-              renoncer au mode adaptateur pour y échapper — on y perdait la délégation serveur du
-              <code>where</code>, sans conséquence ici puisque toute la page travaille côté client.
-              C'est la demande la plus rentable du registre&nbsp;: que l'adaptateur choisisse
-              <code>/exports/json</code> quand il charge tout (AM-011). <strong>Elle est
-              exaucée&nbsp;:</strong> <code>fetch-mode="export"</code> (0.25.0, #689) fait la requête
-              unique <em>sans</em> quitter le mode adaptateur, et la source de cette page est
-              redevenue une source adaptateur. Le renoncement n'a plus lieu d'être — restent le
-              choix explicite de l'attribut, et le plafond <code>max-records</code> qui redevient
-              actif avec lui.</li>
-            <li><strong>Un champ texte long coûte cher — mais moins qu'on ne l'a cru.</strong>
-              <code>description_projet</code> pèse à lui seul 85&nbsp;% du jeu&nbsp;: 1,3&nbsp;Mo
-              avec, 185&nbsp;Ko sans. Au lot&nbsp;1 il avait été retiré de la source (7,9&nbsp;s
-              mesurées avec, contre 4,8&nbsp;s pour l'export complet sans <code>select</code>), et
-              le panneau renvoyait vers le portail. Re-chronométré au lot&nbsp;9, en réponse
-              compressée&nbsp;: 0,65&nbsp;s pour les treize champs description comprise, 0,37&nbsp;s
-              sans, 0,65&nbsp;s mesurés dans le navigateur. La description est donc revenue dans la
-              source&nbsp;: l'infobulle d'origine l'affiche, et c'est le seul champ qui dise ce
-              qu'est le projet. Le chiffre du lot&nbsp;1 n'est pas reproductible aujourd'hui — un
-              rappel que la mesure a une date.</li>
-            <li><strong>Le plafond <code>max-records</code>, silencieux.</strong> Le plafond par
-              défaut de l'adaptateur Opendatasoft est de 1&nbsp;000 enregistrements. Sans
-              <code>max-records="3500"</code>, cette page afficherait 1&nbsp;000 des 3&nbsp;080
-              projets <em>sans rien signaler</em> — ni erreur, ni indication visuelle. C'est le piège
-              le plus dangereux rencontré jusqu'ici&nbsp;: il ne rend pas la page difficile à écrire,
-              il la rend facile à publier fausse.</li>
-            <li><strong>Pas d'agrégat «&nbsp;valeurs distinctes&nbsp;».</strong> Les KPI acceptent
-              <code>count</code>, <code>sum</code>, <code>avg</code>, <code>min</code>,
-              <code>max</code>, <code>first</code>, <code>last</code> — mais pas
-              <code>distinct</code>. Pour afficher «&nbsp;N départements concernés&nbsp;», il faut
-              intercaler un <code>dsfr-data-query group-by="nom_departement"</code> et compter ses
-              lignes. Le détour est court et le pipeline reste lisible, mais il n'est pas évident à
-              trouver&nbsp;: la première écriture, <code>value="nom_departement:distinct"</code>,
-              échoue en silence.</li>
-            <li><strong>Les valeurs nulles polluent les légendes.</strong> 21 des 3&nbsp;080 projets
-              n'ont pas de <code>type_entreprise</code>. Le camembert les regroupe sous l'étiquette
-              «&nbsp;Série&nbsp;4&nbsp;» — le nom de repli de DSFR&nbsp;Chart — au lieu de
-              «&nbsp;Non renseigné&nbsp;». Aucun attribut ne permet de libeller les valeurs manquantes,
-              et <code>dsfr-data-normalize</code> travaille sur des motifs de chaînes, pas sur
-              <code>null</code>. Il faudrait filtrer ces lignes ou pré-traiter la donnée.
-              La page d'origine a exactement le même défaut.</li>
-            <li><strong>Le cadrage de la carte.</strong> <code>fit-bounds</code> seul embrasse la
-              Polynésie française et la Nouvelle-Calédonie&nbsp;: la France métropolitaine devient un
-              point au milieu de l'Atlantique. Il faut le combiner à <code>max-bounds</code> pour
-              clipper l'emprise. C'est documenté, mais ça ne se devine pas — et l'erreur est
-              spectaculaire. Une fois cadrée, la rangée d'encarts DROM reste à l'étroit&nbsp;: les cinq
-              mini-cartes et leurs libellés se tassent sur la gauche du conteneur au lieu de s'étaler.
-              Cosmétique, mais visible.</li>
-            <li><strong>Pas de rappel des filtres actifs hors de la colonne.</strong> L'original affiche un
-              <code>ods-filter-summary</code> avec un bouton «&nbsp;tout effacer&nbsp;».
-              <code>dsfr-data-context-tags</code> existe mais ne fonctionne qu'avec
-              <code>dsfr-data-context</code>, pas avec <code>dsfr-data-facets</code>. La relecture du
-              lot 11 a corrigé deux affirmations inverses de ma première version&nbsp;: les facettes
-              <em>ont</em> un bouton «&nbsp;Réinitialiser les filtres&nbsp;» (vérifié après une case
-              cochée), et <code>context-tags</code> n'a <em>pas</em> de «&nbsp;tout effacer&nbsp;» — il
-              n'est donc pas «&nbsp;l'équivalent&nbsp;» du récapitulatif Opendatasoft. Le manque réel se
-              réduit au récapitulatif en tags hors de la colonne, et tombera avec AM-001 (les facettes
-              parlant à un contexte, les tags du contexte les refléteront).</li>
-            <li><strong>Une incohérence dans la source d'origine.</strong> Les deux
-              <code>ods-chart-serie</code> de la page officielle déclarent
-              <code>expression-y="montant_participation_etat"</code> — un champ qui
-              <strong>n'existe pas</strong> dans le jeu de données. Comme la fonction est
-              <code>COUNT</code>, l'expression est ignorée et le graphique compte des projets.
-              Le résultat est juste, la déclaration est fausse&nbsp;: un type d'erreur que le
-              modèle déclaratif de <code>dsfr-data</code> rend plus difficile à écrire, faute de
-              pouvoir mettre un champ inexistant dans un compteur.</li>
-            <li><strong>Relecture face au relevé visuel du portail.</strong> La fiche d'audit
-              (<code>docs/portail/</code>) a fait apparaître trois écarts, tous comblés, et un
-              défaut de l'original à ne pas imiter. <em>L'infobulle</em>&nbsp;: les neuf champs du
-              template par défaut d'<code>ods-map</code> (type, SIREN, commune, code postal, volet,
-              mesure, description…) sont dans le panneau — <code>siren</code>,
-              <code>code_postal</code>, <code>volet_relance</code>, <code>mesure</code> et
-              <code>description_projet</code> ont rejoint le <code>select</code> (vérifié sur
-              PROPYPLAST, Retournac). <em>Les cinq facettes</em> de l'original avec toutes leurs
-              valeurs, libellés complets de <code>mesure</code> compris&nbsp;: «&nbsp;Voir
-              plus&nbsp;» déplie les 20 régions, les 107 départements et les 9 mesures (compteurs
-              identiques au relevé&nbsp;: TPE / PME 1&nbsp;890, Bouches-du-Rhône 102,
-              Indépendance / Compétitivité 1&nbsp;962…). <em>Les couleurs</em>&nbsp;: Nucléaire et
-              Nucléaire - Compétences, sans couleur chez l'original (points noirs «&nbsp;autre&nbsp;»),
-              en ont une ici — vérifié sur les points de Lyon et de la couche filtrée. <em>Le
-              défaut à ne pas imiter</em>&nbsp;: l'histogramme région × mesure de l'original,
-              plafonné par <code>maxpoints=50</code>, ne trace que 8 régions sur 20&nbsp;; ici DSFR
-              Chart reçoit bien 9 séries × 20 régions, lu dans les attributs du
-              <code>&lt;bar-chart&gt;</code>. Deux réserves restent&nbsp;: le tableau accessible
-              sous ce graphique est plafonné à 100 lignes sur 119 (constante
-              <code>MAX_TABLE_ROWS</code> de <code>dsfr-data-a11y</code>, signalée à l'écran, le
-              CSV est complet), et la carte n'a ni recherche de lieu ni sélecteur de couches.</li>
+            <li><strong>Le CO₂ est publié en texte.</strong> Sans <code>numeric</code>, aucune somme.</li>
+            <li><strong>« TPE / PME » contient la barre du ratio.</strong> <code>count{type_entreprise:eq:TPE / PME}</code>
+              ne peut pas s'écrire dans un <code>value</code> de KPI, dont le séparateur est
+              «&nbsp;<code> / </code>&nbsp;»&nbsp;: passer par un indicateur calculé.</li>
+            <li><strong>Une ligne «&nbsp;Ensemble&nbsp;» dans le graphique</strong> demande une seconde
+              requête, un renommage pour aligner le schéma et un <code>dsfr-data-concat</code>.</li>
           </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.25.0</h4>
-            <p class="fr-text--sm">
-              13 des frictions décrites ci-dessus ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Le constat reste écrit tel qu'il a été rencontré — c'est la trace
-              du banc d'essai&nbsp;; le code de la page porte encore ses contournements, qui ne sont simplement plus
-              nécessaires — à l'exception d'AM-011, dont le contournement a été retiré au lot 13&nbsp;:
-              la source est repassée en mode adaptateur avec <code>fetch-mode="export"</code>. Détail et vérification au <a href="/retours#AM-005">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-005</strong> — <strong>0.21.1</strong> (#647)&nbsp;: <code>empty-label</code>&nbsp;: plus de «&nbsp;Série N&nbsp;» en légende pour un groupe sans valeur.</li>
-              <li><strong>AM-008</strong> — <strong>0.21.1</strong> (#652)&nbsp;: la commande <code>in_bbox</code> du viewport initial part dès que la carte est prête.</li>
-              <li><strong>AM-010</strong> — <strong>0.21.1</strong> (#643)&nbsp;: attribut <code>width</code> sur <code>dsfr-data-map-inset</code> et largeur par défaut de 10 rem.</li>
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>BUG-004</strong> — <strong>0.21.1</strong> (#642)&nbsp;: <code>fit-bounds</code> + <code>max-bounds</code> zoome sur une emprise réduite à un point, et <code>fit-zone</code> (#687, 0.22.0) cadre la métropole sans renoncer aux encarts.</li>
-              <li><strong>PG-012</strong> — <strong>0.21.1</strong> (#645)&nbsp;: <code>sort="count:desc"</code>&nbsp;: la grammaire <code>critère:sens</code> remplace le <code>-count</code> ambigu, qui est déprécié avec avertissement.</li>
-              <li><strong>AM-002</strong> — <strong>0.22.0</strong> (#658)&nbsp;: <code>meta.truncated</code> et ligne du volet Diagnostic quand <code>max-records</code> tronque (le plafond de 1 000 reste le défaut).</li>
-              <li><strong>AM-009</strong> — <strong>0.22.0</strong> (#687)&nbsp;: quand la carte porte des encarts ultramarins sans <code>max-bounds</code>, <code>fit-bounds</code> se cale par défaut sur la métropole, et <code>fit-zone</code> surcharge la zone.</li>
-              <li><strong>AM-017</strong> — <strong>0.22.0</strong> (#686)&nbsp;: <code>tiles-style="muted|grey"</code> atténue le fond de carte&nbsp;: la classe <code>odv-fond-attenue</code> de <code>site.css</code> n'est plus nécessaire.</li>
-              <li><strong>LIM-009</strong> — <strong>0.22.0</strong> (#685)&nbsp;: composant <code>dsfr-data-map-legend</code>, dérivé du rendu réel de la couche — ce n'était donc pas une limite dure.</li>
-              <li><strong>AM-006</strong> — <strong>0.23.0</strong> (#679)&nbsp;: <code>dsfr-data-context-tags</code> reprend les filtres des facettes, et <code>clear-all</code> les efface tous.</li>
-              <li><strong>AM-004</strong> — <strong>0.24.0</strong> (#672)&nbsp;: agrégat <code>distinct</code> (<code>value="champ:distinct"</code>), délégué à Opendatasoft en <code>count(distinct …)</code>.</li>
-              <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>&nbsp;: le chargement complet passe par l'endpoint d'export du portail, en une requête et <em>sans</em> quitter le mode adaptateur. Le contournement par source générique a été retiré de cette page.</li>
-            </ul>
-          </div>
         </div>
       </div>
 
@@ -380,45 +413,26 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-map</code> + <code>-layer-group</code> + <code>-layer</code></td><td><code>dsfr-data-map</code> + <code>-map-layer</code></td><td>Équivalent, moins imbriqué</td></tr>
-            <tr><td><code>color-categories="{…}"</code></td><td><code>color-field</code> + <code>color-map</code></td><td>Transposition directe</td></tr>
-            <tr><td>fond <code>jawg.light</code></td><td><code>tiles="ign-plan"</code></td><td>Avantage&nbsp;: fond souverain par défaut</td></tr>
-            <tr><td>—</td><td><code>insets="drom"</code></td><td>Sans équivalent&nbsp;: gain net</td></tr>
-            <tr><td><code>ods-facets</code> (serveur)</td><td><code>dsfr-data-facets</code> (client, par choix)</td><td>Plus réactif&nbsp;; <code>server-facets</code> disponible si besoin</td></tr>
-            <tr><td>contexte ODS paginé à 100</td><td><code>fetch-mode="export"</code> (0.25.0&nbsp;; source générique auparavant)</td><td>1 requête au lieu de 31&nbsp;: 31&nbsp;s → 0,6&nbsp;s</td></tr>
-            <tr><td>—</td><td><code>bbox</code> sur la couche</td><td>Chargement par viewport&nbsp;: sans équivalent ici</td></tr>
-            <tr><td><code>series-breakdown</code> + <code>stacked</code></td><td><code>group-by</code> à 2 champs + <code>series-field</code></td><td>Équivalent</td></tr>
-            <tr><td><code>ods-filter-summary</code></td><td>—</td><td>Manquant avec <code>dsfr-data-facets</code></td></tr>
-            <tr><td>infobulle par défaut (9 champs)</td><td><code>&lt;template&gt;</code> à 9 champs</td><td>Équivalent, en panneau</td></tr>
-            <tr><td><code>ods-chart</code> <code>maxpoints=50</code> (8 régions sur 20)</td><td><code>dsfr-data-chart stacked</code> sans plafond</td><td>Complet ici, tronqué là-bas</td></tr>
-            <tr><td>recherche de lieu, sélecteur de couches</td><td>—</td><td>Sans équivalent</td></tr>
+            <tr><td><code>ods-dataset-context</code> (paginé)</td><td><code>dsfr-data-source fetch-mode="export"</code></td><td>Une requête pour tout le jeu</td></tr>
+            <tr><td><code>ods-facets</code></td><td><code>dsfr-data-facets</code> (client)</td><td>Équivalent, sur des champs nettoyés</td></tr>
+            <tr><td><code>ods-map</code> + couche catégorielle</td><td><code>dsfr-data-map</code> + <code>-map-layer</code> + <code>-map-legend</code></td><td>Équivalent, DROM en encarts</td></tr>
+            <tr><td>camembert <code>type_entreprise</code></td><td>barres empilées à 100 % par mesure</td><td>Remplacé&nbsp;: la répartition globale cachait l'écart</td></tr>
+            <tr><td>histogramme région × mesure (<code>maxpoints=50</code>, 8 régions sur 20)</td><td>barres triées par région, filtrées</td><td>Complet et lisible</td></tr>
+            <tr><td>—</td><td><code>share_percent</code> + <code>running_sum</code></td><td>Concentration du CO₂, absente de l'original</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction facile, et le résultat dépasse l'original.</strong> Sur un jeu de
-          données de cette taille, le modèle «&nbsp;un chargement, tout se dérive côté client&nbsp;» de
-          <code>dsfr-data</code> donne un tableau de bord plus vif que le va-et-vient serveur
-          d'Opendatasoft, avec en prime un fond de carte souverain, les DROM dans le cadre et
-          l'accessibilité des graphiques. Deux réserves à retenir&nbsp;: le plafond
-          <code>max-records</code>, silencieux et donc redoutable&nbsp;; et l'absence de rappel visuel
-          des filtres actifs.</p>
-        <p>Une leçon de méthode, aussi. Le chargement intégral avait d'abord été noté comme une
-          contrainte subie&nbsp;— c'était le réflexe de la reproduction à l'identique, qui transpose
-          le modèle d'Opendatasoft au lieu de choisir parmi ceux que <code>dsfr-data</code> offre.
-          La bibliothèque propose ici <em>trois</em> architectures (tout charger, agréger côté
-          serveur, charger par viewport)&nbsp;; se tromper d'architecture n'est pas une limite de
-          l'outil. Et la mesure a corrigé la correction&nbsp;: le bon levier pour cette page n'était
-          ni l'agrégation ni le viewport — une carte nationale a besoin de ses 3&nbsp;080 points —
-          mais un endpoint que je n'avais pas regardé. <strong>Chronométrer avant de conclure&nbsp;:
-          le poids ne coûtait rien, les allers-retours coûtaient tout.</strong> Consigné au
-          <a href="/retours">registre des retours</a> sous FP-002, AM-011 et PG-004.</p>
+        <p><strong>Le jeu racontait plus que la page d'origine.</strong> Compter les projets met les
+          PME au premier plan&nbsp;; le seul champ quantitatif du jeu, le CO₂ déclaré, montre que la
+          décarbonation se joue dans une poignée de sites de grands groupes. <code>dsfr-data</code>
+          l'établit sans une ligne de script&nbsp;; ce qui a coûté, c'est la donnée (un nombre en texte,
+          une barre oblique dans une modalité), pas la bibliothèque.</p>
       </div>
-    </div>
-  
-      </details></section>
+    </details>
+  </section>
 
 </main>
 
