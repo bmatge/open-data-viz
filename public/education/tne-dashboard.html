@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Territoires numériques éducatifs — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du tableau de bord des Territoires numériques éducatifs de data.education.gouv.fr : cinq jeux, quatre chiffres clés datés.">
+  <meta name="description" content="Recréation avec dsfr-data du tableau de bord des Territoires numériques éducatifs de data.education.gouv.fr : un participant aux formations sur quatre vient de l'Aisne, qui ne compte qu'un élève bénéficiaire sur dix-sept.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,208 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un bilan de déploiement : quatre compteurs cumulés, deux
+       camemberts, une carte SVG à quatre rangs de couleur, deux courbes qui
+       montent par construction. La reproduction précédente en corrigeait les
+       défauts un à un. Relu à l'API, le jeu des formations raconte autre chose :
+       l'Aisne, un département sur douze et 5,8 % des élèves bénéficiaires,
+       rassemble un participant sur quatre — et même à période égale, depuis que
+       les douze départements sont dans le jeu (février 2022), elle forme quatre
+       fois plus que la moyenne rapportée aux élèves.
+
+       Trois jeux de Réseau Canopé, lus SANS clé, tous minuscules :
+         · formations par département (460 lignes) — deux coupes : mars 2025, le
+           dernier mois publié, et février 2022, le premier mois où les douze
+           départements sont présents ;
+         · déploiement par département (12 lignes, juin 2025) — le dénominateur ;
+         · satisfaction (6 lignes) et audience de la plateforme (50 lignes).
+       ========================================================================== -->
+
+  <!-- ---------- Les formations : deux coupes du même jeu ----------
+       Le jeu est un CUMUL par département et par mois. Une ligne par
+       département à chaque date (vérifié : les doublons du jeu ne touchent que
+       2020-11 à 2021-01, jamais les deux dates retenues ici). -->
+  <dsfr-data-source id="f25" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-tne_personnels_formes_par_departement_secteur_type_etablissement"
+    fetch-mode="export" max-records="100"
+    where="date_de_saisie = date'2025-03-01'">
+  </dsfr-data-source>
+  <dsfr-data-source id="f22" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-tne_personnels_formes_par_departement_secteur_type_etablissement"
+    fetch-mode="export" max-records="100"
+    select="departement, nombre_total_de_participants as n22"
+    where="date_de_saisie = date'2022-02-01'">
+  </dsfr-data-source>
+
+  <!-- ---------- Le dénominateur : les élèves bénéficiaires (juin 2025) ----------
+       Même territoire, deux libellés : « Corse » (code 20) ici, « Corse-du-Sud »
+       dans le jeu des formations. Sans ce recodage la jointure perd une ligne,
+       sans erreur. -->
+  <dsfr-data-source id="dep" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-tne_suivi_deploiement_solutions_numeriques_dept"
+    fetch-mode="export" max-records="100"
+    select="departement, nombre_d_eleves, nombre_d_enseignants, date_des_donnees">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="dep-n" source="dep"
+    replace-fields="departement:Corse:Corse-du-Sud"></dsfr-data-normalize>
+
+  <!-- Clé unique des trois côtés (une ligne par département) : pas de 1-N. -->
+  <dsfr-data-join id="j1" left="f25" right="f22" on="departement" type="left"></dsfr-data-join>
+  <dsfr-data-join id="j2" left="j1" right="dep-n" on="departement" type="left"></dsfr-data-join>
+
+  <!-- Une ligne par département, toutes les grandeurs de la page. Les taux
+       sont arrondis pour l'affichage ; les sommes et les parts repartent
+       des valeurs brutes. -->
+  <dsfr-data-normalize id="t" source="j2"
+    compute="n = nombre_total_de_participants;
+             gain = n - n22;
+             deg = etablissement_1er_degre + etablissement_2nd_degre;
+             pilote = when departement = 'Aisne' or contains(departement, 'Oise') then 1 else 0;
+             groupe = when pilote = 1 then departement else 'Les dix autres départements';
+             ordre = when departement = 'Aisne' then 1 when pilote = 1 then 2 else 3;
+             pour1000 = round(1000 * n / nombre_d_eleves, 1);
+             gain1000 = round(1000 * gain / nombre_d_eleves, 1);
+             part_renseigne = round(100 * nombre_de_personnes_precisees / n, 1);
+             g_aisne = when departement = 'Aisne' then gain1000 else null;
+             g_autres = when departement = 'Aisne' then null else gain1000;
+             r_pilote = when pilote = 1 then part_renseigne else null;
+             r_autres = when pilote = 1 then null else part_renseigne;
+             n_aisne = when departement = 'Aisne' then n else 0;
+             el_aisne = when departement = 'Aisne' then nombre_d_eleves else 0;
+             gain_aisne = when departement = 'Aisne' then gain else 0;
+             prec_pil = pilote * nombre_de_personnes_precisees;
+             deg_pil = pilote * deg;
+             k = 'ensemble'">
+  </dsfr-data-normalize>
+
+  <!-- 1. Les deux parts, département par département. -->
+  <dsfr-data-query id="parts" source="t" group-by="departement"
+    aggregate="n:sum:nf, nombre_d_eleves:sum:ne, nf:share_percent:part_f, ne:share_percent:part_e"
+    order-by="nf:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="parts-r" source="parts" round="part_f:1, part_e:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="parts-t" source="parts-r"
+    rename="departement:Département | part_f:Part des participants (%) | part_e:Part des élèves bénéficiaires (%) | nf:Participants | ne:Élèves bénéficiaires"></dsfr-data-normalize>
+
+  <!-- Le résumé qui nourrit le chapô et les phrases de lecture. -->
+  <dsfr-data-query id="som" source="t" group-by="k"
+    aggregate="n:sum:n_tot, n_aisne:sum:n_a, nombre_d_eleves:sum:el_tot, el_aisne:sum:el_a,
+               gain:sum:g_tot, gain_aisne:sum:g_a, nombre_de_personnes_precisees:sum:prec_tot,
+               prec_pil:sum:prec_pil, deg:sum:deg_tot, deg_pil:sum:deg_pil,
+               etablissement_1er_degre:sum:e1_tot"></dsfr-data-query>
+  <dsfr-data-normalize id="som-c" source="som"
+    compute="pa = 100 * n_a / n_tot;
+             pe = 100 * el_a / el_tot;
+             r_a = 1000 * n_a / el_a;
+             r_tot = 1000 * n_tot / el_tot;
+             rg_a = 1000 * g_a / el_a;
+             rg_autres = 1000 * (g_tot - g_a) / (el_tot - el_a);
+             fois = rg_a / rg_autres;
+             p_prec = 100 * prec_tot / n_tot;
+             p_prec_pil = 100 * prec_pil / prec_tot;
+             p_deg_pil = 100 * deg_pil / deg_tot;
+             p1_tot = 100 * e1_tot / deg_tot">
+  </dsfr-data-normalize>
+
+  <!-- 2. À période égale : les participants gagnés depuis février 2022. -->
+  <dsfr-data-query id="gain-o" source="t" order-by="gain1000:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="gain-t" source="gain-o"
+    rename="departement:Département | gain1000:Participants gagnés pour 1 000 élèves bénéficiaires | gain:Participants gagnés de 02/2022 à 03/2025 | nombre_d_eleves:Élèves bénéficiaires"></dsfr-data-normalize>
+
+  <!-- 3. Qui renseigne le profil de ses participants. -->
+  <dsfr-data-query id="rens-o" source="t" order-by="part_renseigne:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="rens-t" source="rens-o"
+    rename="departement:Département | part_renseigne:Participants au profil renseigné (%) | nombre_de_personnes_precisees:Profils renseignés | n:Participants"></dsfr-data-normalize>
+  <dsfr-data-query id="grp" source="t" group-by="groupe, ordre"
+    aggregate="n:sum:n, nombre_de_personnes_precisees:sum:prec, etablissement_1er_degre:sum:e1, deg:sum:deg"
+    order-by="ordre:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="grp-c" source="grp"
+    compute="taux_r = 100 * prec / n; p1 = 100 * e1 / deg"></dsfr-data-normalize>
+
+  <!-- ---------- 4. Satisfaction : six critères, six mois ----------
+       Chaque mois publie un taux par critère et son nombre de répondants.
+       La moyenne sur la période est pondérée par les répondants (somme des
+       taux × répondants / somme des répondants) — jamais la moyenne des six
+       taux mensuels. -->
+  <dsfr-data-source id="sat" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-tne_indicateurs_satisfaction_formations"
+    fetch-mode="export" max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="sat-w" source="sat"
+    compute="k = 'ensemble';
+             w_contenu = contenu * nombre_de_repondants;
+             w_duree = duree * nombre_de_repondants;
+             w_logistique = logistique * nombre_de_repondants;
+             w_maitrise = maitrise_du_sujet_par_l_intervenant * nombre_de_repondants;
+             w_supports = qualite_des_supports * nombre_de_repondants;
+             w_transf = transferabilite * nombre_de_repondants">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="sat-s" source="sat-w" group-by="k"
+    aggregate="nombre_de_repondants:sum:rep, mois_concerne:count:nb_mois,
+               w_contenu:sum:s_contenu, w_duree:sum:s_duree, w_logistique:sum:s_logistique,
+               w_maitrise:sum:s_maitrise, w_supports:sum:s_supports, w_transf:sum:s_transf"></dsfr-data-query>
+  <dsfr-data-normalize id="sat-m" source="sat-s"
+    compute="m_maitrise = s_maitrise / rep; m_supports = s_supports / rep; m_logistique = s_logistique / rep;
+             m_contenu = s_contenu / rep; m_duree = s_duree / rep; m_transf = s_transf / rep;
+             ecart = m_maitrise - m_transf">
+  </dsfr-data-normalize>
+  <dsfr-data-unpivot id="sat-l" source="sat-m"
+    value-cols="m_maitrise:Maîtrise du sujet par l'intervenant, m_supports:Qualité des supports, m_logistique:Logistique, m_contenu:Contenu, m_duree:Durée, m_transf:Transférabilité en classe"
+    var-name="critere" value-name="taux"></dsfr-data-unpivot>
+  <dsfr-data-query id="sat-o" source="sat-l" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="sat-r" source="sat-o" round="taux:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="sat-t" source="sat-r"
+    rename="critere:Critère | taux:Satisfaits (%), moyenne pondérée par les répondants"></dsfr-data-normalize>
+
+  <!-- ---------- 5. Audience de la plateforme ----------
+       Compteurs CUMULÉS depuis octobre 2020 : le flux se retrouve par `diff`.
+       La ligne entièrement vide du jeu (un second « 2024-01 », tout à null) est
+       écartée À LA SOURCE : laissée, elle coupe la série et `diff` perd février
+       2024 avec elle (8 515 connexions). -->
+  <dsfr-data-source id="aud-all" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-tne_suivi_audiences"
+    fetch-mode="export" max-records="200"
+    select="mois_saisie, nombre_de_connexion_a_la_plateforme_tne"
+    where="nombre_de_connexion_a_la_plateforme_tne is not null">
+  </dsfr-data-source>
+  <dsfr-data-query id="aud-d" source="aud-all" order-by="mois_saisie:asc"
+    aggregate="nombre_de_connexion_a_la_plateforme_tne:diff:connex"></dsfr-data-query>
+  <dsfr-data-normalize id="aud-an" source="aud-d"
+    compute="an = year(mois_saisie); t1 = when month(mois_saisie) &lt;= 3 then connex else 0; k = 'ensemble'"></dsfr-data-normalize>
+  <!-- Années complètes seulement : 2020 commence en octobre, 2025 s'arrête en mars. -->
+  <dsfr-data-query id="aud-y" source="aud-an" where="an:gte:2021, an:lte:2024"
+    group-by="an" aggregate="connex:sum:connex" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="aud-y-t" source="aud-y"
+    rename="an:Année | connex:Connexions ajoutées dans l'année"></dsfr-data-normalize>
+  <dsfr-data-pivot id="aud-p" source="aud-an" row="k" column="an" value="connex" aggregate="sum"
+    column-format="c{value}"></dsfr-data-pivot>
+  <dsfr-data-pivot id="aud-q" source="aud-an" row="k" column="an" value="t1" aggregate="sum"
+    column-format="q{value}"></dsfr-data-pivot>
+  <dsfr-data-join id="aud-pq" left="aud-p" right="aud-q" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="aud-s" source="aud-pq"
+    compute="mult = c2023 / c2022; ev24 = 100 * (c2024 - c2023) / c2023; evq = 100 * (q2025 - q2024) / q2024"></dsfr-data-normalize>
+
+  <!-- La série mensuelle, filtrable par période (exploration). -->
+  <dsfr-data-source id="aud" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-tne_suivi_audiences"
+    fetch-mode="export" max-records="200"
+    select="mois_saisie, nombre_de_connexion_a_la_plateforme_tne, nombre_de_visiteurs_uniques_a_la_plateforme_tne"
+    where="nombre_de_connexion_a_la_plateforme_tne is not null">
+  </dsfr-data-source>
+  <dsfr-data-query id="aud-f" source="aud" order-by="mois_saisie:asc"
+    aggregate="nombre_de_connexion_a_la_plateforme_tne:diff:connex"></dsfr-data-query>
+  <dsfr-data-normalize id="aud-f-t" source="aud-f"
+    rename="mois_saisie:Mois | connex:Connexions du mois | nombre_de_connexion_a_la_plateforme_tne:Connexions cumulées depuis 10/2020 | nombre_de_visiteurs_uniques_a_la_plateforme_tne:Visiteurs uniques cumulés"></dsfr-data-normalize>
+
+  <!-- ---------- Exploration : le tableau des douze ---------- -->
+  <dsfr-data-query id="liste" source="t" order-by="pour1000:desc"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,227 +234,230 @@
       </div>
     </nav>
 
-    <h1>Territoires numériques éducatifs</h1>
+    <h1>Un participant sur quatre aux formations des Territoires numériques éducatifs vient de l'Aisne</h1>
 
-    <p class="fr-text--lead">
-      Lancé à la rentrée 2020 dans douze départements, le programme des
-      <a href="https://eduscol.education.fr/2662/territoires-numeriques-educatifs" target="_blank" rel="noopener external">Territoires
-      numériques éducatifs</a> vise à réduire la fracture numérique et à accélérer la
-      transformation numérique de l'École. Les cinq jeux de ce tableau de bord sont produits par
-      le <strong>Réseau Canopé</strong>.
-    </p>
-
-    <details class="fr-callout fr-icon-information-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Tous ces chiffres sont des cumuls depuis 2020</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        C'est la clé de lecture du tableau de bord, et l'original ne l'écrit nulle part : élèves
-        bénéficiaires, participants aux formations, connexions, visiteurs, pages vues — tout est
-        <strong>cumulé depuis le lancement</strong>. Toutes les courbes montent donc par
-        construction. Le seul indicateur non cumulé de la page, la durée moyenne d'une visite, est
-        aussi le seul qui redescende.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Les quatre chiffres clés ne sont pas contemporains</strong> : ils datent de juin
-        2025, mars 2025 et février 2025 selon le jeu. Chacun porte donc sa date, ce que l'original
-        ne fait pas non plus.
-      </p>
-    </details>
-
-    <details class="fr-callout fr-icon-error-warning-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Un cinquième de la page d'origine a disparu, sans un mot</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        La section « Détail du déploiement par solution numérique » — un sélecteur, un graphique et
-        une carte départementale — est <strong>effacée du DOM</strong> par un <code>ng-if</code>,
-        parce que la requête de métadonnées de son jeu répond <strong>404</strong>. Aucun message,
-        aucun bloc vide : la page a simplement l'air plus courte, et le seul indice est la requête
-        en échec dans l'onglet réseau.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        Le jeu <code>…_par_solution_et_dept</code> n'existe plus. Trois jeux lui ont succédé
-        (<code>…_1d_dept</code>, <code>…_2d_dept</code>,
-        <code>…_preparation_classe_ecole_inclusive_dept</code>) mais <strong>ils ne le remplacent
-        pas</strong> : la dimension « solution numérique » a disparu, il ne reste qu'une seule date,
-        et surtout <strong>les trois publient exactement les mêmes chiffres</strong> — 2 435 461
-        élèves et 16 667 enseignants pour chacun, c'est-à-dire le total tous degrés confondus.
-        Trois jeux étiquetés « 1er degré », « 2nd degré » et « préparation de la classe » servent
-        donc la même somme. Vérifié à l'API. C'est un défaut de production du portail, pas de la page.
-      </p>
-    </details>
-  </div>
-
-  <!-- ==========================================================================
-       Quatre jeux vivants sur les cinq de l'original. Tous minuscules
-       (12, 50, 6 et 460 lignes) : export complet partout, rien à arbitrer.
-       ========================================================================== -->
-
-  <dsfr-data-source id="tne-deploiement" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-tne_suivi_deploiement_solutions_numeriques_dept"
-    fetch-mode="export" max-records="100">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="tne-audiences" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-tne_suivi_audiences"
-    fetch-mode="export" max-records="200"
-    where="mois_saisie is not null">
-  </dsfr-data-source>
-
-  <!-- Le `where` cadre le mois de référence : sans lui, `contenu:max` prendrait
-       le meilleur des six mois publiés (93,4 % en septembre 2024) et non la
-       valeur du dernier (83,3 % en février 2025). Un agrégat lit les lignes
-       reçues : c'est à la source de dire lesquelles. -->
-  <dsfr-data-source id="tne-satisfaction" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-tne_indicateurs_satisfaction_formations"
-    fetch-mode="export" max-records="100"
-    where="mois_concerne = date'2025-02-01'">
-  </dsfr-data-source>
-
-  <!-- Les personnels formés du dernier mois publié (mars 2025). L'original filtre
-       ce même jeu de DEUX façons différentes sur DEUX blocs adjacents : la carte
-       par `where=date_de_saisie >= '2025-03-01'` SANS borne haute — elle
-       additionnera donc un mois de trop à la prochaine mise à jour — et le
-       camembert par `refine.date_de_saisie=2025-03`, qui est juste. Ici, une
-       borne exacte, une seule fois. -->
-  <dsfr-data-source id="tne-formes-src" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-tne_personnels_formes_par_departement_secteur_type_etablissement"
-    fetch-mode="export" max-records="1000"
-    where="date_de_saisie = date'2025-03-01'">
-  </dsfr-data-source>
-
-  <!-- ⚠️ Ce `dsfr-data-normalize` ne normalise rien : il est là UNIQUEMENT pour
-       s'interposer. Deux `dsfr-data-query` d'agrégat lisent ce jeu ; posées
-       directement sur la source, leur délégation serveur la réécrit pour tous
-       ses consommateurs et le KPI « participants » tombe à zéro. C'est BUG-009,
-       rencontré sur la page IPS Collèges, et repayé ici malgré la connaissance
-       du piège — parce que la page a trois consommateurs du même jeu et qu'on
-       ne voit pas lequel réécrit l'autre. Le composant vide est le prix à payer. -->
-  <dsfr-data-normalize id="tne-formes" source="tne-formes-src"></dsfr-data-normalize>
-
-  <div class="fr-container fr-mb-6w">
-    <dsfr-data-kpi-group cols="4" gap="md">
-      <dsfr-data-kpi source="tne-deploiement" value="nombre_d_eleves:sum" format="nombre"
-        heading="Élèves bénéficiaires" label="cumul au 06/2025"></dsfr-data-kpi>
-      <dsfr-data-kpi source="tne-formes" value="nombre_total_de_participants:sum" format="nombre"
-        heading="Participants aux formations" label="cumul au 03/2025"></dsfr-data-kpi>
-      <!-- `:last` — la DERNIÈRE valeur de la série dans l'ordre courant, la
-           source étant triée `mois_saisie:asc` en aval. Un `:max` aurait donné
-           95 672, le maximum mensuel (février 2025), et non 94 383, la valeur
-           du dernier mois publié : sur une série cumulée, les deux ne
-           coïncident même pas, parce que le nombre de visiteurs d'un mois n'est
-           pas cumulé alors que tout le reste de la page l'est.
-           ⚠️ `first` et `last` existent (vérifiés au source, `aggregations.ts`)
-           mais ne figurent PAS dans la référence de `value` servie par le MCP,
-           qui documente `sum`, `avg`, `min`, `max`, `count`, `distinct`,
-           `meta:total`, le ratio et `evolution`. Trouvés en lisant le code. -->
-      <dsfr-data-kpi source="tne-audiences-f" value="nombre_de_visiteurs_uniques_a_la_plateforme_tne:last"
-        format="nombre"
-        heading="Visiteurs uniques" label="plateforme TNE, dernier mois de la période"></dsfr-data-kpi>
-      <dsfr-data-kpi source="tne-satisfaction" value="contenu:max" format="pourcentage" decimals="1"
-        heading="Satisfaction du contenu" label="02/2025, sur 75 répondants"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    <p class="fr-text--xs fr-mt-1w">
-      La satisfaction est mesurée sur <strong>38 à 75 répondants</strong> selon le mois — un ordre
-      de grandeur que l'original n'affiche jamais à côté de son pourcentage.
-    </p>
-  </div>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">Les personnels formés, mars 2025</h2>
-
-    <div class="fr-alert fr-alert--warning fr-alert--sm fr-mb-3w">
-      <p class="fr-text--sm">
-        <strong>Les deux répartitions ci-dessous ne portent pas sur les 53 491 participants.</strong>
-        <strong>32 688</strong> d'entre eux — soit <strong>61 %</strong> — sont comptés en
-        « formés non connus » : ni leur degré, ni leur profil n'est renseigné. Les pourcentages
-        portent donc sur 15 362 et 20 803 personnes. L'original affiche ces deux camemberts
-        directement sous le compteur « 53 491 », sans le dire : ils se lisent inévitablement comme
-        une répartition de ce total.
-      </p>
-    </div>
-
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-4">
-        <h3 class="fr-h6">Par degré d'enseignement</h3>
-        <div class="odv-viz" data-code="Personnels formés par degré (hors non connus)">
-        <dsfr-data-chart id="g-degre" source="tne-degre" type="pie"
-          label-field="categorie" value-field="valeur"
-          databox databox-title="Personnels formés par degré (hors non connus)"
-          databox-source="Réseau Canopé — fr-en-tne_personnels_formes…, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-degre" source="tne-degre" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">Sur 15 362 personnes dont le degré est connu.</p>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <h3 class="fr-h6">Par profil</h3>
-        <div class="odv-viz" data-code="Personnels formés par profil (hors non connus)">
-        <dsfr-data-chart id="g-profil" source="tne-profil" type="pie"
-          label-field="categorie" value-field="valeur"
-          databox databox-title="Personnels formés par profil (hors non connus)"
-          databox-source="Réseau Canopé — fr-en-tne_personnels_formes…, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-profil" source="tne-profil" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">Sur 20 803 personnes dont le profil est connu.</p>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <h3 class="fr-h6">Ce qui est renseigné</h3>
-        <div class="odv-viz" data-code="Part des participants dont le détail est renseigné">
-        <dsfr-data-chart id="g-connu" source="tne-connu" type="pie"
-          label-field="categorie" value-field="valeur"
-          databox databox-title="Part des participants dont le détail est renseigné"
-          databox-source="Réseau Canopé — fr-en-tne_personnels_formes…, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-connu" source="tne-connu" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          Le graphique que l'original n'a pas, et qui conditionne la lecture des deux autres.
+    <!-- Le chapô est CALCULÉ sur les deux jeux. -->
+    <dsfr-data-repeat source="som-c">
+      <template>
+        <p class="fr-text--lead">
+          De novembre 2020 à mars 2025, les formations au numérique du programme des Territoires
+          numériques éducatifs (TNE) ont compté <strong>{{n_tot:number}} participants</strong>
+          dans ses douze départements. L'Aisne en rassemble <strong>{{pa:number:1}}&nbsp;%</strong>,
+          alors qu'elle ne compte que <strong>{{pe:number:1}}&nbsp;%</strong> des élèves
+          bénéficiaires du programme&nbsp;: {{r_a:number:1}} participants pour 1&nbsp;000 élèves,
+          contre {{r_tot:number:1}} dans l'ensemble des douze. Son avance de pionnière n'explique
+          pas tout&nbsp;: depuis février 2022, quand les douze départements sont dans le jeu, elle
+          forme encore <strong>{{fois:number:1}} fois plus</strong> que les onze autres, rapporté
+          à ses élèves.
         </p>
-      </div>
-    </div>
-
-    <h3 class="fr-h5">Les douze départements</h3>
-    <p class="fr-text--sm fr-mb-2w">
-      Une <strong>échelle continue</strong>, et non les quatre rangs de couleur de l'original :
-      l'Aisne (13 811) et la Corse-du-Sud (934) ne sont pas dans un rapport de un à quatre mais de
-      un à quinze.
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Lancé à la rentrée 2020 dans l'Aisne et le Val-d'Oise, étendu en 2021 à dix autres
+      départements, le programme
+      <a href="https://eduscol.education.fr/2662/territoires-numeriques-educatifs" target="_blank" rel="noopener external">TNE</a>
+      équipe écoles et collèges et forme leurs personnels au numérique. Les chiffres de cette page
+      sont des <strong>cumuls depuis le lancement</strong>, publiés par Réseau Canopé.
     </p>
-    <div class="odv-viz" data-code="Participants formés par département, cumul au 03/2025">
-    <dsfr-data-chart id="g-dept" source="tne-dept" type="bar" horizontal
-      label-field="departement" value-field="n" name='["Participants formés"]'
-      databox databox-title="Participants formés par département, cumul au 03/2025"
-      databox-source="Réseau Canopé — fr-en-tne_personnels_formes…, via data.education.gouv.fr"
-      databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-dept" source="tne-dept" table download></dsfr-data-a11y>
+
+    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
+        Réseau Canopé, via data.education.gouv.fr, lecture sans clé&nbsp;:
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-tne_personnels_formes_par_departement_secteur_type_etablissement/" target="_blank" rel="noopener external"><code>…_personnels_formes_par_departement…</code></a>
+        (participants aux formations, cumul mensuel par département, 460 lignes de novembre 2020 à
+        mars 2025)&nbsp;;
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-tne_suivi_deploiement_solutions_numeriques_dept/" target="_blank" rel="noopener external"><code>…_suivi_deploiement_solutions_numeriques_dept</code></a>
+        (élèves et enseignants bénéficiaires d'une solution numérique, une seule date&nbsp;: juin
+        2025)&nbsp;;
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-tne_indicateurs_satisfaction_formations/" target="_blank" rel="noopener external"><code>…_indicateurs_satisfaction_formations</code></a>
+        (six mois)&nbsp;;
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-tne_suivi_audiences/" target="_blank" rel="noopener external"><code>…_suivi_audiences</code></a>
+        (plateforme TNE, octobre 2020 à mars 2025).
+      </p>
+    </details>
+
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="f25" value="nombre_total_de_participants:sum" format="nombre"
+        heading="Participants aux formations"
+        label="cumul de novembre 2020 à mars 2025, douze départements"></dsfr-data-kpi>
+      <dsfr-data-kpi source="f25"
+        value="nombre_total_de_participants:sum{departement:eq:Aisne} / nombre_total_de_participants:sum"
+        format="pourcentage" decimals="1"
+        heading="viennent de l'Aisne"
+        label="un département sur douze, cumul à mars 2025"></dsfr-data-kpi>
+      <dsfr-data-kpi source="dep"
+        value="nombre_d_eleves:sum{departement:eq:Aisne} / nombre_d_eleves:sum"
+        format="pourcentage" decimals="1"
+        heading="des élèves bénéficiaires sont dans l'Aisne"
+        label="juin 2025, sur l'ensemble du programme"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. L'Aisne pèse quatre fois plus dans les formations que dans le programme</h2>
+    <dsfr-data-repeat source="som-c">
+      <template>
+        <p class="odv-lecture">L'Aisne rassemble <strong>{{pa:number:1}}&nbsp;% des
+          participants</strong> aux formations mais <strong>{{pe:number:1}}&nbsp;% des élèves
+          bénéficiaires</strong>. Les Bouches-du-Rhône, l'Isère et le Val-d'Oise, qui comptent le
+          plus d'élèves, forment moins que leur poids.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">Pour chaque département, deux parts du total des douze&nbsp;: celle des
+      participants aux formations (cumul à mars 2025) et celle des élèves bénéficiaires d'une
+      solution numérique (juin 2025). Une barre bleue plus longue que la grise&nbsp;: le département
+      forme plus que son poids dans le programme.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Part des participants et part des élèves bénéficiaires, par département">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-parts" source="parts-r" type="bar" horizontal
+        label-field="departement"
+        value-field="part_f:Part des participants aux formations (%)"
+        value-fields="part_e:Part des élèves bénéficiaires (%)"
+        color-map="Part des participants aux formations (%):#000091,Part des élèves bénéficiaires (%):#929292"
+        unit-tooltip="%"
+        databox databox-title="Part de chaque département dans les participants aux formations et dans les élèves bénéficiaires"
+        databox-source="Réseau Canopé — formations (cumul à 03/2025) et déploiement (06/2025), via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-parts" source="parts-t" table download
+        filename="tne-parts-par-departement.csv"
+        label-field="Département"
+        value-field="Part des participants (%), Part des élèves bénéficiaires (%), Participants, Élèves bénéficiaires"
+        description="Pour chacun des douze départements TNE, sa part dans le total des participants aux formations (cumul à mars 2025) et sa part dans le total des élèves bénéficiaires (juin 2025), triés par part des participants. L'Aisne rassemble environ un quart des participants pour moins de 6 % des élèves."></dsfr-data-a11y>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">L'audience de la plateforme</h2>
+    <!-- ---------- 2. La nuance : l'ancienneté ---------- -->
+    <h2 class="fr-h3">2. À période égale, l'avance de l'Aisne demeure&nbsp;: ce n'est pas qu'une affaire d'ancienneté</h2>
+    <dsfr-data-repeat source="som-c">
+      <template>
+        <p class="odv-lecture">L'Aisne et le Val-d'Oise sont dans le programme depuis 2020, les dix
+          autres depuis 2021. Mais de février 2022 à mars 2025, quand les douze sont suivis, l'Aisne
+          ajoute encore <strong>{{rg_a:number:1}} participants pour 1&nbsp;000 élèves
+          bénéficiaires</strong>, contre <strong>{{rg_autres:number:1}}</strong> pour les onze
+          autres réunis. Le Val-d'Oise, pionnier comme elle, est sous cette moyenne.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Participants gagnés de février 2022 à mars 2025, pour 1 000 élèves bénéficiaires">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-gain" source="gain-o" type="bar" horizontal stacked
+        label-field="departement"
+        value-field="g_aisne:Aisne" value-fields="g_autres:Autres départements"
+        color-map="Aisne:#000091,Autres départements:#929292"
+        databox databox-title="Participants aux formations gagnés de février 2022 à mars 2025, pour 1 000 élèves bénéficiaires"
+        databox-source="Réseau Canopé — formations (02/2022 et 03/2025) et déploiement (06/2025), via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-gain" source="gain-t" table download
+        filename="tne-participants-depuis-2022.csv"
+        label-field="Département"
+        value-field="Participants gagnés pour 1 000 élèves bénéficiaires, Participants gagnés de 02/2022 à 03/2025, Élèves bénéficiaires"
+        description="Participants aux formations ajoutés entre février 2022 et mars 2025, rapportés à 1 000 élèves bénéficiaires du programme, par département, du plus au moins élevé. L'Aisne est en tête, loin devant le Cher ; le Val-d'Oise, entré dans le programme en même temps qu'elle, est dans le bas du classement."></dsfr-data-a11y>
+    </div>
 
-    <!-- ⚠️ LE BUG LE PLUS COÛTEUX DE L'ORIGINAL, et il est reproductible.
-         Le jeu porte DEUX champs de type date : `annee` (premier au schéma) et
-         `mois_saisie`. Faute d'un `audiences-time-field`, l'`ods-timerange`
-         retombe sur le premier et le dit… en console. La requête part donc en
-         `q=annee:[…]`, jamais sur `mois_saisie`.
+    <!-- ---------- 3. La nuance : ce que les répartitions décrivent ---------- -->
+    <h2 class="fr-h3">3. Le «&nbsp;80&nbsp;% de premier degré&nbsp;» décrit surtout l'Aisne et le Val-d'Oise</h2>
+    <dsfr-data-repeat source="som-c">
+      <template>
+        <p class="odv-lecture">Seuls <strong>{{p_prec:number:1}}&nbsp;% des participants</strong>
+          ont un profil renseigné. Les deux départements pionniers fournissent
+          {{p_prec_pil:number:1}}&nbsp;% de ces profils, et <strong>{{p_deg_pil:number:1}}&nbsp;% de
+          ceux dont le degré est connu</strong>. La part du premier degré
+          ({{p1_tot:number:1}}&nbsp;% de ces derniers), que l'original affiche en camembert sous le
+          total des participants, est donc d'abord la leur.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-2w" data-code="Part des participants dont le profil est renseigné, par département">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-rens" source="rens-o" type="bar" horizontal stacked
+        label-field="departement"
+        value-field="r_pilote:Départements pionniers (2020)" value-fields="r_autres:Autres départements"
+        color-map="Départements pionniers (2020):#000091,Autres départements:#929292"
+        unit-tooltip="%"
+        databox databox-title="Part des participants aux formations dont le profil est renseigné, cumul à mars 2025"
+        databox-source="Réseau Canopé — fr-en-tne_personnels_formes_par_departement…, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-rens" source="rens-t" table download
+        filename="tne-profils-renseignes.csv"
+        label-field="Département"
+        value-field="Participants au profil renseigné (%), Profils renseignés, Participants"
+        description="Part des participants aux formations dont le profil (degré, statut) est renseigné, par département, cumul à mars 2025, de la plus haute à la plus basse. Le Val-d'Oise est en tête, suivi du Finistère et de l'Aisne ; dans les Bouches-du-Rhône, moins d'un participant sur dix a un profil renseigné."></dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="grp-c" key-field="groupe">
+      <template>
+        <p class="fr-text--sm fr-mb-1v"><strong>{{groupe}}</strong>&nbsp;: {{taux_r:number:1}}&nbsp;%
+          des {{n:number}} participants ont un profil renseigné&nbsp;; parmi ceux dont le degré est
+          connu, {{p1:number:1}}&nbsp;% viennent du premier degré.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w fr-mb-6w">Hors pionniers, le premier degré reste majoritaire,
+      mais moins nettement. Et sur des profils renseignés à moins d'un quart, rien ne dit que les
+      non-renseignés leur ressemblent&nbsp;: la répartition des participants par degré n'est
+      <strong>pas connue</strong>.</p>
 
-         Conséquence mesurée à l'audit : saisir « 01 juin 2023 » comme borne
-         basse donne `annee:[2023-06-01 TO …]` — et comme `annee` vaut
-         2023-01-01 pour TOUTE l'année 2023, l'année entière tombe hors plage.
-         Les graphiques repartent de janvier 2024. Un sélecteur au jour près qui
-         filtre à l'année près, et qui SUPPRIME les sept mois qu'on venait de
-         demander de garder.
+    <!-- ---------- 4. Ce qu'en disent les formés ---------- -->
+    <h2 class="fr-h3">4. Les formés saluent l'intervenant plus que ce qu'ils pourront en faire en classe</h2>
+    <dsfr-data-repeat source="sat-m">
+      <template>
+        <p class="odv-lecture">Sur les {{nb_mois}} mois publiés (de septembre 2024 à février 2025),
+          <strong>{{m_maitrise:number:1}}&nbsp;%</strong> des répondants se disent satisfaits de la
+          maîtrise du sujet par l'intervenant, contre <strong>{{m_transf:number:1}}&nbsp;%</strong>
+          pour la transférabilité en classe — {{ecart:number:1}} points d'écart. Ces taux reposent
+          sur <strong>{{rep}} réponses</strong> en tout.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-2w" data-code="Satisfaction des formés par critère">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-sat" source="sat-r" type="bar" horizontal
+        label-field="critere" value-field="taux:Satisfaits (%)"
+        x-min="0" x-max="100" unit-tooltip="%"
+        databox databox-title="Part des formés satisfaits, par critère, moyenne pondérée par les répondants"
+        databox-source="Réseau Canopé — fr-en-tne_indicateurs_satisfaction_formations, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-sat" source="sat-t" table download
+        filename="tne-satisfaction.csv"
+        label-field="Critère" value-field="Satisfaits (%), moyenne pondérée par les répondants"
+        description="Part des formés satisfaits pour six critères, moyenne des six mois publiés pondérée par le nombre de répondants de chaque mois, du critère le mieux noté au moins bien noté. La maîtrise du sujet par l'intervenant arrive en tête, la transférabilité en classe en dernier."></dsfr-data-a11y>
+    </div>
+    <p class="fr-text--sm fr-mb-6w">La maîtrise du sujet est en tête chacun des six mois. Le jeu ne
+      dit ni qui répond, ni à quelles formations&nbsp;: quelques dizaines de réponses par mois,
+      rapportées à des milliers de participants, ne font pas un échantillon représentatif.</p>
 
-         Ici la colonne est nommée : `field="mois_saisie"`. Le filtre pilote
-         aussi le KPI « visiteurs uniques » ci-dessus, qui lit le même jeu —
-         c'est le test qui distingue une reproduction d'un décalque. -->
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-3w">
+    <!-- ---------- 5. La plateforme ---------- -->
+    <h2 class="fr-h3">5. La plateforme a décollé en 2023, puis a cessé d'accélérer</h2>
+    <dsfr-data-repeat source="aud-s">
+      <template>
+        <p class="odv-lecture">La plateforme TNE a enregistré <strong>{{c2023:number}}
+          connexions</strong> en 2023, {{mult:number:1}} fois plus qu'en 2022&nbsp;; en 2024,
+          {{c2024:number}}, soit {{ev24:number:1}}&nbsp;% de plus seulement. Au premier trimestre
+          2025, {{q2025:number}} connexions, contre {{q2024:number}} un an plus tôt
+          ({{evq:number:1}}&nbsp;%).</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-4w" data-code="Connexions à la plateforme TNE ajoutées chaque année">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-an" source="aud-y" type="bar"
+        label-field="an" value-field="connex:Connexions ajoutées dans l'année"
+        y-min="0"
+        databox databox-title="Connexions à la plateforme TNE ajoutées chaque année, années complètes"
+        databox-source="Réseau Canopé — fr-en-tne_suivi_audiences, écart des cumuls de décembre calculé dans la page"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-an" source="aud-y-t" table download
+        filename="tne-connexions-par-an.csv"
+        label-field="Année" value-field="Connexions ajoutées dans l'année"
+        description="Connexions à la plateforme TNE ajoutées chaque année civile complète, de 2021 à 2024, retrouvées par différence du compteur cumulé publié. Le nombre bondit en 2023 puis se stabilise en 2024."></dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5">Explorer la série mois par mois</h3>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-2w">
       <div class="fr-col-12 fr-col-md-3">
         <div class="fr-input-group">
           <label class="fr-label" for="tne-de">Depuis le mois</label>
@@ -266,231 +471,127 @@
         </div>
       </div>
       <div class="fr-col-12 fr-col-md-6">
-        <p class="fr-text--xs fr-mt-4w">
-          Le filtre porte sur <code>mois_saisie</code>, la colonne nommée explicitement — pas sur
-          <code>annee</code>, que l'original choisit par défaut sans le dire.
-        </p>
+        <p class="fr-text--xs fr-mt-4w">Chaque barre est l'écart entre deux cumuls publiés. Le
+          premier mois de la période choisie n'a pas de barre&nbsp;: son écart avec le mois
+          précédent sort de la période. Août n&rsquo;est jamais publié&nbsp;: septembre porte les deux mois (et décembre 2020 porte novembre).</p>
       </div>
     </div>
-
-    <dsfr-data-context id="tne-ctx" sources="tne-audiences" url-sync>
+    <dsfr-data-context id="tne-ctx" sources="aud" url-sync>
       <dsfr-data-context-filter field="mois_saisie" operator="between"
         ui="tne-de tne-a" label="Période"></dsfr-data-context-filter>
     </dsfr-data-context>
-
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">Connexions et visiteurs uniques</h3>
-        <div class="odv-viz" data-code="Connexions et visiteurs uniques de la plateforme TNE">
-        <dsfr-data-chart id="g-audience" source="tne-audiences-f" type="line"
-          label-field="mois_saisie"
-          value-field="nombre_de_connexion_a_la_plateforme_tne"
-          value-field-2="nombre_de_visiteurs_uniques_a_la_plateforme_tne"
-          name='["Connexions","Visiteurs uniques"]'
-          databox databox-title="Connexions et visiteurs uniques de la plateforme TNE"
-          databox-source="Réseau Canopé — fr-en-tne_suivi_audiences, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-audience" source="tne-audiences-f" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          Deux séries, <strong>un seul axe</strong> et une légende — l'original superpose deux axes
-          Y sans légende. Ce sont des cumuls : la courbe monte par construction.
-        </p>
+    <div class="odv-viz fr-mb-6w" data-code="Connexions à la plateforme TNE, mois par mois">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-mois" source="aud-f" type="bar"
+        label-field="mois_saisie" value-field="connex:Connexions du mois"
+        databox databox-title="Connexions à la plateforme TNE, mois par mois"
+        databox-source="Réseau Canopé — fr-en-tne_suivi_audiences, écart entre cumuls calculé dans la page"
+        databox-download heading-level="4">
+      </dsfr-data-chart>
       </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">Durée moyenne d'une visite</h3>
-        <div class="odv-viz" data-code="Durée moyenne d'une visite sur la plateforme TNE, en minutes">
-        <dsfr-data-chart id="g-duree" source="tne-audiences-f" type="line"
-          label-field="mois_saisie"
-          value-field="duree_moyenne_d_une_visite_sur_la_plateforme_tne"
-          name='["Durée moyenne (min)"]'
-          unit-tooltip="min"
-          databox databox-title="Durée moyenne d'une visite sur la plateforme TNE, en minutes"
-          databox-source="Réseau Canopé — fr-en-tne_suivi_audiences, via data.education.gouv.fr"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-duree" source="tne-audiences-f" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          <strong>Le seul indicateur non cumulé de la page</strong>, et le seul qui redescende :
-          pic à 7,58 min en avril 2023, creux à 2,83 min en décembre 2020, 4,98 min en mars 2025.
-        </p>
-      </div>
+      <dsfr-data-a11y for="g-mois" source="aud-f-t" table download
+        filename="tne-connexions-par-mois.csv"
+        label-field="Mois" value-field="Connexions du mois, Connexions cumulées depuis 10/2020, Visiteurs uniques cumulés"
+        description="Connexions à la plateforme TNE ajoutées chaque mois, retrouvées par différence du compteur cumulé, sur la période choisie. Le premier mois de la période n'a pas de valeur ; septembre inclut août, jamais publié."></dsfr-data-a11y>
     </div>
 
-    <h3 class="fr-h6 fr-mt-4w">Le flux mensuel, retrouvé par différence</h3>
-    <div class="odv-viz" data-code="Connexions et visiteurs uniques par mois, écart avec le mois précédent">
-    <dsfr-data-chart id="g-flux" source="tne-audiences-f" type="bar"
-      label-field="mois_saisie"
-      value-field="nombre_de_connexion_a_la_plateforme_tne__diff"
-      value-field-2="nombre_de_visiteurs_uniques_a_la_plateforme_tne__diff"
-      name='["Connexions du mois","Visiteurs uniques du mois"]'
-      databox databox-title="Connexions et visiteurs uniques par mois, écart avec le mois précédent"
-      databox-source="Réseau Canopé — fr-en-tne_suivi_audiences, via data.education.gouv.fr ; écart calculé dans la page"
-      databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-flux" source="tne-audiences-f" table download></dsfr-data-a11y>
+    <!-- ---------- 6. Exploration : les douze départements ---------- -->
+    <h2 class="fr-h3">6. Les douze départements, tous les chiffres</h2>
+    <p class="fr-text--sm">Triez par colonne&nbsp;; l'export reprend les valeurs brutes.</p>
+    <dsfr-data-list source="liste"
+      columns="departement:Département, n:Participants 03/2025, pour1000:Pour 1 000 élèves, gain:Participants gagnés depuis 02/2022, gain1000:Gagnés pour 1 000 élèves, part_renseigne:Profil renseigné (%), nombre_d_eleves:Élèves bénéficiaires 06/2025, nombre_d_enseignants:Enseignants bénéficiaires 06/2025"
+      sort="pour1000:desc" export="csv" count-label="département"
+      caption="Participants aux formations, élèves et enseignants bénéficiaires, par département TNE">
+    </dsfr-data-list>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Les formations des Territoires numériques éducatifs ne sont pas
+        réparties comme le programme&nbsp;: l'Aisne en rassemble un quart pour moins d'un élève
+        bénéficiaire sur dix-sept, et garde son avance à période égale. Ce que les données ne
+        disent pas&nbsp;: si un participant est une personne ou une inscription, qui sont les trois
+        participants sur cinq dont le profil manque, ni ce que les formations changent en
+        classe.</p>
     </div>
-    <p class="fr-text--xs fr-mt-1w">
-      La même donnée que la courbe de gauche, <strong>dérivée</strong> : ce que chaque mois a
-      ajouté, au lieu du total depuis 2020. C'est la question qu'on pose naturellement à un
-      compteur cumulé, et elle est restée sans réponse jusqu'à la <strong>0.29</strong>
-      (<code>aggregate="…:diff"</code>, <a href="https://github.com/bmatge/dsfr-data/pull/799"
-      target="_blank" rel="noopener external">#799</a>). Octobre 2020, premier mois publié, n'a
-      pas de barre : son incrément est inconnu, et <code>diff</code> rend <code>null</code>
-      plutôt que zéro. Ni le tableau de bord d'origine ni le portail ne montrent cette vue.
-    </p>
-    <div class="fr-alert fr-alert--warning fr-alert--sm fr-mt-2w fr-mb-4w">
-      <p class="fr-text--sm">
-        <strong>Deux défauts du jeu que seule la vue dérivée fait voir.</strong> Une courbe cumulée
-        monte toujours&nbsp;: elle cache ce qui se passe entre deux points. Dès qu'on affiche les
-        écarts, deux anomalies sautent aux yeux — et aucune ne se voit sur les deux graphiques
-        ci-dessus.
-      </p>
-      <ul class="fr-text--sm">
-        <li><strong>Deux barres négatives sur les visiteurs uniques</strong>, en 09/2024
-          (80&nbsp;549 → 79&nbsp;166) et en 03/2025 (95&nbsp;672 → 94&nbsp;383). Un compteur
-          cumulé de visiteurs <em>uniques</em> ne peut pas décroître&nbsp;: ces deux mois sont des
-          révisions à la baisse du producteur. L'encadré en tête de page annonce pourtant que
-          «&nbsp;tous ces chiffres sont des cumuls depuis 2020&nbsp;»&nbsp;: c'est vrai de la
-          forme, pas de la série.</li>
-        <li><strong>Le mois 01/2024 est publié deux fois</strong>, une fois avec ses valeurs
-          (147&nbsp;145 connexions) et une fois <em>entièrement vide</em> — vérifié à l'API, 50
-          lignes pour 49 mois. La ligne vide coupe la série&nbsp;: <code>diff</code> rend
-          <code>null</code> pour elle <em>et</em> pour la suivante, d'où le trou de deux barres au
-          début de 2024. Le défaut est dans le jeu, pas dans le calcul&nbsp;; les courbes cumulées
-          le traversaient sans rien montrer.</li>
-      </ul>
-    </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>« Participants », pas personnes.</strong> Le jeu ne dit pas si un même
+          enseignant formé deux fois compte deux fois. Dans l'Aisne, 13&nbsp;811 participants pour
+          1&nbsp;381 enseignants bénéficiaires (vérifié à l'API, 2026-09-26)&nbsp;: dix par
+          enseignant, ce qui fait pencher vers des inscriptions. La comparaison entre départements
+          reste valable si la règle de comptage est la même partout — ce que le jeu ne garantit
+          pas.</li>
+        <li><strong>Le dénominateur est le programme, pas le département.</strong> Les « élèves
+          bénéficiaires » sont ceux qu'une solution numérique TNE touche en juin 2025, pas tous les
+          élèves du département. Ils mesurent la taille du programme sur place. Les deux jeux ne
+          sont pas à la même date (mars et juin 2025).</li>
+        <li><strong>Deux coupes seulement du jeu des formations.</strong> Mars 2025, dernier mois
+          publié au 2026-09-26, et février 2022, premier mois où les douze départements
+          apparaissent. Avant 2022, le jeu porte plusieurs lignes par mois pour l'Aisne et le
+          Val-d'Oise (jusqu'à quatre, de novembre 2020 à janvier 2021), et leur total recule d'un
+          mois à l'autre&nbsp;: la série d'avant 2022 n'est pas un cumul fiable et n'est pas
+          montrée. Si le jeu est mis à jour, les deux dates de la page sont à revoir.</li>
+        <li><strong>La Corse.</strong> Le jeu du déploiement écrit « Corse » (code 20), celui des
+          formations « Corse-du-Sud »&nbsp;; la page les apparie. Si le déploiement couvre toute
+          l'île, le taux de la Corse-du-Sud est sous-estimé.</li>
+        <li><strong>La plateforme.</strong> Le jeu publie un second « janvier 2024 » entièrement
+          vide&nbsp;: il est écarté, sinon il coupe la série. Le compteur de visiteurs
+          <em>uniques</em> recule deux fois (septembre 2024, mars 2025), impossible pour un cumul
+          strict&nbsp;: la page ne l'utilise pas pour mesurer une croissance (LIM-016).</li>
+        <li><strong>Ce que le portail a perdu.</strong> Le détail « par solution numérique » de
+          l'original reposait sur un jeu qui répond 404. Les trois jeux
+          <code>…_1d_dept</code>, <code>…_2d_dept</code> et
+          <code>…_preparation_classe_ecole_inclusive_dept</code> qui semblent lui succéder publient
+          chacun le même total que le jeu agrégé (2&nbsp;435&nbsp;461 élèves, vérifié à l'API le
+          2026-09-26)&nbsp;: ils ne le remplacent pas.</li>
+        <li><strong>Angles écartés.</strong> La carte des douze départements (douze valeurs
+          dispersées se lisent mieux triées)&nbsp;; la durée moyenne d'une visite (elle varie sans
+          rien dire du programme)&nbsp;; le jeu des volumes horaires de formation, que l'original
+          n'utilise pas et qui mériterait sa propre page.</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- ================= Le pipeline de dérivation ================= -->
+  <!-- ====================== Analyse ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — Territoires numériques éducatifs</h2>
 
-  <!-- `diff` (#775, livré en 0.29.0) : l'écart de chaque ligne avec la
-       précédente, calculé APRÈS `order-by`, jamais délégué. C'est l'inverse de
-       `running_sum` (0.27.0), et c'est le sens qui manquait ici — la page reçoit
-       des compteurs DÉJÀ cumulés (constat AM-068). La première ligne vaut `null`,
-       jamais 0 : octobre 2020 est le premier mois publié, son incrément est
-       inconnu, pas nul. L'agrégat ajoute une colonne `…__diff` sans toucher aux
-       lignes : les deux graphiques de cumul ci-dessus lisent la même query. -->
-  <dsfr-data-query id="tne-audiences-f" source="tne-audiences"
-    order-by="mois_saisie:asc"
-    aggregate="nombre_de_connexion_a_la_plateforme_tne:diff, nombre_de_visiteurs_uniques_a_la_plateforme_tne:diff"></dsfr-data-query>
-
-  <dsfr-data-query id="tne-dept" source="tne-formes" group-by="departement"
-    aggregate="nombre_total_de_participants:sum:n" order-by="n:desc"></dsfr-data-query>
-
-  <!-- Les trois camemberts. Le jeu est en WIDE : une colonne par modalité
-       (`etablissement_1er_degre`, `etablissement_2nd_degre`, …). Il faut une
-       ligne unique portant les sommes, puis la déplier en long.
-
-       `limit="1"` sur la query : le piège maison « `select` agrégé sans
-       `group_by` renvoie la valeur répétée une fois par ligne de page ».
-       Ici l'agrégat est calculé côté client sur les 12 lignes du mois, donc
-       une seule ligne sort — mais le `limit` reste la ceinture.
-
-       `dsfr-data-unpivot value-cols` avec alias inline `colonne:Libellé`
-       (#668) : les libellés lisibles sont écrits là, pas dans un `rename`. -->
-  <dsfr-data-query id="tne-totaux" source="tne-formes"
-    aggregate="etablissement_1er_degre:sum:d1, etablissement_2nd_degre:sum:d2, profil_stagiaire_enseignant:sum:p1, profil_stagiaire_formateurs_cadres_personnel_de_l_en:sum:p2, formes_non_connus:sum:nc, nombre_total_de_participants:sum:tot"
-    limit="1"></dsfr-data-query>
-
-  <dsfr-data-unpivot id="tne-degre" source="tne-totaux"
-    value-cols="d1:Premier degré, d2:Second degré"
-    var-name="categorie" value-name="valeur"></dsfr-data-unpivot>
-
-  <dsfr-data-unpivot id="tne-profil" source="tne-totaux"
-    value-cols="p1:Professeurs, p2:Formateurs et cadres"
-    var-name="categorie" value-name="valeur"></dsfr-data-unpivot>
-
-  <dsfr-data-unpivot id="tne-connu" source="tne-totaux-connu"
-    value-cols="connus:Détail renseigné, nc:Formés non connus"
-    var-name="categorie" value-name="valeur"></dsfr-data-unpivot>
-
-  <dsfr-data-normalize id="tne-totaux-connu" source="tne-totaux"
-    compute="connus = tot - nc"></dsfr-data-normalize>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — tableau de bord TNE — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/tne_dashboard/" target="_blank" rel="noopener external">/pages/tne_dashboard/</a>,
-        page AngularJS à <strong>cinq jeux</strong> — le tableau de bord multi-sources du portail.
-        Fiche d'audit : <code>docs/portail-education/tne-dashboard.md</code>.
+        <a href="https://data.education.gouv.fr/pages/tne_dashboard/" target="_blank" rel="noopener external">/pages/tne_dashboard/</a>
+        — quatre compteurs, deux camemberts, une carte SVG, deux courbes cumulées. Fiche d'audit :
+        <code>docs/portail-education/tne-dashboard.md</code>. Recréée le 2026-09-26 en page
+        éditoriale&nbsp;; la reproduction précédente, bloc pour bloc, est remplacée.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le repli wide → long, en une balise.</strong> Les répartitions de
-              l'original sont des camemberts construits à la main à partir de colonnes parallèles.
-              <code>dsfr-data-unpivot value-cols="d1:Premier degré, d2:Second degré"</code> les
-              déplie et <em>écrit les libellés au passage</em> (alias inline, #668) : pas de
-              <code>rename</code>, pas de table de correspondance.</li>
-            <li><strong>Le filtre temporel qui nomme sa colonne.</strong> Deux
-              <code>&lt;input type="month"&gt;</code> et un
-              <code>dsfr-data-context-filter field="mois_saisie" operator="between"</code>.
-              L'attribut <code>ui</code> accepte deux ids pour un intervalle. Et le filtre pilote
-              aussi le KPI « visiteurs uniques », qui lit le même jeu — c'est le test qui distingue
-              une reproduction d'un décalque, et il tient parce que le KPI est simplement branché
-              en aval.</li>
-            <li><strong>Cinq sources, aucun ordonnancement à écrire.</strong> L'original enchaîne
-              dix-sept requêtes dont <strong>trois sont du gaspillage de double passe</strong> :
-              une interpolation évaluée avant que sa donnée n'arrive envoie
-              <code>where=date_de_saisie &gt;= '-01'</code>, le serveur répond <strong>503</strong>,
-              puis la requête est rejouée. Ce genre de course n'existe pas ici : chaque composant
-              attend sa source.</li>
-            <li><strong>Le troisième camembert.</strong> Celui qui manque à l'original — la part
-              des participants dont le détail est renseigné — coûte une expression
-              <code>compute</code> (<code>connus = tot - nc</code>) et un troisième
-              <code>unpivot</code>.</li>
+            <li><strong>Deux jeux, un dénominateur.</strong> Deux <code>dsfr-data-join</code> sur
+              le département et un <code>compute</code> donnent taux, écarts et parts&nbsp;;
+              <code>share_percent</code> fait les deux répartitions sans total écrit en dur.</li>
+            <li><strong>À période égale.</strong> Une seconde source sur le même jeu, coupée à
+              février 2022 par son <code>where</code>, suffit à neutraliser l'ancienneté.</li>
+            <li><strong>Dé-cumuler.</strong> <code>aggregate="…:diff"</code> puis un
+              <code>group-by</code> sur <code>year()</code> donnent les connexions de chaque année
+              à partir d'un compteur cumulé.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le cumul manquait dans les deux sens ; un seul a été comblé.</strong>
-              Toutes les séries de cette page sont des compteurs cumulés depuis 2020. Deux
-              opérations manquaient au moment de l'écrire — cumuler une série qui ne l'est pas,
-              et l'inverse, retrouver le flux mensuel en soustrayant la ligne précédente.
-              <strong>Le premier sens a été livré le jour même</strong> :
-              <code>aggregate="montant:running_sum"</code> (#738, 0.27.0), calculé après
-              <code>order-by</code>, toujours côté client — aucune API ne le traduit — avec un
-              avertissement console si l'<code>order-by</code> manque, où le résultat n'aurait
-              pas de sens. C'est ce que le tableau de bord d'origine fait en <strong>douze
-              expressions de template</strong>. <strong>Le second sens a été livré en
-              0.29.0</strong> (<code>aggregate="champ:diff"</code>,
-              <a href="https://github.com/bmatge/dsfr-data/pull/799" target="_blank"
-              rel="noopener external">#799</a>, constat AM-068) : mêmes règles que le cumul —
-              après <code>order-by</code>, jamais délégué —, et la première ligne à
-              <code>null</code> plutôt qu'à zéro, un incrément inconnu n'étant pas un incrément
-              nul. Le graphique « flux mensuel » ci-dessus en sort. <strong>Ce qu'il a révélé
-              vaut mieux que la fonction elle-même</strong> : deux baisses d'un compteur de
-              visiteurs <em>uniques</em> — impossibles sur un cumul, donc des révisions — et un
-              mois publié en double dont l'exemplaire vide coupe la série. Les deux vivaient
-              depuis le lot 14 sous des courbes qui montaient bien sagement. Une série cumulée
-              ne se relit pas ; sa dérivée, si.</li>
-            <li><strong>La carte départementale n'a pas été refaite en carte.</strong> L'original
-              dessine un SVG de douze départements en aplats de quatre rangs de couleur, contours
-              blancs filaires — illisible comme carte, et faux comme échelle (l'Aisne et la
-              Corse-du-Sud sont dans un rapport de un à quinze, pas de un à quatre). Le jeu ne porte
-              <strong>aucun code INSEE</strong>, seulement un libellé de département : une
-              choroplèthe demanderait une jointure sur les libellés. Sur douze valeurs, un
-              graphique en barres trié dit la même chose plus honnêtement — <strong>écart assumé,
-              pas manque</strong>.</li>
-            <li><strong>Un jeu sur cinq est mort, et il a fallu enquêter pour l'écrire.</strong>
-              Le 404 ne prouve rien (leçon LIM-006) : le catalogue TNE compte huit jeux, dont quatre
-              que la page ne connaît pas. Trois ressemblent à l'éclatement du jeu perdu — mais ils
-              publient <strong>tous le même total</strong>, celui du jeu agrégé. Constater qu'un
-              remplaçant n'en est pas un a demandé quatre requêtes et une comparaison de sommes.
-              Aucune bibliothèque n'aide à cela ; c'est ce qui sépare une reproduction d'un décalque.</li>
+            <li><strong>Un même territoire, deux libellés.</strong> « Corse » et « Corse-du-Sud »
+              ne s'apparient pas, sans erreur&nbsp;: un <code>replace-fields</code> le règle, mais
+              seule une comparaison des deux listes à l'API l'a montré.</li>
+            <li><strong>La ligne vide de 2024.</strong> Filtrée à la source plutôt que traversée
+              par <code>diff</code>, qui aurait perdu février 2024 et faussé le total de
+              l'année.</li>
           </ul>
         </div>
       </div>
@@ -502,37 +603,26 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>5 <code>ods-dataset-context</code> imbriqués</td><td>4 <code>dsfr-data-source</code> (le cinquième jeu est mort)</td><td>Équivalent, sans course entre requêtes</td></tr>
-            <tr><td><code>ods-timerange</code> sans <code>time-field</code> → filtre sur la mauvaise colonne</td><td><code>dsfr-data-context-filter field="mois_saisie" operator="between"</code></td><td>Meilleur : la colonne est nommée, le bug disparaît</td></tr>
-            <tr><td>camemberts construits à la main sur des colonnes parallèles</td><td><code>dsfr-data-unpivot value-cols="col:Libellé"</code></td><td>Nettement plus simple</td></tr>
-            <tr><td>4 KPI sans date affichée</td><td><code>dsfr-data-kpi</code> + date dans le libellé</td><td>Équivalent en technique, corrigé en énoncé</td></tr>
-            <tr><td>SVG départemental à 4 rangs de couleur</td><td><code>dsfr-data-chart type="bar"</code> trié</td><td><strong>Écart assumé</strong> : pas de code INSEE dans le jeu, et 12 valeurs se lisent mieux en barres</td></tr>
-            <tr><td>cumul par 12 expressions de template</td><td><code>aggregate="…:running_sum"</code></td><td>Équivalent depuis 0.27.0 (#738) — mais l'opération inverse (dé-cumuler) reste absente</td></tr>
-            <tr><td><code>ng-if</code> qui efface une section sur un 404</td><td>un encadré qui le dit</td><td>Meilleur : le silence délibéré est devenu un signal de panne invisible</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code>, <code>url-sync</code>, 3ᵉ camembert</td><td>Sans équivalent côté Opendatasoft</td></tr>
+            <tr><td>5 <code>ods-dataset-context</code> imbriqués</td><td>5 <code>dsfr-data-source</code> sur 4 jeux vivants</td><td>Équivalent</td></tr>
+            <tr><td>camemberts sur colonnes parallèles</td><td><code>compute</code> + <code>group-by</code> par groupe de départements</td><td>Meilleur : la composition des répartitions est dite</td></tr>
+            <tr><td>carte SVG à 4 rangs de couleur</td><td>barres triées, rapportées aux élèves (<code>dsfr-data-join</code>)</td><td>Meilleur : un taux au lieu d'un volume</td></tr>
+            <tr><td>cumul en 12 expressions de template</td><td><code>aggregate="…:diff"</code> + <code>year()</code></td><td>Meilleur : le flux au lieu du cumul</td></tr>
+            <tr><td><code>ods-timerange</code> sur la mauvaise colonne</td><td><code>dsfr-data-context-filter field="mois_saisie" operator="between"</code></td><td>Meilleur : la colonne est nommée</td></tr>
+            <tr><td>—</td><td><code>share_percent</code>, <code>dsfr-data-pivot</code>, <code>dsfr-data-repeat</code>, <code>dsfr-data-a11y</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong> pour la mécanique — cinq jeux, un filtre
-          temporel, trois répartitions et deux séries se déclarent sans une ligne de JavaScript, et
-          le bug le plus coûteux de l'original (un sélecteur au jour près qui filtre à l'année près
-          et efface ce qu'on demande de garder) disparaît en nommant une colonne. Mais c'est la page
-          du lot qui bute sur un <strong>vrai manque</strong>, et pas un manque de confort.
-          Écrite le matin, elle constatait qu'<em>on ne peut ni cumuler, ni dé-cumuler</em> ;
-          le premier sens a été livré dans la journée (<code>running_sum</code>, 0.27.0).
-          <strong>Le second reste ouvert</strong> — et sur un tableau de bord dont
-          <em>toutes</em> les métriques sont déjà des cumuls, c'est justement celui qu'il
-          faudrait. Le reste du travail n'a pas été technique : il
-          a consisté à écrire ce que l'original tait, à savoir que 61 % de ses camemberts sont hors
-          champ, que ses quatre chiffres clés ne sont pas de la même date, et qu'un cinquième de sa
-          page a disparu.</p>
+        <p>La bibliothèque n'a opposé aucune résistance&nbsp;; <strong>le travail a été de
+          rapporter les volumes au programme</strong>. L'original et sa reproduction montraient
+          l'Aisne en tête des formations sans dire qu'elle est septième en élèves, et deux
+          camemberts qui décrivaient surtout deux départements sur douze.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 
@@ -541,11 +631,7 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<!-- Bundle `core` (446 Ko) et non `esm` (551 Ko) : cette page n'a aucune
-     <dsfr-data-map> Leaflet. Verifie le 2026-09-19 sur les noms d'elements du
-     paquet publie 0.31.0 : `core` definit tout ce que la page emploie, les
-     cartes DSFR Chart (map-chart) comprises ; il ne lui manque que les enfants
-     de la carte Leaflet (map-layer, map-popup, map-legend, map-inset...). -->
+<!-- Bundle `core` : la page n'a aucune carte Leaflet. -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>

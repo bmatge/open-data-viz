@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FEI — projets européens sur les données — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la cartographie éditoriale de France Éducation international : 44 projets européens sur la littératie des données, et quatre colonnes de suivi interne publiées en open data.">
+  <meta name="description" content="Recréation avec dsfr-data de la cartographie de France Éducation international : la littératie des données se construit en Europe par consortiums, mais la France y figure surtout par ses propres initiatives nationales.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,80 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un catalogue filtrable de 44 fiches, sans un seul constat.
+       La reproduction précédente en comptait les pays et les thèmes. Relu à
+       l'API, le jeu dit autre chose que « Allemagne 15, Italie 13 » : la
+       France est le seul grand contributeur présent SURTOUT par des initiatives
+       nationales (7 de ses 11 entrées), alors que l'Espagne (12), le Portugal (9)
+       et la Grèce (8) n'y figurent que par des consortiums européens.
+
+       Une seule source (44 lignes, un export). En API v2.1, `pays`, `theme` et
+       `public_cible` arrivent en tableaux JSON : ni split ni découpage.
+       `select` écarte les quatre colonnes de suivi interne du producteur
+       (initiales d'agents, dates de relance) : la page ne les télécharge pas.
+       ========================================================================== -->
+
+  <dsfr-data-source id="ini" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-initiatives_donnees_europe"
+    fetch-mode="export" max-records="200"
+    select="initiative_projet, pays, type_de_projet_national_europeen, insititution_s, financement, theme, public_cible, descriptif_fr, source">
+  </dsfr-data-source>
+
+  <!-- Fusion des graphies EN AMONT de tout (élément par élément sur un tableau
+       depuis 0.29), puis indicateurs 0/1 : leur moyenne est une PROPORTION de
+       projets, pas une moyenne de taux. -->
+  <dsfr-data-normalize id="ini-n" source="ini"
+    replace-fields="pays:slovénie:Slovénie | pays:Royaume-Uni / Angleterre:Royaume-Uni | pays:Royaume-Uni / Ecosse:Royaume-Uni | public_cible:citoyens /grand public:citoyens / grand public | public_cible:cadres educatifs:cadres éducatifs"
+    compute="eu = when type_de_projet_national_europeen = 'européen' then 1 else 0;
+             nat = when type_de_projet_national_europeen = 'national' then 1 else 0;
+             type_lib = when type_de_projet_national_europeen = 'européen' then 'Projets européens' else 'Initiatives nationales';
+             nb_pays = len(pays);
+             ens = when public_cible = 'enseignants' then 1 else 0;
+             elv = when public_cible = 'élèves' then 1 else 0;
+             gp = when public_cible = 'citoyens / grand public' then 1 else 0;
+             k = 'tous'">
+  </dsfr-data-normalize>
+
+  <!-- Le recensement en un rang. -->
+  <dsfr-data-query id="q-tot" source="ini-n" group-by="k"
+    aggregate="k:count:n, eu:sum:n_eu, nat:sum:n_nat">
+  </dsfr-data-query>
+
+  <!-- Par pays : une ligne par pays cité (explode), projets européens et
+       nationaux séparés. Chaque initiative nationale ne cite qu'un pays. -->
+  <dsfr-data-query id="q-pays" source="ini-n" explode="pays" group-by="pays"
+    aggregate="pays:count:projets, eu:sum:n_eu, nat:sum:n_nat"
+    order-by="projets:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="q-pays-n" source="q-pays"
+    compute="surtout_nat = when n_nat &gt; n_eu then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="q-fr" source="q-pays-n" where="pays:eq:France"></dsfr-data-query>
+  <dsfr-data-query id="q-surtout-nat" source="q-pays-n" where="surtout_nat:eq:1" order-by="projets:desc"></dsfr-data-query>
+  <dsfr-data-query id="q-eu-seul" source="q-pays-n" where="n_nat:eq:0" order-by="projets:desc" limit="3"></dsfr-data-query>
+  <dsfr-data-normalize id="q-pays-t" source="q-pays"
+    rename="pays:Pays | n_eu:Projets européens | n_nat:Initiatives nationales | projets:Total"></dsfr-data-normalize>
+
+  <!-- Qui portent les initiatives nationales (une ligne = un pays : partition). -->
+  <dsfr-data-query id="q-nat" source="ini-n" where="type_de_projet_national_europeen:eq:national"></dsfr-data-query>
+  <dsfr-data-query id="q-eu" source="ini-n" where="type_de_projet_national_europeen:eq:européen"></dsfr-data-query>
+
+  <!-- Publics : part des projets de chaque type qui visent un public donné. -->
+  <dsfr-data-query id="q-pub" source="ini-n" group-by="type_lib"
+    aggregate="k:count:n, ens:avg:ens, elv:avg:elv, gp:avg:gp" order-by="type_lib:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="q-pub-p" source="q-pub"
+    compute="ens_p = round(ens * 100, 0); elv_p = round(elv * 100, 0); gp_p = round(gp * 100, 0)">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="q-pub-t" source="q-pub-p"
+    rename="type_lib:Type de projet | n:Projets | ens_p:Visent les enseignants (%) | elv_p:Visent les élèves (%) | gp_p:Visent les citoyens et le grand public (%)"></dsfr-data-normalize>
+
+  <!-- Les initiatives françaises, en toutes lettres. -->
+  <dsfr-data-query id="q-fr-nat" source="ini-n"
+    where="pays:eq:France, type_de_projet_national_europeen:eq:national"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,101 +106,155 @@
       </div>
     </nav>
 
-    <h1>La littératie des données en Europe : 44 projets</h1>
+    <h1>Littératie des données&nbsp;: l'Europe avance en consortium, la France surtout chez elle</h1>
 
-    <p class="fr-text--lead">
-      France Éducation international, avec l'IIPE-UNESCO, a recensé
-      <strong>44 projets</strong> européens et nationaux portant sur les données en éducation —
-      <strong>24 projets européens</strong> et <strong>20 initiatives nationales</strong>. Ils
-      couvrent <strong>33 pays</strong> et <strong>22 thèmes</strong>, dominés par la
-      <strong>littératie des données</strong> (28 projets sur 44). L'Allemagne (15), l'Italie
-      (13), l'Espagne (12) et la France (11) en sont les points d'appui.
-    </p>
+    <!-- Le chapô est CALCULÉ. -->
+    <dsfr-data-repeat source="q-tot">
+      <template>
+        <p class="fr-text--lead fr-mb-2w">
+          France Éducation international (FEI), avec l'IIPE-UNESCO, a recensé
+          <strong>{{n}} projets</strong> qui apprennent à lire, produire ou utiliser des données
+          en éducation&nbsp;: <strong>{{n_eu}} projets européens</strong>, menés par des
+          consortiums de plusieurs pays, et <strong>{{n_nat}} initiatives nationales</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="q-fr">
+      <template>
+        <p class="fr-text--lead">
+          La France y figure {{projets}} fois, mais <strong>{{n_nat}} de ces entrées sont des
+          initiatives nationales</strong> et {{n_eu}} seulement des partenariats européens —
+          l'inverse de ses voisins, que le recensement ne voit presque qu'en consortium.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-initiatives_donnees_europe/" target="_blank" rel="noopener external"><code>fr-en-initiatives_donnees_europe</code></a>
-        — 44 lignes, 13 champs, Licence Ouverte 2.0, lu sans clé. Le jeu <strong>n'a pas de
-        titre</strong> : le champ <code>title</code> n'a jamais été rempli, il s'affiche donc au
-        catalogue sous son identifiant technique. Et un de ses champs porte une coquille gravée
-        au schéma : <code>insititution_s</code>, avec trois <em>i</em> et sans le <em>t</em> de
-        « institutions » — donc dans l'API, et dans tout code qui la consomme.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Quatre colonnes de suivi éditorial interne sont publiées en open data</strong> :
-        <code>date_envoi_fiche_et_questionnaire</code> (24 vides), <code>reponse_recue</code>
-        (31 vides), <code>personne_en_charge</code> (22 vides) et <code>fiche_descriptive</code>
-        (20 vides). Elles ne sont affichées nulle part, mais elles sont dans l'export, dans
-        l'API — et dans l'index plein texte que la barre de recherche de la page d'origine
-        interroge. On y lit des initiales d'agents, des dates de relance, et la réponse d'un
-        partenaire expliquant qu'il n'avait pas le temps de contribuer. Ce n'est pas un défaut
-        de dataviz, c'est un défaut de gouvernance de la donnée, et c'est le plus lourd de la
-        page. La recherche de cette page-ci <strong>n'indexe que quatre champs choisis</strong>.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Le catalogue de valeurs n'est pas nettoyé.</strong> <code>pays</code> porte
-        <code>Slovénie</code> <em>et</em> <code>slovénie</code>, plus trois graphies du
-        Royaume-Uni (<code>Royaume-Uni</code>, <code>Royaume-Uni / Angleterre</code>,
-        <code>Royaume-Uni / Ecosse</code> — sans accent à « Écosse ») ;
-        <code>public_cible</code> porte <code>citoyens / grand public</code> <em>et</em>
-        <code>citoyens /grand public</code>, <code>cadres éducatifs</code> <em>et</em>
-        <code>cadres educatifs</code>. La carte de la page d'origine additionne d'ailleurs
-        <code>Slovénie</code> et <code>Slovènie</code> — une troisième graphie, qui n'existe
-        dans aucune ligne : elle affiche donc « Slovénie (2 projets) » là où il y en a
-        <strong>4</strong>.
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-initiatives_donnees_europe/"
+           target="_blank" rel="noopener external"><code>fr-en-initiatives_donnees_europe</code></a>
+        (France Éducation international, Licence Ouverte 2.0), lu sans clé&nbsp;: un projet par
+        ligne, avec ses pays, son type (européen ou national), ses thèmes et ses publics. Jeu
+        modifié le 27 août 2026, relu le 26 septembre 2026. C'est une <strong>sélection</strong>
+        établie par FEI, pas un inventaire&nbsp;: la page décrit ce que le recensement a retenu.
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="q-fr" value="n_nat:first" format="nombre"
+        heading="initiatives nationales françaises"
+        lines='[{"value":"n_eu:first","format":"nombre","prefix":"contre ","suffix":" projets européens"}]'
+        label="les entrées où figure la France, selon leur type"></dsfr-data-kpi>
+      <dsfr-data-kpi source="q-nat" value="count{pays:eq:France} / count" format="pourcentage" decimals="0"
+        heading="des initiatives nationales recensées sont françaises"
+        lines='[{"value":"count","format":"nombre","prefix":"sur ","suffix":" initiatives nationales"}]'
+        label="le recensement est établi par un opérateur français"></dsfr-data-kpi>
+      <dsfr-data-kpi source="q-pays-n" value="count{n_nat:eq:0}" format="nombre"
+        heading="pays n'apparaissent que par des consortiums européens"
+        lines='[{"value":"count","format":"nombre","prefix":"sur ","suffix":" pays cités"}]'
+        label="aucune initiative nationale recensée chez eux"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. Partout ailleurs, on figure au recensement par l'Europe&nbsp;; la France, par ses propres projets</h2>
+    <dsfr-data-repeat source="q-eu-seul" key-field="pays">
+      <template>
+        <p class="odv-lecture fr-mb-1v"><strong>{{pays}}</strong>&nbsp;: {{projets}} projets, tous européens.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="odv-lecture fr-mt-2w fr-mb-1v">Pays cités davantage pour des initiatives nationales que pour des projets européens&nbsp;:</p>
+    <dsfr-data-repeat source="q-surtout-nat" key-field="pays">
+      <template>
+        <p class="odv-lecture fr-mb-1v"><strong>{{pays}}</strong>&nbsp;: {{n_nat}} initiatives nationales, {{n_eu}} projets européens.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">Chaque barre compte les projets où un pays est cité, triés
+      du plus cité au moins cité. En gris, les projets européens (un projet réunissant six pays
+      compte une fois pour chacun)&nbsp;; en bleu, les initiatives nationales, qui ne citent
+      jamais qu'un pays. Le bleu se concentre sur la France, puis sur l'Allemagne — où il reste minoritaire.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Projets par pays, européens et nationaux">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-pays" source="q-pays" type="bar" horizontal stacked
+        label-field="pays"
+        value-field="n_eu:Projets européens" value-fields="n_nat:Initiatives nationales"
+        color-map="Projets européens:#929292,Initiatives nationales:#000091"
+        databox databox-title="Projets où chaque pays est cité, selon leur type"
+        databox-source="France Éducation international — fr-en-initiatives_donnees_europe, Licence Ouverte 2.0"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-pays" source="q-pays-t" table download
+        filename="fei-projets-par-pays.csv"
+        label-field="Pays" value-field="Projets européens, Initiatives nationales, Total"
+        description="Nombre de projets du recensement où chaque pays est cité, séparés en projets européens et initiatives nationales, du pays le plus cité au moins cité. Un projet européen compte pour chacun de ses pays. La France est le seul pays très cité dont la majorité des entrées sont des initiatives nationales."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. Nuance : deux publics ---------- -->
+    <h2 class="fr-h3">2. Les initiatives nationales parlent au grand public, les projets européens aux enseignants</h2>
+    <dsfr-data-repeat source="q-pub-p" key-field="type_lib">
+      <template>
+        <p class="odv-lecture fr-mb-1v"><strong>{{type_lib}}</strong> ({{n}})&nbsp;:
+          {{ens_p}}&nbsp;% visent les enseignants, {{elv_p}}&nbsp;% les élèves,
+          {{gp_p}}&nbsp;% les citoyens et le grand public.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">Parts de projets, pas de volumes&nbsp;: les deux groupes
+      n'ont pas la même taille. Un projet vise souvent plusieurs publics, les parts ne somment
+      donc pas à 100&nbsp;%. Les projets européens, financés pour la plupart par Erasmus+,
+      forment des enseignants&nbsp;; les initiatives nationales sont plus souvent des
+      plateformes et des outils ouverts à tous — c'est ce qui les rend visibles depuis Paris.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Publics visés selon le type de projet">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-pub" source="q-pub-p" type="bar"
+        label-field="type_lib"
+        value-field="ens_p:Enseignants" value-fields="elv_p:Élèves, gp_p:Citoyens et grand public"
+        color-map="Enseignants:#c1c1fb,Élèves:#929292,Citoyens et grand public:#000091"
+        y-min="0" y-max="100" unit-tooltip="% des projets"
+        databox databox-title="Part des projets qui visent chaque public, selon le type de projet (%)"
+        databox-source="France Éducation international — fr-en-initiatives_donnees_europe, Licence Ouverte 2.0"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-pub" source="q-pub-t" table download
+        filename="fei-publics-par-type.csv"
+        label-field="Type de projet"
+        value-field="Projets, Visent les enseignants (%), Visent les élèves (%), Visent les citoyens et le grand public (%)"
+        description="Part des projets européens et des initiatives nationales qui visent les enseignants, les élèves, et les citoyens ou le grand public. Un projet peut viser plusieurs publics. Les initiatives nationales visent bien plus souvent le grand public ; les projets européens, plus souvent les enseignants."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. Nuance : qui regarde ---------- -->
+    <h2 class="fr-h3">3. Côté français, le recensement retient les outils du ministère — dont son auteur est l'opérateur</h2>
+    <p class="fr-text--sm">FEI est un opérateur du ministère de l'Éducation nationale. Les
+      initiatives françaises qu'il recense sont la plateforme de données du ministère, son
+      tableau de bord du numérique éducatif, son serveur MCP, des parcours Pix, une formation
+      de l'IH2EF&nbsp;: des projets proches de lui, dont il connaît l'existence. Il n'est pas
+      interdit de penser qu'un recensement fait à Rome ou à Madrid aurait trouvé, chez eux,
+      des initiatives nationales que celui-ci ne voit pas. <strong>Le déséquilibre du
+      graphique 1 dit donc au moins autant qui a regardé que ce qui existe.</strong> FEI
+      coordonne par ailleurs lui-même l'un des projets européens recensés (AIDL).</p>
+    <div class="odv-viz fr-mb-6w" data-code="Les initiatives nationales françaises">
+      <dsfr-data-list source="q-fr-nat"
+        columns="initiative_projet:Initiative, insititution_s:Institutions, financement:Financement"
+        caption="Les initiatives nationales françaises du recensement, avec leurs institutions et leur financement déclarés">
+      </dsfr-data-list>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       44 lignes : une source, tout côté client. `pays`, `theme` et `public_cible`
-       arrivent en TABLEAUX JSON via l'API v2.1 — la page d'origine, qui passe par
-       l'API v1, doit les découper elle-même au `.split(',')`. La moitié de sa
-       gymnastique disparaît en changeant de version d'API, pas de bibliothèque.
-
-       `ini-detail` est une SECONDE source sur le même jeu, portant `require-where` :
-       elle ne fait aucune requête tant qu'aucune fiche n'a été cliquée. C'est ce
-       qui rend le motif maître-détail possible sans dupliquer les 44 lignes.
-       ========================================================================== -->
-
-  <dsfr-data-source id="ini" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-initiatives_donnees_europe"
-    max-records="200">
-  </dsfr-data-source>
-
-  <!-- Fusion des graphies, EN AMONT de tout le reste. Jusqu'en 0.28,
-       `replace-fields` traversait un champ multivalué sans rien faire et sans
-       rien dire : il fallait éclater d'abord (`explode`), remplacer sur les
-       valeurs scalaires, puis regrouper une seconde fois — ce qui ne corrigeait
-       que les agrégats et laissait les FACETTES afficher 36 pays pour 33 réels.
-       ⚠️ Depuis #774 (0.29.0), le remplacement s'applique élément par élément
-       sur un tableau, longueur conservée, sans dédoublonnage. Posé ici, il
-       corrige d'un coup les facettes, les KPI, les cartes, la liste ET les
-       graphiques. Limite documentée : le remplacement s'exécute avant `split`
-       et ne verrait donc pas un tableau fabriqué par lui — ici les tableaux
-       viennent de l'API v2.1, le cas ne se pose pas. -->
-  <dsfr-data-normalize id="ini-n" source="ini"
-    replace-fields="pays:slovénie:Slovénie | pays:Royaume-Uni / Angleterre:Royaume-Uni | pays:Royaume-Uni / Ecosse:Royaume-Uni | public_cible:citoyens /grand public:citoyens / grand public | public_cible:cadres educatifs:cadres éducatifs">
-  </dsfr-data-normalize>
-
-  <dsfr-data-source id="ini-detail" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-initiatives_donnees_europe"
-    require-where max-records="10">
-  </dsfr-data-source>
-
-  <dsfr-data-context id="ini-ctx-detail" sources="ini-detail"></dsfr-data-context>
-
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+  <!-- ---------- 4. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Parcourir les projets</h2>
+    <p class="fr-text--sm">La recherche et les filtres pilotent les fiches ci-dessous&nbsp;; ils
+      ne touchent pas les graphiques du haut de page, qui décrivent tout le recensement.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="ini-q" source="ini-n"
-        fields="initiative_projet, descriptif_fr, insititution_s, financement"
-        label="Rechercher un projet" placeholder="Titre, description, institution, financement…"
-        operator="words" count count-label="projet" url-sync>
+          fields="initiative_projet, descriptif_fr, insititution_s, financement"
+          label="Rechercher un projet" placeholder="Titre, description, institution, financement…"
+          operator="words" count count-label="projet" url-sync>
         </dsfr-data-search>
       </div>
     </div>
@@ -134,322 +262,141 @@
 
   <div class="fr-container fr-mb-8w">
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-        
-        <h2 class="fr-h6">Filtrer</h2>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="ini-f" source="ini-q"
-          fields="type_de_projet_national_europeen, theme, pays, public_cible"
-          labels="type_de_projet_national_europeen:Type de projet | theme:Thème | pays:Pays | public_cible:Public cible"
-          display="type_de_projet_national_europeen:radio-inline | theme:multiselect | pays:multiselect | public_cible:multiselect"
-          searchable="theme, pays, public_cible"
-          disjunctive="theme, pays, public_cible"
+          fields="type_lib, pays, theme, public_cible"
+          labels="type_lib:Type de projet | pays:Pays | theme:Thème | public_cible:Public cible"
+          display="type_lib:radio-inline | pays:multiselect | theme:multiselect | public_cible:multiselect"
+          searchable="pays, theme, public_cible"
+          disjunctive="pays, theme, public_cible"
           sort="alpha:asc" max-values="40" url-sync url-params>
         </dsfr-data-facets>
-        <p class="fr-hint-text">
-          Les graphies en double du jeu (<code>slovénie</code> / <code>Slovénie</code>,
-          deux Royaume-Uni, <code>cadres educatifs</code>) sont fusionnées <strong>en amont</strong>
-          depuis la 0.29 : facettes, compteurs et graphiques comptent la même chose. Jusque-là,
-          les facettes affichaient 36 pays pour 33 réels et 21 publics pour 19 — voir l'analyse.
-        </p>
-        </details>
-      </div>
+      </details>
 
-      <div class="fr-col-12 fr-col-md-9">
-        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
-          <dsfr-data-kpi source="ini-f" value="count" format="nombre"
-            heading="Projets" label="dans la sélection"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ini-f" value="count:type_de_projet_national_europeen:européen / count"
-            format="pourcentage" decimals="0"
-            heading="Projets européens" label="part de la sélection"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ini-pays" value="count" format="nombre"
-            heading="Pays" label="après fusion des graphies"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ini-theme" value="count" format="nombre"
-            heading="Thèmes" label="distincts"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <div class="fr-grid-row fr-grid-row--gutters">
-          <div class="fr-col-12 fr-col-md-6">
-            <h3 class="fr-h6">Les projets par pays</h3>
-            <div class="odv-viz" data-code="Projets par pays">
-            <dsfr-data-chart id="g-ini-pays" source="ini-pays" type="bar" horizontal
-              label-field="pays" value-field="projets" name="Projets"
-              databox databox-title="Projets par pays"
-              databox-source="France Éducation international — fr-en-initiatives_donnees_europe, Licence Ouverte 2.0"
-              databox-download>
-            </dsfr-data-chart>
-            <dsfr-data-a11y for="g-ini-pays" source="ini-pays" table download
-              label-field="pays" value-field="projets"></dsfr-data-a11y>
-            </div>
-            <p class="fr-text--xs fr-mt-1w">
-              <strong>Slovénie 4</strong> et <strong>Royaume-Uni 5</strong> : les graphies
-              multiples sont fusionnées. La carte du portail affiche 2 pour la première.
-            </p>
-          </div>
-          <div class="fr-col-12 fr-col-md-6">
-            <h3 class="fr-h6">Les projets par thème</h3>
-            <div class="odv-viz" data-code="Projets par thème">
-            <dsfr-data-chart id="g-ini-theme" source="ini-theme" type="bar" horizontal
-              label-field="theme" value-field="projets" name="Projets"
-              databox databox-title="Projets par thème"
-              databox-source="France Éducation international — fr-en-initiatives_donnees_europe, Licence Ouverte 2.0"
-              databox-download>
-            </dsfr-data-chart>
-            <dsfr-data-a11y for="g-ini-theme" source="ini-theme" table download
-              label-field="theme" value-field="projets"></dsfr-data-a11y>
-            </div>
-            <p class="fr-text--xs fr-mt-1w">
-              La page d'origine n'a <strong>aucun graphique</strong> : ses seuls comptages sont
-              les pastilles de facette.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Comptages par valeur multivaluée. `explode` produit une ligne par valeur —
-       sans lui, un projet à six pays compterait comme la modalité
-       « Danemark,Norvège,Portugal,… ». Les graphies sont déjà fusionnées en
-       amont (`ini-n`), donc un seul regroupement suffit : les trois chaînes
-       explode → remplacement → second regroupement ont été retirées au lot 20. -->
-  <dsfr-data-normalize id="ini-fn" source="ini-f"></dsfr-data-normalize>
-
-  <dsfr-data-query id="ini-pays" source="ini-fn" explode="pays" group-by="pays"
-    aggregate="pays:count:projets" order-by="projets:desc"></dsfr-data-query>
-
-  <dsfr-data-query id="ini-theme" source="ini-fn" explode="theme" group-by="theme"
-    aggregate="theme:count:projets" order-by="projets:desc"></dsfr-data-query>
-
-  <dsfr-data-query id="ini-public" source="ini-fn" explode="public_cible"
-    group-by="public_cible" aggregate="public_cible:count:projets"
-    order-by="projets:desc"></dsfr-data-query>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Les publics visés</h2>
-    <div class="odv-viz" data-code="Projets par public cible">
-    <dsfr-data-chart id="g-ini-public" source="ini-public" type="bar" horizontal
-      label-field="public_cible" value-field="projets" name="Projets"
-      databox databox-title="Projets par public cible"
-      databox-source="France Éducation international — fr-en-initiatives_donnees_europe"
-      databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-ini-public" source="ini-public" table download
-      label-field="public_cible" value-field="projets"></dsfr-data-a11y>
-    </div>
-    <p class="fr-text--xs fr-mt-1w">
-      <strong>19 publics</strong> après fusion (21 valeurs brutes) : enseignants 27, élèves 23,
-      citoyens et grand public 11, cadres éducatifs 8.
-    </p>
-  </div>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Les 44 fiches projet</h2>
-    <p class="fr-text--sm">
-      Cliquer le bouton « Filtrer sur… » d'une fiche affiche son détail complet dans le panneau
-      ci-dessous, et un second clic le retire. Les fiches n'utilisent <strong>pas</strong>
-      le composant <code>fr-card</code> du DSFR : le bouton de sélection est ajouté
-      <em>après</em> la racine du gabarit, si bien qu'une carte DSFR — qui occupe toute la
-      hauteur de sa cellule — le recouvre et intercepte le clic. Vérifié au navigateur : avec
-      <code>fr-card</code>, le clic n'aboutit jamais. Sur le portail, le geste attendu — cliquer la
-      fiche — remplit un panneau <strong>dont le bouton de fermeture est invisible</strong>
-      (recouvert par son propre en-tête collant), et le bouton « Voir », lui, quitte le site
-      sans le dire.
-    </p>
-
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-8">
+      <div class="fr-col-12 fr-col-lg-9">
         <dsfr-data-display id="ini-cartes" source="ini-f" cols="2" pagination="12"
-          uid-field="initiative_projet"
-          refine-on-click="initiative_projet" context="ini-ctx-detail" label="Projet"
+          uid-field="initiative_projet" label="Projets"
           empty="Aucun projet ne correspond aux critères sélectionnés." count-label="projet">
           <template>
-            <article class="fr-p-2w fr-mb-2w" style="border:1px solid var(--border-default-grey)">
-              <p class="fr-badge fr-badge--sm fr-mb-2v">{{type_de_projet_national_europeen}}</p>
-              <h3 class="fr-h6 fr-mb-1v">{{initiative_projet}}</h3>
-              <ul class="fr-tags-group fr-mb-1w">
-                {{#each pays}}<li><p class="fr-tag fr-tag--sm">{{.}}</p></li>{{/each}}
-              </ul>
-              <ul class="fr-tags-group fr-mb-1w">
-                {{#each theme}}<li><p class="fr-tag fr-tag--sm">{{.}}</p></li>{{/each}}
-              </ul>
-              <p class="fr-text--sm">{{descriptif_fr}}</p>
-              {{#if financement}}<p class="fr-text--xs"><em>{{financement}}</em></p>{{/if}}
-              <p class="fr-mb-0"><a class="fr-link fr-link--sm" href="{{source:url}}" target="_blank"
-                rel="noopener external">Voir le projet (nouvelle fenêtre)</a></p>
-            </article>
-          </template>
-        </dsfr-data-display>
-      </div>
-
-      <aside class="fr-col-12 fr-col-md-4">
-        <h3 class="fr-h6">Détail du projet</h3>
-        <dsfr-data-display id="ini-detail-vue" source="ini-detail" cols="1"
-          idle-message="Sélectionnez une fiche projet pour afficher son descriptif complet, ses thèmes, ses publics cibles, ses pays, ses institutions et son financement."
-          empty="Aucun projet sélectionné." count-label="projet">
-          <template>
-            <div class="fr-callout">
-              <p class="fr-badge fr-badge--sm fr-mb-2v">{{type_de_projet_national_europeen}}</p>
-              <h4 class="fr-callout__title fr-text--md">{{initiative_projet}}</h4>
-              <ul class="fr-tags-group fr-mb-2v">
-                {{#each pays}}<li><p class="fr-tag fr-tag--sm">{{.}}</p></li>{{/each}}
-              </ul>
-              <p class="fr-text--xs fr-mb-0"><strong>Thèmes</strong></p>
-              <ul class="fr-tags-group fr-mb-2v">{{#each theme}}<li><p class="fr-tag fr-tag--sm">{{.}}</p></li>{{/each}}</ul>
-              <p class="fr-text--xs fr-mb-0"><strong>Public cible</strong></p>
-              <ul class="fr-tags-group fr-mb-2v">{{#each public_cible}}<li><p class="fr-tag fr-tag--sm">{{.}}</p></li>{{/each}}</ul>
-              {{#if descriptif_fr}}<p class="fr-text--xs fr-mb-0"><strong>Description</strong></p>
-              <p class="fr-text--sm">{{descriptif_fr}}</p>{{/if}}
-              {{#if insititution_s}}<p class="fr-text--xs fr-mb-0"><strong>Institutions</strong></p>
-              <p class="fr-text--sm">{{insititution_s}}</p>{{/if}}
-              {{#if financement}}<p class="fr-text--xs fr-mb-0"><strong>Financement</strong></p>
-              <p class="fr-text--sm">{{financement}}</p>{{/if}}
-              <p><a class="fr-btn fr-btn--sm" href="{{source:url}}" target="_blank"
-                rel="noopener external">Voir le projet (nouvelle fenêtre)</a></p>
+            <div class="fr-card fr-card--no-arrow fr-mb-2w">
+              <div class="fr-card__body">
+                <div class="fr-card__content">
+                  <h3 class="fr-card__title">{{initiative_projet}}</h3>
+                  <div class="fr-card__desc">
+                    <ul class="fr-tags-group fr-mb-1w">{{#each pays}}<li><p class="fr-tag fr-tag--sm">{{.}}</p></li>{{/each}}</ul>
+                    <ul class="fr-tags-group fr-mb-1w">{{#each theme}}<li><p class="fr-tag fr-tag--sm fr-tag--blue-ecume">{{.}}</p></li>{{/each}}</ul>
+                    <details class="fr-text--sm">
+                      <summary>Descriptif, publics, institutions et financement</summary>
+                      <p class="fr-text--sm fr-mt-1w">{{descriptif_fr}}</p>
+                      <p class="fr-text--xs fr-mb-0"><strong>Publics</strong></p>
+                      <ul class="fr-tags-group fr-mb-1w">{{#each public_cible}}<li><p class="fr-tag fr-tag--sm">{{.}}</p></li>{{/each}}</ul>
+                      <p class="fr-text--xs fr-mb-0"><strong>Institutions</strong></p>
+                      <p class="fr-text--sm">{{insititution_s}}</p>
+                      <p class="fr-text--xs fr-mb-0"><strong>Financement</strong></p>
+                      <p class="fr-text--sm">{{financement|non renseigné}}</p>
+                    </details>
+                    <p class="fr-mb-0 fr-mt-1w"><a class="fr-link fr-link--sm" href="{{source:url}}" target="_blank"
+                      rel="noopener external">Site du projet (nouvelle fenêtre)</a></p>
+                  </div>
+                  <div class="fr-card__start">
+                    <p class="fr-badge fr-badge--sm">{{type_lib}}</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </template>
         </dsfr-data-display>
-        <dsfr-data-context-tags for="ini-ctx-detail" clear-all></dsfr-data-context-tags>
-      </aside>
+      </div>
     </div>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">La littératie des données se construit en Europe par des
+        consortiums financés par Erasmus+, qui forment surtout des enseignants. Dans ce
+        recensement, la France est la seule grande contributrice présente d'abord par ses
+        propres initiatives — plateformes et outils du ministère, tournés vers le grand public.
+        Ce déséquilibre tient en partie à qui a fait le recensement&nbsp;: un opérateur français
+        voit mieux ce qui se fait en France. Ce que ces données ne disent pas&nbsp;: les
+        montants, la durée des projets, ni leur audience.</p>
+    </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Une sélection, pas un inventaire.</strong> Le jeu est établi par FEI&nbsp;;
+          l'absence d'initiative nationale espagnole ou italienne dit ce que le recensement a
+          retenu, pas ce qui existe.</li>
+        <li><strong>Le champ <code>pays</code> est pris tel que déclaré.</strong> Il ne recoupe pas
+          toujours la liste des institutions&nbsp;: Agile EDU nomme un partenaire suédois (SKR),
+          mais pas la Suède dans ses pays (relevé le 2026-09-26).</li>
+        <li><strong>Graphies fusionnées en amont</strong>&nbsp;: <code>slovénie</code> et
+          <code>Slovénie</code>, trois Royaume-Uni (dont Angleterre et Écosse), deux graphies de
+          « citoyens / grand public » et de « cadres éducatifs ». Sans cela, un même pays
+          compterait deux barres.</li>
+        <li><strong>Aucune date exploitable.</strong> Les années ne figurent que dans le titre
+          des projets (« (2021-2023) »)&nbsp;: la page ne montre aucune évolution.</li>
+        <li><strong>Pas de carte.</strong> La bibliothèque ne livre aucune géométrie européenne
+          et ne sait pas passer d'un nom de pays à un code ISO&nbsp;; le classement en barres dit
+          d'ailleurs mieux « qui est cité, et comment » qu'une choroplèthe.</li>
+        <li><strong>Quatre colonnes de suivi interne</strong> du producteur (dates de relance,
+          réponses des partenaires, initiales d'agents) sont publiées dans le jeu. La page ne
+          les télécharge pas (<code>select</code>).</li>
+        <li><strong>Un lien incomplet.</strong> EVIDALI porte <code>evidali.eun.org</code> sans
+          <code>https://</code>&nbsp;: son lien « Site du projet » reste relatif.</li>
+        <li><strong>Angles écartés.</strong> Le classement des thèmes (la « littératie des
+          données » domine par construction — c'est l'objet du recensement)&nbsp;; le nombre de
+          pays par projet européen (il décrit le montage Erasmus+, pas la politique d'un pays).</li>
+      </ol>
+    </section>
   </div>
 
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">La même sélection, en tableau</h2>
-    <div class="odv-viz" data-code="Graphique">
-    <dsfr-data-list source="ini-f"
-      columns="initiative_projet, type_de_projet_national_europeen, pays, theme, public_cible, financement"
-      caption="Projets européens et nationaux portant sur les données en éducation"
-      sort pagination="10">
-    </dsfr-data-list>
-    </div>
-    <p class="fr-text--xs fr-mt-1w">
-      Ni tableau, ni export, ni lien vers le jeu, ni mention de licence sur la page d'origine.
-    </p>
-  </div>
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — FEI, projets européens sur les données</h2>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — France Éducation international — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine : une <strong>page AngularJS</strong> servie sous
-        <a href="https://data.education.gouv.fr/explore/assets/fei-selection-des-projets-internationaux-portant-sur-les-donnees/view/" target="_blank" rel="noopener external">/explore/assets/fei-selection-des-projets-internationaux-portant-sur-les-donnees/view/</a>,
-        première entrée du catalogue de data-visualisations. Fiche d'audit :
-        <code>docs/portail-education/fei-projets-europeens-donnees.md</code>.
+        Page d'origine&nbsp;:
+        <a href="https://data.education.gouv.fr/explore/assets/fei-selection-des-projets-internationaux-portant-sur-les-donnees/view/" target="_blank" rel="noopener external">/explore/assets/fei-selection-des-projets-internationaux-portant-sur-les-donnees/view/</a>
+        — un catalogue filtrable de fiches, une carte d'Europe, aucun constat. Fiche d'audit&nbsp;:
+        <code>docs/portail-education/fei-projets-europeens-donnees.md</code>. Recréée le
+        2026-09-26 en page éditoriale&nbsp;; la reproduction précédente (comptages par pays,
+        thème et public) est remplacée.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le maître-détail existe désormais, et la fiche d'audit le donnait pour
-              un manque réel.</strong> Elle écrivait : « sur l'ensemble du source, un seul
-              événement de sélection existe, <code>dsfr-data-map-select</code>, et un seul
-              composant porte <code>refine-on-click</code> […] cliquer une <em>fiche</em> pour
-              la détailler : rien ». <code>refine-on-click</code> est aujourd'hui sur
-              <code>dsfr-data-display</code> : chaque fiche reçoit un bouton « Filtrer sur… »
-              atteignable au clavier, avec <code>aria-pressed</code>, second clic pour retirer,
-              tag dans le contexte et état dans l'URL. <strong>C'est plus que ce que fait
-              l'original</strong>, dont le panneau ne peut pas être refermé.</li>
-            <li><strong>Une boucle dans un template, aussi.</strong> Le quatrième manque réel de
-              la fiche — « pas de <code>#each</code>, donc pas moyen d'émettre un tag DSFR par
-              valeur d'un champ multivalué » — est levé : <code>{{#each pays}}…{{.}}…{{/each}}</code>
-              rend une pastille par pays, par thème et par public. Les trois éléments
-              visuellement structurants de la fiche sont donc reproduits, et pas dégradés en
-              trois lignes de texte.</li>
-            <li><strong>Le second contexte n'interroge rien tant qu'on ne clique pas.</strong>
-              <code>require-where</code> sur la source de détail : aucune requête au chargement,
-              et un message d'attente propre à la place. C'est ce qui permet d'avoir une source
-              dédiée au panneau sans doubler le trafic.</li>
-            <li><strong>Les tableaux JSON de l'API v2.1 évitent tout découpage.</strong>
-              <code>pays</code>, <code>theme</code> et <code>public_cible</code> arrivent déjà
-              en tableaux ; <code>dsfr-data-facets</code> les éclate nativement, et
-              <code>explode</code> fait la même chose pour les regroupements. La moitié de la
-              gymnastique du template d'origine (<code>.split(',')</code> partout) disparaît en
-              changeant de version d'API, pas de bibliothèque.</li>
+            <li><strong>Séparer européen et national par pays.</strong> Deux indicateurs 0/1 en
+              <code>compute</code>, un <code>explode="pays"</code> et deux <code>sum</code>&nbsp;:
+              le graphique empilé est trié par total sans passer par un format long.</li>
+            <li><strong>Des parts honnêtes.</strong> La moyenne d'un indicateur 0/1 est une
+              proportion de projets&nbsp;; <code>compute</code> la teste directement dans le
+              tableau <code>public_cible</code> (<code>=</code> regarde dans le tableau).</li>
+            <li><strong>Un champ tableau dans un ratio de KPI.</strong>
+              <code>count{pays:eq:France} / count</code> compte les lignes dont le tableau
+              contient la France.</li>
+            <li><strong>Une divulgation native à la place du maître-détail.</strong> Un
+              <code>&lt;details&gt;</code> dans la fiche remplace le panneau latéral et son second
+              contexte&nbsp;: plus de <code>refine-on-click</code> recouvert par une carte DSFR.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong><code>replace-fields</code> ne touchait pas un champ multivalué —
-              corrigé en 0.29.</strong> C'était la friction principale de cette page, et elle
-              tombait exactement sur les trois champs à nettoyer. Vérifié au source à l'époque :
-              le remplacement ne s'appliquait qu'aux valeurs de type chaîne, nombre ou booléen —
-              un tableau était laissé intact, sans erreur ni avertissement. Or <code>pays</code>
-              est un tableau, et c'est lui qui porte <code>Slovénie</code> /
-              <code>slovénie</code>. <strong>Le contournement</strong> consistait à éclater
-              d'abord (<code>explode</code> dans une <code>dsfr-data-query</code>), appliquer
-              <code>replace-fields</code> sur les valeurs scalaires obtenues, puis regrouper une
-              seconde fois : trois composants au lieu d'un, et <strong>seulement pour les
-              agrégats</strong> — les <em>facettes</em>, qui lisent le champ tableau d'origine,
-              affichaient 36 pays pour 33 réels, c'est-à-dire précisément le défaut de
-              l'original.
-              <br><strong>Corrigé par
-              <a href="https://github.com/bmatge/dsfr-data/pull/774" target="_blank" rel="noopener external">#774</a>
-              (0.29.0)</strong> : le remplacement s'applique élément par élément sur un tableau,
-              longueur conservée. Au lot 20, la page a donc remonté un seul
-              <code>dsfr-data-normalize</code> <em>en amont de la recherche et des facettes</em>,
-              et <strong>quatre composants ont disparu</strong> (deux normalisations et deux
-              regroupements de rattrapage). Le gain n'est pas seulement la concision&nbsp;: la
-              correction vaut maintenant pour <em>toute</em> la page. Vérifié au navigateur —
-              facettes et graphiques s'accordent, « Slovénie » 4 en une seule entrée,
-              « Royaume-Uni » 5 fusionné depuis deux graphies, « cadres éducatifs » 8 ;
-              33 pays et 19 publics distincts, contre 36 et 21 auparavant.
-              <strong>La demi-correction est devenue entière</strong>, et c'est la leçon : un
-              nettoyage posé au bon endroit du pipeline vaut pour tous ses consommateurs.</li>
-            <li><strong>Les blocs de gabarit ne s'imbriquent pas, et l'échec est
-              silencieux.</strong> Le panneau de détail avait d'abord été écrit
-              <code>{{#if theme}}…{{#each theme}}…{{/each}}…{{/if}}</code>, pour reproduire les
-              <code>ng-if</code> par section de l'original. Résultat au navigateur : le titre
-              « Thèmes » s'affichait, <em>et la liste de pastilles était vide</em> — aucune
-              erreur, aucun avertissement. La pré-passe de blocs ne connaît que
-              <code>if</code> et <code>unless</code>, non imbriqués, et un <code>#each</code>
-              placé à l'intérieur d'un <code>#if</code> n'est pas résolu. Écrit à plat, tout
-              fonctionne. C'est exactement le genre de grammaire fausse et muette que ce dépôt
-              traque : la page paraissait correcte, et la moitié de son panneau était vide.</li>
-            <li><strong>Le bouton de sélection est ajouté après la racine du gabarit.</strong>
-              <code>refine-on-click</code> injecte son bouton « Filtrer sur… » comme dernier
-              enfant de la cellule, à côté du contenu du <code>&lt;template&gt;</code>. Une
-              carte DSFR (<code>fr-card</code>), qui s'étire sur toute la hauteur de sa cellule,
-              le recouvre alors et intercepte le clic — vérifié : le clic n'aboutit jamais, sans
-              qu'aucun style ne paraisse fautif. Il a fallu renoncer à <code>fr-card</code> pour
-              un conteneur simple. Un bouton rendu <em>dans</em> le flux du gabarit, ou une
-              position explicite, éviterait la collision.</li>
-            <li><strong>Aucune géométrie européenne n'est livrée.</strong> Le paquet embarque
-              <code>geo/regions.json</code> et <code>geo/departements.json</code>, et rien
-              d'autre. Pour la seule carte non française du portail Éducation, il faudrait
-              produire, simplifier, héberger et maintenir un GeoJSON d'Europe. Le recours natif
-              est <code>type="map-monde"</code>, mais il n'a aucun attribut de cadrage : ce
-              serait un planisphère entier pour vingt-et-un pays européens. <strong>Cette page
-              n'a donc pas de carte</strong>, et c'est un choix assumé : un classement de pays
-              en barres horizontales dit mieux « Allemagne 15, Italie 13, Espagne 12 » qu'une
-              choroplèthe à quatre classes sans légende — ce que l'original propose.</li>
-            <li><strong>Et il manque le référentiel qui rendrait la carte possible.</strong>
-              Aucun jeu open data français ne stocke des codes ISO : il stocke « Allemagne »,
-              « Royaume-Uni / Angleterre », « slovénie ». <code>map-monde</code> sait convertir
-              alpha-3 et numérique vers alpha-2, mais <strong>ne connaît aucun nom de
-              pays</strong>. La table de 66 correspondances écrite à la main dans le template
-              Opendatasoft n'est pas un caprice de son auteur : c'est la conséquence directe de
-              ce manque, et c'est un manque que le portail de Bercy ne pouvait pas révéler —
-              tous ses jeux étaient français.</li>
-            <li><strong>Un lien source sans schéma.</strong> Le projet EVIDALI porte
-              <code>source = "evidali.eun.org"</code>, sans <code>https://</code>. Injecté tel
-              quel dans un <code>href</code>, il devient une URL <em>relative</em> et renvoie
-              sur le portail lui-même. Le pipe <code>{{source:url}}</code> filtre les schémas
-              par liste blanche — il protège d'un <code>javascript:</code> sur un jeu alimenté
-              à la main, ce qui est le vrai risque ici — mais il ne répare pas un lien
-              incomplet.</li>
+            <li><strong>Rien côté bibliothèque.</strong> Le travail a été de lire le jeu&nbsp;: le
+              type de projet, ignoré par la reproduction précédente dans ses graphiques, porte
+              toute l'histoire.</li>
+            <li><strong>Le biais de l'observateur ne se calcule pas.</strong> Le jeu ne dit pas
+              comment les projets ont été trouvés&nbsp;; la section 3 le dit en prose, avec la
+              liste qui l'étaye.</li>
           </ul>
         </div>
       </div>
@@ -458,45 +405,30 @@
         <table>
           <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">Directive AngularJS d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-dataset-context</code> + un second contexte « sans filtre »</td><td>1 <code>dsfr-data-source</code> (le second contexte était la cause du défaut n° 1)</td><td>Meilleur : tout suit les filtres</td></tr>
-            <tr><td>3 boutons TYPE, choix unique, compteurs</td><td><code>display="…:radio-inline"</code></td><td>Équivalent</td></tr>
-            <tr><td><code>ods-select multiple</code> PAYS / PUBLIC, sans compteurs</td><td><code>display="…:multiselect"</code> + <code>searchable</code></td><td>Meilleur : compteurs et recherche</td></tr>
-            <tr><td>22 pastilles de thème, choix unique</td><td>facette + graphique trié</td><td>Meilleur : le comptage devient lisible</td></tr>
-            <tr><td><code>ods-color-gradient</code> + SVG inline de 66 <code>path</code> + table ISO à la main</td><td>— (graphique en barres)</td><td><strong>Non reproduit</strong> : pas de géométrie européenne, pas de table nom → ISO</td></tr>
-            <tr><td><code>ng-click</code> sur une fiche → panneau de détail</td><td><code>refine-on-click</code> + <code>require-where</code></td><td>Meilleur : clavier, retrait au second clic, URL</td></tr>
-            <tr><td><code>ng-if</code> par section du panneau</td><td><code>{{#if}}</code></td><td>Équivalent</td></tr>
-            <tr><td>tags pays / thèmes / publics (<code>.split(',')</code>)</td><td><code>{{#each}}</code> + <code>fr-tag</code></td><td>Équivalent</td></tr>
-            <tr><td>recherche plein texte sur tout l'index (suivi interne compris)</td><td><code>dsfr-data-search fields="…"</code></td><td>Meilleur : quatre champs choisis</td></tr>
-            <tr><td>doublons de casse exposés à l'utilisateur</td><td><code>explode</code> + <code>replace-fields</code> + regroupement</td><td><strong>Partiel</strong> : corrigé dans les graphiques, pas dans les facettes</td></tr>
-            <tr><td><code>ods-results-max="46"</code> pour 44 lignes</td><td><code>pagination="12"</code></td><td>Meilleur : plus de plafond en dur</td></tr>
+            <tr><td><code>ods-dataset-context</code> × 2 (dont un « sans filtre »)</td><td>une <code>dsfr-data-source fetch-mode="export"</code> + <code>select</code></td><td>Meilleur&nbsp;: une requête, colonnes internes écartées</td></tr>
+            <tr><td><code>.split(',')</code> sur les champs multivalués (API v1)</td><td>tableaux de l'API v2.1, <code>explode</code>, <code>{{#each}}</code></td><td>Équivalent, sans code</td></tr>
+            <tr><td>boutons TYPE, <code>ods-select</code> PAYS / PUBLIC, pastilles THÈME</td><td><code>dsfr-data-facets</code> (<code>radio-inline</code>, <code>multiselect</code>)</td><td>Équivalent, graphies fusionnées</td></tr>
+            <tr><td>carte SVG d'Europe + table ISO écrite à la main</td><td>barres empilées triées</td><td><strong>Non reproduit</strong>&nbsp;: pas de géométrie européenne (AM-054)</td></tr>
+            <tr><td><code>ng-click</code> → panneau de détail</td><td><code>&lt;details&gt;</code> dans le gabarit</td><td>Équivalent</td></tr>
+            <tr><td>—</td><td><code>compute</code>, <code>dsfr-data-repeat</code>, <code>color-map</code>, KPI à ratio</td><td>Sans équivalent&nbsp;: le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>partielle</strong>, et pour une raison géographique et non
-          fonctionnelle : <strong>la seule carte non française du portail Éducation n'a pas de
-          fond de carte</strong>. Rien n'est livré au-delà des régions et départements
-          français, et aucun référentiel « nom de pays en français → code ISO » n'existe —
-          alors qu'aucun jeu open data français ne stocke autre chose que des noms. Les deux
-          autres « manques réels » de la fiche d'audit, eux, sont levés :
-          <strong><code>refine-on-click</code> sur une fiche</strong> et
-          <strong><code>{{#each}}</code> dans un template</strong> existent, si bien que le
-          motif maître-détail et les pastilles par valeur — les deux seules choses que la
-          transposition perdait — sont revenus. Reste une friction neuve, et elle est
-          instructive : <strong><code>replace-fields</code> ignore silencieusement les champs
-          multivalués</strong>, c'est-à-dire exactement les champs qu'un catalogue éditorial
-          saisi à la main a besoin de nettoyer. Le contournement (éclater, remplacer,
-          regrouper) sauve les graphiques mais pas les facettes — <em>les 36 pays pour 33
-          réels y sont toujours</em>.</p>
+        <p>La bibliothèque n'a opposé aucune résistance&nbsp;; seule la carte d'Europe reste hors
+          d'atteinte, et elle ne manque pas au récit. <strong>Le travail a été la lecture du
+          jeu</strong>&nbsp;: compter les pays sans distinguer européen et national faisait de la
+          France un contributeur parmi d'autres, alors qu'elle est la seule présente d'abord
+          chez elle — et que le recensement est français.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 
@@ -505,11 +437,6 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<!-- Bundle `core` (446 Ko) et non `esm` (551 Ko) : cette page n'a aucune
-     <dsfr-data-map> Leaflet. Verifie le 2026-09-19 sur les noms d'elements du
-     paquet publie 0.31.0 : `core` definit tout ce que la page emploie, les
-     cartes DSFR Chart (map-chart) comprises ; il ne lui manque que les enfants
-     de la carte Leaflet (map-layer, map-popup, map-legend, map-inset...). -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>

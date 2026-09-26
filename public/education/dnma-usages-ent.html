@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DNMA — les usages des ENT — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du tableau de bord DNMA : 12,35 millions de lignes, 649 millions de visites ENT, quatre requêtes au lieu de trente-neuf.">
+  <meta name="description" content="Recréation avec dsfr-data du tableau de bord DNMA de data.education.gouv.fr : quatre fois plus d'établissements mesurés, moins de visites — les chiffres des ENT suivent le périmètre de la mesure, pas les usages.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,158 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       La reproduction précédente titrait sur « 649 millions de visites » et
+       attribuait la bascule élèves → parents de 2025-2026 à « un changement de
+       méthode de mesure ». Relu à l'API, ce n'est ni la méthode ni l'usage :
+       c'est le PÉRIMÈTRE. Les écoles entrent dans la mesure en deux vagues
+       (septembre 2024, septembre 2025), et quatre académies en sortent presque
+       entièrement en septembre 2025. Le total national additionne des
+       établissements qui changent chaque année.
+
+       12,35 millions de lignes (UAI × semaine) : RIEN n'est chargé dans le
+       navigateur. Chaque source porte son agrégation dans `select`/`group-by`,
+       déléguée au portail. Lecture sans clé.
+       ========================================================================== -->
+
+  <!-- ---------- 1. La série : une ligne par semaine, 365 semaines ----------
+       `etab` = nombre de lignes de la semaine = établissements mesurés cette
+       semaine-là (UAI unique par semaine, vérifié à l'API sur trois semaines).
+       PAS `count(distinct uai)` : l'agrégat du portail est APPROCHÉ — 29 470
+       « établissements distincts » pour une semaine qui compte 28 698 lignes. -->
+  <dsfr-data-source id="sem" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
+    group-by="date_format(debutsemaine, 'yyyy-MM-dd') as semaine"
+    select="sum(visites_globales) as visites, sum(visites_eleve) as eleves, sum(visites_parent) as parents, count(*) as etab"
+    order-by="semaine" max-records="1000">
+  </dsfr-data-source>
+  <!-- Année scolaire : du 1er août au 31 juillet, comme `year-start-month="8"`. -->
+  <dsfr-data-normalize id="sem-n" source="sem"
+    compute="an = when month(semaine) &gt;= 8 then year(semaine) else year(semaine) - 1;
+             annee = an + '-' + (an + 1); k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="annees" source="sem-n" group-by="an, annee"
+    aggregate="visites:sum:visites, eleves:sum:eleves, parents:sum:parents, etab:max:etab_max, etab:sum:lignes, semaine:count:nsem"
+    order-by="an:asc">
+  </dsfr-data-query>
+  <!-- L'année en cours (quelques semaines) ne se compare pas à une année pleine. -->
+  <dsfr-data-query id="annees-c" source="annees" where="nsem:gte:40"></dsfr-data-query>
+  <dsfr-data-normalize id="annees-r" source="annees-c"
+    compute="par_etab = round(visites / lignes, 0); part_parents = round(parents / visites * 100, 1);
+             part_eleves = round(eleves / visites * 100, 1); k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="annees-t" source="annees-r"
+    rename="annee:Année scolaire | visites:Visites | etab_max:Établissements mesurés (semaine la plus haute) | lignes:Établissements × semaines | par_etab:Visites par établissement et par semaine | part_eleves:Part des élèves (%) | part_parents:Part des parents (%)">
+  </dsfr-data-normalize>
+
+  <!-- Avant les écoles (2023-2024, dernière année sans elles) et dernière année pleine. -->
+  <dsfr-data-query id="q-avant" source="annees-r" where="an:eq:2023" group-by="k"
+    aggregate="visites:sum:v_av, etab_max:max:e_av, par_etab:max:pe_av, part_parents:max:pp_av, part_eleves:max:pl_av">
+  </dsfr-data-query>
+  <dsfr-data-query id="q-der1" source="annees-r" order-by="an:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="q-der" source="q-der1" group-by="k"
+    aggregate="an:max:an_der, visites:sum:v_der, etab_max:max:e_der, par_etab:max:pe_der, part_parents:max:pp_der, part_eleves:max:pl_der">
+  </dsfr-data-query>
+  <dsfr-data-join id="comp-j" left="q-avant" right="q-der" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="comp" source="comp-j"
+    compute="annee_der = an_der + '-' + (an_der + 1); fois_etab = round(e_der / e_av, 1);
+             evol_v = round((v_der - v_av) / v_av * 100, 0)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 2. Les académies, 2024-2025 contre 2025-2026 ----------
+       Deux agrégations serveur (une ligne par académie de chaque côté : clé
+       unique, pas de relation 1-N), jointes en `full` pour garder les
+       académies absentes d'un côté. -->
+  <dsfr-data-source id="aca24" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
+    group-by="academie" select="sum(visites_globales) as v24"
+    where="academie is not null and debutsemaine &gt;= date'2024-08-01' and debutsemaine &lt; date'2025-08-01'"
+    max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-source id="aca25" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
+    group-by="academie" select="sum(visites_globales) as v25"
+    where="academie is not null and debutsemaine &gt;= date'2025-08-01' and debutsemaine &lt; date'2026-08-01'"
+    max-records="100">
+  </dsfr-data-source>
+  <dsfr-data-join id="aca-j" left="aca24" right="aca25" on="academie" type="full"></dsfr-data-join>
+  <dsfr-data-normalize id="aca-n" source="aca-j"
+    compute="v24 = coalesce(v24, 0); v25 = coalesce(v25, 0);
+             evol = when v24 = 0 then null else round((v25 - v24) / v24 * 100, 1);
+             grande = when v24 &gt;= 1000000 or v25 &gt;= 1000000 then 1 else 0; k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="aca-g" source="aca-n" where="grande:eq:1" order-by="v24:desc"></dsfr-data-query>
+  <dsfr-data-query id="aca-o" source="aca-n" order-by="v24:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-t" source="aca-o"
+    rename="academie:Académie | v24:Visites 2024-2025 | v25:Visites 2025-2026 | evol:Évolution (%)">
+  </dsfr-data-normalize>
+  <!-- Les académies sorties : plus de 90 % de visites en moins. -->
+  <dsfr-data-query id="aca-sorties" source="aca-n" where="evol:lte:-90, v24:gte:1000000" order-by="v24:desc"></dsfr-data-query>
+  <dsfr-data-query id="aca-sorties-s" source="aca-sorties" group-by="k"
+    aggregate="v24:sum:v24, v25:sum:v25, academie:count:n">
+  </dsfr-data-query>
+  <dsfr-data-query id="aca-entree" source="aca-n" where="v24:gte:1000000" order-by="evol:desc" limit="1"></dsfr-data-query>
+
+  <!-- ---------- 3. Qui visite, selon le type d'établissement (2025-2026) ---------- -->
+  <dsfr-data-source id="typ25" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
+    group-by="nature_uai"
+    select="sum(visites_globales) as visites, sum(visites_eleve) as eleves, sum(visites_parent) as parents, sum(visites_enseignant) as enseignants, sum(visites_admin_vie_scol_tech) as personnels, count(*) as lignes, count(distinct debutsemaine) as nsem"
+    where="debutsemaine &gt;= date'2025-08-01' and debutsemaine &lt; date'2026-08-01'"
+    max-records="200">
+  </dsfr-data-source>
+  <!-- Quatre familles. La branche « Écoles » lit une sous-chaîne (insensible à
+       la casse) : toutes les natures d'école du jeu commencent par « Ecole ». -->
+  <dsfr-data-normalize id="typ25-n" source="typ25"
+    compute="type = when contains(nature_uai, 'Ecole') then 'Écoles' when nature_uai = 'Collège' or nature_uai = 'Collège spécialisé' then 'Collèges' when contains(nature_uai, 'Lycée') then 'Lycées' else 'Autres structures'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="typ25-g" source="typ25-n" group-by="type"
+    aggregate="visites:sum:visites, eleves:sum:eleves, parents:sum:parents, enseignants:sum:enseignants, personnels:sum:personnels, lignes:sum:lignes, nsem:max:nsem"
+    order-by="visites:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="typ25-r" source="typ25-g"
+    compute="part_parents = round(parents / visites * 100, 1); part_eleves = round(eleves / visites * 100, 1); etab = round(lignes / nsem, 0)">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="typ25-t" source="typ25-r"
+    rename="type:Type d'établissement | etab:Établissements mesurés par semaine (moyenne) | visites:Visites | eleves:Élèves | parents:Parents | enseignants:Enseignants | personnels:Personnels | part_parents:Part des parents (%)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="typ25-ecoles" source="typ25-r" where="type:eq:Écoles"></dsfr-data-query>
+
+  <!-- ---------- 4. Le smartphone, et la part des visites dont l'appareil est connu ----------
+       Le jeu profil × appareil ne commence qu'à la semaine du 18 août 2025. -->
+  <dsfr-data-source id="app25" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils-appareils"
+    group-by="nature_uai"
+    select="sum(visites_parent_smartphone) as p_tel, sum(visites_parent_ordinateur) + sum(visites_parent_tablette) + sum(visites_parent_autresappareil) + sum(visites_parent_smartphone) as p_app, sum(visites_eleve_smartphone) as e_tel, sum(visites_eleve_ordinateur) + sum(visites_eleve_tablette) + sum(visites_eleve_autresappareil) + sum(visites_eleve_smartphone) as e_app"
+    where="debutsemaine &gt;= date'2025-08-01' and debutsemaine &lt; date'2026-08-01'"
+    max-records="200">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="app25-n" source="app25"
+    compute="type = when contains(nature_uai, 'Ecole') then 'Écoles' when nature_uai = 'Collège' or nature_uai = 'Collège spécialisé' then 'Collèges' when contains(nature_uai, 'Lycée') then 'Lycées' else 'Autres structures'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="app25-g" source="app25-n" group-by="type"
+    aggregate="p_tel:sum:p_tel, p_app:sum:p_app, e_tel:sum:e_tel, e_app:sum:e_app">
+  </dsfr-data-query>
+  <!-- Une ligne par type des deux côtés : jointure 1-1. -->
+  <dsfr-data-join id="app-j" left="app25-g" right="typ25-g" on="type" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="app-r" source="app-j"
+    compute="tel_parents = round(p_tel / p_app * 100, 1); tel_eleves = round(e_tel / e_app * 100, 1);
+             connu_parents = round(p_app / parents * 100, 0); k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="app-g" source="app-r" where="type:neq:Autres structures" order-by="tel_parents:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="app-t" source="app-r"
+    rename="type:Type d'établissement | tel_parents:Parents : part au smartphone (%) | tel_eleves:Élèves : part au smartphone (%) | connu_parents:Visites de parents dont l'appareil est connu (%)">
+  </dsfr-data-normalize>
+  <!-- National : ratios de SOMMES, jamais moyenne des taux par type. -->
+  <dsfr-data-query id="app-nat" source="app-r" group-by="k"
+    aggregate="p_tel:sum:p_tel, p_app:sum:p_app, parents:sum:parents">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="app-nat-r" source="app-nat"
+    compute="tel = round(p_tel / p_app * 100, 1); connu = round(p_app / parents * 100, 0)">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,125 +184,258 @@
       </div>
     </nav>
 
-    <h1>DNMA : les usages numériques constatés via les ENT</h1>
+    <h1>Quatre fois plus d'établissements mesurés, moins de visites&nbsp;: les chiffres des ENT suivent le périmètre de la mesure, pas les usages</h1>
 
-    <p class="fr-text--lead">
-      Le Dispositif national de mesure d'audience mesure la fréquentation des espaces numériques
-      de travail, semaine par semaine et établissement par établissement, depuis
-      <strong>septembre 2019</strong>. Sur l'année scolaire 2025-2026, il compte
-      <strong>649 492 449 visites</strong> et <strong>143 170 883 utilisateurs</strong>. Le
-      constat le plus frappant est ailleurs : <strong>les parents accèdent à l'ENT au smartphone
-      dans 81,7 % des cas</strong>, et les élèves dans 53,8 %.
+    <!-- Le chapô est CALCULÉ : 2023-2024 (dernière année sans écoles) contre la dernière année pleine. -->
+    <dsfr-data-repeat source="comp">
+      <template>
+        <p class="fr-text--lead">
+          En {{annee_der}}, le Dispositif national de mesure d'audience (DNMA) compte
+          <strong>{{v_der:number:0}} visites</strong> sur les espaces numériques de travail (ENT),
+          contre {{v_av:number:0}} en 2023-2024. Dans le même temps, le nombre d'établissements
+          mesurés chaque semaine est passé de {{e_av:number:0}} à <strong>{{e_der:number:0}}</strong>&nbsp;:
+          les écoles sont entrées dans la mesure, et quatre académies en sont presque sorties.
+          Le total national additionne des établissements qui changent d'une année à l'autre&nbsp;;
+          <strong>il ne dit pas si l'on utilise plus ou moins les ENT</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Le DNMA compte, semaine par semaine et établissement par établissement, les visites des
+      ENT raccordés au dispositif. Une visite n'est pas une personne, et un établissement absent
+      n'est pas un établissement sans ENT&nbsp;: c'est un établissement que la mesure ne voit pas.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <strong>Quatre jeux, 12,35 millions de lignes</strong> — une ligne = un établissement (UAI)
-        × une semaine :
+      <p class="fr-callout__text fr-text--sm">
+        Quatre jeux de la DNE, une ligne par établissement (UAI) et par semaine, 12,35 millions
+        de lignes au total&nbsp;:
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-dnma-par-uai-profils/" target="_blank" rel="noopener external"><code>…profils</code></a>
-        (3 896 557 lignes),
+        (depuis septembre 2019),
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-dnma-par-uai-services/" target="_blank" rel="noopener external"><code>…services</code></a>
-        (3 093 552),
+        (depuis septembre 2021),
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-dnma-par-uai-profils-appareils/" target="_blank" rel="noopener external"><code>…profils-appareils</code></a>
-        (1 479 646) et
-        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-dnma-par-uai-appareils/" target="_blank" rel="noopener external"><code>…appareils</code></a>
-        (3 881 534). <strong>Aucune ligne n'est chargée dans le navigateur</strong> : chaque bloc
-        de cette page lit une somme calculée par le serveur.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Sur le portail, le quatrième jeu est chargé et jamais lu</strong> : un contexte
-        Opendatasoft est déclaré sur <code>…appareils</code> (3,88 millions de lignes,
-        systèmes d'exploitation et navigateurs), ses paramètres sont recalculés à chaque filtre,
-        et aucune agrégation ne l'interroge. Il est exploité ici, en bas de page.
+        (depuis août 2025) et
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-dnma-par-uai-appareils/" target="_blank" rel="noopener external"><code>…appareils</code></a>.
+        Aucune ligne n'est chargée dans le navigateur&nbsp;: chaque bloc lit une somme calculée
+        par le portail. Licence Ouverte 2.0.
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="comp" value="e_der:first" format="nombre"
+        heading="Établissements mesurés en une semaine"
+        lines='[{"value":"e_av:first","format":"nombre","prefix":"2023-2024 : "}]'
+        label="semaine la plus haute de la dernière année pleine"></dsfr-data-kpi>
+      <dsfr-data-kpi source="comp" value="pe_der:first" format="nombre"
+        heading="Visites par établissement et par semaine"
+        lines='[{"value":"pe_av:first","format":"nombre","prefix":"2023-2024 : "}]'
+        label="dernière année pleine : la mesure s'est diluée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="aca-sorties-s" value="n:first" format="nombre"
+        heading="Académies presque sorties de la mesure"
+        lines='[{"value":"v24:first","format":"compact","suffix":" visites en 2024-2025"},{"value":"v25:first","format":"compact","suffix":" en 2025-2026"}]'
+        label="plus de 90 % de visites en moins d'une année sur l'autre"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve : deux séries qui divergent ---------- -->
+    <h2 class="fr-h3">1. Les écoles sont entrées dans la mesure en deux vagues, et la visite moyenne par établissement s'est effondrée</h2>
+    <dsfr-data-repeat source="comp">
+      <template>
+        <p class="odv-lecture">Entre 2023-2024 et {{annee_der}}, le nombre d'établissements
+          mesurés en une semaine est multiplié par <strong>{{fois_etab:number:1}}</strong>,
+          tandis que les visites évoluent de <strong>{{evol_v:number:0}}&nbsp;%</strong>. Un
+          établissement mesuré compte <strong>{{pe_der:number:0}} visites par semaine</strong>,
+          contre {{pe_av:number:0}} en 2023-2024&nbsp;: les nouveaux venus sont surtout des
+          écoles, où l'ENT sert peu et surtout aux parents.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="odv-viz" data-code="Établissements mesurés par année scolaire">
+          <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-etab" source="annees-r" type="bar"
+            label-field="annee" value-field="etab_max:Établissements mesurés" y-min="0"
+            selected-palette="neutral" highlight-index="[5, 6]"
+            unit-tooltip="établissements"
+            databox databox-title="Établissements mesurés en une semaine (semaine la plus haute de l'année)"
+            databox-source="DNE — fr-en-dnma-par-uai-profils, via data.education.gouv.fr"
+            databox-download heading-level="3">
+          </dsfr-data-chart>
+          </div>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="odv-viz" data-code="Visites ENT par année scolaire">
+          <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-vis" source="annees-r" type="bar"
+            label-field="annee" value-field="visites:Visites" y-min="0"
+            selected-palette="neutral" highlight-index="[5, 6]"
+            unit-tooltip="visites"
+            databox databox-title="Visites ENT par année scolaire"
+            databox-source="DNE — fr-en-dnma-par-uai-profils, via data.education.gouv.fr"
+            databox-download heading-level="3">
+          </dsfr-data-chart>
+          </div>
+        </div>
+      </div>
+      <div class="fr-col-12">
+        <dsfr-data-a11y for="g-etab" source="annees-t" table download
+          filename="dnma-par-annee-scolaire.csv"
+          label-field="Année scolaire"
+          value-field="Visites, Établissements mesurés (semaine la plus haute), Établissements × semaines, Visites par établissement et par semaine, Part des élèves (%), Part des parents (%)"
+          description="Par année scolaire complète (1er août au 31 juillet) : visites ENT, établissements mesurés à la semaine la plus haute, nombre de couples établissement × semaine, visites par établissement et par semaine, part des élèves et des parents dans les visites. Les deux dernières années, mises en évidence, sont celles de l'entrée des écoles. L'année en cours est exclue."></dsfr-data-a11y>
+      </div>
+    </div>
+
+    <!-- ---------- 2. Les académies ---------- -->
+    <h2 class="fr-h3">2. En septembre 2025, quatre académies disparaissent presque de la mesure, une autre y entre</h2>
+    <dsfr-data-repeat source="aca-sorties-s">
+      <template>
+        <p class="odv-lecture">De 2024-2025 à 2025-2026, <strong>{{n}} académies</strong> perdent
+          plus de 90&nbsp;% de leurs visites mesurées&nbsp;: ensemble, elles passent de
+          <strong>{{v24:number:0}}</strong> à <strong>{{v25:number:0}}</strong> visites. Leurs
+          établissements restent pourtant dans le jeu&nbsp;: c'est leur audience qui n'est plus
+          remontée.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="aca-sorties" key-field="academie">
+      <template>
+        <p class="fr-text--sm fr-mb-1v"><strong>{{academie}}</strong>&nbsp;: {{v24:number:0}} visites en
+          2024-2025, {{v25:number:0}} en 2025-2026 ({{evol:number:1}}&nbsp;%).</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="aca-entree">
+      <template>
+        <p class="fr-text--sm fr-mt-2w">À l'inverse, l'académie de <strong>{{academie}}</strong>
+          passe de {{v24:number:0}} à {{v25:number:0}} visites (+{{evol:number:0}}&nbsp;%). Aucune
+          de ces variations ne se lit comme un changement d'usage&nbsp;: une telle ampleur, en une
+          rentrée, est celle d'un raccordement ou d'un débranchement.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mt-2w fr-mb-6w" data-code="Visites ENT par académie, 2024-2025 et 2025-2026">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-aca" source="aca-g" type="bar" horizontal
+        label-field="academie"
+        value-field="v24:2024-2025" value-fields="v25:2025-2026"
+        color-map="2024-2025:#929292,2025-2026:#000091"
+        unit-tooltip="visites"
+        databox databox-title="Visites ENT par académie, 2024-2025 et 2025-2026"
+        databox-source="DNE — fr-en-dnma-par-uai-profils, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-aca" source="aca-t" table download
+        filename="dnma-academies-2024-2026.csv"
+        label-field="Académie" value-field="Visites 2024-2025, Visites 2025-2026, Évolution (%)"
+        description="Visites ENT mesurées par académie en 2024-2025 et en 2025-2026, triées par volume 2024-2025. Le graphique n'affiche que les académies qui dépassent un million de visites l'une des deux années ; le tableau les donne toutes."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La conséquence sur les profils ---------- -->
+    <h2 class="fr-h3">3. La part des parents a bondi parce que les écoles sont arrivées, pas parce que les parents ont changé</h2>
+    <dsfr-data-repeat source="comp">
+      <template>
+        <p class="odv-lecture">Les parents font <strong>{{pp_der:number:1}}&nbsp;%</strong> des
+          visites en {{annee_der}}, contre {{pp_av:number:1}}&nbsp;% en 2023-2024&nbsp;; les élèves
+          {{pl_der:number:1}}&nbsp;%, contre {{pl_av:number:1}}&nbsp;%.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="typ25-ecoles">
+      <template>
+        <p class="fr-text--sm">L'explication tient dans un type d'établissement&nbsp;: en
+          2025-2026, les écoles — {{etab:number:0}} mesurées en moyenne chaque semaine — totalisent {{visites:number:0}}
+          visites, dont <strong>{{part_parents:number:1}}&nbsp;% par des parents</strong>. Un élève
+          de maternelle ou d'élémentaire ne se connecte guère&nbsp;; ses parents, si. Comparer la
+          répartition par profil d'une année sur l'autre, c'est comparer deux compositions
+          d'établissements.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Visites ENT par profil et par type d'établissement, 2025-2026">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-typ" source="typ25-r" type="bar" horizontal stacked
+        label-field="type"
+        value-field="eleves:Élèves" value-fields="parents:Parents, enseignants:Enseignants, personnels:Personnels"
+        color-map="Élèves:#000091,Parents:#e4794a,Enseignants:#929292,Personnels:#cecece"
+        unit-tooltip="visites"
+        databox databox-title="Visites ENT par profil et par type d'établissement, 2025-2026"
+        databox-source="DNE — fr-en-dnma-par-uai-profils, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-typ" source="typ25-t" table download
+        filename="dnma-profils-par-type-2025-2026.csv"
+        label-field="Type d'établissement"
+        value-field="Établissements mesurés par semaine (moyenne), Visites, Élèves, Parents, Enseignants, Personnels, Part des parents (%)"
+        description="Visites ENT de l'année scolaire 2025-2026 réparties par profil, pour quatre familles d'établissements. Dans les écoles, les parents font l'essentiel des visites ; dans les collèges et les lycées, ce sont les élèves."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 4. La nuance : le smartphone ---------- -->
+    <h2 class="fr-h3">4. Le smartphone des parents&nbsp;: neuf visites sur dix à l'école, deux sur trois au lycée</h2>
+    <dsfr-data-repeat source="app-nat-r">
+      <template>
+        <p class="odv-lecture">En 2025-2026, <strong>{{tel:number:1}}&nbsp;%</strong> des visites de
+          parents dont l'appareil est connu passent par un smartphone. Ce chiffre national mélange
+          des publics très différents, et il ne porte que sur <strong>{{connu:number:0}}&nbsp;%</strong>
+          des visites de parents&nbsp;: pour les autres, le jeu ne dit pas l'appareil.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">Le jeu profil × appareil ne commence qu'en août 2025&nbsp;: il n'y a pas
+      d'évolution à montrer. Le détail par type d'établissement, lui, défait la moyenne
+      nationale.</p>
+    <div class="odv-viz fr-mb-2w" data-code="Part des visites faites au smartphone, par profil et type d'établissement, 2025-2026">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-tel" source="app-g" type="bar"
+        label-field="type"
+        value-field="tel_parents:Parents" value-fields="tel_eleves:Élèves"
+        color-map="Parents:#e4794a,Élèves:#000091"
+        y-min="0" y-max="100" unit-tooltip="%"
+        databox databox-title="Part des visites faites au smartphone, 2025-2026 (visites dont l'appareil est connu)"
+        databox-source="DNE — fr-en-dnma-par-uai-profils-appareils et …-profils, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-tel" source="app-t" table download
+        filename="dnma-smartphone-2025-2026.csv"
+        label-field="Type d'établissement"
+        value-field="Parents : part au smartphone (%), Élèves : part au smartphone (%), Visites de parents dont l'appareil est connu (%)"
+        description="Part des visites ENT faites au smartphone en 2025-2026, pour les parents et pour les élèves, par type d'établissement. Les parts sont calculées sur les seules visites dont l'appareil est renseigné ; la dernière colonne dit quelle part des visites de parents cela représente."></dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="app-g" key-field="type">
+      <template>
+        <p class="fr-text--sm fr-mb-1v"><strong>{{type}}</strong>&nbsp;: {{tel_parents:number:1}}&nbsp;%
+          des visites de parents au smartphone, {{tel_eleves:number:1}}&nbsp;% de celles des élèves
+          (appareil connu pour {{connu_parents:number:0}}&nbsp;% des visites de parents).</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w fr-mb-6w">La moyenne nationale monte à mesure que les écoles
+      pèsent dans la mesure&nbsp;: elle aussi suit le périmètre.</p>
   </div>
 
-  <!-- ==========================================================================
-       12,35 M de lignes : tout charger est exclu, et il n'y a pas à en débattre.
-       Chaque source porte son agrégation dans `select` : UNE requête = N
-       indicateurs. C'est le renversement décisif par rapport au modèle
-       Opendatasoft, où une directive = une requête (39 au chargement de la page
-       d'origine, 34 à chaque changement d'académie).
-
-       Le filtre d'année scolaire passe par `year-of` + `year-start-month="8"` :
-       l'année court du 1er août au 31 juillet, exactement la fenêtre de
-       l'original, et la clause reste une plage gte/lt déléguée au serveur.
-       ========================================================================== -->
-
-  <!-- National : sensible à l'année, insensible à l'académie. -->
-  <dsfr-data-source id="dnma-nat" api-type="opendatasoft"
+  <!-- ---------- 5. Exploration ---------- -->
+  <!-- Local : une académie (ou toutes) et une année scolaire. -->
+  <dsfr-data-source id="loc" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
-    select="sum(visites_globales) as visites, sum(utilisateurs_globales) as utilisateurs, sum(visites_eleve) as eleves, sum(visites_parent) as parents, sum(visites_enseignant) as enseignants, sum(visites_admin_vie_scol_tech) as admin, count(*) as lignes" max-records="1">
+    select="sum(visites_globales) as visites, sum(visites_parent) as parents, count(*) as lignes, count(distinct debutsemaine) as nsem"
+    max-records="1">
   </dsfr-data-source>
-
-  <!-- Répartition par académie, pour la carte et le podium : un group_by serveur. -->
-  <dsfr-data-source id="dnma-aca-raw" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
-    group-by="academie" select="sum(visites_globales) as visites"
-    where="academie is not null" order-by="visites:desc" max-records="100">
-  </dsfr-data-source>
-
-  <!-- Local : même jeu, mais dans le contexte académique. -->
-  <dsfr-data-source id="dnma-loc" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
-    select="sum(visites_globales) as visites, sum(utilisateurs_globales) as utilisateurs, sum(visites_eleve) as eleves, sum(visites_parent) as parents, sum(visites_enseignant) as enseignants, sum(visites_admin_vie_scol_tech) as admin, count(*) as lignes" max-records="1">
-  </dsfr-data-source>
-
-  <!-- Les 25 services en UN appel. L'original en montre 5. -->
-  <dsfr-data-source id="dnma-svc" api-type="opendatasoft"
+  <!-- Les 25 services en UN appel (jeu disponible depuis septembre 2021). -->
+  <dsfr-data-source id="svc" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-services"
-    select="sum(visites_accueil) as accueil, sum(visites_actualites) as actualites, sum(visites_cahier_textes) as cahier_textes, sum(visites_cahier_liaison) as cahier_liaison, sum(visites_courrier_electronique) as courriel, sum(visites_messagerie_instantanee) as messagerie, sum(visites_visioconference) as visio, sum(visites_stockage_partage) as stockage, sum(visites_production_collaborative) as collaboratif, sum(visites_documentation_cdi) as cdi, sum(visites_parcours_pedagogique) as parcours, sum(visites_reservation_salles_materiels) as reservation, sum(visites_service_collectivite) as collectivite, sum(visites_services_vie_scolaire) as vie_scolaire, sum(visites_gestion_temps) as gestion_temps, sum(visites_absences) as absences, sum(visites_gestion_competences) as competences, sum(visites_notes) as notes, sum(visites_manuel_numerique) as manuel, sum(visites_ressource_multimedia) as multimedia, sum(visites_ressource_orientation) as orientation, sum(visites_ressource_production) as production, sum(visites_ressource_accompagnement_entrainement) as accompagnement, sum(visites_ressource_reference_dictionnaire) as dictionnaire, sum(visites_ressource_documentaire) as documentaire" max-records="1">
+    select="sum(visites_accueil) as accueil, sum(visites_actualites) as actualites, sum(visites_cahier_textes) as cahier_textes, sum(visites_cahier_liaison) as cahier_liaison, sum(visites_courrier_electronique) as courriel, sum(visites_messagerie_instantanee) as messagerie, sum(visites_visioconference) as visio, sum(visites_stockage_partage) as stockage, sum(visites_production_collaborative) as collaboratif, sum(visites_documentation_cdi) as cdi, sum(visites_parcours_pedagogique) as parcours, sum(visites_reservation_salles_materiels) as reservation, sum(visites_service_collectivite) as collectivite, sum(visites_services_vie_scolaire) as vie_scolaire, sum(visites_gestion_temps) as gestion_temps, sum(visites_absences) as absences, sum(visites_gestion_competences) as competences, sum(visites_notes) as notes, sum(visites_manuel_numerique) as manuel, sum(visites_ressource_multimedia) as multimedia, sum(visites_ressource_orientation) as orientation, sum(visites_ressource_production) as production, sum(visites_ressource_accompagnement_entrainement) as accompagnement, sum(visites_ressource_reference_dictionnaire) as dictionnaire, sum(visites_ressource_documentaire) as documentaire"
+    max-records="1">
   </dsfr-data-source>
-
-  <!-- Les 16 combinaisons profil × appareil, en un appel. L'original en montre 6. -->
-  <dsfr-data-source id="dnma-app" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils-appareils"
-    select="sum(visites_eleve_ordinateur) as e_ordi, sum(visites_eleve_smartphone) as e_tel, sum(visites_eleve_tablette) as e_tab, sum(visites_eleve_autresappareil) as e_autre, sum(visites_parent_ordinateur) as p_ordi, sum(visites_parent_smartphone) as p_tel, sum(visites_parent_tablette) as p_tab, sum(visites_parent_autresappareil) as p_autre, sum(visites_enseignant_ordinateur) as ens_ordi, sum(visites_enseignant_smartphone) as ens_tel, sum(visites_enseignant_tablette) as ens_tab, sum(visites_enseignant_autresappareil) as ens_autre, sum(visites_adminviescoltech_ordinateur) as adm_ordi, sum(visites_adminviescoltech_smartphone) as adm_tel, sum(visites_adminviescoltech_tablette) as adm_tab, sum(visites_adminviescoltech_autresappareil) as adm_autre" max-records="1">
-  </dsfr-data-source>
-
-  <!-- Le jeu que l'original charge sans jamais le lire : OS et navigateurs. -->
-  <dsfr-data-source id="dnma-os" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-appareils"
-    select="sum(visites_android) as android, sum(visites_windows) as windows, sum(visites_ios) as ios, sum(visites_macos) as macos, sum(visites_chromeos) as chromeos, sum(visites_linux) as linux, sum(visites_autreos) as autre_os" max-records="1">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="dnma-nav" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-appareils"
-    select="sum(visites_chrome) as chrome, sum(visites_chromemobile) as chrome_mobile, sum(visites_safari) as safari, sum(visites_firefox) as firefox, sum(visites_edge) as edge, sum(visites_samsungbrowser) as samsung, sum(visites_opera) as opera, sum(visites_huaweibrowser) as huawei, sum(visites_miuibrowser) as miui, sum(visites_autrenavigateur) as autre_nav" max-records="1">
-  </dsfr-data-source>
-
-  <!-- Ce que l'original n'a pas du tout : la série hebdomadaire, sur toute la
-       profondeur du jeu. 370 semaines, quelques kilo-octets, un aller-retour. -->
-  <dsfr-data-source id="dnma-sem" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
-    group-by="date_format(debutsemaine, 'yyyy-MM-dd') as semaine" order-by="semaine"
-    select="sum(visites_eleve) as eleves, sum(visites_parent) as parents, sum(visites_enseignant) as enseignants"
-    max-records="600">
-  </dsfr-data-source>
-
-  <!-- Source dédiée à la facette d'académie : `select` d'un seul champ et
-       `max-records="1"` — les valeurs viennent de l'endpoint /facets, pas des
-       lignes, donc on ne rapatrie rien. -->
-  <!-- `debutsemaine` sort en ISO complet (« 2019-09-02T00:00:00+00:00 ») : 365
-       étiquettes d'axe illisibles. Le raccourci naturel —
-       group-by="date_format(debutsemaine, 'yyyy-MM-dd') as semaine" — rendait un
-       HTTP 400 jusqu'en 0.28 : l'adaptateur découpait `group-by` sur TOUTES les
-       virgules, y compris celle de la fonction, puis backquotait le second
-       morceau (BUG-011). Le contournement était un `replace()` côté client.
-       ⚠️ Contournement RETIRÉ au lot 20 : #796, livré en 0.29.0, ignore les
-       virgules entre parenthèses et entre quotes. Le regroupement se fait
-       maintenant côté serveur, et le `dsfr-data-normalize` intermédiaire a
-       disparu. Vérifié à l'API : l'expression nue rend 200 et des semaines
-       « 2019-09-02 » ; la forme backquotée d'avant rend une ODSQLSyntaxError. -->
-
-  <dsfr-data-source id="dnma-fac" api-type="opendatasoft"
+  <!-- Source des facettes : seul l'endpoint /facets est lu. -->
+  <dsfr-data-source id="fac" api-type="opendatasoft"
     base-url="https://data.education.gouv.fr" dataset-id="fr-en-dnma-par-uai-profils"
     select="academie" server-side max-records="1">
   </dsfr-data-source>
 
-  <div class="fr-container fr-mb-6w">
+  <div class="fr-container">
+    <h2 class="fr-h3">5. Explorer une académie, une année</h2>
+    <p class="fr-text--sm">Les filtres ne pilotent que cette section. Avant de comparer deux
+      années, regarder le nombre d'établissements mesurés&nbsp;: s'il change beaucoup, c'est la
+      mesure qui a changé.</p>
     <div class="fr-grid-row fr-grid-row--gutters fr-mb-3w">
       <div class="fr-col-12 fr-col-md-4">
         <div class="fr-select-group">
@@ -163,11 +448,9 @@
             <option value="2023">2023-2024</option>
             <option value="2024">2024-2025</option>
             <option value="2025" selected>2025-2026</option>
-            <option value="2026">2026-2027</option>
+            <option value="2026">2026-2027 (en cours)</option>
           </select>
-          <p class="fr-hint-text">
-            Le jeu remonte à la semaine du 2 septembre 2019. Le portail n'en propose que trois.
-          </p>
+          <p class="fr-hint-text">Du 1er août au 31 juillet. Services détaillés depuis 2021-2022.</p>
         </div>
       </div>
       <div class="fr-col-12 fr-col-md-4">
@@ -175,384 +458,155 @@
           <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
             Académie<span class="odv-filtres__compte"></span>
           </summary>
-        <h2 class="fr-h6">Académie</h2>
-        <dsfr-data-facets id="dnma-f-aca" source="dnma-fac" context="dnma-ctx-loc"
-          server-facets fields="academie" labels="academie:Académie"
-          display="academie:multiselect" sort="alpha:asc" max-values="40">
-        </dsfr-data-facets>
-        <p class="fr-hint-text">
-          Ne pilote que la section « lecture locale » ci-dessous — les blocs nationaux, la carte
-          et le classement restent à l'échelle nationale, ce qui est dit ici et ne l'est pas
-          sur le portail.
-        </p>
+          <h3 class="fr-h6">Académie</h3>
+          <dsfr-data-facets id="f-aca" source="fac" context="ctx-loc"
+            server-facets fields="academie" labels="academie:Académie"
+            display="academie:multiselect" sort="alpha:asc" max-values="40">
+          </dsfr-data-facets>
+          <p class="fr-hint-text">Les compteurs de la liste sont des lignes établissement × semaine,
+            pas des visites.</p>
         </details>
       </div>
       <div class="fr-col-12 fr-col-md-4">
-        <dsfr-data-context-tags for="dnma-ctx-loc" clear-all></dsfr-data-context-tags>
+        <dsfr-data-context-tags for="ctx-loc" clear-all></dsfr-data-context-tags>
       </div>
     </div>
   </div>
 
-  <dsfr-data-context id="dnma-ctx-nat" sources="dnma-nat dnma-aca-raw">
-    <dsfr-data-context-filter field="debutsemaine" operator="year-of" year-start-month="8"
-      ui="dnma-annee" label="Année scolaire" default="2025"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <dsfr-data-context id="dnma-ctx-loc" sources="dnma-loc dnma-svc dnma-app dnma-os dnma-nav" url-sync>
+  <dsfr-data-context id="ctx-loc" sources="loc svc" url-sync>
     <dsfr-data-context-filter field="debutsemaine" operator="year-of" year-start-month="8"
       ui="dnma-annee" label="Année scolaire" default="2025"></dsfr-data-context-filter>
   </dsfr-data-context>
 
   <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Vue d'ensemble nationale</h2>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-2w">
-      <dsfr-data-kpi source="dnma-nat" value="visites:max" format="compact"
-        heading="National" label="visites ENT"></dsfr-data-kpi>
-      <dsfr-data-kpi source="dnma-nat" value="utilisateurs:max" format="compact"
-        heading="National" label="utilisateurs"></dsfr-data-kpi>
-      <dsfr-data-kpi source="dnma-nat" value="eleves:max" format="compact"
-        heading="Profil élève" label="visites"></dsfr-data-kpi>
-      <dsfr-data-kpi source="dnma-nat" value="parents:max" format="compact"
-        heading="Profil parent" label="visites"></dsfr-data-kpi>
+    <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="loc" value="lignes:max / nsem:max" format="nombre"
+        heading="Établissements mesurés" label="en moyenne par semaine"></dsfr-data-kpi>
+      <dsfr-data-kpi source="loc" value="visites:max" format="compact"
+        heading="Visites ENT" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="loc" value="visites:max / lignes:max" format="nombre"
+        heading="Visites par établissement et par semaine" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="loc" value="parents:max / visites:max" format="pourcentage" decimals="1"
+        heading="Part des parents" label="dans les visites"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
-    <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-4w">
-      <p class="fr-text--sm">
-        <strong>La somme des profils ne fait pas le total, et il faut le dire.</strong> En
-        2025-2026, élèves + parents + enseignants + personnels administratifs valent
-        <strong>648 563 478</strong> visites, contre <strong>649 492 449</strong> déclarées en
-        <code>visites_globales</code> : <strong>928 971 visites</strong> ne se rattachent à aucun
-        profil. Rien ne l'explique dans le jeu, et le portail ne le mentionne pas.
-        <strong>2026-2027 est une année en cours</strong> : la choisir dans le sélecteur donne
-        trois semaines de données, à ne pas comparer à une année pleine.
-      </p>
-    </div>
-
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">Visites par profil</h3>
-        <dsfr-data-unpivot id="dnma-u-prof" source="dnma-nat"
-          value-cols="eleves:Élèves, parents:Parents, enseignants:Enseignants, admin:Personnels administratifs et vie scolaire"
-          var-name="profil" value-name="visites"></dsfr-data-unpivot>
-        <div class="odv-viz" data-code="Visites ENT par profil">
-        <dsfr-data-chart id="g-dnma-prof" source="dnma-u-prof" type="bar" horizontal
-          label-field="profil" value-field="visites" name="Visites"
-          databox databox-title="Visites ENT par profil"
-          databox-source="DNE — fr-en-dnma-par-uai-profils, Licence Ouverte 2.0"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-dnma-prof" source="dnma-u-prof" table download
-          label-field="profil" value-field="visites"></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">Les visites ENT par académie</h3>
-        <!-- Aucune mise en clé a écrire : depuis la 0.26.0 (dsfr-data#754),
-             `toAcademyKey` desaccentue et retire l'article, donc « Créteil »,
-             « Orléans-Tours », « Besançon » et « La Réunion » s'apparient tels
-             quels. Le `compute` de quatre cas plus `upper()` que portait cette
-             page etait perime depuis trois versions mineures (BUG-008, FP-014). -->
-        <div class="odv-viz" data-code="Visites ENT par académie">
-        <dsfr-data-chart id="c-dnma-aca" source="dnma-aca-raw" type="map-aca"
-          code-field="academie" value-field="visites" name="Visites"
-          unit-tooltip="visites" selected-palette="sequentialAscending"
-          databox databox-title="Visites ENT par académie"
-          databox-source="DNE — fr-en-dnma-par-uai-profils" databox-download>
-        </dsfr-data-chart>
-        </div>
-        <p class="fr-hint-text">
-          L'original n'a <strong>aucune carte</strong>. Celle-ci en perd quatre, relevées en
-          console au chargement (« 4 ligne(s) sur 34 ignorée(s) ») : <strong>Polynésie
-          française</strong> (2 437 660 visites en 2025-2026), <strong>Nouvelle-Calédonie</strong>
-          (891 867), <strong>Saint-Pierre-et-Miquelon</strong> (365) et
-          <strong>« Etranger »</strong> (65) n'existent pas dans le découpage académique de
-          DSFR Chart — ce sont pourtant des académies de plein exercice dans la donnée du
-          ministère. Le jeu porte en outre <strong>135 visites rattachées à une académie
-          nulle</strong>, écartées ici par un <code>where</code>.
-        </p>
-      </div>
-    </div>
-
-    <h3 class="fr-h6 fr-mt-4w">Le classement des académies</h3>
-    <div class="odv-viz" data-code="Graphique">
-    <dsfr-data-podium source="dnma-aca-raw" label-field="academie" value-field="visites"
-      value-unit="visites" max-items="10"></dsfr-data-podium>
-    </div>
-    <p class="fr-text--xs fr-mt-1w">
-      <strong>Attention à la lecture.</strong> Ce classement mesure des <em>visites</em>, pas un
-      taux d'équipement : le DNMA ne couvre que les ENT raccordés au dispositif, et la
-      couverture est très inégale — Versailles pèse 103 952 337 visites en 2025-2026 quand
-      Dijon en compte 65 950 et Clermont-Ferrand 222 173. Le portail affiche, lui, une facette
-      d'académie dont les compteurs sont des <em>nombres de lignes</em> UAI × semaine, ce qui
-      classe Lille devant Versailles alors que Versailles a plus de visites.
-    </p>
-    <dsfr-data-a11y for="c-dnma-aca" source="dnma-aca-raw" table download
-      label-field="academie" value-field="visites"></dsfr-data-a11y>
-  </div>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Ce que la page d'origine ne montre pas : la série hebdomadaire</h2>
-    <p class="fr-text--sm">
-      Les quatre jeux sont hebdomadaires, déclarés <code>timeserie</code>, et remontent à
-      septembre 2019. La page d'origine n'a <strong>aucun graphique</strong> : uniquement des
-      cartes de chiffres et des barres en CSS. Une requête <code>group_by=debutsemaine</code>
-      suffit, et elle rend visible d'un coup d'œil ce que trois boutons d'année dissimulent —
-      <strong>la rupture de série entre 2024-2025 et 2025-2026</strong>, où les visites élèves
-      passent de 468 à 261 millions pendant que les visites parents montent de 182 à 243 millions.
-      Un basculement de cette ampleur en un an relève du changement de méthode de mesure, pas de
-      l'usage.
-    </p>
-    <div class="odv-viz" data-code="Visites ENT hebdomadaires par profil, depuis septembre 2019">
-    <dsfr-data-chart id="g-dnma-sem" source="dnma-sem" type="line"
-      label-field="semaine"
-      value-field="eleves:Élèves" value-fields="parents:Parents, enseignants:Enseignants"
-      databox databox-title="Visites ENT hebdomadaires par profil, depuis septembre 2019"
-      databox-source="DNE — fr-en-dnma-par-uai-profils, Licence Ouverte 2.0"
-      databox-download databox-screenshot>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-dnma-sem" source="dnma-sem" table download
-      label-field="semaine" value-field="eleves, parents, enseignants"></dsfr-data-a11y>
-    </div>
-  </div>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Lecture locale — académie et année sélectionnées</h2>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
-      <dsfr-data-kpi source="dnma-loc" value="visites:max" format="compact"
-        heading="Sélection" label="visites ENT"></dsfr-data-kpi>
-      <dsfr-data-kpi source="dnma-loc" value="utilisateurs:max" format="compact"
-        heading="Sélection" label="utilisateurs"></dsfr-data-kpi>
-      <dsfr-data-kpi source="dnma-loc" value="lignes:max" format="nombre"
-        heading="Sélection" label="enregistrements UAI × semaine"></dsfr-data-kpi>
-      <dsfr-data-kpi source="dnma-svc" value="accueil:max" format="compact"
-        heading="Page d'accueil" label="visites, le service n° 1"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <h3 class="fr-h6">Les 25 services ENT, pas cinq</h3>
-    <p class="fr-text--sm">
-      Le portail affiche cinq services sur vingt-cinq, et normalise ses barres sur la somme de
-      ces cinq-là : « Courrier électronique 39 % » n'est donc pas 39 % des visites de service.
-      Il annonce en outre <strong>« Service le plus structurant : Vie scolaire »</strong> — un
-      libellé écrit en dur — alors que le service le plus visité est
-      <strong>la page d'accueil (332 219 366 visites en 2025-2026)</strong>, et que le courrier
-      électronique (198 425 504) dépasse la vie scolaire (197 863 169). Les vingt-cinq colonnes
-      arrivent ici en une seule requête.
-    </p>
-    <dsfr-data-unpivot id="dnma-u-svc" source="dnma-svc"
+    <h3 class="fr-h5">Les vingt-cinq services de l'ENT, du plus au moins visité</h3>
+    <dsfr-data-unpivot id="u-svc" source="svc"
       value-cols="accueil:Page d'accueil, courriel:Courrier électronique, vie_scolaire:Vie scolaire, cahier_textes:Cahier de textes, collaboratif:Production collaborative, cahier_liaison:Cahier de liaison, messagerie:Messagerie instantanée, stockage:Stockage partagé, actualites:Actualités, accompagnement:Ressource d'accompagnement, gestion_temps:Gestion du temps, parcours:Parcours pédagogique, production:Ressource de production, absences:Absences, multimedia:Ressource multimédia, collectivite:Service collectivité, manuel:Manuel numérique, competences:Gestion des compétences, documentaire:Ressource documentaire, cdi:Documentation CDI, orientation:Ressource orientation, reservation:Réservation de salles, dictionnaire:Dictionnaire et référence, visio:Visioconférence, notes:Notes"
       var-name="service" value-name="visites"></dsfr-data-unpivot>
-    <dsfr-data-query id="dnma-q-svc" source="dnma-u-svc" order-by="visites:desc"></dsfr-data-query>
+    <dsfr-data-query id="q-svc" source="u-svc" order-by="visites:desc"></dsfr-data-query>
+    <dsfr-data-query id="q-svc-1" source="q-svc" limit="1"></dsfr-data-query>
+    <dsfr-data-repeat source="q-svc-1">
+      <template>
+        <p class="odv-lecture">Dans la sélection, le service le plus visité est
+          <strong>{{service}}</strong> ({{visites:number:0}} visites). Attention au service « Notes »&nbsp;:
+          il ne reçoit plus aucune visite depuis septembre 2025 — une colonne qui a cessé d'être
+          alimentée, pas un service abandonné.</p>
+      </template>
+    </dsfr-data-repeat>
     <div class="odv-viz" data-code="Visites par service ENT">
-    <dsfr-data-chart id="g-dnma-svc" source="dnma-q-svc" type="bar" horizontal
-      label-field="service" value-field="visites" name="Visites"
-      databox databox-title="Visites par service ENT"
-      databox-source="DNE — fr-en-dnma-par-uai-services, Licence Ouverte 2.0"
-      databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-dnma-svc" source="dnma-q-svc" table download
-      label-field="service" value-field="visites"></dsfr-data-a11y>
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-svc" source="q-svc" type="bar" horizontal
+        label-field="service" value-field="visites" name="Visites"
+        selected-palette="neutral" highlight-index="[0]"
+        unit-tooltip="visites"
+        databox databox-title="Visites par service ENT, sélection courante"
+        databox-source="DNE — fr-en-dnma-par-uai-services, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-svc" source="q-svc" table download
+        filename="dnma-services.csv"
+        label-field="service" value-field="visites"
+        description="Visites de chacun des vingt-cinq services ENT pour l'académie et l'année sélectionnées, triées de la plus visitée à la moins visitée."></dsfr-data-a11y>
     </div>
-    <p class="fr-text--xs fr-mt-1w">
-      <strong>Le service « Notes » s'est arrêté.</strong> 1 644 visites en 2025-2026, contre
-      197,5 millions en cumul historique — la colonne a cessé d'être alimentée. Le portail
-      l'affiche à côté de valeurs à neuf chiffres, sans un mot.
-    </p>
 
-    <h3 class="fr-h6 fr-mt-6w">Les modes d'accès, quatre profils et quatre appareils</h3>
-    <p class="fr-text--sm">
-      L'original ne montre que trois appareils, pour deux profils : la quatrième modalité
-      <code>autresappareil</code> est ignorée, et les pourcentages affichés ne sont donc pas ceux
-      de la donnée. Les seize combinaisons sont ici.
-    </p>
-    <dsfr-data-unpivot id="dnma-u-app" source="dnma-app"
-      value-cols="e_ordi:Élèves — ordinateur, e_tel:Élèves — smartphone, e_tab:Élèves — tablette, e_autre:Élèves — autre, p_ordi:Parents — ordinateur, p_tel:Parents — smartphone, p_tab:Parents — tablette, p_autre:Parents — autre, ens_ordi:Enseignants — ordinateur, ens_tel:Enseignants — smartphone, ens_tab:Enseignants — tablette, ens_autre:Enseignants — autre, adm_ordi:Personnels — ordinateur, adm_tel:Personnels — smartphone, adm_tab:Personnels — tablette, adm_autre:Personnels — autre"
-      var-name="cle" value-name="visites"></dsfr-data-unpivot>
-    <dsfr-data-query id="dnma-q-app" source="dnma-u-app" order-by="visites:desc"></dsfr-data-query>
-    <div class="odv-viz" data-code="Visites ENT par profil et par appareil">
-    <dsfr-data-chart id="g-dnma-app" source="dnma-q-app" type="bar" horizontal
-      label-field="cle" value-field="visites" name="Visites"
-      databox databox-title="Visites ENT par profil et par appareil"
-      databox-source="DNE — fr-en-dnma-par-uai-profils-appareils, Licence Ouverte 2.0"
-      databox-download>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-dnma-app" source="dnma-q-app" table download
-      label-field="cle" value-field="visites"></dsfr-data-a11y>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Le DNMA mesure l'audience des ENT qui lui sont raccordés, et ce
+        périmètre bouge&nbsp;: les écoles sont entrées en 2024 et 2025, quatre académies sont
+        presque sorties en 2025, d'autres ont fait l'aller-retour. Ses totaux nationaux, et même
+        ses répartitions par profil ou par appareil, se lisent donc à périmètre donné, jamais
+        d'une année sur l'autre. Ce que le jeu ne permet pas de dire&nbsp;: combien d'élèves ou de
+        familles utilisent un ENT, ni pourquoi une académie cesse d'être mesurée.</p>
     </div>
-    <p class="fr-text--xs fr-mt-1w">
-      En 2025-2026 au national : les parents accèdent à l'ENT au smartphone dans
-      <strong>101 170 716</strong> visites sur 123 854 603, soit <strong>81,7 %</strong> ; les
-      élèves dans <strong>108 531 590</strong> sur 201 851 233, soit <strong>53,8 %</strong>. Les
-      enseignants, à l'inverse, restent à l'ordinateur (75 084 669 contre 21 385 112).
-      C'est le constat le plus utile du tableau de bord, et il est enterré dans six cartes de
-      chiffres.
-    </p>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>« Établissements mesurés »</strong> = établissements ayant une ligne dans la
+          semaine (un établissement n'a qu'une ligne par semaine), à la semaine la plus haute de
+          l'année ou en moyenne par semaine. Le jeu ne contient pas de ligne
+          sans visite&nbsp;: un établissement absent peut avoir un ENT non raccordé, ou aucun.</li>
+        <li><strong>Les « utilisateurs » ne sont pas montrés.</strong> La colonne
+          <code>utilisateurs_globales</code> compte des utilisateurs distincts <em>par
+          établissement et par semaine</em>&nbsp;: les additionner sur une année donne plus de cent
+          millions d'« utilisateurs » pour douze millions d'élèves. Ce ne sont pas des personnes.</li>
+        <li><strong>Pourquoi quatre académies disparaissent</strong>, le jeu ne le dit pas. Leurs
+          établissements restent présents avec quelques visites&nbsp;; l'hypothèse d'un changement
+          d'ENT non raccordé au DNMA est plausible et non vérifiable ici.</li>
+        <li><strong>L'appareil n'est connu que pour une partie des visites</strong>, très
+          inégalement selon les académies. Les parts au smartphone portent sur ces seules visites.</li>
+        <li><strong>Exclus des moyennes et graphiques</strong>&nbsp;: l'année scolaire en cours
+          (moins de 40 semaines)&nbsp;; 135 visites 2025-2026 sans académie&nbsp;; les académies de
+          moins d'un million de visites les deux années, présentes dans le tableau seulement. La
+          somme des quatre profils n'égale pas tout à fait <code>visites_globales</code>&nbsp;: un
+          peu moins de un million de visites 2025-2026 n'ont pas de profil.</li>
+        <li><strong>Angles écartés.</strong> La carte des visites par académie (elle dessine la
+          couverture du DNMA, pas l'usage)&nbsp;; le classement des académies (même raison)&nbsp;; les
+          systèmes d'exploitation et navigateurs (sans question à laquelle ils répondent ici)&nbsp;;
+          la série hebdomadaire complète (les vacances y écrasent la lecture, l'année scolaire
+          suffit).</li>
+      </ol>
+    </section>
   </div>
 
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Le jeu que le portail charge sans jamais le lire</h2>
-    <p class="fr-text--sm">
-      <code>fr-en-dnma-par-uai-appareils</code> — 3 881 534 lignes, 73 colonnes — porte les
-      systèmes d'exploitation et les navigateurs. Sur la page d'origine, son contexte est
-      déclaré, initialisé, recalculé à chaque filtre, et <strong>aucune agrégation ne le lit</strong>.
-      Deux requêtes suffisent à le rendre.
-    </p>
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">Systèmes d'exploitation</h3>
-        <dsfr-data-unpivot id="dnma-u-os" source="dnma-os"
-          value-cols="android:Android, windows:Windows, ios:iOS, macos:macOS, chromeos:ChromeOS, linux:Linux, autre_os:Autre système"
-          var-name="os" value-name="visites"></dsfr-data-unpivot>
-        <dsfr-data-query id="dnma-q-os" source="dnma-u-os" order-by="visites:desc"></dsfr-data-query>
-        <div class="odv-viz" data-code="Visites ENT par système d'exploitation">
-        <dsfr-data-chart id="g-dnma-os" source="dnma-q-os" type="bar" horizontal
-          label-field="os" value-field="visites" name="Visites"
-          databox databox-title="Visites ENT par système d'exploitation"
-          databox-source="DNE — fr-en-dnma-par-uai-appareils" databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-dnma-os" source="dnma-q-os" table download
-          label-field="os" value-field="visites"></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <h3 class="fr-h6">Navigateurs</h3>
-        <dsfr-data-unpivot id="dnma-u-nav" source="dnma-nav"
-          value-cols="chrome:Chrome, chrome_mobile:Chrome mobile, safari:Safari, firefox:Firefox, edge:Edge, samsung:Samsung Internet, opera:Opera, huawei:Huawei Browser, miui:MIUI Browser, autre_nav:Autre navigateur"
-          var-name="navigateur" value-name="visites"></dsfr-data-unpivot>
-        <dsfr-data-query id="dnma-q-nav" source="dnma-u-nav" order-by="visites:desc"></dsfr-data-query>
-        <div class="odv-viz" data-code="Visites ENT par navigateur">
-        <dsfr-data-chart id="g-dnma-nav" source="dnma-q-nav" type="bar" horizontal
-          label-field="navigateur" value-field="visites" name="Visites"
-          databox databox-title="Visites ENT par navigateur"
-          databox-source="DNE — fr-en-dnma-par-uai-appareils" databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-dnma-nav" source="dnma-q-nav" table download
-          label-field="navigateur" value-field="visites"></dsfr-data-a11y>
-        </div>
-      </div>
-    </div>
-  </div>
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — DNMA, les usages des ENT</h2>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — DNMA — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine : une <strong>page AngularJS</strong> servie sous l'URL
+        Page d'origine&nbsp;:
         <a href="https://data.education.gouv.fr/explore/assets/dmna-les-usages-numeriques-constates-v2/view/" target="_blank" rel="noopener external">/explore/assets/<strong>dmna</strong>-les-usages-numeriques-constates-v2/view/</a>
-        — l'identifiant public inverse les lettres N et M du sigle DNMA et expose un
-        <code>-v2</code> de brouillon. Fiche d'audit :
-        <code>docs/portail-education/dnma-usages-ent.md</code>.
+        — page AngularJS de cartes de chiffres et de barres CSS, trois années figées. Fiche
+        d'audit&nbsp;: <code>docs/portail-education/dnma-usages-ent.md</code>. Recréée le
+        2026-09-26 en page éditoriale&nbsp;; la reproduction précédente attribuait la bascule de
+        2025-2026 à « un changement de méthode de mesure » — c'est un changement de périmètre.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Trente-neuf requêtes deviennent sept sources.</strong> Chaque source
-              porte ses sommes dans <code>select</code> : une requête rend N indicateurs, là où
-              Opendatasoft impose une directive = une requête. Sur 12,35 millions de lignes, le
-              bon réflexe n'est pas de mieux charger, c'est de <em>ne pas charger</em> :
-              <code>fetch-mode="export"</code> n'a aucun rôle ici.</li>
-            <li><strong><code>year-start-month="8"</code> règle l'année scolaire.</strong> La
-              fiche d'audit de ce lot classait « aucun opérateur d'année scolaire » comme un
-              <em>manque réel</em> à remonter à la bibliothèque, et proposait de le contourner
-              par un <code>between</code> et deux contrôles d'UI. <strong>L'attribut existe
-              depuis</strong> : <code>operator="year-of" year-start-month="8"</code> produit la
-              plage <code>[1er août N, 1er août N+1)</code>, exactement la fenêtre codée en dur
-              dans l'original, et se délègue au serveur comme n'importe quelle clause. Un
-              <code>&lt;select&gt;</code> de huit options remplace trois boutons figés.</li>
-            <li><strong><code>dsfr-data-unpivot</code> est fait pour ce jeu.</strong> Les quatre
-              jeux sont « wide » : les modalités sont dans les <em>noms</em> de colonnes.
-              L'alias inline <code>colonne:Libellé</code> redresse et renomme en une passe — 25
-              services, 16 combinaisons profil × appareil, 7 systèmes, 10 navigateurs, quatre
-              balises.</li>
-            <li><strong>La série hebdomadaire coûte une requête.</strong>
-              <code>group-by="debutsemaine"</code> sur 3,9 millions de lignes rend
-              370 points. C'est le manque le plus lourd de l'original — « est-ce que ça
-              monte ? » n'y a pas de réponse — et il se comble en une balise.</li>
+            <li><strong>Tout agréger au portail.</strong> 12,35 millions de lignes, aucune
+              chargée&nbsp;: une source par question, sommes et comptes dans le
+              <code>select</code>.</li>
+            <li><strong>L'année scolaire depuis la semaine.</strong> Une seule série hebdomadaire
+              (365 lignes) sert au chapô, aux KPI et aux deux graphiques&nbsp;: un
+              <code>compute</code> dérive l'année scolaire, une <code>dsfr-data-query</code>
+              l'agrège et écarte l'année incomplète par son nombre de semaines.</li>
+            <li><strong>Avant/après par jointure.</strong> Deux agrégations par académie, une
+              <code>dsfr-data-join type="full"</code>, et les académies sorties se listent par un
+              <code>where</code>.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Distinguer « national » et « local » demande deux contextes, et deux
-              filtres qui écoutent le même <code>&lt;select&gt;</code>.</strong> Un
-              <code>dsfr-data-context</code> diffuse tous ses filtres à toutes ses sources : il
-              n'existe pas de filtre « qui ne s'applique qu'à certaines sources » — sinon par
-              <code>apply-to</code>, qui restreint mais ne permet pas deux périmètres différents
-              sur deux champs. Deux contextes, deux
-              <code>dsfr-data-context-filter</code> identiques sur l'année, et un seul contrôle
-              d'UI partagé : ça marche, mais l'année est déclarée deux fois et il faut penser à
-              les garder synchronisées.</li>
-            <li><strong>La facette d'académie a besoin d'une source à elle.</strong> Les sources
-              de cette page ne renvoient qu'une ligne d'agrégats : aucune facette locale ne peut
-              en sortir la liste des académies. Il a fallu une septième source,
-              <code>select="academie" server-side max-records="1"</code>, dont les lignes ne
-              servent à rien — seul l'endpoint <code>/facets</code> est interrogé. C'est correct,
-              mais c'est un montage qu'on ne devine pas : <strong>une source d'agrégats et une
-              source de facettes ne sont pas le même objet</strong>, alors que le portail n'a
-              qu'un contexte pour les deux.</li>
-            <li><strong>Les compteurs de facette comptent des lignes, ici sans aucun sens
-              métier.</strong> « Lille 326 879 » est un nombre de couples UAI × semaine, pas un
-              volume d'usage — et il classe Lille devant Versailles, qui a pourtant plus de
-              visites. <code>weight-field</code> existe désormais pour pondérer un compteur par
-              une mesure, mais il est <strong>explicitement indisponible en
-              <code>server-facets</code></strong> : l'API de facettes d'Opendatasoft ne renvoie
-              qu'un nombre de lignes. Sur un jeu de 3,9 millions de lignes, où le mode serveur
-              est obligatoire, le compteur reste donc trompeur ou absent.</li>
-            <li><strong>Une virgule dans une fonction casse <code>group-by</code> — HTTP 400.</strong>
-              La série hebdomadaire sort <code>debutsemaine</code> en ISO complet
-              (« 2019-09-02T00:00:00+00:00 ») : 365 étiquettes d'axe illisibles. Le raccourci
-              évident, <code>group-by="date_format(debutsemaine, 'yyyy-MM-dd') as semaine"</code>,
-              produit un <strong>HTTP 400</strong>. Cause relevée au réseau : l'adaptateur
-              découpe <code>group-by</code> sur les virgules <em>avant</em> d'analyser les
-              parenthèses, si bien que la fonction est coupée en deux et que le second morceau —
-              <code>'yyyy-MM-dd') as semaine</code> — n'ayant plus de parenthèse ouvrante, est
-              backquoté comme un nom de champ. La requête effectivement émise contient
-              <code>group_by=date_format(debutsemaine,`'yyyy-MM-dd') as semaine`</code>.
-              <strong>C'est le frère jumeau de BUG-010</strong> : là où l'alias sans parenthèse
-              était backquoté à tort, c'est ici la virgule d'argument qui est prise pour un
-              séparateur de champs. Contourné par un <code>compute="semaine =
-              replace(debutsemaine, 'T00:00:00+00:00', '')"</code> en aval, qui faisait le même
-              travail côté client — mais le contournement <strong>cessait de marcher</strong> dès
-              qu'on voulait un vrai regroupement de date (par mois, par trimestre), qui n'a pas
-              d'équivalent client.
-              <br><strong>Corrigé en 0.29.0</strong>
-              (<a href="https://github.com/bmatge/dsfr-data/pull/796" target="_blank" rel="noopener external">#796</a>)
-              : le découpeur ignore désormais les virgules entre parenthèses et entre quotes, et
-              le même correctif règle BUG-010 et PG-027 — trois symptômes, un seul choix
-              d'implémentation. Le contournement a été retiré au lot 20 : le regroupement
-              hebdomadaire se fait côté serveur, et le <code>dsfr-data-normalize</code>
-              intermédiaire a disparu de la page.</li>
-            <li><strong>Une source d'agrégats se croit tronquée.</strong> Une
-              <code>dsfr-data-source</code> qui porte un <code>select</code> de sommes
-              <em>sans</em> <code>group-by</code> ne renvoie qu'une ligne, mais l'API publie le
-              nombre de lignes <em>sous-jacentes</em> comme total. Résultat : la source pagine, et
-              la console avertit « pagination incomplète — 1 000 / 1 476 743 résultats
-              récupérés ». Le chiffre affiché est juste, l'avertissement est faux, et il faut
-              poser <code>max-records="1"</code> sur chacune des six sources d'agrégats pour
-              qu'il se taise — ce qui donne alors « 1 / 1 476 743 », tout aussi alarmant.
-              Sur une page qui repose entièrement sur l'agrégation serveur, c'est un
-              avertissement qui crie au loup à chaque chargement.</li>
-            <li><strong>Quatre académies n'ont pas de polygone</strong> — Polynésie française,
-              Nouvelle-Calédonie, Saint-Pierre-et-Miquelon et « Etranger », absentes du découpage
-              académique de DSFR Chart. L'avertissement console les compte (« 4 ligne(s) sur 34
-              ignorée(s) »), mais il faut penser à le lire. Le champ
-              <code>academie</code> est ici en <strong>casse normale accentuée</strong>, alors
-              que le jeu Capytale <em>du même portail et du même producteur</em> le stocke en
-              CAPITALES SANS ACCENTS — deux normalisations opposées pour la même nomenclature,
-              ce qui reste un défaut du producteur. <strong>Mais la colonne dérivée que cette
-              page écrivait des deux côtés n'a plus lieu d'être</strong> : depuis la 0.26.0
-              (<code>dsfr-data#754</code>), la mise en clé désaccentue et retire l'article, et
-              les deux casses s'apparient telles quelles. Le <code>compute</code> de quatre cas
-              plus <code>upper()</code> a été retiré le 2026-09-19 et la carte lit
-              <code>academie</code> directement : <strong>4 lignes ignorées sur 34 avant comme
-              après</strong>, mesurées au navigateur sur les deux versions. Le contournement ne
-              corrigeait rien — il coûtait un composant et une affirmation fausse (BUG-008,
-              FP-014).</li>
+            <li><strong>Une rupture que rien ne signale.</strong> Ni les métadonnées ni le portail
+              ne disent que le périmètre change&nbsp;; il a fallu compter les établissements par
+              semaine et par académie pour la voir.</li>
+            <li><strong>Des taux sur une couverture partielle.</strong> Le jeu profil × appareil
+              ne renseigne l'appareil que pour une partie des visites&nbsp;; la part au smartphone
+              de la page précédente portait sur ce sous-ensemble sans le dire.</li>
+            <li><strong><code>count(distinct uai)</code> est approché, en silence.</strong> Sur la
+              semaine du 22 septembre 2025, le portail rend 29&nbsp;470 établissements distincts
+              pour 28&nbsp;698 lignes — plus de distincts que de lignes. Sur l'année 2025-2026,
+              37&nbsp;371 au lieu de 36&nbsp;291 (+3&nbsp;%). La page compte donc des lignes
+              (<code>count(*)</code>, un établissement par semaine) et des semaines.</li>
           </ul>
         </div>
       </div>
@@ -561,42 +615,28 @@
         <table>
           <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">Directive AngularJS d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>5 <code>ods-dataset-context</code> imbriqués + 1 pour la facette</td><td>7 <code>dsfr-data-source</code> à plat + 2 <code>dsfr-data-context</code></td><td>Équivalent</td></tr>
-            <tr><td>39 <code>ods-aggregation</code> (dont 8 doublons exacts)</td><td>0 : les sommes sont dans le <code>select</code> des sources</td><td>Meilleur : 7 requêtes au lieu de 39</td></tr>
-            <tr><td><code>q='debutsemaine &gt;= "2025/08/01" AND …'</code>, 3 boutons figés</td><td><code>year-of</code> + <code>year-start-month="8"</code>, 8 options</td><td>Meilleur, et natif</td></tr>
-            <tr><td><code>ods-select</code> d'académie sans compteurs, calculé hors année</td><td><code>server-facets</code> + <code>dsfr-data-context</code></td><td><strong>Partiel</strong> : les compteurs restent des nombres de lignes</td></tr>
-            <tr><td>barres CSS normalisées sur un sous-ensemble</td><td><code>dsfr-data-unpivot</code> + <code>type="bar" horizontal</code></td><td>Meilleur : 25 services et 16 appareils, pas 5 et 6</td></tr>
-            <tr><td>« Service le plus structurant : Vie scolaire » en dur</td><td>graphique trié par valeur</td><td>Meilleur : le libellé suit la donnée</td></tr>
-            <tr><td>aucun graphique, aucune carte</td><td>série hebdomadaire + <code>map-aca</code> + podium</td><td>Sans équivalent sur le portail</td></tr>
-            <tr><td>contexte mort sur <code>…appareils</code></td><td>2 sources, 2 graphiques (OS, navigateurs)</td><td>Sans équivalent sur le portail</td></tr>
+            <tr><td>39 <code>ods-aggregation</code></td><td>sommes dans le <code>select</code> des <code>dsfr-data-source</code></td><td>Meilleur&nbsp;: une requête par question</td></tr>
+            <tr><td>3 boutons d'année codés en dur</td><td><code>year-of</code> + <code>year-start-month="8"</code>&nbsp;; <code>compute</code> pour la série</td><td>Meilleur</td></tr>
+            <tr><td><code>ods-select</code> d'académie</td><td><code>dsfr-data-facets server-facets</code> + <code>dsfr-data-context</code></td><td>Équivalent (compteurs en lignes)</td></tr>
+            <tr><td>barres CSS sur 5 services sur 25</td><td><code>dsfr-data-unpivot</code> + graphique trié</td><td>Meilleur</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-join</code>, <code>dsfr-data-repeat</code>, <code>dsfr-data-a11y</code></td><td>Sans équivalent&nbsp;: le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong> sur le plus gros volume du banc — 12,35 millions
-          de lignes, zéro chargée — et la page qui règle le plus de dettes d'un coup. Deux
-          enseignements en sortent. Le premier est une bonne nouvelle : <strong>le « manque réel »
-          n° 1 de la fiche d'audit, l'opérateur d'année scolaire, n'en est plus un</strong> —
-          <code>year-start-month</code> existe, et l'année scolaire du portail Éducation se
-          déclare en un attribut. Le second reste ouvert : <strong>sur une table de faits, un
-          compteur de facette ne veut rien dire</strong>, et <code>weight-field</code>, qui
-          répondrait exactement au besoin, est indisponible dans le seul mode utilisable à cette
-          échelle. C'est un résidu propre à ce portail : les jeux de Bercy sont « une ligne = un
-          objet », ceux-ci sont « une ligne = un établissement × une semaine ».
-          S'y ajoutent deux frictions neuves, toutes deux liées à l'agrégation serveur :
-          <strong>une virgule d'argument dans <code>group-by</code> valait un HTTP 400</strong>
-          (frère de BUG-010, corrigé en 0.29.0 par #796 — la page est repassée en voie native),
-          et <strong>une source d'agrégats sans <code>group-by</code>
-          s'annonce tronquée</strong> alors qu'elle est complète.</p>
+        <p>La bibliothèque n'a opposé aucune résistance sur le plus gros volume du banc&nbsp;;
+          <strong>le travail a été de compter qui est mesuré</strong>. Le total national, la
+          bascule élèves → parents et la part au smartphone suivaient tous trois le périmètre du
+          DNMA&nbsp;: la page précédente les lisait comme des usages.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 
@@ -605,12 +645,7 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<!-- Bundle `core` (446 Ko) et non `esm` (551 Ko) : cette page n'a aucune
-     <dsfr-data-map> Leaflet. Verifie le 2026-09-19 sur les noms d'elements du
-     paquet publie 0.31.0 : `core` definit tout ce que la page emploie, les
-     cartes DSFR Chart (map-chart) comprises ; il ne lui manque que les enfants
-     de la carte Leaflet (map-layer, map-popup, map-legend, map-inset...). -->
-<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

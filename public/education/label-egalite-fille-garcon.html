@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Label Égalité filles-garçons — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la cartographie des labellisations Égalité filles-garçons de data.education.gouv.fr : 1 678 établissements, trois niveaux, trois campagnes.">
+  <meta name="description" content="Recréation avec dsfr-data de la cartographie du label Égalité filles-garçons de data.education.gouv.fr : rapporté au nombre de collèges et lycées publics, le label dépend d'abord de l'académie — de près de deux établissements sur trois à La Réunion à aucun en Guadeloupe, en Guyane et à Mayotte.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,161 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un annuaire cartographié sans un chiffre ; la reproduction
+       précédente comptait des VOLUMES (« Normandie 119, Versailles 113… »), qui
+       disent surtout la taille des académies. Rapporté au nombre de collèges et
+       lycées publics, le label raconte autre chose : il dépend d'abord de
+       l'académie.
+
+       Deux sources, lues SANS clé :
+         · `egf` — les 1 678 labellisations (trois campagnes), en un export ;
+         · `ann` — le dénominateur : les collèges, lycées et EREA publics du
+                   ministère de l'éducation nationale, tirés de l'annuaire de
+                   l'éducation (≈ 7 900 lignes, filtrées PAR LE SERVEUR).
+
+       Deux défauts du jeu corrigés en amont :
+         · la campagne « 2024- 2025 » (une espace parasite, une ligne) ;
+         · 164 lignes portent un UAI en MINUSCULE final (« 0220082v ») : sans
+           `upper()`, 27 établissements comptent deux fois (1 529 au lieu de
+           1 502) et 136 établissements labellisés ne se joignent pas à l'annuaire.
+       ========================================================================== -->
+
+  <!-- ---------- Les labellisations ----------
+       1 678 lignes : `max-records` relevé par principe (plafond silencieux à 1 000). -->
+  <dsfr-data-source id="egf" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-label-egalite-fille-garcon"
+    fetch-mode="export" max-records="3000">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="egf-n" source="egf"
+    replace-fields="campagnedelabellisation:2024- 2025:2024-2025"
+    compute="uai = upper(identifiantuai);
+             niveau_txt = when niveaudelabellisation = 3 then 'Niveau 3' when niveaudelabellisation = 2 then 'Niveau 2' else 'Niveau 1';
+             type_txt = when typeeple = 'COLLEGE' then 'Collège' when typeeple = 'LEGT' then 'Lycée général et technologique' when typeeple = 'LPO' then 'Lycée polyvalent' when typeeple = 'LP' then 'Lycée professionnel' else 'EREA'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Un établissement par ligne ----------
+       Le pivot ramène les 1 678 labellisations à une ligne par UAI (clé UNIQUE
+       du côté droit de la jointure qui suit : pas de relation 1-N), avec le
+       niveau obtenu à chaque campagne. -->
+  <dsfr-data-pivot id="egf-etab" source="egf-n"
+    row="uai" column="campagnedelabellisation" value="niveaudelabellisation" aggregate="max"
+    labels="2022-2023:c22 | 2023-2024:c23 | 2024-2025:c24">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="egf-traj" source="egf-etab"
+    compute="nb = (when is_null(c22) then 0 else 1) + (when is_null(c23) then 0 else 1) + (when is_null(c24) then 0 else 1);
+             premier = coalesce(c22, c23, c24);
+             dernier = coalesce(c24, c23, c22);
+             traj = when nb &lt; 2 then 'Une seule campagne' when dernier &gt; premier then 'Niveau relevé' when dernier = premier then 'Même niveau' else 'Niveau abaissé';
+             k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Le dénominateur : l'annuaire de l'éducation ----------
+       Publics, tutelle éducation nationale, hors SEGPA et SEP (« SECTION … »,
+       qui ont leur propre UAI mais ne sont pas des établissements), hors les
+       quatre collectivités d'outre-mer, absentes du jeu du label. -->
+  <dsfr-data-source id="ann" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-annuaire-education"
+    fetch-mode="export" max-records="12000"
+    select="identifiant_de_l_etablissement, libelle_academie, type_etablissement, appartenance_education_prioritaire"
+    where='statut_public_prive = "Public" and type_etablissement in ("Collège", "Lycée", "EREA") and not startswith(libelle_nature, "SECTION") and ministere_tutelle = "MINISTERE DE L&#39;EDUCATION NATIONALE" and not libelle_academie in ("Nouvelle Calédonie", "Polynésie Française", "Wallis et Futuna", "Saint Pierre et Miquelon")'>
+  </dsfr-data-source>
+
+  <!-- L'annuaire n'a PAS une ligne par UAI : une cité scolaire y figure une
+       fois comme collège et une fois comme lycée, et quelques lycées jusqu'à
+       trois fois (30 UAI en double sur 7 862, relevé le 2026-09-26). Joindre
+       tel quel compterait ces établissements deux fois, au numérateur comme au
+       dénominateur. Le `group-by` EST le dédoublonnage (PG-001). -->
+  <dsfr-data-query id="ann-u" source="ann" group-by="identifiant_de_l_etablissement, libelle_academie"
+    aggregate="identifiant_de_l_etablissement:count:lignes"></dsfr-data-query>
+
+  <!-- Jointure À GAUCHE sur l'annuaire : un établissement jamais labellisé
+       reste, avec des champs de label nuls. -->
+  <dsfr-data-join id="etab-j" left="ann-u" right="egf-traj"
+    on="identifiant_de_l_etablissement=uai" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="etab" source="etab-j"
+    compute="labellise = when is_null(traj) then 0 else 1; k = 'France'">
+  </dsfr-data-normalize>
+
+  <!-- 1. Le taux par académie : ratio de SOMMES, jamais moyenne de taux. -->
+  <dsfr-data-query id="aca" source="etab" group-by="libelle_academie"
+    aggregate="labellise:sum:n_lab, labellise:count:n"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-t" source="aca" compute="taux = n_lab * 100 / n; k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-o" source="aca-t" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-r" source="aca-o" round="taux:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="aca-tab" source="aca-r"
+    rename="libelle_academie:Académie | taux:Part labellisée (%) | n_lab:Établissements labellisés | n:Établissements publics"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-zero" source="aca-t" where="n_lab:eq:0" order-by="libelle_academie:asc"></dsfr-data-query>
+
+  <!-- Le chapô : France, académie la plus haute, la plus basse non nulle. -->
+  <dsfr-data-query id="nat" source="etab" group-by="k"
+    aggregate="labellise:sum:n_lab, labellise:count:n"></dsfr-data-query>
+  <dsfr-data-normalize id="nat-t" source="nat" compute="taux = n_lab * 100 / n"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-haut" source="aca-t" order-by="taux:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-haut-r" source="aca-haut"
+    rename="libelle_academie:haut_aca | taux:haut_taux | n_lab:haut_n_lab | n:haut_n"></dsfr-data-normalize>
+  <dsfr-data-query id="aca-bas" source="aca-t" where="n_lab:gt:0" order-by="taux:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="aca-bas-r" source="aca-bas"
+    rename="libelle_academie:bas_aca | taux:bas_taux | n_lab:bas_n_lab | n:bas_n"></dsfr-data-normalize>
+  <dsfr-data-join id="chapo-1" left="nat-t" right="aca-haut-r" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="chapo-2" left="chapo-1" right="aca-bas-r" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="chapo" source="chapo-2" compute="rapport = haut_taux / bas_taux"></dsfr-data-normalize>
+
+  <!-- 2. Les collèges selon l'éducation prioritaire. Collèges seuls : les
+       lycées ne relèvent pas de l'éducation prioritaire, les mêler au groupe
+       « hors EP » comparerait des types d'établissement, pas des publics.
+       Même dédoublonnage que ci-dessus, par type. -->
+  <dsfr-data-query id="ann-col" source="ann" where="type_etablissement:eq:Collège"
+    group-by="identifiant_de_l_etablissement, appartenance_education_prioritaire"
+    aggregate="identifiant_de_l_etablissement:count:lignes"></dsfr-data-query>
+  <dsfr-data-join id="col-j" left="ann-col" right="egf-traj"
+    on="identifiant_de_l_etablissement=uai" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="col" source="col-j"
+    compute="labellise = when is_null(traj) then 0 else 1;
+             ep = when is_empty(appartenance_education_prioritaire) then 'Hors éducation prioritaire' else appartenance_education_prioritaire;
+             k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ep" source="col" group-by="ep, k"
+    aggregate="labellise:sum:n_lab, labellise:count:n" order-by="ep:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="ep-t" source="ep" compute="taux = n_lab * 100 / n"></dsfr-data-normalize>
+  <dsfr-data-normalize id="ep-r" source="ep-t" round="taux:1"></dsfr-data-normalize>
+  <dsfr-data-normalize id="ep-tab" source="ep-r"
+    rename="ep:Collèges publics | taux:Part labellisée (%) | n_lab:Collèges labellisés | n:Collèges"></dsfr-data-normalize>
+  <dsfr-data-pivot id="ep-w" source="ep-t" row="k" column="ep" value="taux" aggregate="first"
+    labels="Hors éducation prioritaire:hors | REP:rep | REP+:repp"></dsfr-data-pivot>
+
+  <dsfr-data-query id="ann-lyc" source="ann" where="type_etablissement:eq:Lycée"
+    group-by="identifiant_de_l_etablissement" aggregate="identifiant_de_l_etablissement:count:lignes"></dsfr-data-query>
+  <dsfr-data-join id="lyc-j" left="ann-lyc" right="egf-traj"
+    on="identifiant_de_l_etablissement=uai" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="lyc" source="lyc-j"
+    compute="labellise = when is_null(traj) then 0 else 1; k = 'France'"></dsfr-data-normalize>
+  <dsfr-data-query id="type-lyc" source="lyc" group-by="k"
+    aggregate="labellise:sum:n_lab, labellise:count:n"></dsfr-data-query>
+  <dsfr-data-normalize id="type-lyc-t" source="type-lyc" compute="taux = n_lab * 100 / n"></dsfr-data-normalize>
+
+  <!-- 3. Les établissements labellisés plusieurs fois. -->
+  <dsfr-data-query id="traj" source="egf-traj" where="traj:neq:Une seule campagne" group-by="traj"
+    aggregate="uai:count:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="traj-tab" source="traj"
+    rename="traj:Entre la première et la dernière labellisation | n:Établissements"></dsfr-data-normalize>
+  <dsfr-data-pivot id="traj-w" source="egf-traj" row="k" column="traj" value="uai" aggregate="count"
+    labels="Une seule campagne:une | Niveau relevé:releve | Même niveau:meme | Niveau abaissé:abaisse"></dsfr-data-pivot>
+  <dsfr-data-normalize id="traj-s" source="traj-w"
+    compute="plusieurs = coalesce(releve, 0) + coalesce(meme, 0) + coalesce(abaisse, 0); total = plusieurs + coalesce(une, 0)"></dsfr-data-normalize>
+
+  <!-- Les campagnes, par niveau. -->
+  <dsfr-data-query id="camp" source="egf-n" group-by="campagnedelabellisation, niveau_txt"
+    aggregate="identifiantuai:count:n" order-by="campagnedelabellisation:asc"></dsfr-data-query>
+  <!-- Les séries suivent l'ordre d'apparition : un second tri (stable) par
+       niveau met « Niveau 1 » en bas de pile, sans défaire l'ordre des campagnes. -->
+  <dsfr-data-query id="camp-o" source="camp" order-by="niveau_txt:asc"></dsfr-data-query>
+  <dsfr-data-pivot id="camp-tab" source="camp" row="campagnedelabellisation" column="niveau_txt" value="n"
+    aggregate="sum" column-order="asc"></dsfr-data-pivot>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,113 +187,240 @@
       </div>
     </nav>
 
-    <h1>Les établissements labellisés « Égalité filles-garçons »</h1>
+    <h1>Le label Égalité filles-garçons dépend d'abord de l'académie</h1>
 
-    <p class="fr-text--lead">
-      Le label « Égalité filles-garçons » distingue les collèges et lycées engagés dans une
-      démarche de promotion de l'égalité. <strong>1 678 labellisations</strong> ont été délivrées
-      sur trois campagnes, à trois niveaux d'exigence croissante : <strong>1 013</strong> de
-      niveau&nbsp;1, <strong>568</strong> de niveau&nbsp;2 et <strong>97</strong> de
-      niveau&nbsp;3. Le label est très majoritairement <strong>public</strong> (1 644 contre 34)
-      et très majoritairement <strong>en collège</strong> (1 065 sur 1 678).
+    <!-- Le chapô est CALCULÉ : jointure France × académie la plus haute ×
+         académie la plus basse non nulle. -->
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="fr-text--lead">
+          En trois campagnes, de 2022-2023 à 2024-2025, <strong>{{n_lab}} collèges, lycées et
+          EREA publics sur {{n}}</strong> ont obtenu au moins une fois le label « Égalité
+          filles-garçons », soit <strong>{{taux:number:1}}&nbsp;%</strong>. Mais la proportion
+          va de <strong>{{haut_taux:number:1}}&nbsp;%</strong> dans l'académie de {{haut_aca}} à
+          <strong>{{bas_taux:number:1}}&nbsp;%</strong> dans celle de {{bas_aca}}, soit
+          {{rapport:number:0}} fois moins — et plusieurs académies d'outre-mer n'en comptent aucun.
+          Le territoire pèse plus que le type d'établissement ou son public.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Créé par la circulaire du 10 mars 2022, le label distingue les établissements qui
+      conduisent une politique d'égalité entre filles et garçons et de prévention des
+      violences sexistes et sexuelles, à trois niveaux d'exigence croissante. Il est délivré
+      par les académies&nbsp;: la page compare donc des académies, et rapporte chaque compte
+      au nombre d'établissements publics qu'elles administrent — un volume brut dirait
+      surtout leur taille.
     </p>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-label-egalite-fille-garcon/"
            target="_blank" rel="noopener external"><code>fr-en-label-egalite-fille-garcon</code></a>
-        — 1 678 lignes, 13 champs, lu sans clé. <strong>Aucune ligne sans position</strong> :
-        les 1 678 sont cartographiables, ce qui est assez rare pour être noté.
-        29 académies et <strong>981 communes</strong> — et non 959, comme le laisse croire le <code>count(distinct)</code> de l'API (voir l'analyse).
+        — une ligne par labellisation (un établissement labellisé deux fois compte deux lignes),
+        trois campagnes. Pour le dénominateur,
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-annuaire-education/"
+           target="_blank" rel="noopener external"><code>fr-en-annuaire-education</code></a>&nbsp;:
+        collèges, lycées et EREA publics du ministère de l'éducation nationale, ouverts
+        aujourd'hui. Les deux jeux se joignent par le code UAI. Lecture sans clé.
       </p>
     </details>
+
+    <!-- ---------- Accroche : trois repères ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-6w" aria-label="Les trois chiffres à retenir">
+      <dsfr-data-kpi source="nat-t" value="taux:first" format="decimal" decimals="1" unit="%"
+        heading="des établissements publics labellisés"
+        lines='[{"value":"n_lab:first","format":"nombre","suffix":" labellisés"},{"value":"n:first","format":"nombre","prefix":"sur ","suffix":" collèges, lycées et EREA"}]'
+        label="au moins une fois, campagnes 2022-2023 à 2024-2025"></dsfr-data-kpi>
+      <dsfr-data-kpi source="chapo" value="haut_taux:first" format="decimal" decimals="1" unit="%"
+        heading="dans l'académie la plus engagée"
+        lines='[{"value":"bas_taux:first","format":"decimal","decimals":1,"prefix":"la moins engagée : ","suffix":" %"}]'
+        label="hors les académies qui n'en comptent aucun"></dsfr-data-kpi>
+      <dsfr-data-kpi source="egf-traj" value="count:traj:Niveau relevé" format="nombre"
+        heading="établissements ont relevé leur niveau"
+        lines='[{"value":"count{traj:neq:Une seule campagne}","format":"nombre","prefix":"sur ","suffix":" labellisés plusieurs fois"}]'
+        label="en repassant le label à une campagne suivante"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. D'une académie à l'autre, la part d'établissements labellisés varie de un à dix</h2>
+    <dsfr-data-repeat source="chapo">
+      <template>
+        <p class="odv-lecture">Dans l'académie de {{haut_aca}}, <strong>{{haut_n_lab}}
+          établissements publics sur {{haut_n}}</strong> ont été labellisés&nbsp;; dans celle de
+          {{bas_aca}}, <strong>{{bas_n_lab}} sur {{bas_n}}</strong>. La moyenne nationale,
+          {{taux:number:1}}&nbsp;%, masque un écart du simple au décuple entre académies — et
+          l'académie de tête est ultramarine, comme celles qui n'ont aucun établissement
+          labellisé.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-mb-2w">
+      <p class="fr-text--sm fr-mb-1v">Aucun établissement labellisé dans les académies de&nbsp;:</p>
+      <dsfr-data-repeat source="aca-zero" key-field="libelle_academie" empty="(aucune académie à zéro)">
+        <template>
+          <p class="fr-tag fr-mr-1v fr-mb-1v">{{libelle_academie}} — {{n}} établissements publics</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-viz fr-mb-6w" data-code="Part des collèges, lycées et EREA publics labellisés, par académie">
+      <div class="odv-chart-slot odv-chart-slot--haut">
+      <dsfr-data-chart id="g-aca" source="aca-r" type="bar" horizontal
+        label-field="libelle_academie" value-field="taux:Part labellisée (%)"
+        unit-tooltip="%" selected-palette="neutral" highlight-index="[0]"
+        databox databox-title="Part des collèges, lycées et EREA publics labellisés au moins une fois, par académie, campagnes 2022-2023 à 2024-2025"
+        databox-source="Ministère de l'éducation nationale — fr-en-label-egalite-fille-garcon et fr-en-annuaire-education, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-aca" source="aca-tab" table download
+        filename="label-egalite-part-par-academie.csv"
+        label-field="Académie"
+        value-field="Part labellisée (%), Établissements labellisés, Établissements publics"
+        description="Part des collèges, lycées et EREA publics labellisés au moins une fois lors des campagnes 2022-2023 à 2024-2025, par académie, de la plus haute à la plus basse. La Réunion est nettement en tête ; trois académies d'outre-mer ne comptent aucun établissement labellisé."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. La nuance ---------- -->
+    <h2 class="fr-h3">2. Le public compte aussi, mais bien moins que l'académie</h2>
+    <dsfr-data-repeat source="ep-w">
+      <template>
+        <p class="odv-lecture">Parmi les collèges publics, <strong>{{repp:number:1}}&nbsp;%</strong>
+          de ceux de l'éducation prioritaire renforcée (REP+) ont été labellisés, contre
+          {{rep:number:1}}&nbsp;% en REP et <strong>{{hors:number:1}}&nbsp;%</strong> hors
+          éducation prioritaire. L'écart est réel, mais il reste bien en deçà de celui qui
+          sépare les académies&nbsp;: aucun groupe de collèges n'approche le niveau de l'académie
+          de tête.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="type-lyc-t">
+      <template>
+        <p class="fr-text--sm">Les lycées publics, eux, sont labellisés à
+          {{taux:number:1}}&nbsp;% ({{n_lab}} sur {{n}}) — un peu plus souvent que les collèges.
+          Ils ne relèvent pas de l'éducation prioritaire, d'où la comparaison limitée aux
+          collèges ci-dessous.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Part des collèges publics labellisés selon l'éducation prioritaire">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-ep" source="ep-r" type="bar"
+        label-field="ep" value-field="taux:Part labellisée (%)"
+        y-min="0" unit-tooltip="%" selected-palette="neutral" highlight-index="[2]"
+        databox databox-title="Part des collèges publics labellisés au moins une fois, selon l'éducation prioritaire, campagnes 2022-2023 à 2024-2025"
+        databox-source="Ministère de l'éducation nationale — fr-en-label-egalite-fille-garcon et fr-en-annuaire-education, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-ep" source="ep-tab" table download
+        filename="label-egalite-colleges-education-prioritaire.csv"
+        label-field="Collèges publics"
+        value-field="Part labellisée (%), Collèges labellisés, Collèges"
+        description="Part des collèges publics labellisés au moins une fois, hors éducation prioritaire, en REP et en REP+. Les collèges REP+ sont les plus souvent labellisés. L'appartenance à l'éducation prioritaire est celle de l'annuaire actuel."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. La dynamique ---------- -->
+    <h2 class="fr-h3">3. Quand un établissement repasse le label, c'est presque toujours pour monter d'un niveau</h2>
+    <dsfr-data-repeat source="traj-s">
+      <template>
+        <p class="odv-lecture">Sur {{total}} établissements labellisés, <strong>{{plusieurs}}</strong>
+          l'ont été lors de plusieurs campagnes. <strong>{{releve}} d'entre eux ont relevé leur
+          niveau</strong>, {{meme}} ont gardé le même et {{abaisse}} l'ont abaissé. Le label
+          fonctionne comme une échelle&nbsp;: on y revient pour gravir un palier.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
+      <div class="fr-col-12 fr-col-md-5">
+        <div class="odv-viz" data-code="Établissements labellisés plusieurs fois, selon l'évolution de leur niveau">
+        <div class="odv-chart-slot">
+        <dsfr-data-chart id="g-traj" source="traj" type="bar"
+          label-field="traj" value-field="n:Établissements"
+          y-min="0" selected-palette="neutral" highlight-index="[0]"
+          databox databox-title="Établissements labellisés plusieurs fois, selon l'évolution de leur niveau"
+          databox-source="Ministère de l'éducation nationale — fr-en-label-egalite-fille-garcon, via data.education.gouv.fr"
+          databox-download heading-level="3">
+        </dsfr-data-chart>
+        </div>
+        <dsfr-data-a11y for="g-traj" source="traj-tab" table download
+          filename="label-egalite-trajectoires.csv"
+          label-field="Entre la première et la dernière labellisation" value-field="Établissements"
+          description="Établissements labellisés lors d'au moins deux campagnes, selon que leur niveau de label a été relevé, maintenu ou abaissé entre la première et la dernière labellisation. La grande majorité a relevé son niveau."></dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-7">
+        <div class="odv-viz" data-code="Labellisations par campagne et par niveau">
+        <div class="odv-chart-slot">
+        <dsfr-data-chart id="g-camp" source="camp-o" type="bar" stacked
+          label-field="campagnedelabellisation" value-field="n" series-field="niveau_txt"
+          y-min="0" color-map="Niveau 1:#a1a1f8,Niveau 2:#4747d3,Niveau 3:#000091"
+          databox databox-title="Labellisations délivrées à chaque campagne, par niveau"
+          databox-source="Ministère de l'éducation nationale — fr-en-label-egalite-fille-garcon, via data.education.gouv.fr"
+          databox-download heading-level="3">
+        </dsfr-data-chart>
+        </div>
+        <dsfr-data-a11y for="g-camp" source="camp-tab" table download
+          filename="label-egalite-campagnes-niveaux.csv"
+          label-field="campagnedelabellisation" value-field="Niveau 1, Niveau 2, Niveau 3"
+          description="Nombre de labellisations délivrées lors de chacune des trois campagnes, par niveau. Le niveau 1 domine chaque campagne ; le niveau 3 reste rare."></dsfr-data-a11y>
+        </div>
+        <p class="fr-text--xs fr-mt-1w">Une labellisation par barre élémentaire&nbsp;: un
+          établissement labellisé à deux campagnes figure dans deux barres.</p>
+      </div>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       Gabarit « annuaire cartographié », cinquième emploi du dépôt. 1 678 lignes :
-       export complet, tout côté client, `max-records` posé explicitement.
-
-       Une correction de données, et c'est un défaut de saisie du jeu : la campagne
-       « 2024-2025 » existe en DEUX graphies, dont une avec un espace parasite
-       après le tiret — « 2024- 2025 », sur UNE seule ligne. Sans correction, la
-       facette « Campagne » affiche quatre entrées pour trois campagnes, et la
-       quatrième compte 1. C'est exactement le motif de la double graphie
-       « Education » / « Éducation » rencontrée sur le catalogue de ce même portail :
-       un défaut invisible à la lecture, qui ne se voit qu'en comptant les valeurs
-       distinctes d'une facette. `replace-fields` compare la valeur ENTIÈRE, ce
-       qui convient ici — et son séparateur d'entrées est le `|` (PG-022).
-       ========================================================================== -->
-
-  <dsfr-data-source id="egf" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-label-egalite-fille-garcon"
-    fetch-mode="export" max-records="3000">
-  </dsfr-data-source>
-
-  <dsfr-data-normalize id="egf-n" source="egf"
-    replace-fields="campagnedelabellisation:2024- 2025:2024-2025"
-    compute="niveau_txt = when niveaudelabellisation = 3 then 'Niveau 3' when niveaudelabellisation = 2 then 'Niveau 2' else 'Niveau 1'; type_txt = when typeeple = 'COLLEGE' then 'Collège' when typeeple = 'LEGT' then 'Lycée général et technologique' when typeeple = 'LPO' then 'Lycée polyvalent' when typeeple = 'LP' then 'Lycée professionnel' else 'EREA'">
-  </dsfr-data-normalize>
-
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+  <!-- ---------- 4. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Trouver un établissement labellisé</h2>
+    <p class="fr-text--sm">Toutes les labellisations, une par ligne, colorées selon leur
+      niveau. La recherche et les filtres pilotent les compteurs, la carte et la liste&nbsp;;
+      ils ne touchent pas les graphiques ci-dessus.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="egf-q" source="egf-n"
-        fields="nom_des_etablissements, ville, identifiantuai"
-        label="Rechercher un établissement" placeholder="Nom, commune, code UAI…"
-        operator="words" count count-label="établissement" url-sync>
+          fields="nom_des_etablissements, ville, uai"
+          label="Rechercher un établissement" placeholder="Nom, commune, code UAI…"
+          operator="words" count count-label="labellisation"
+          url-sync url-search-param="q">
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
       <dsfr-data-kpi source="egf-f" value="count" format="nombre"
         heading="Labellisations" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="egf-f" value="uai:distinct" format="nombre"
+        heading="Établissements" label="distincts (code UAI)"></dsfr-data-kpi>
       <dsfr-data-kpi source="egf-f" value="count:niveau_txt:Niveau 3" format="nombre"
-        heading="Niveau 3" label="le plus exigeant"></dsfr-data-kpi>
-      <dsfr-data-kpi source="egf-f" value="ville:distinct" format="nombre"
-        heading="Communes" label="concernées"></dsfr-data-kpi>
-      <dsfr-data-kpi source="egf-f" value="academie:distinct" format="nombre"
-        heading="Académies" label="représentées"></dsfr-data-kpi>
+        heading="Labellisations de niveau 3" label="le plus exigeant"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-      <div class="fr-col-12 fr-col-md-3">
-        <details class="odv-filtres odv-filtres--md" open>
-          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
-          </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-
-        <h2 class="fr-h6">Filtrer</h2>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="egf-f" source="egf-q"
-          fields="niveau_txt, campagnedelabellisation, type_txt, secteur, academie, libelle_departement, ville"
-          labels="niveau_txt:Niveau du label | campagnedelabellisation:Campagne | type_txt:Type d'établissement | secteur:Secteur | academie:Académie | libelle_departement:Département | ville:Commune"
-          display="niveau_txt:checkbox | campagnedelabellisation:checkbox | type_txt:checkbox | secteur:radio-inline | academie:multiselect | libelle_departement:multiselect | ville:radio"
-          searchable="academie, libelle_departement, ville"
+          fields="niveau_txt, campagnedelabellisation, type_txt, secteur, academie, libelle_departement"
+          labels="niveau_txt:Niveau du label | campagnedelabellisation:Campagne | type_txt:Type d'établissement | secteur:Secteur | academie:Académie | libelle_departement:Département"
+          display="niveau_txt:checkbox | campagnedelabellisation:checkbox | type_txt:checkbox | secteur:checkbox | academie:multiselect | libelle_departement:multiselect"
+          searchable="academie, libelle_departement"
           disjunctive="academie, libelle_departement"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
-        </details>
-      </div>
-      <div class="fr-col-12 fr-col-md-9">
-        <div class="odv-viz" data-code="Établissements labellisés Égalité filles-garçons">
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des établissements labellisés Égalité filles-garçons">
         <dsfr-data-map id="carte-egf"
-          name="Établissements labellisés Égalité filles-garçons"
+          name="Établissements labellisés Égalité filles-garçons, par niveau"
           height="600px" tiles="ign-plan" tiles-style="muted"
-          insets="drom" fit-bounds fit-max-zoom="13">
-          <!-- La couleur porte le NIVEAU, qui est la seule variable ordonnée du
-               jeu et ce que le label veut dire. Une palette à trois tons
-               croissants plutôt que trois teintes sans rapport. -->
+          insets="drom" fit-bounds fit-max-zoom="13" max-bounds="41,-5.5,51.5,10">
+          <!-- Trois tons croissants d'une même teinte : le niveau est la seule
+               variable ordonnée du jeu. -->
           <dsfr-data-map-layer id="couche-egf" source="egf-f" type="circle"
             geo-field="position" radius="5" fill-opacity="0.9"
             color-field="niveau_txt"
@@ -151,155 +433,141 @@
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{niveau_txt}}</p>
               <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{type_txt}}</p>
-
               <p class="fr-text--sm fr-mb-1v">
                 <strong>{{ville}}</strong> — {{libelle_departement}}<br>
                 académie de {{academie}} · secteur {{secteur}}
               </p>
               <p class="fr-text--sm fr-mb-3v">Labellisé lors de la campagne {{campagnedelabellisation}}.</p>
-
-              <!-- Deux liens que l'original porte dans son jeu et n'expose pas
-                   tous les deux. `{{champ:url}}` passe par la liste blanche de
-                   schémas ; `{{#if}}` évite le lien mort. -->
               {{#if web}}<p class="fr-text--sm fr-mb-1v">
                 <a href="{{web:url}}" target="_blank" rel="noopener external">Site de l'établissement</a></p>{{/if}}
               {{#if fiche_onisep}}<p class="fr-text--sm fr-mb-3v">
                 <a href="{{fiche_onisep:url}}" target="_blank" rel="noopener external">Fiche Onisep</a></p>{{/if}}
-
-              <p class="fr-text--xs fr-mb-0">UAI {{identifiantuai}}</p>
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="egf-f" for="carte-egf" table download
+        <dsfr-data-normalize id="egf-tableau" source="egf-f"
+          rename="nom_des_etablissements:Établissement | niveau_txt:Niveau | campagnedelabellisation:Campagne | type_txt:Type | secteur:Secteur | ville:Commune | libelle_departement:Département | academie:Académie | uai:UAI"></dsfr-data-normalize>
+        <dsfr-data-a11y source="egf-tableau" for="carte-egf" table download
           filename="label-egalite-filles-garcons.csv"
           label="Données de la carte"
-          description="Une labellisation par ligne : établissement, niveau, campagne, type, commune, académie."
-          label-field="nom_des_etablissements"
-          value-field="niveau_txt, campagnedelabellisation, type_txt, secteur, ville, libelle_departement, academie">
+          description="Une labellisation par ligne pour la sélection courante : établissement, niveau, campagne, type, secteur, commune, département, académie, UAI."
+          label-field="Établissement"
+          value-field="Niveau, Campagne, Type, Secteur, Commune, Département, Académie, UAI">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-7">
-        <h2 class="fr-h5">Labellisations par académie</h2>
-        <div class="odv-viz" data-code="Établissements labellisés Égalité filles-garçons, par académie">
-        <dsfr-data-chart id="g-egf-aca" source="egf-aca" type="bar" horizontal
-          label-field="academie" value-field="n" name='["Labellisations"]'
-          databox databox-title="Établissements labellisés Égalité filles-garçons, par académie"
-          databox-source="Ministère de l'éducation nationale — fr-en-label-egalite-fille-garcon"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-egf-aca" source="egf-aca" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-5">
-        <h2 class="fr-h5">Par campagne</h2>
-        <div class="odv-viz" data-code="Labellisations par campagne">
-        <dsfr-data-chart id="g-egf-camp" source="egf-camp" type="bar"
-          label-field="campagnedelabellisation" value-field="n" name='["Labellisations"]'
-          databox databox-title="Labellisations par campagne"
-          databox-source="Ministère de l'éducation nationale — fr-en-label-egalite-fille-garcon"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-egf-camp" source="egf-camp" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          Trois campagnes, et non quatre : la graphie fautive « 2024- 2025 » d'une ligne unique
-          est corrigée en amont, sinon elle formerait une quatrième barre à 1.
-        </p>
-      </div>
-    </div>
-  </div>
-
-  <dsfr-data-query id="egf-aca" source="egf-f" group-by="academie"
-    aggregate="identifiantuai:count:n" where="academie:isnotnull"
-    order-by="n:desc" limit="20"></dsfr-data-query>
-  <dsfr-data-query id="egf-camp" source="egf-f" group-by="campagnedelabellisation"
-    aggregate="identifiantuai:count:n" where="campagnedelabellisation:isnotnull"
-    order-by="campagnedelabellisation:asc"></dsfr-data-query>
-
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h4">La liste</h2>
-    <div class="odv-viz" data-code="Graphique">
+    <h3 class="fr-h5 fr-mt-6w">La liste</h3>
     <dsfr-data-list source="egf-f"
-      columns="nom_des_etablissements, niveau_txt, campagnedelabellisation, type_txt, secteur, ville, libelle_departement, academie"
-      search sort pagination="25" count-label="établissement">
+      columns="nom_des_etablissements:Établissement, niveau_txt:Niveau, campagnedelabellisation:Campagne, type_txt:Type, ville:Commune, libelle_departement:Département, academie:Académie"
+      search sort pagination="25" count-label="labellisation">
     </dsfr-data-list>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">En trois campagnes, le label Égalité filles-garçons a touché
+        près d'un collège ou lycée public sur cinq. Mais sa diffusion suit les académies bien
+        plus que les établissements&nbsp;: une académie ultramarine en tête, loin devant toutes
+        les autres, et d'autres académies d'outre-mer à zéro. Les collèges de l'éducation
+        prioritaire renforcée s'en saisissent un peu plus que les autres, et ceux qui y
+        reviennent le font pour monter d'un niveau. Ce que le jeu ne dit pas&nbsp;: pourquoi
+        une académie s'engage plus qu'une autre, ni ce que le label a changé dans les
+        établissements.</p>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Un établissement, pas une labellisation.</strong> Le jeu compte 1&nbsp;678
+          labellisations pour 1&nbsp;502 établissements distincts (relevé à l'API le
+          2026-09-26). Les taux comptent un établissement labellisé une fois, quel que soit le
+          nombre de ses labels. Le label étant délivré pour une durée limitée, « labellisé au
+          moins une fois » n'est pas « labellisé aujourd'hui »&nbsp;: le jeu ne porte pas de
+          date d'échéance.</li>
+        <li><strong>164 codes UAI en minuscule.</strong> Le jeu écrit par exemple
+          <code>0220082v</code> au lieu de <code>0220082V</code> (125 lignes de la campagne
+          2024-2025, 39 de 2023-2024)&nbsp;: 27 établissements apparaissent sous les deux
+          graphies. Deux d'entre eux sont même labellisés deux fois lors de la même campagne
+          2023-2024, à deux niveaux différents&nbsp;; la page retient le plus élevé. Sans remise en
+          majuscule, on compterait 1&nbsp;529 établissements et 136 labellisés ne se joindraient pas à
+          l'annuaire — l'académie de Lille perdrait 36 de ses labellisés.</li>
+        <li><strong>Le dénominateur est l'annuaire d'aujourd'hui.</strong> Collèges, lycées et
+          EREA publics sous tutelle de l'éducation nationale, ouverts à la date de lecture, hors
+          SEGPA et sections d'enseignement professionnel (qui ont leur propre UAI sans être des
+          établissements) et hors collectivités d'outre-mer (Nouvelle-Calédonie, Polynésie
+          française, Wallis-et-Futuna, Saint-Pierre-et-Miquelon), absentes du jeu du label.
+          L'annuaire décrit une cité scolaire deux fois (collège et lycée)&nbsp;: chaque UAI
+          n'y compte qu'une fois. Un établissement labellisé puis fermé ou fusionné sort du calcul&nbsp;: quatre
+          labellisés publics ne s'y retrouvent pas, dont un lycée français de l'étranger et une
+          école relevant des armées.</li>
+        <li><strong>En marge de la carte</strong>&nbsp;: les quatre labellisations de
+          lycées français à l'étranger (Maurice, Tunisie). Elles restent dans la liste et dans
+          l'export.</li>
+        <li><strong>Le privé est hors du calcul.</strong> 31 établissements privés seulement
+          ont été labellisés, sur plusieurs milliers de collèges et lycées privés sous
+          contrat&nbsp;: les inclure aurait abaissé tous les taux sans rien dire des académies.
+          Ils restent dans la carte et la liste.</li>
+        <li><strong>Deux défauts de saisie corrigés.</strong> La campagne « 2024- 2025 » (une
+          espace parasite, une ligne) est ramenée à « 2024-2025 »&nbsp;; deux lycées français de
+          l'étranger (Maurice, Tunisie) partagent un même UAI entre collège et lycée, et comptent
+          donc chacun pour un établissement.</li>
+        <li><strong>Angles écartés.</strong> Le nombre de labellisations par académie (il
+          mesure la taille des académies)&nbsp;; la carte seule comme réponse (1&nbsp;678 points
+          ne montrent pas une proportion)&nbsp;; le classement des établissements (le label
+          n'est pas une note).</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Label Égalité filles-garçons — ce que la reproduction a coûté</summary>
+  <!-- ====================== Analyse ====================== -->
+  <div class="fr-container fr-mb-8w">
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — Label Égalité filles-garçons</h2>
 
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
         <a href="https://data.education.gouv.fr/pages/label-egalite-fille-garcon0" target="_blank" rel="noopener external">/pages/label-egalite-fille-garcon0</a>
-        — noter le <code>0</code> final, vestige d'un doublon de page.
-        Fiche d'audit : <code>docs/portail-education/label-egalite-fille-garcon.md</code>.
+        — un annuaire cartographié sans un chiffre, cinq couches identiques. Fiche d'audit :
+        <code>docs/portail-education/label-egalite-fille-garcon.md</code>. Recréée le
+        2026-09-26 en page éditoriale&nbsp;; la reproduction précédente (volumes par académie)
+        est remplacée.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le gabarit « annuaire cartographié », cinquième emploi.</strong> Source en
-              export, recherche, facettes client, carte colorée, popup en panneau, tableau
-              accessible, liste triable. Écrit sans hésitation ni vérification d'attribut : c'est
-              le motif le mieux rodé du dépôt, tous portails confondus.</li>
-            <li><strong>Deux recodages de libellés en une expression.</strong> Le jeu stocke le
-              niveau en entier (1, 2, 3) et le type d'établissement en sigle
-              (<code>COLLEGE</code>, <code>LEGT</code>, <code>LPO</code>, <code>LP</code>,
-              <code>EREA</code>) — illisibles en facette comme en légende. Un
-              <code>compute</code> avec deux assignations sépare les deux, et les libellés
-              obtenus servent partout : couleur, facette, KPI, popup, export CSV.</li>
-            <li><strong>Les deux liens sortants.</strong> Le jeu porte un site d'établissement et
-              une fiche Onisep ; <code>{{champ:url}}</code> les passe par la liste blanche de
-              schémas et <code>{{#if}}</code> évite les liens morts. Deux lignes de template.</li>
-            <li><strong>Une palette ordonnée.</strong> Le niveau est la seule variable ordonnée du
-              jeu : trois tons croissants d'une même teinte plutôt que trois couleurs sans
-              rapport, ce qui fait lire la carte sans consulter la légende.</li>
+            <li><strong>Passer du volume au taux.</strong> Un second jeu (l'annuaire) filtré par
+              le serveur, une jointure à gauche, une query <code>sum</code>/<code>count</code> et
+              un <code>compute</code>&nbsp;: le ratio de sommes est prêt, académies à zéro
+              comprises.</li>
+            <li><strong>Une ligne par établissement.</strong> Un <code>dsfr-data-pivot</code>
+              <code>row="uai"</code> dédoublonne et donne le niveau de chaque campagne&nbsp;; la
+              trajectoire se déduit par <code>coalesce</code> et <code>when</code>.</li>
+            <li><strong>Un chapô calculé.</strong> Deux jointures sur une clé constante
+              rapprochent la France, l'académie de tête et la dernière non nulle en une ligne,
+              que <code>dsfr-data-repeat</code> met en phrase.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Une campagne existe en deux graphies.</strong> Le champ
-              <code>campagnedelabellisation</code> porte « 2024-2025 » 553 fois et
-              « <strong>2024- 2025</strong> » — avec un espace après le tiret — <strong>une
-              fois</strong>. Sans correction, la facette affiche quatre campagnes pour trois, et
-              le graphique une quatrième barre à 1. Ce défaut ne se voit <em>pas</em> à la
-              lecture : il faut compter les valeurs distinctes. C'est le troisième du même genre
-              rencontré sur ce portail, après la double graphie « Education » / « Éducation » du
-              catalogue et les « NA » textuels de l'annuaire des internats. <strong>La saisie
-              libre d'un champ censé être une nomenclature est la première cause d'erreur des
-              jeux de ce portail</strong>, et aucune bibliothèque ne peut la détecter — elle ne
-              peut que la corriger une fois qu'on l'a vue.</li>
-            <li><strong>Le chiffre de référence lu à l'API était faux.</strong> Ce dépôt vérifie
-              tous ses chiffres à l'API avant de les écrire — c'est sa règle la plus ancienne.
-              Le <code>count(distinct ville)</code> a répondu <strong>959</strong> ; le KPI de
-              cette page, qui compte côté client sur des données complètes, affiche
-              <strong>981</strong>. C'est le KPI qui a raison : <code>count(distinct)</code> de
-              l'API Opendatasoft est une <strong>estimation</strong>, exacte tant que le cardinal
-              est petit et fausse au-delà — vérifié sur trois jeux, et elle se trompe
-              <em>dans les deux sens</em> (3 761 au lieu de 3 791 sur les communes des collèges ;
-              927 au lieu de 924 sur celles d'Euroscol). <strong>La bibliothèque n'y est pour
-              rien</strong> — son agrégat <code>distinct</code> est calculé sur les lignes reçues,
-              et ne délègue rien. C'est la méthode de vérification du banc qui était en défaut,
-              et c'est cette page qui l'a révélé. Constat PG-026.</li>
-            <li><strong><code>replace-fields</code> ne sait corriger qu'une valeur entière.</strong>
-              Ici cela suffit — la graphie fautive est complète. Mais s'il y avait eu dix
-              variantes d'espacement, il aurait fallu dix entrées, ou passer par
-              <code>compute</code> et <code>replace()</code>. Il n'y a pas de normalisation
-              d'espaces (l'attribut <code>trim</code> ne traite que les bords, pas l'intérieur).</li>
+            <li><strong>Des UAI en minuscule.</strong> Invisibles à la lecture, ils faussaient
+              le compte d'établissements (1&nbsp;529 au lieu de 1&nbsp;502, repris par la fiche
+              d'audit) et privaient la jointure de 136 établissements labellisés. Repérés seulement parce que
+              la jointure avec l'annuaire en perdait 11&nbsp;%. <code>upper()</code> dans le
+              <code>compute</code> suffit, une fois vu.</li>
+            <li><strong>Construire un dénominateur honnête.</strong> L'annuaire range SEGPA et
+              SEP parmi les « collèges » et « lycées », avec leur propre UAI&nbsp;: sans
+              <code>not startswith(libelle_nature, "SECTION")</code>, plus de 2&nbsp;000
+              pseudo-établissements abaissaient les taux d'un cinquième. Et il n'a pas une ligne
+              par UAI (une cité scolaire y est collège <em>et</em> lycée)&nbsp;: un
+              <code>group-by</code> sur l'UAI avant la jointure.</li>
           </ul>
         </div>
       </div>
@@ -311,28 +579,27 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>ods-dataset-context</code></td><td><code>dsfr-data-source fetch-mode="export"</code></td><td>Équivalent</td></tr>
-            <tr><td><code>ods-facet</code> sur des sigles et des entiers</td><td><code>compute</code> + <code>dsfr-data-facets</code></td><td>Meilleur : les libellés sont lisibles partout à la fois</td></tr>
-            <tr><td>campagne en quatre graphies pour trois campagnes</td><td><code>replace-fields</code></td><td>Meilleur : défaut du jeu corrigé en un attribut</td></tr>
-            <tr><td><code>ods-map</code> + épingles</td><td><code>dsfr-data-map-layer color-field="niveau_txt"</code></td><td>Meilleur : palette ordonnée sur la variable ordonnée</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-search</code>, <code>dsfr-data-list</code>, <code>dsfr-data-a11y</code>, liens Onisep</td><td>Sans équivalent côté Opendatasoft</td></tr>
+            <tr><td><code>ods-dataset-context</code> × 7 sur un même jeu</td><td><code>dsfr-data-source fetch-mode="export"</code> + second jeu en <code>where</code> serveur</td><td>Meilleur : un contexte, et un dénominateur</td></tr>
+            <tr><td>cinq couches <code>refine.typeeple</code> identiques</td><td>une <code>dsfr-data-map-layer</code> + facette « Type »</td><td>Meilleur</td></tr>
+            <tr><td><code>ods-facet</code> sur des sigles et des entiers</td><td><code>compute</code> + <code>dsfr-data-facets</code></td><td>Meilleur : libellés lisibles partout</td></tr>
+            <tr><td>épingles sans légende</td><td><code>color-map</code> ordonné + <code>dsfr-data-map-legend</code></td><td>Meilleur</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-join</code>, <code>dsfr-data-pivot</code>, <code>dsfr-data-repeat</code>, <code>dsfr-data-a11y</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, sixième page du portail Éducation à ne poser
-          <strong>aucune difficulté technique</strong>. Le seul travail réel a consisté à repérer
-          qu'une campagne sur trois se scinde en deux à cause d'un espace — un caractère, sur une
-          ligne parmi 1 678 — et qu'un chiffre de référence pris à l'API était faux de 22 communes.
-          C'est devenu le motif dominant de ce second portail : <strong>les pages se reproduisent,
-          les jeux se corrigent</strong>. Et cette page ajoute une nuance qui vaut pour tout le
-          dépôt : <strong>l'outil de vérification aussi peut mentir</strong>.</p>
+        <p>La bibliothèque n'a opposé aucune résistance&nbsp;; <strong>le travail a été de
+          trouver le bon dénominateur</strong>. Compter les labels par académie classait les
+          grandes académies&nbsp;; les rapporter aux établissements publics fait apparaître
+          l'histoire — un label qui dépend du rectorat plus que de l'établissement — et, en
+          chemin, un défaut du jeu (les UAI en minuscule) qu'aucune lecture du tableau n'aurait
+          montré.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 

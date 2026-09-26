@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ted-i — robots de téléprésence — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du tableau de bord Ted-i : les déploiements de robots de téléprésence, un cumul mensuel natif, et des lignes entièrement vides.">
+  <meta name="description" content="Recréation avec dsfr-data du tableau de bord Ted-i de data.education.gouv.fr : le parc de robots de téléprésence suit l'année scolaire — il monte jusqu'en avril et se vide en mai-juin —, et la dernière rentrée démarre plus vite que les précédentes.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,160 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un tableau de bord de compteurs (académies, départements,
+       robots « en service », établissements) et un cumul mensuel. La
+       reproduction précédente le transposait fidèlement. Relu à l'API, le jeu
+       raconte autre chose que des totaux : chaque ligne porte une date de pose
+       ET une date de restitution, donc le parc en service se reconstitue mois
+       par mois — et il respire avec l'année scolaire.
+
+       Une seule source, lue sans clé : 3 948 lignes au 2026-09-26, jeu
+       QUOTIDIEN. `max-records="20000"` : le plafond par défaut (1 000)
+       tronquerait les trois quarts du jeu en silence, et un plafond calé sur le
+       volume du jour se referme tout seul.
+
+       CAMPAGNE = août → juillet (et non septembre → août). Les robots posés
+       fin août servent la rentrée qui suit : 77 en août 2026, 37 en août 2025.
+       Aucune pose n'est enregistrée en juillet.
+       ========================================================================== -->
+
+  <dsfr-data-source id="tedi" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr" dataset-id="fr-en-deploiemement_tedi"
+    fetch-mode="export" max-records="20000">
+  </dsfr-data-source>
+
+  <!-- Colonnes dérivées, ligne à ligne :
+       - `statut`, `degre` : pour les filtres (groupe nul NOMMÉ) ;
+       - `an_camp`, `campagne` : la campagne août → juillet de la pose ;
+       - `rang_camp`, `mlib` : le rang du mois dans la campagne (août = 1) et son nom ;
+       - `jour_camp` : la position du jour dans la campagne (rang × 100 + jour),
+         pour comparer les campagnes « à la même date » ;
+       - `mois` : la clé de mois ZÉRO-REMPLIE (`month()` rend 9, pas 09 : sans
+         ça, 2025-10 se trie avant 2025-9 et le cumul est faux sans erreur) ;
+       - `k` : une clé constante pour les jointures à une ligne. -->
+  <dsfr-data-normalize id="tedi-n" source="tedi"
+    compute="statut = when is_null(fin_utilisation) then 'En service' else 'Restitué';
+             an_camp = when month(debut_utilisation) &gt;= 8 then year(debut_utilisation) else year(debut_utilisation) - 1;
+             campagne = concat(an_camp, '-', an_camp + 1);
+             rang_camp = when month(debut_utilisation) &gt;= 8 then month(debut_utilisation) - 7 else month(debut_utilisation) + 5;
+             mlib = when rang_camp = 1 then '01 août' when rang_camp = 2 then '02 sept.' when rang_camp = 3 then '03 oct.' when rang_camp = 4 then '04 nov.' when rang_camp = 5 then '05 déc.' when rang_camp = 6 then '06 janv.' when rang_camp = 7 then '07 févr.' when rang_camp = 8 then '08 mars' when rang_camp = 9 then '09 avril' when rang_camp = 10 then '10 mai' when rang_camp = 11 then '11 juin' else '12 juil.';
+             jour_camp = rang_camp * 100 + day(debut_utilisation);
+             mois = when month(debut_utilisation) &lt; 10 then concat(year(debut_utilisation), '-0', month(debut_utilisation)) else concat(year(debut_utilisation), '-', month(debut_utilisation));
+             degre = when type_etablissement = 'Ecole' then '1er degré' when type_etablissement = 'Collège' then '2nd degré' when type_etablissement = 'Lycée' then '2nd degré' when type_etablissement = 'EREA' then '2nd degré' when is_null(type_etablissement) then 'Établissement non identifié' else 'Autres structures';
+             k = 'k'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Le parc en service, mois par mois ----------
+       Deux flux d'événements de même schéma : une pose (+1) au mois de
+       `debut_utilisation`, une restitution (−1) au mois de `fin_utilisation`.
+       Empilés, regroupés par mois, cumulés : le solde cumulé est le nombre de
+       robots en service à la fin du mois. -->
+  <dsfr-data-normalize id="ev-pose" source="tedi-n"
+    compute="mois_evt = mois; pose = 1; rendu = 0; net = 1; mj = 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="q-fin" source="tedi-n" where="fin_utilisation:isnotnull"></dsfr-data-query>
+  <dsfr-data-normalize id="ev-rendu" source="q-fin"
+    compute="mois_evt = when month(fin_utilisation) &lt; 10 then concat(year(fin_utilisation), '-0', month(fin_utilisation)) else concat(year(fin_utilisation), '-', month(fin_utilisation));
+             pose = 0; rendu = 1; net = -1;
+             mj = when month(fin_utilisation) = 5 or month(fin_utilisation) = 6 then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-concat id="ev" sources="ev-pose, ev-rendu"></dsfr-data-concat>
+  <dsfr-data-query id="parc" source="ev" group-by="mois_evt"
+    aggregate="pose:sum:poses, rendu:sum:rendus, net:sum:solde, solde:running_sum:en_service"
+    order-by="mois_evt:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="parc-t" source="parc"
+    rename="mois_evt:Mois | poses:Robots posés | rendus:Robots rendus | en_service:En service en fin de mois">
+  </dsfr-data-normalize>
+
+  <!-- Par campagne : le pic du parc, et ce qui reste en place fin juillet. -->
+  <dsfr-data-normalize id="parc-c" source="parc"
+    compute="an = when month(mois_evt) &gt;= 8 then year(mois_evt) else year(mois_evt) - 1;
+             campagne = concat(an, '-', an + 1);
+             an_civ = year(mois_evt);
+             juillet = when month(mois_evt) = 7 then en_service else null">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="parc-camp" source="parc-c" group-by="campagne"
+    aggregate="en_service:max:pic" order-by="campagne:asc">
+  </dsfr-data-query>
+  <!-- Les fins de juillet observées seulement (la campagne en cours n'en a pas). -->
+  <dsfr-data-query id="parc-ete" source="parc-c" where="juillet:isnotnull" order-by="mois_evt:asc"></dsfr-data-query>
+
+  <!-- Part des restitutions en mai-juin, par campagne de restitution
+       (une campagne en cours, sans mai ni juin, est écartée : nmj > 0). -->
+  <dsfr-data-normalize id="ev-rendu-c" source="ev-rendu"
+    compute="an_fin = when month(fin_utilisation) &gt;= 8 then year(fin_utilisation) else year(fin_utilisation) - 1;
+             campagne_fin = concat(an_fin, '-', an_fin + 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="rendu-camp" source="ev-rendu-c" group-by="campagne_fin"
+    aggregate="rendu:sum:n, mj:sum:nmj" order-by="campagne_fin:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="rendu-camp-p" source="rendu-camp" where="nmj:gt:0"></dsfr-data-query>
+  <dsfr-data-normalize id="rendu-camp-r" source="rendu-camp-p"
+    compute="part = round(nmj / n * 100, 0)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Les campagnes comparées « à la même date » ----------
+       La date de référence est celle de la DERNIÈRE pose du jeu (mis à jour
+       chaque jour à 6 h UTC), pas l'horloge du lecteur. -->
+  <dsfr-data-query id="ref1" source="tedi-n" order-by="debut_utilisation:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="ref2" source="ref1" group-by="k, debut_utilisation, campagne"
+    aggregate="jour_camp:max:ref_jour, an_camp:max:ref_an">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="ref" source="ref2"
+    rename="debut_utilisation:ref_date | campagne:ref_camp">
+  </dsfr-data-normalize>
+  <!-- Clé constante des deux côtés, UNE ligne à droite : pas de relation 1-N. -->
+  <dsfr-data-join id="tedi-ref" left="tedi-n" right="ref" on="k" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="tedi-rel" source="tedi-ref"
+    compute="rel = ref_an - an_camp;
+             a_date = when jour_camp &lt;= ref_jour then 1 else 0;
+             serie = when rel = 0 then 'Campagne en cours' when rel = 1 then 'Campagne précédente' when rel = 2 then 'Il y a deux campagnes' else concat('Campagne ', campagne)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="adate" source="tedi-rel" where="a_date:eq:1"
+    group-by="k, rel" aggregate="uai:count:n">
+  </dsfr-data-query>
+  <dsfr-data-pivot id="adate-p" source="adate" row="k" column="rel" value="n" aggregate="first"
+    labels="0:cur | 1:prev | 2:prev2">
+  </dsfr-data-pivot>
+  <dsfr-data-query id="total" source="tedi-n" group-by="k"
+    aggregate="uai:count:n_total, uai:distinct:n_etab">
+  </dsfr-data-query>
+  <dsfr-data-join id="synth-1" left="adate-p" right="ref" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="synth-2" left="synth-1" right="total" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="synth" source="synth-2"
+    compute="evo = round((cur - prev) / prev * 100, 0)">
+  </dsfr-data-normalize>
+
+  <!-- Poses par mois de campagne, une série par campagne. -->
+  <dsfr-data-query id="camp-mois" source="tedi-rel"
+    group-by="rang_camp, mlib, serie, campagne" aggregate="uai:count:poses"
+    order-by="rang_camp:asc, campagne:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="camp-mois-t" source="camp-mois"
+    rename="mlib:Mois de campagne | campagne:Campagne | poses:Robots posés">
+  </dsfr-data-normalize>
+
+  <dsfr-data-query id="tedi-actif" source="tedi-n" where="fin_utilisation:isnull"></dsfr-data-query>
+
+  <!-- ---------- Les lignes sans établissement ---------- -->
+  <dsfr-data-query id="vides" source="tedi-n" where="nom_etablissement:isnull"
+    group-by="uai" aggregate="uai:count:n" order-by="n:desc">
+  </dsfr-data-query>
+  <dsfr-data-query id="vides-top" source="vides" order-by="n:desc" limit="4"></dsfr-data-query>
+  <dsfr-data-normalize id="vides-top-k" source="vides-top" compute="k = 'k'"></dsfr-data-normalize>
+  <dsfr-data-query id="vides-top-s" source="vides-top-k" group-by="k" aggregate="n:sum:t"></dsfr-data-query>
+  <dsfr-data-normalize id="vides-k" source="vides" compute="k = 'k'"></dsfr-data-normalize>
+  <dsfr-data-query id="vides-s" source="vides-k" group-by="k" aggregate="n:sum:lignes, uai:count:codes"></dsfr-data-query>
+  <dsfr-data-join id="vides-j" left="vides-s" right="vides-top-s" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="vides-j2" left="vides-j" right="total" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="vides-r" source="vides-j2"
+    compute="part = round(lignes / n_total * 100, 1)">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,135 +186,233 @@
       </div>
     </nav>
 
-    <h1>Ted-i : les robots de téléprésence pour élèves empêchés</h1>
+    <h1>Les robots Ted-i suivent l'année scolaire&nbsp;: posés à la rentrée, rendus en juin</h1>
 
-    <p class="fr-text--lead">
-      Dans le cadre du programme Ted-i, un enfant hospitalisé ou maintenu durablement à domicile
-      peut disposer gratuitement d'un système de téléprésence pour suivre sa classe.
-      Le jeu recense les déploiements depuis août 2024. Les quatre compteurs ci-dessous —
-      déploiements, établissements, académies, départements — sont lus sur le jeu et suivent
-      les filtres&nbsp;: ils ne sont pas écrits ici. Le jeu est <strong>mis à jour
-      quotidiennement</strong>, et ce chapô a porté quatre chiffres figés (3 734 / 2 497 / 27 /
-      97) jusqu'au 2026-09-19 — la recette du 12 en relevait déjà 3 753 / 2 505, et l'API en
-      rendait 3 861 / 2 590 le 19. Un chiffre écrit à la main à côté d'un jeu quotidien est faux
-      la semaine suivante&nbsp;: c'est le KPI qui le dit, pas la prose.
+    <p class="fr-text--lead fr-mb-2w">
+      Avec le programme Ted-i, un élève hospitalisé ou soigné durablement à domicile reçoit
+      gratuitement un robot de téléprésence pour suivre sa classe à distance. Le jeu publié
+      chaque jour par le ministère porte, pour chaque robot, sa date de pose et sa date de
+      restitution&nbsp;: on peut donc compter, mois par mois, combien sont en service.
     </p>
+    <!-- Le chapô chiffré est CALCULÉ : le jeu est quotidien. -->
+    <dsfr-data-repeat source="synth">
+      <template>
+        <p class="fr-text--lead">
+          Depuis le lancement en août 2024, <strong>{{n_total:number}} robots</strong> ont été
+          posés dans {{n_etab:number}} établissements. Le parc en service grimpe chaque année de la rentrée
+          jusqu'en avril, puis se vide en mai-juin.
+          La campagne {{ref_camp}} part plus vite que les précédentes&nbsp;:
+          <strong>{{cur:number}} robots posés</strong> au {{ref_date:date}}, contre
+          {{prev:number}} à la même date un an plus tôt.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-deploiemement_tedi/" target="_blank" rel="noopener external"><code>fr-en-deploiemement_tedi</code></a>
-        — 3 734 lignes, 9 champs, mis à jour <strong>quotidiennement à 6 h UTC</strong>, lu sans
-        clé. Une ligne = un robot posé dans un établissement, avec sa date de début et,
-        éventuellement, sa date de fin d'utilisation. Le mot « temps réel » qu'emploie la page
-        d'origine désigne donc <em>l'état du jeu à sa dernière mise à jour quotidienne</em>.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Le défaut de données le plus net du lot : 175 lignes sont entièrement
-        vides.</strong> Vérifié sur l'export complet — ce sont exactement les
-        <em>mêmes</em> 175 lignes qui n'ont ni <code>nom_etablissement</code>, ni
-        <code>type_etablissement</code>, ni <code>nom_commune</code>, ni <code>position</code>,
-        ni <code>libelle_departement</code>, ni <code>libelle_academie</code>. Il ne leur reste
-        que l'UAI et les dates : l'appariement au référentiel des établissements n'a pas eu lieu.
-        La page d'origine, elle, présente le symptôme trois fois séparément — une barre 1er/2nd
-        degré qui perd des lignes, une carte qui perd des points, un classement d'académies
-        incomplet — sans jamais dire que c'est le même trou.
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.education.gouv.fr/explore/dataset/fr-en-deploiemement_tedi/"
+           target="_blank" rel="noopener external"><code>fr-en-deploiemement_tedi</code></a>
+        (DNE, Licence Ouverte 2.0) — une ligne par robot posé dans un établissement, avec sa date
+        de début et, s'il a été rendu, sa date de fin d'utilisation. Mis à jour chaque jour à
+        6&nbsp;h UTC, lu sans clé, chargé en une requête. Le jeu compte des <strong>robots</strong>,
+        jamais des élèves&nbsp;: un établissement qui en reçoit deux peut accueillir deux élèves,
+        ou le même élève deux fois.
       </p>
     </details>
+
+    <!-- ---------- Accroche : quatre repères de poids différents ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:2 lg:4" gap="md" class="fr-mb-6w" aria-label="Les chiffres à retenir">
+      <dsfr-data-kpi source="parc" value="en_service:max" format="nombre"
+        heading="robots en service au plus haut"
+        label="en fin de mois, depuis août 2024"></dsfr-data-kpi>
+      <dsfr-data-kpi source="tedi-actif" value="count" format="nombre"
+        heading="robots en service aujourd'hui"
+        label="sans date de restitution, à la dernière mise à jour du jeu"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ev-rendu" value="count{mj:eq:1} / count" format="pourcentage"
+        heading="des restitutions ont lieu en mai ou juin"
+        label="toutes campagnes confondues"></dsfr-data-kpi>
+      <dsfr-data-kpi source="synth" value="cur:first" format="nombre"
+        heading="robots posés depuis le 1er août"
+        lines='[{"value":"prev:first","format":"nombre","prefix":"même date l’an dernier : "}]'
+        label="campagne en cours, à la date de la dernière pose"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <!-- ---------- 1. La preuve : le parc respire ---------- -->
+    <h2 class="fr-h3">1. Le parc en service monte de septembre à avril, puis se vide en mai-juin</h2>
+    <dsfr-data-repeat source="parc-camp" key-field="campagne">
+      <template>
+        <p class="odv-lecture fr-mb-1v">Campagne {{campagne}}&nbsp;: jusqu'à
+          <strong>{{pic:number}} robots</strong> en service en même temps.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="parc-ete" key-field="mois_evt">
+      <template>
+        <p class="odv-lecture fr-mb-1v">Fin juillet {{an_civ}}, en plein été, <strong>{{juillet:number}}
+          robots</strong> restaient en service.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">Chaque point est le nombre de robots posés et pas encore
+      rendus à la fin du mois (à la dernière mise à jour pour le mois en cours). La courbe dessine
+      deux années scolaires presque superposables&nbsp;: une montée continue d'octobre à avril,
+      puis une chute brutale quand l'année se termine.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Robots Ted-i en service en fin de mois">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-parc" source="parc" type="line"
+        label-field="mois_evt" value-field="en_service:Robots en service"
+        y-min="0" unit-tooltip="robots"
+        databox databox-title="Robots Ted-i en service en fin de mois, depuis août 2024"
+        databox-source="DNE — fr-en-deploiemement_tedi, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-parc" source="parc-t" table download
+        filename="tedi-parc-mensuel.csv"
+        label-field="Mois" value-field="Robots posés, Robots rendus, En service en fin de mois"
+        description="Pour chaque mois depuis août 2024 : robots posés, robots rendus, et robots en service en fin de mois (posés moins rendus, cumulés). Le parc monte de septembre à avril et chute en mai-juin, chaque année."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 2. Le mécanisme : deux vagues ---------- -->
+    <h2 class="fr-h3">2. Deux vagues opposées&nbsp;: les poses à la rentrée, les restitutions en fin d'année</h2>
+    <dsfr-data-repeat source="rendu-camp-r" key-field="campagne_fin">
+      <template>
+        <p class="odv-lecture fr-mb-1v">Sur les {{n:number}} robots rendus pendant la campagne
+          {{campagne_fin}}, <strong>{{nmj:number}} l'ont été en mai ou juin</strong>, soit
+          {{part}}&nbsp;%.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">Les poses culminent en septembre et s'étalent jusqu'en
+      mars&nbsp;; presque aucune n'a lieu en juin ou juillet. Les restitutions, elles, sont
+      rares à l'automne et se concentrent sur les deux derniers mois de l'année scolaire&nbsp;:
+      le robot accompagne l'élève jusqu'à la fin de l'année plutôt que jusqu'à la fin de ses
+      soins — une lecture que le jeu suggère sans pouvoir la prouver, faute de motif de
+      restitution.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Robots Ted-i posés et rendus chaque mois">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-flux" source="parc" type="bar"
+        label-field="mois_evt"
+        value-field="poses:Robots posés" value-fields="rendus:Robots rendus"
+        color-map="Robots posés:#000091,Robots rendus:#e4794a"
+        y-min="0" unit-tooltip="robots"
+        databox databox-title="Robots Ted-i posés et rendus chaque mois, depuis août 2024"
+        databox-source="DNE — fr-en-deploiemement_tedi, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-flux" source="parc-t" table download
+        filename="tedi-poses-restitutions.csv"
+        label-field="Mois" value-field="Robots posés, Robots rendus"
+        description="Robots posés (mois de la date de début) et rendus (mois de la date de fin) chaque mois depuis août 2024. Les poses culminent en septembre, les restitutions en mai et juin."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. Le changement : la rentrée en cours ---------- -->
+    <h2 class="fr-h3">3. La dernière rentrée démarre plus vite que les deux précédentes</h2>
+    <dsfr-data-repeat source="synth">
+      <template>
+        <p class="odv-lecture">Du 1er août au {{ref_date:date}}, <strong>{{cur:number}} robots</strong>
+          ont été posés pour la campagne {{ref_camp}}, contre <strong>{{prev:number}}</strong> sur
+          la même période de la campagne précédente ({{evo}}&nbsp;% d'écart) et {{prev2:number}}
+          deux ans plus tôt, l'année du lancement.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">L'écart vient surtout d'un démarrage plus précoce&nbsp;: les
+      poses d'août ont doublé d'une année sur l'autre. Deux campagnes complètes ne suffisent pas
+      à parler de tendance&nbsp;: la campagne 2025-2026 a posé un peu moins de robots que la
+      première.</p>
+    <div class="odv-viz fr-mb-2w" data-code="Robots Ted-i posés par mois de campagne">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-camp" source="camp-mois" type="bar"
+        label-field="mlib" value-field="poses" series-field="serie"
+        color-map="Campagne en cours:#000091,Campagne précédente:#929292,Il y a deux campagnes:#cecece"
+        y-min="0" unit-tooltip="robots"
+        databox databox-title="Robots Ted-i posés par mois de campagne (août à juillet)"
+        databox-source="DNE — fr-en-deploiemement_tedi, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-camp" source="camp-mois-t" table download
+        filename="tedi-poses-par-campagne.csv"
+        label-field="Mois de campagne" value-field="Campagne, Robots posés"
+        description="Robots posés chaque mois, d'août à juillet, pour chaque campagne depuis 2024-2025. La campagne en cours n'a que ses premiers mois ; celle de 2024-2025 commence le 22 août 2024, date de la première pose."></dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-mb-6w">Une campagne court du 1er août au 31 juillet&nbsp;: les
+      robots posés fin août servent la rentrée qui suit. La série « campagne en cours » est
+      incomplète par construction.</p>
+
+    <!-- ---------- 4. Ce que le jeu ne dit pas ---------- -->
+    <h2 class="fr-h3">4. Un robot sur vingt n'a pas d'établissement connu</h2>
+    <dsfr-data-repeat source="vides-r">
+      <template>
+        <p class="odv-lecture">{{lignes:number}} robots ({{part:number:1}}&nbsp;% du jeu) n'ont ni nom
+          d'établissement, ni commune, ni académie, ni coordonnées&nbsp;: seulement un code UAI et
+          des dates. Ils ne sont pas dispersés&nbsp;: ils se répartissent sur {{codes:number}}
+          codes, et <strong>les quatre plus fréquents en portent {{t:number}}</strong>.</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mb-6w">Les cinq codes les plus fréquents sont absents de l'annuaire
+      de l'éducation (vérifié le 2026-09-26). Un même code qui reçoit plusieurs dizaines de robots
+      n'est pas une classe&nbsp;: l'hypothèse d'une structure qui prête les robots — un service
+      départemental, une école à l'hôpital — est plausible, mais le jeu ne permet pas de la
+      vérifier. Ces robots comptent dans les courbes ci-dessus&nbsp;; ils manquent à la carte
+      et aux filtres par académie, où ils forment le groupe «&nbsp;Établissement non
+      identifié&nbsp;».</p>
   </div>
 
-  <!-- ==========================================================================
-       3 861 lignes au 2026-09-19, 282 Ko : `fetch-mode="export"` charge tout en un aller-retour,
-       sans quitter le mode adaptateur. L'original émet DIX-NEUF requêtes, dont
-       quatre en 503 parce qu'une variable de période est encore vide au premier
-       cycle de digest et produit l'expression ODSQL `debut_utilisation>=-09-01`.
-
-       `max-records="20000"` explicite : le plafond par défaut de 1 000 tronquerait
-       les quatre cinquièmes du jeu en silence. Relevé porté de 5 000 à 20 000 le
-       2026-09-19 : le jeu est quotidien et gagnait 127 lignes en une semaine — un
-       plafond calé sur le volume du jour se referme tout seul, sans message.
-       ========================================================================== -->
-
-  <dsfr-data-source id="tedi" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr" dataset-id="fr-en-deploiemement_tedi"
-    fetch-mode="export" max-records="20000">
-  </dsfr-data-source>
-
-  <!-- Quatre colonnes dérivées que le jeu n'a pas :
-       - `statut`     : en service (fin_utilisation nulle) ou restitué ;
-       - `an_debut`   : l'année scolaire de pose, calculée avec la bascule de septembre ;
-       - `annee_scolaire` : son libellé « 2025-2026 » ;
-       - `mois`       : la clé de mois zéro-remplie, pour un axe chronologique correct ;
-       - `degre`      : le regroupement 1er / 2nd degré de l'original, groupe nul NOMMÉ. -->
-  <dsfr-data-normalize id="tedi-n" source="tedi"
-    compute="statut = when is_null(fin_utilisation) then 'En service' else 'Restitué'; an_debut = when month(debut_utilisation) &gt;= 9 then year(debut_utilisation) else year(debut_utilisation) - 1; annee_scolaire = concat(an_debut, '-', an_debut + 1); mois = when month(debut_utilisation) &lt; 10 then concat(year(debut_utilisation), '-0', month(debut_utilisation)) else concat(year(debut_utilisation), '-', month(debut_utilisation)); degre = when type_etablissement = 'Ecole' then '1er degré' when type_etablissement = 'Collège' then '2nd degré' when type_etablissement = 'Lycée' then '2nd degré' when type_etablissement = 'EREA' then '2nd degré' when is_null(type_etablissement) then 'Établissement non identifié' else 'Autres structures'">
-  </dsfr-data-normalize>
-
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+  <!-- ---------- 5. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">5. Trouver un établissement</h2>
+    <p class="fr-text--sm">La recherche et les filtres pilotent les compteurs, la carte et le
+      tableau ci-dessous&nbsp;; ils ne touchent pas les graphiques du récit.</p>
+  </div>
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="tedi-q" source="tedi-n"
-        fields="nom_etablissement, nom_commune, uai, libelle_departement"
-        label="Rechercher un établissement" placeholder="Nom, commune, UAI, département…"
-        operator="words" count count-label="déploiement" url-sync>
+          fields="nom_etablissement, nom_commune, uai, libelle_departement"
+          label="Rechercher un établissement" placeholder="Nom, commune, UAI, département…"
+          operator="words" count count-label="robot" url-sync>
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-3w" aria-label="La sélection en chiffres">
       <dsfr-data-kpi source="tedi-f" value="count" format="nombre"
-        heading="Déploiements" label="dans la sélection"></dsfr-data-kpi>
+        heading="Robots posés" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="tedi-f" value="count{fin_utilisation:isnull}" format="nombre"
+        heading="En service" label="sans date de restitution"></dsfr-data-kpi>
       <dsfr-data-kpi source="tedi-f" value="uai:distinct" format="nombre"
-        heading="Établissements" label="accompagnés (UAI distincts)"></dsfr-data-kpi>
-      <dsfr-data-kpi source="tedi-f" value="libelle_academie:distinct" format="nombre"
-        heading="Académies" label="couvertes sur 30"></dsfr-data-kpi>
-      <dsfr-data-kpi source="tedi-f" value="libelle_departement:distinct" format="nombre"
-        heading="Départements" label="couverts sur 101"></dsfr-data-kpi>
+        heading="Établissements" label="codes UAI distincts"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <div class="fr-col-12 fr-col-md-3">
         <details class="odv-filtres odv-filtres--md" open>
           <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
           </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-
-        <h2 class="fr-h6">Filtrer</h2>
-        <dsfr-data-facets id="tedi-f" source="tedi-q"
-          fields="statut, annee_scolaire, degre, type_etablissement, libelle_academie, libelle_departement"
-          labels="statut:Statut du robot | annee_scolaire:Année scolaire de pose | degre:Degré | type_etablissement:Type d'établissement | libelle_academie:Académie | libelle_departement:Département"
-          display="statut:radio-inline | annee_scolaire:radio-inline | degre:checkbox | type_etablissement:multiselect | libelle_academie:multiselect | libelle_departement:multiselect"
-          searchable="libelle_academie, libelle_departement"
-          disjunctive="degre, type_etablissement, libelle_academie, libelle_departement"
-          max-values="8" url-sync url-params>
-        </dsfr-data-facets>
-        <p class="fr-hint-text">
-          La page d'origine n'a <strong>aucun filtre</strong> : ni académie, ni département, ni
-          type, ni recherche. Son seul contrôle est un sélecteur de période — dupliqué à
-          l'identique à 900 pixels d'écart.
-        </p>
+          <h3 class="fr-h6">Filtrer</h3>
+          <dsfr-data-facets id="tedi-f" source="tedi-q"
+            fields="statut, campagne, degre, libelle_academie, libelle_departement"
+            labels="statut:Statut du robot | campagne:Campagne de pose (août à juillet) | degre:Degré | libelle_academie:Académie | libelle_departement:Département"
+            display="statut:radio-inline | campagne:radio-inline | degre:checkbox | libelle_academie:multiselect | libelle_departement:multiselect"
+            searchable="libelle_academie, libelle_departement"
+            disjunctive="degre, libelle_academie, libelle_departement"
+            max-values="8" url-sync url-params>
+          </dsfr-data-facets>
         </details>
       </div>
       <div class="fr-col-12 fr-col-md-9">
-        <div class="odv-viz" data-code="Déploiement des robots Ted-i">
-        <dsfr-data-map id="carte-tedi" name="Déploiement des robots Ted-i"
+        <div class="odv-viz" data-code="Robots Ted-i par établissement">
+        <dsfr-data-map id="carte-tedi" name="Robots Ted-i par établissement"
           height="580px" tiles="ign-plan" tiles-style="muted"
           fit-bounds fit-max-zoom="12" insets="la-reunion,martinique">
           <dsfr-data-map-layer id="couche-tedi" source="tedi-f" type="circle"
             geo-field="position" radius="6" fill-opacity="0.9"
-            color-field="statut" color-map="En service:#18753c,Restitué:#3558a2"
-            color="#929292" tooltip-field="nom_etablissement"
-            cluster cluster-radius="50" max-items="10000">
+            color-field="statut" color-map="En service:#000091,Restitué:#929292"
+            tooltip-field="nom_etablissement"
+            cluster cluster-radius="50" max-items="20000">
           </dsfr-data-map-layer>
           <dsfr-data-map-legend for="couche-tedi" label="Statut du robot"></dsfr-data-map-legend>
           <dsfr-data-map-popup mode="panel-right" title-field="nom_etablissement" width="380px">
@@ -171,203 +423,119 @@
                 académie de {{libelle_academie|non renseignée}}
               </p>
               <ul class="fr-text--sm fr-mb-3v">
-                <li>Posé le <strong>{{debut_utilisation:date}}</strong></li>
-                {{#if fin_utilisation}}<li>Restitué le <strong>{{fin_utilisation:date}}</strong></li>{{/if}}
+                <li>Posé le <strong>{{debut_utilisation:date}}</strong> (campagne {{campagne}})</li>
+                {{#if fin_utilisation}}<li>Rendu le <strong>{{fin_utilisation:date}}</strong></li>{{/if}}
                 {{#unless fin_utilisation}}<li><strong>Robot encore en service</strong></li>{{/unless}}
               </ul>
-              <p class="fr-text--xs fr-mb-0">UAI {{uai}} · année scolaire de pose {{annee_scolaire}}</p>
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
         </div>
+        <p class="fr-hint-text fr-mt-1w">Les robots sans établissement identifié (section&nbsp;4)
+          n'ont pas de coordonnées&nbsp;: ils comptent dans les compteurs et le tableau, pas sur
+          la carte.</p>
+
+        <dsfr-data-normalize id="tedi-tableau" source="tedi-f"
+          rename="nom_etablissement:Établissement | type_etablissement:Type | nom_commune:Commune | libelle_departement:Département | libelle_academie:Académie | statut:Statut | campagne:Campagne"></dsfr-data-normalize>
+        <dsfr-data-a11y source="tedi-tableau" for="carte-tedi" table download
+          filename="tedi-robots.csv" label="Données de la carte"
+          description="Un robot par ligne pour la sélection courante : établissement, type, commune, département, académie, statut et campagne de pose."
+          label-field="Établissement"
+          value-field="uai, Type, Commune, Département, Académie, Statut, Campagne">
+        </dsfr-data-a11y>
       </div>
     </div>
 
-    <p class="fr-hint-text">
-      <strong>175 déploiements sur 3 734 n'ont aucune coordonnée</strong> et ne peuvent donc
-      pas figurer sur la carte : ce sont les 175 lignes non appariées au référentiel des
-      établissements. Le portail perd les mêmes points sans le signaler — au premier écran,
-      ses trois bulles de regroupement totalisent 2 030 robots pour une période qui en
-      compte 2 160.
-    </p>
-    <dsfr-data-a11y source="tedi-f" for="carte-tedi" table download
-      filename="tedi-deploiements.csv" label="Données de la carte"
-      description="Un déploiement par ligne : établissement, commune, département, académie, type, statut et année scolaire de pose."
-      label-field="nom_etablissement"
-      value-field="uai, type_etablissement, nom_commune, libelle_departement, libelle_academie, statut, annee_scolaire">
-    </dsfr-data-a11y>
-  </div>
-
-  <!-- Transformateur d'isolement (BUG-009) avant les regroupements. -->
-  <dsfr-data-normalize id="tedi-fn" source="tedi-f"></dsfr-data-normalize>
-
-  <dsfr-data-query id="tedi-aca" source="tedi-fn" group-by="libelle_academie"
-    aggregate="uai:count:robots" where="libelle_academie:isnotnull"
-    order-by="robots:desc"></dsfr-data-query>
-
-  <dsfr-data-query id="tedi-degre" source="tedi-fn" group-by="degre"
-    aggregate="uai:count:robots" order-by="robots:desc"></dsfr-data-query>
-
-  <!-- Le cumul mensuel. L'original le calcule en douze expressions de template
-       en cascade, sur un ordre de mois écrit en dur. `running_sum` le fait en un
-       mot — et il n'invente PAS de mois futurs. -->
-  <dsfr-data-query id="tedi-mois" source="tedi-fn" group-by="mois"
-    aggregate="uai:count:poses, poses:running_sum:cumul"
-    order-by="mois:asc"></dsfr-data-query>
-
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-7">
-        <h2 class="fr-h5">Où sont les robots</h2>
-        <div class="odv-viz" data-code="Graphique">
-        <dsfr-data-podium source="tedi-aca" label-field="libelle_academie" value-field="robots"
-          value-unit="robots" max-items="10"></dsfr-data-podium>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          Le portail rend ce classement à la main, dans un conteneur de 220 pixels de haut qui
-          n'en montre que sept lignes sur vingt-sept — et qui <strong>capture la molette</strong> :
-          faire défiler la page en le survolant fait défiler le classement à la place.
-        </p>
-      </div>
-      <div class="fr-col-12 fr-col-md-5">
-        <h2 class="fr-h5">Premier ou second degré</h2>
-        <div class="odv-viz" data-code="Déploiements Ted-i par degré d'enseignement">
-        <dsfr-data-chart id="g-tedi-degre" source="tedi-degre" type="bar" horizontal
-          label-field="degre" value-field="robots" name="Robots"
-          empty-label="Établissement non identifié"
-          databox databox-title="Déploiements Ted-i par degré d'enseignement"
-          databox-source="DNE — fr-en-deploiemement_tedi, Licence Ouverte 2.0"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-tedi-degre" empty-label="Établissement non identifié" source="tedi-degre" table download
-          label-field="degre" value-field="robots"></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          La barre à trois segments du portail — 1er degré / 2nd degré / Autres — <strong>ne
-          totalise jamais son propre KPI</strong> : jusqu'à 96 robots sur 1 740 disparaissent,
-          parce que les lignes sans type d'établissement ne tombent dans aucun des trois groupes.
-          Ici, elles ont une barre et un nom.
-        </p>
-      </div>
+    <div class="fr-mt-4w">
+      <dsfr-data-list source="tedi-f"
+        columns="nom_etablissement:Établissement, type_etablissement:Type, nom_commune:Commune, libelle_academie:Académie, statut:Statut, campagne:Campagne"
+        caption="Robots Ted-i de la sélection"
+        sort pagination="15" count-label="robot">
+      </dsfr-data-list>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Le déploiement mois par mois</h2>
-    <p class="fr-text--sm">
-      Deux lectures d'une même donnée : les poses de chaque mois, et leur cumul. Sur l'année
-      2025-2026, le cumul passe de <strong>301</strong> en septembre à <strong>1 740</strong> en
-      août. Sur le portail, ce cumul est calculé par douze expressions de template en cascade,
-      sur une liste de mois écrite en dur — et en mode « temps réel », <strong>les douze barres
-      affichent la même valeur, dont onze pour des mois qui n'ont pas encore eu lieu</strong>.
-    </p>
-    <div class="odv-viz" data-code="Déploiements Ted-i, poses mensuelles et cumul">
-    <dsfr-data-chart id="g-tedi-mois" source="tedi-mois" type="bar-line"
-      label-field="mois" value-field="poses:Poses du mois" value-field-2="cumul:Cumul"
-      databox databox-title="Déploiements Ted-i, poses mensuelles et cumul"
-      databox-source="DNE — fr-en-deploiemement_tedi, Licence Ouverte 2.0"
-      databox-download databox-screenshot>
-    </dsfr-data-chart>
-    <dsfr-data-a11y for="g-tedi-mois" source="tedi-mois" table download
-      label-field="mois" value-field="poses, cumul"></dsfr-data-a11y>
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">Ted-i n'est pas un stock qui grandit mais un parc qui se
+        remplit et se vide chaque année scolaire&nbsp;: un peu plus de 1&nbsp;200 robots en
+        service au printemps de 2025 comme de 2026, quelques dizaines à quelques centaines en
+        été. Le nombre qui compte n'est donc pas le
+        cumul des poses, mais le parc du moment — et il se compare d'une année sur l'autre à la
+        même date. Ce que ces données ne disent pas&nbsp;: le nombre d'élèves, la durée des
+        soins, ni pourquoi un robot est rendu.</p>
     </div>
-    <p class="fr-text--xs fr-mt-1w">
-      <strong>Le cumul ne dépasse jamais le dernier mois observé.</strong> C'est une conséquence
-      directe du fait qu'il est calculé sur les lignes présentes, et non projeté sur une année
-      civile écrite d'avance. Filtrer sur une année scolaire dans le panneau de gauche recalcule
-      les deux séries.
-    </p>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Une campagne court d'août à juillet</strong>, et non de septembre à août comme
+          l'original&nbsp;: les poses de fin août préparent la rentrée. Le choix déplace 37 robots
+          (août 2025) d'une année à l'autre (relevé du 2026-09-26).</li>
+        <li><strong>« En service » = posé et sans date de fin.</strong> Le parc de fin de mois
+          est le cumul des poses moins le cumul des restitutions&nbsp;; un robot rendu sans que la
+          date soit saisie reste compté en service. Fin juillet 2025, 402 robots restaient en place&nbsp;;
+          fin juillet 2026, 43 (relevé du 2026-09-26, section&nbsp;1)&nbsp;: élèves suivis d'une année sur l'autre ou restitutions
+          saisies tardivement, le jeu ne permet pas de trancher.</li>
+        <li><strong>Pas de durée en jours.</strong> Les colonnes calculées de la bibliothèque n'ont
+          pas de différence de dates&nbsp;; la page raisonne en mois de pose et de restitution.
+          Mesurée hors page sur l'export du 2026-09-26, la durée médiane d'un prêt rendu est de
+          144 jours.</li>
+        <li><strong>La comparaison « à la même date »</strong> prend pour date de référence la
+          dernière pose du jeu, reportée sur chaque campagne (rang du mois et jour).</li>
+        <li><strong>Angles écartés.</strong> Le classement des académies en volume (Lille en tête,
+          devant Versailles)&nbsp;: sans le nombre d'élèves de chaque académie, il mesure autant
+          la taille de l'académie que le recours au dispositif. La couverture « 27 académies sur
+          30 »&nbsp;: elle est acquise dès la première année et ne raconte plus rien.</li>
+      </ol>
+    </section>
   </div>
 
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
-    <h2 class="fr-h5">Les déploiements en détail</h2>
-    <div class="odv-viz" data-code="Graphique (2)">
-    <dsfr-data-list source="tedi-f"
-      columns="nom_etablissement, type_etablissement, nom_commune, libelle_departement, libelle_academie, statut, annee_scolaire"
-      caption="Déploiements de robots de téléprésence Ted-i"
-      sort pagination="15" count-label="déploiement">
-    </dsfr-data-list>
-    </div>
-  </div>
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — Ted-i</h2>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
-  <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Ted-i — ce que la reproduction a coûté</summary>
-
-    <div class="fr-container">
       <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine : une <strong>« custom view » AngularJS</strong> — pas une page Studio —
-        servie sous
-        <a href="https://data.education.gouv.fr/explore/assets/visualisation-fr-en-deploiemement_tedi/view/" target="_blank" rel="noopener external">/explore/assets/visualisation-fr-en-deploiemement_tedi/view/</a>.
-        Fiche d'audit : <code>docs/portail-education/tedi-robots-telepresence.md</code>.
+        Cible d'origine&nbsp;: une «&nbsp;custom view&nbsp;» AngularJS servie sous
+        <a href="https://data.education.gouv.fr/explore/assets/visualisation-fr-en-deploiemement_tedi/view/" target="_blank" rel="noopener external">/explore/assets/visualisation-fr-en-deploiemement_tedi/view/</a>
+        — quatre compteurs, un classement d'académies, une barre 1er/2nd degré, un cumul mensuel,
+        une carte. Fiche d'audit&nbsp;: <code>docs/portail-education/tedi-robots-telepresence.md</code>.
+        Recréée le 2026-09-26 en page éditoriale.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le cumul mensuel est natif — et la fiche d'audit le donnait pour un
-              manque réel.</strong> Elle écrivait : « ni <code>dsfr-data-query</code> ni
-              <code>dsfr-data-chart</code> ne calculent une somme cumulée […] manque réel, à
-              remonter », et proposait de le faire en JavaScript sur l'événement de chargement.
-              <code>aggregate="uai:count:poses, poses:running_sum:cumul"</code> suffit
-              aujourd'hui. Le cumul se calcule après <code>order-by</code>, côté client, et
-              suit les filtres.</li>
-            <li><strong>Les dénombrements distincts en un mot.</strong>
-              <code>value="uai:distinct"</code>, <code>libelle_academie:distinct</code>,
-              <code>libelle_departement:distinct</code> : trois KPI, pas de
-              <code>group-by</code> intermédiaire. Le piège historique du dépôt — « pas
-              d'agrégat <code>distinct</code>, intercaler une query » — ne s'applique plus.
-              <strong>Et le chiffre est exact</strong>, ce que
-              <code>count(distinct)</code> de l'API Opendatasoft ne garantit pas : il donne
-              2 524 UAI là où le décompte des lignes de l'export en donne
-              <strong>2 497</strong>.</li>
-            <li><strong>Les colonnes dérivées font tout le travail éditorial.</strong> Un seul
-              <code>compute</code> produit le statut, l'année scolaire, la clé de mois
-              zéro-remplie et le regroupement 1er/2nd degré — c'est-à-dire, à lui seul, les
-              quatre calculs que l'original éparpille entre une double boucle
-              <code>ng-repeat</code>, un filtre AngularJS et douze expressions de template.</li>
-            <li><strong>Une requête au lieu de dix-neuf.</strong>
-              <code>fetch-mode="export"</code> ramène les 3 734 lignes en un aller-retour ; tout
-              le reste se recalcule sans réseau. L'original en émet dix-neuf, dont quatre
-              en 503 systématique.</li>
+            <li><strong>Reconstituer un stock à partir de deux dates.</strong> Deux flux
+              d'événements de même schéma (pose +1, restitution −1), un
+              <code>dsfr-data-concat</code>, un <code>group-by</code> par mois et un
+              <code>running_sum</code>&nbsp;: le parc en service mois par mois, que ni le portail
+              ni la reproduction précédente ne montraient.</li>
+            <li><strong>Comparer des campagnes « à la même date » sans chiffre en dur.</strong>
+              La dernière pose est jointe à chaque ligne (clé constante, une ligne à droite), un
+              <code>compute</code> la compare au rang du jour, un <code>dsfr-data-pivot</code> met
+              les campagnes côte à côte avec des libellés relatifs (en cours, précédente).</li>
+            <li><strong>Une requête pour toute la page.</strong> <code>fetch-mode="export"</code>
+              charge le jeu&nbsp;; récit, carte et filtres se recalculent côté client.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>La clé de mois doit être zéro-remplie à la main.</strong>
-              <code>compute</code> a <code>year()</code> et <code>month()</code>, mais
-              <code>month()</code> rend <code>9</code> et non <code>09</code> : concaténés tels
-              quels, les mois se trient <code>2025-10</code> avant <code>2025-9</code>, et la
-              série cumulée devient fausse — silencieusement, puisque <code>running_sum</code>
-              se calcule après le tri. Il faut écrire un <code>when month(…) &lt; 10 then
-              concat(…, '-0', …) else concat(…, '-', …)</code>. Ça marche, mais c'est le genre
-              de détail qui produit un graphique plausible et faux si on l'oublie. Un
-              <code>month(d, 2)</code> ou un pipe de formatage de date manquent.</li>
-            <li><strong>« Robot posé pendant l'année » et « robot en service pendant l'année »
-              ne sont pas la même chose.</strong> L'original compte un robot dans une année
-              scolaire s'il l'a <em>chevauchée</em> (deux conditions sur deux champs) ; la
-              colonne <code>annee_scolaire</code> dérivée ici le compte dans son année de
-              <em>pose</em>. Sur ce jeu les deux coïncident presque, parce que la première pose
-              date du 22 août 2024 et que les locations sont courtes — mais
-              <strong>sur un jeu où les prêts durent plus d'un an, elles divergeraient</strong>,
-              et aucun composant ne signalerait l'écart. C'est une différence de modèle, pas de
-              capacité, et elle doit être dite plutôt que masquée.</li>
-            <li><strong>L'anneau de progression « 23 / 30 » n'a pas d'équivalent.</strong>
-              <code>dsfr-data-kpi</code> n'a pas de rendu circulaire, et
-              <code>type="gauge"</code> prend un <code>gauge-value</code> numérique littéral,
-              pas un champ de source. Le dénominateur passe donc dans le libellé
-              (« couvertes sur 30 »), comme dans l'original — qui l'écrit aussi en dur, jusque
-              dans son <code>aria-label</code>. Cosmétique, mais un <code>gauge-field</code> +
-              <code>gauge-max</code> manque au catalogue.</li>
-            <li><strong>Une carte qui capture la molette reste sans réglage.</strong>
-              <code>dsfr-data-map</code> n'expose pas d'attribut de neutralisation du zoom
-              molette ; <code>locked</code> désactive <em>toute</em> interaction. Sur une page
-              longue c'est un piège d'ergonomie — les pages Studio du même portail affichent
-              d'ailleurs « Utilisez ⌘ + molette pour zoomer ». Manque mineur, déjà relevé.</li>
+            <li><strong>Pas de différence de dates dans <code>compute</code>.</strong> La durée
+              d'un prêt, question naturelle sur ce jeu, n'est pas calculable dans la page&nbsp;; la
+              médiane est citée depuis un calcul externe, datée.</li>
+            <li><strong>Des séries nommées par le temps qui passe.</strong> <code>color-map</code>
+              vise un nom de série&nbsp;; nommer les séries « 2025-2026 » aurait figé les couleurs
+              sur une année. Il a fallu dériver des noms relatifs («&nbsp;Campagne en
+              cours&nbsp;») pour que la mise en évidence survive au changement de campagne.</li>
+            <li><strong>Un pipeline long pour une phrase.</strong> La comparaison à date demande
+              deux queries, une jointure, un pivot et deux autres jointures pour rejoindre la date
+              et le total&nbsp;: juste, mais une douzaine de balises pour trois nombres.</li>
           </ul>
         </div>
       </div>
@@ -376,39 +544,30 @@
         <table>
           <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">Directive AngularJS d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>5 <code>ods-dataset-context</code> sur le même jeu, 19 requêtes dont 4 en 503</td><td>1 <code>dsfr-data-source fetch-mode="export"</code></td><td>Meilleur : un aller-retour</td></tr>
-            <tr><td><code>count(distinct …)</code> ×3 (académies, départements, UAI)</td><td><code>value="champ:distinct"</code> ×3</td><td>Meilleur : exact, là où l'API approxime</td></tr>
-            <tr><td>anneaux <code>conic-gradient</code> « 23 / 30 »</td><td>KPI + dénominateur dans le libellé</td><td><strong>Partiel</strong> : pas de jauge branchée sur une source</td></tr>
-            <tr><td>classement rendu à la main, 7 lignes visibles sur 27</td><td><code>dsfr-data-podium</code></td><td>Meilleur</td></tr>
-            <tr><td>barre 1er/2nd degré perdant les types nuls</td><td><code>compute</code> + <code>empty-label</code></td><td>Meilleur : le groupe non identifié est nommé</td></tr>
-            <tr><td>cumul en 12 expressions de template, mois futurs compris</td><td><code>running_sum</code></td><td>Meilleur : natif, et sans mois inventés</td></tr>
-            <tr><td><code>ods-map location="2,18.54,-2.64"</code> (planisphère)</td><td><code>fit-bounds</code> + <code>insets="la-reunion,martinique"</code></td><td>Meilleur</td></tr>
-            <tr><td>infobulle en noms de colonnes techniques</td><td><code>dsfr-data-map-popup</code> + template français</td><td>Meilleur</td></tr>
-            <tr><td>aucun filtre, aucune recherche, aucune URL partageable</td><td>6 facettes + recherche + <code>url-sync</code></td><td>Sans équivalent sur le portail</td></tr>
+            <tr><td>5 <code>ods-dataset-context</code>, 19 requêtes dont 4 en 503</td><td>1 <code>dsfr-data-source fetch-mode="export"</code></td><td>Meilleur</td></tr>
+            <tr><td>cumul des poses en 12 expressions de template, mois futurs compris</td><td><code>dsfr-data-concat</code> + <code>running_sum</code> sur poses et restitutions</td><td>Meilleur&nbsp;: le parc réel, pas un cumul qui ne redescend jamais</td></tr>
+            <tr><td>boutons de période écrits en dur</td><td>campagne dérivée + comparaison à date (<code>dsfr-data-join</code>, <code>dsfr-data-pivot</code>)</td><td>Sans équivalent&nbsp;: l'original ne compare pas</td></tr>
+            <tr><td>barre 1er/2nd degré perdant les types nuls</td><td>groupe «&nbsp;Établissement non identifié&nbsp;» nommé, section dédiée</td><td>Meilleur</td></tr>
+            <tr><td><code>ods-map location="2,18.54,-2.64"</code> (planisphère)</td><td><code>fit-bounds</code> + <code>insets</code></td><td>Meilleur</td></tr>
+            <tr><td>aucun filtre</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code> + <code>url-sync</code></td><td>Sans équivalent sur le portail</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong>, et la page qui solde le plus de dette
-          d'analyse : <strong>les deux « manques réels » que la fiche d'audit voulait remonter à
-          la bibliothèque — la somme cumulée et l'agrégat <code>distinct</code> — sont
-          aujourd'hui natifs</strong> (<code>running_sum</code>, <code>champ:distinct</code>).
-          Ce qui reste tient en une ligne de vigilance : <code>month()</code> ne remplit pas de
-          zéro, et une clé de mois mal formée produit un cumul faux <em>sans erreur</em>. Mais
-          le vrai apport de la transposition est un défaut de données que le portail éparpille
-          en trois symptômes : <strong>175 des 3 734 lignes n'ont que leur UAI et leurs
-          dates</strong> — pas de nom, pas de commune, pas de coordonnées, pas d'académie. Ce
-          n'est pas « des types manquants » ni « des points hors carte » : c'est un
-          appariement au référentiel des établissements qui n'a pas eu lieu, sur 4,7 % du jeu.</p>
+        <p>La bibliothèque a tout porté, y compris un stock reconstitué et une comparaison à date
+          qui suit un jeu quotidien. Le travail a été de regarder la date de <em>fin</em>, que
+          l'original et la reproduction précédente ignoraient&nbsp;: avec elle, les compteurs
+          «&nbsp;temps réel&nbsp;» deviennent un parc qui respire avec l'année scolaire, et le
+          cumul des poses — la courbe de l'original — cesse d'être la bonne mesure.</p>
       </div>
-    </div>
-  
-      </details></section>
+      </section>
+    </details>
+  </div>
 
 </main>
 

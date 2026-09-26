@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Les participations à Pix par établissement — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la cartographie Pix de data.education.gouv.fr — et le défaut qui rend la carte d'origine inutilisable : ses 43 479 lignes ont toutes la même position.">
+  <title>Pix fait passer plus souvent les mêmes élèves — open-data-viz</title>
+  <meta name="description" content="De 2022 à 2025, les participations aux parcours Pix des collèges et lycées ont bondi bien plus vite que le nombre d'élèves qui y participent : Pix s'intensifie plus qu'il ne s'étend, surtout au collège. Recréation avec dsfr-data de la cartographie Pix de data.education.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,152 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-26 — la page raconte avant de laisser chercher.
+
+       L'original est un localisateur maître-détail dont la carte est inopérante
+       (les 43 479 lignes de son jeu ont une seule et même position, revérifié le
+       2026-09-26). La reproduction précédente avait changé de jeu et coloriait les
+       établissements par « taux d'envoi ». Relu à l'API, le jeu raconte autre
+       chose : de 2022 à 2025, les PARTICIPATIONS aux parcours bondissent (+60 %)
+       quand le nombre d'ÉLÈVES participants progresse à peine (+12 %). Pix
+       s'intensifie plus qu'il ne s'étend — et c'est d'abord le fait du collège.
+
+       Un seul jeu, lu SANS clé :
+       `fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil`
+       (41 422 lignes, une par établissement et par année). Quatre usages :
+         · `pix-an`   — la série nationale, agrégée PAR LE SERVEUR (4 lignes) ;
+         · `pix-col` / `pix-lyc` — la même série, collèges puis lycées (serveur) ;
+         · `pix-aca-src` — académie × {2022, 2025} (serveur, 64 lignes) ;
+         · `pix`      — une année d'établissements, pour la carte (export ~10 400).
+       ========================================================================== -->
+
+  <!-- ---------- 1. La série nationale ---------- -->
+  <dsfr-data-source id="pix-an" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil"
+    select="annee, sum(total_participations) as p, sum(total_partipants) as q, sum(total_participations_avec_envoi) as pe"
+    group-by="annee" order-by="annee:asc">
+  </dsfr-data-source>
+  <!-- Les bornes 2022 et 2025 sont extraites ligne à ligne, puis sommées en une
+       ligne : la phrase de lecture compare la première et la dernière campagne
+       publiées au 2026-09-26. Aucun arrondi avant le calcul. -->
+  <dsfr-data-normalize id="pix-an-n" source="pix-an"
+    compute="pm = p / 1000000; qm = q / 1000000; r = p / q; k = 'France';
+             p0 = when annee = '2022' then p else 0; p1 = when annee = '2025' then p else 0;
+             q0 = when annee = '2022' then q else 0; q1 = when annee = '2025' then q else 0;
+             e0 = when annee = '2022' then pe else 0; e1 = when annee = '2025' then pe else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="pix-an-r" source="pix-an-n" round="pm:2, qm:2, r:2"></dsfr-data-normalize>
+  <dsfr-data-normalize id="pix-an-t" source="pix-an-r"
+    rename="annee:Campagne | pm:Participations (millions) | qm:Élèves participants (millions) | r:Parcours par élève">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="pix-bilan-s" source="pix-an-n" group-by="k"
+    aggregate="p0:sum:sp0, p1:sum:sp1, q0:sum:sq0, q1:sum:sq1, e0:sum:se0, e1:sum:se1">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="pix-bilan" source="pix-bilan-s"
+    compute="evp = round((sp1 / sp0 - 1) * 100, 0); evq = round((sq1 / sq0 - 1) * 100, 0);
+             r0 = round(sp0 / sq0, 2); r1 = round(sp1 / sq1, 2);
+             p0m = round(sp0 / 1000000, 1); p1m = round(sp1 / 1000000, 1);
+             q0m = round(sq0 / 1000000, 2); q1m = round(sq1 / 1000000, 2);
+             t0 = round(se0 / sp0 * 100, 1); t1 = round(se1 / sp1 * 100, 1)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 2. Collèges et lycées ----------
+       Le jeu ne porte pas le type d'établissement : il est lu dans le NOM, côté
+       serveur (`startswith`). Les ~166 autres lignes par an (EREA, ensembles
+       scolaires, campus) ne sont dans aucune des deux séries — dit en note. -->
+  <dsfr-data-source id="pix-col" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil"
+    select="annee, sum(total_participations) as p, sum(total_partipants) as q"
+    where="startswith(etablissement, 'Collège')"
+    group-by="annee" order-by="annee:asc">
+  </dsfr-data-source>
+  <dsfr-data-source id="pix-lyc" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil"
+    select="annee, sum(total_participations) as p, sum(total_partipants) as q"
+    where="startswith(etablissement, 'Lycée') or startswith(etablissement, 'LP') or startswith(etablissement, 'LGT')"
+    group-by="annee" order-by="annee:asc">
+  </dsfr-data-source>
+  <dsfr-data-concat id="pix-niv" sources="pix-col, pix-lyc"
+    origin-field="niveau" origin-labels="pix-col:Collèges | pix-lyc:Lycées">
+  </dsfr-data-concat>
+  <dsfr-data-normalize id="pix-niv-n" source="pix-niv"
+    compute="r = round(p / q, 2);
+             p0 = when annee = '2022' then p else 0; p1 = when annee = '2025' then p else 0;
+             q0 = when annee = '2022' then q else 0; q1 = when annee = '2025' then q else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="pix-niv-s" source="pix-niv-n" group-by="niveau"
+    aggregate="p0:sum:sp0, p1:sum:sp1, q0:sum:sq0, q1:sum:sq1">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="pix-niv-b" source="pix-niv-s"
+    compute="r0 = round(sp0 / sq0, 2); r1 = round(sp1 / sq1, 2);
+             evq = round((sq1 / sq0 - 1) * 100, 0);
+             evq_txt = when evq &gt; 0 then '+' + evq else '' + evq;
+             q1m = round(sq1 / 1000000, 2)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- 3. Les académies ----------
+       Tri : les lignes 2025 d'abord (par ratio décroissant), pour que l'ordre des
+       académies sur l'axe soit celui de 2025. -->
+  <dsfr-data-source id="pix-aca-src" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil"
+    select="academie_nom, annee, sum(total_participations) as p, sum(total_partipants) as q"
+    where="annee in ('2022', '2025')"
+    group-by="academie_nom, annee">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="pix-aca-n" source="pix-aca-src"
+    compute="r = round(p / q, 2); cle = when annee = '2025' then 100 + p / q else p / q">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="pix-aca-o" source="pix-aca-n" order-by="cle:desc"></dsfr-data-query>
+  <dsfr-data-pivot id="pix-aca-w" source="pix-aca-n"
+    row="academie_nom" column="annee" value="r" aggregate="first"
+    labels="2022:r0 | 2025:r1">
+  </dsfr-data-pivot>
+  <dsfr-data-normalize id="pix-aca-d" source="pix-aca-w"
+    compute="deux = when is_null(r0) or is_null(r1) then 0 else 1;
+             hausse = when deux = 0 then 0 when r1 &gt; r0 then 1 else 0; k = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="pix-aca-b" source="pix-aca-d" group-by="k"
+    aggregate="academie_nom:count:n, deux:sum:n_deux, hausse:sum:n_hausse">
+  </dsfr-data-query>
+  <!-- Les académies qui manquent à l'une des deux campagnes (Nouvelle-Calédonie et
+       Wallis-et-Futuna : présentes en 2022 et 2024, absentes en 2023 et 2025). -->
+  <dsfr-data-query id="pix-aca-abs" source="pix-aca-d" where="deux:eq:0"></dsfr-data-query>
+
+  <!-- ---------- 4. Exploration : une année d'établissements ----------
+       Une ligne par établissement ET par année : sans filtre d'année, quatre
+       points se superposeraient. `max-records` relevé (plafond silencieux à 1 000).
+       Pas de `where position is not null` : les ~50 à 130 lignes sans position
+       par an restent dans les compteurs, elles manquent seulement à la carte. -->
+  <dsfr-data-source id="pix" api-type="opendatasoft"
+    base-url="https://data.education.gouv.fr"
+    dataset-id="fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil"
+    fetch-mode="export" max-records="15000">
+  </dsfr-data-source>
+
+  <!-- `libelle_de_la_region` et non `libelle_region` : la seconde est vide sur
+       645 lignes, la première sur 4 (compté à l'API le 2026-09-26). -->
+  <dsfr-data-context id="pix-ctx" sources="pix" url-sync
+    url-param-map="secteur:secteur | academie:academie_nom | region:libelle_de_la_region | departement:departement_nom">
+    <dsfr-data-context-filter field="annee" operator="eq" ui="pix-annee"
+      label="Année" default="2025"></dsfr-data-context-filter>
+  </dsfr-data-context>
+
+  <!-- Le ratio par établissement se calcule sans arrondi ; la tranche aussi.
+       Une division par zéro rend null (8 établissements en 2025). -->
+  <dsfr-data-normalize id="pix-n" source="pix"
+    compute="ratio = total_participations / total_partipants;
+             ratio_txt = round(ratio, 2);
+             taux_partage = round(total_participations_avec_envoi / total_participations * 100, 1);
+             tranche = when is_null(ratio) then 'Non calculable' when ratio &lt; 1.5 then 'Moins d’un parcours et demi' when ratio &lt; 2 then 'D’un et demi à deux parcours' when ratio &lt; 3 then 'De deux à trois parcours' else 'Trois parcours ou plus';
+             bas = when is_null(ratio) then 0 when ratio &lt; 1.5 then 1 else 0;
+             haut = when is_null(ratio) then 0 when ratio &gt;= 3 then 1 else 0">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,189 +178,246 @@
       </div>
     </nav>
 
-    <h1>Les participations à Pix, établissement par établissement</h1>
+    <h1>Pix fait passer plus souvent les mêmes élèves</h1>
 
-    <p class="fr-text--lead">
-      Pix évalue et certifie les compétences numériques des élèves. Sur quatre années,
-      <strong>10 824 établissements</strong> ont ouvert des campagnes, totalisant
-      <strong>26,2 millions de participations</strong> pour
-      <strong>13,9 millions de participants</strong>. Environ
-      <strong>10 400 établissements</strong> participent chaque année.
+    <!-- Le chapô est CALCULÉ : première et dernière campagne publiées. -->
+    <dsfr-data-repeat source="pix-bilan">
+      <template>
+        <p class="fr-text--lead">
+          De la campagne 2022 à la campagne 2025, les participations des collèges et lycées aux
+          parcours Pix sont passées de <strong>{{p0m:number:1}} à {{p1m:number:1}} millions</strong>
+          (+{{evp}}&nbsp;%). Le nombre d'élèves qui y participent, lui, n'a progressé que de
+          <strong>{{evq}}&nbsp;%</strong> ({{q0m:number:2}} puis {{q1m:number:2}} millions).
+          Chaque élève participant a donc suivi en moyenne <strong>{{r1:number:2}} parcours</strong>
+          en 2025, contre {{r0:number:2}} en 2022&nbsp;: Pix s'intensifie bien plus qu'il ne
+          s'étend — et c'est d'abord au collège.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm">
+      Pix est la plateforme publique d'évaluation et de certification des compétences
+      numériques. Les établissements y ouvrent des <em>campagnes</em> (parcours de rentrée,
+      disciplinaires, thématiques) que les élèves suivent. Une <strong>participation</strong> est
+      un parcours suivi par un élève&nbsp;; un même élève peut en suivre plusieurs. C'est l'écart
+      entre ces deux comptes que raconte cette page.
     </p>
 
-    <details class="fr-callout fr-icon-error-warning-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Cette page ne repose pas sur le jeu de la carte d'origine, et voici pourquoi</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        La cartographie du portail est portée par
-        <code>fr-en-pix_certification_pix_inscription_et_passation_par_eple</code>.
-        <strong>Ses 43 479 lignes ont toutes exactement la même position.</strong> Vérifié par
-        export complet : 43 479 lignes, <strong>11 113 établissements distincts</strong>,
-        et <strong>une seule coordonnée</strong> — 45,97497 / 5,35024, qui est celle du lycée
-        professionnel Alexandre-Bérard à Ambérieu-en-Bugey, <em>la première ligne du fichier</em>.
-        Tout le jeu a hérité de la position de son premier enregistrement.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        Conséquence à l'écran : le cluster affiche « 43 479 » et ne se disperse jamais, quel que
-        soit le zoom — jusqu'au niveau 19, à 20 mètres d'échelle. Le motif maître-détail annoncé
-        par le titre de la page, qui suppose de cliquer un établissement sur la carte, est
-        <strong>inatteignable par l'interaction prévue</strong>.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        Un <strong>jeu frère du même producteur</strong>,
-        <code>…_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil</code>,
-        porte de <strong>vraies positions</strong> — 10 095 coordonnées distinctes pour
-        41 422 lignes. C'est lui qui alimente cette page. La reproduction ne recopie donc pas la
-        carte d'origine&nbsp;: <strong>elle la répare</strong>, en changeant de source.
-      </p>
-    </details>
-
     <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé, et pourquoi pas celui de la carte d'origine</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
         <a href="https://data.education.gouv.fr/explore/dataset/fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil/"
-           target="_blank" rel="noopener external"><code>…_par_etablissement_sans_collecte_de_profil</code></a>
-        — 41 422 lignes (une par établissement et par année), 19 champs, lu sans clé.
-        Quatre millésimes : 2022 (10 413), 2023 (10 236), 2024 (10 388), 2025 (10 385).
-        Le filtre d'année ci-dessous évite d'additionner quatre années dans un même point.
+           target="_blank" rel="noopener external"><code>…_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil</code></a>
+        (ministère de l'éducation nationale, mis à jour le 23/07/2026) — une ligne par
+        établissement et par campagne, 2022 à 2025, collèges et lycées publics et privés sous
+        contrat, hors agricole et étranger. Lecture sans clé.
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        La cartographie du portail repose sur un autre jeu,
+        <code>…_certification_pix_inscription_et_passation_par_eple</code>, dont
+        <strong>les 43 479 lignes portent toutes la même position</strong> (celle de la première
+        ligne du fichier, à Ambérieu-en-Bugey — revérifié par export complet le 2026-09-26)&nbsp;:
+        sa carte ne se disperse jamais et l'on ne peut y cliquer aucun établissement. Le jeu
+        frère utilisé ici porte de vraies positions.
       </p>
     </details>
-  </div>
 
-  <!-- ==========================================================================
-       Le jeu est en format « une ligne par établissement ET par année ». Charger
-       les quatre millésimes d'un coup ferait superposer quatre points au même
-       endroit et additionnerait des participations de quatre campagnes dans un
-       même cercle — c'est le genre de faux chiffre que ce banc traque.
+    <!-- ---------- Accroche : trois repères de poids différents ---------- -->
+    <dsfr-data-kpi-group per-row="1 md:4" gap="md" class="fr-mb-6w" aria-label="Les chiffres à retenir">
+      <dsfr-data-kpi source="pix-an" value="p:last / q:last" format="decimal" decimals="2" span="6"
+        heading="Parcours par élève participant"
+        lines='[{"value":"p:first / q:first","format":"decimal","decimals":2,"prefix":"contre ","suffix":" à la première campagne (2022)"}]'
+        label="dernière campagne publiée (2025)"></dsfr-data-kpi>
+      <dsfr-data-kpi source="pix-an" value="p:evolution" format="pourcentage" decimals="0"
+        heading="Hausse des participations"
+        label="de la campagne 2022 à la campagne 2025"></dsfr-data-kpi>
+      <dsfr-data-kpi source="pix-an" value="q:evolution" format="pourcentage" decimals="0"
+        heading="Hausse du nombre d'élèves participants"
+        label="sur la même période"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
 
-       Le filtre d'année est donc posé par un `dsfr-data-context` (opérateur `eq`
-       sur un champ texte), avec `default="2025"`. Chaque changement d'année
-       relance UNE requête d'export d'environ 10 400 lignes.
-       ========================================================================== -->
-
-  <dsfr-data-source id="pix" api-type="opendatasoft"
-    base-url="https://data.education.gouv.fr"
-    dataset-id="fr-en-pix_participations_aux_campagnes_par_etablissement_sans_collecte_de_profil"
-    fetch-mode="export" max-records="15000"
-    where="position is not null">
-  </dsfr-data-source>
-
-  <dsfr-data-context id="pix-ctx" sources="pix" url-sync
-    url-param-map="secteur:secteur | academie:academie_nom | region:libelle_region | departement:departement_nom">
-    <dsfr-data-context-filter field="annee" operator="eq" ui="pix-annee"
-      label="Année" default="2025"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <!-- Le taux d'envoi : la part des participations effectivement transmises.
-       C'est la mesure la plus parlante du jeu, et elle n'est affichée nulle part
-       sur le portail — ni dans la carte, ni dans la fiche établissement. -->
-  <dsfr-data-normalize id="pix-n" source="pix"
-    compute="taux_envoi = when total_participations = 0 then null else round(total_participations_avec_envoi / total_participations * 100, 1); tranche_envoi = when is_null(taux_envoi) then 'Non calculable' when taux_envoi &lt; 70 then 'Moins de 70 %' when taux_envoi &lt; 85 then '70 à 85 %' when taux_envoi &lt; 95 then '85 à 95 %' else '95 % et plus'; part_par_participant = when total_partipants = 0 then null else round(total_participations / total_partipants, 1); envoi_haut = when is_null(taux_envoi) then 0 when taux_envoi &gt;= 95 then 1 else 0">
-  </dsfr-data-normalize>
-
-
-  <div class="fr-container fr-mb-4w">
-    <div class="fr-select-group" style="max-width:14rem">
-      <label class="fr-label" for="pix-annee">Année de campagne</label>
-      <select class="fr-select" id="pix-annee">
-        <option value="2025">2025</option>
-        <option value="2024">2024</option>
-        <option value="2023">2023</option>
-        <option value="2022">2022</option>
-      </select>
+    <!-- ---------- 1. La preuve ---------- -->
+    <h2 class="fr-h3">1. Les participations s'envolent, le nombre d'élèves suit à peine</h2>
+    <dsfr-data-repeat source="pix-bilan">
+      <template>
+        <p class="odv-lecture">Entre 2022 et 2025, l'écart entre les deux barres se creuse
+          chaque année&nbsp;: <strong>+{{evp}}&nbsp;%</strong> de participations,
+          <strong>+{{evq}}&nbsp;%</strong> d'élèves. La hausse est concentrée sur les deux
+          dernières campagnes.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w" data-code="Participations et élèves participants par campagne">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-an" source="pix-an-r" type="bar"
+        label-field="annee"
+        value-field="pm:Participations (millions)" value-fields="qm:Élèves participants (millions)"
+        y-min="0" unit-tooltip="millions"
+        color-map="Participations (millions):#000091,Élèves participants (millions):#929292"
+        databox databox-title="De 2022 à 2025, les participations aux parcours Pix augmentent cinq fois plus vite que le nombre d'élèves"
+        databox-source="Ministère de l'éducation nationale — participations aux campagnes Pix par établissement, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-an" source="pix-an-t" table download
+        filename="pix-participations-par-campagne.csv"
+        label-field="Campagne"
+        value-field="Participations (millions), Élèves participants (millions), Parcours par élève"
+        description="Participations aux parcours Pix et élèves participants, en millions, pour chaque campagne de 2022 à 2025, collèges et lycées réunis. Les participations augmentent chaque année, nettement en 2024 et 2025 ; le nombre d'élèves progresse beaucoup moins, si bien que le nombre de parcours par élève monte d'environ 1,6 à 2,3."></dsfr-data-a11y>
     </div>
 
-    <!-- `dsfr-data-context-value` (#742, 0.27.0) : le titre suit le filtre au lieu
-         de figer l'année. `live` en fait une région live polie — un seul élément
-         de la page la porte. -->
-    <h2 class="fr-h4 fr-mt-4w fr-mb-0">
-      <dsfr-data-context-value for="pix-ctx"
-        template="Campagnes Pix de l'année {{annee}}"
-        fallback="Campagnes Pix, toutes années confondues" live>
-      </dsfr-data-context-value>
-    </h2>
+    <!-- ---------- 2. La nuance : collèges et lycées ---------- -->
+    <h2 class="fr-h3">2. Au collège, Pix s'étend et s'intensifie&nbsp;; au lycée, il s'intensifie seulement</h2>
+    <dsfr-data-repeat source="pix-niv-b" key-field="niveau">
+      <template>
+        <p class="odv-lecture fr-mb-1v"><strong>{{niveau}}</strong>&nbsp;:
+          {{r0:number:2}} parcours par élève en 2022, <strong>{{r1:number:2}}</strong> en 2025&nbsp;;
+          élèves participants {{evq_txt}}&nbsp;% sur la période ({{q1m:number:2}} millions en 2025).</p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-mt-2w">Le collège porte l'essentiel de la hausse&nbsp;: il gagne à la
+      fois des élèves et des parcours par élève. Au lycée, le nombre d'élèves participants a
+      reculé, et l'intensité n'a vraiment monté qu'à la dernière campagne.</p>
+    <div class="odv-viz fr-mb-6w" data-code="Parcours par élève participant, collèges et lycées">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-niv" source="pix-niv-n" type="bar"
+        label-field="annee" value-field="r" series-field="niveau"
+        y-min="0" unit-tooltip="parcours par élève"
+        color-map="Collèges:#000091,Lycées:#929292"
+        databox databox-title="Au collège, le nombre de parcours par élève passe d'environ 1,8 à 2,7 ; au lycée, d'environ 1,4 à 1,7"
+        databox-source="Ministère de l'éducation nationale — participations aux campagnes Pix par établissement, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-niv" source="pix-niv-n" table download
+        filename="pix-parcours-par-eleve-college-lycee.csv"
+        label-field="annee" value-field="r" series-field="niveau"
+        description="Nombre moyen de parcours Pix par élève participant (participations divisées par élèves), par campagne de 2022 à 2025, pour les collèges et pour les lycées. Le type d'établissement est lu dans son nom ; les EREA et autres structures sont exclus."></dsfr-data-a11y>
+    </div>
+
+    <!-- ---------- 3. Partout ---------- -->
+    <h2 class="fr-h3">3. Le mouvement touche toutes les académies</h2>
+    <dsfr-data-repeat source="pix-aca-b">
+      <template>
+        <p class="odv-lecture"><strong>{{n_hausse}} académies sur les {{n_deux}}</strong> présentes aux
+          deux campagnes ont vu le nombre de parcours par élève participant augmenter entre 2022 et
+          2025.
+          Les écarts entre académies restent plus petits que la hausse commune&nbsp;: en 2025, la
+          plupart se situent entre 2 et 2,7 parcours par élève.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="pix-aca-abs" key-field="academie_nom">
+      <template>
+        <p class="fr-text--sm fr-mb-1v">{{academie_nom}}&nbsp;: présente en 2022, absente du jeu en
+          2025 — une seule barre.</p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz fr-mb-6w fr-mt-2w" data-code="Parcours par élève participant, par académie, 2022 et 2025">
+      <div class="odv-chart-slot">
+      <dsfr-data-chart id="g-aca" source="pix-aca-o" type="bar" horizontal
+        label-field="academie_nom" value-field="r" series-field="annee"
+        unit-tooltip="parcours par élève"
+        color-map="2025:#000091,2022:#929292"
+        databox databox-title="Dans chaque académie, les élèves suivent plus de parcours Pix en 2025 qu'en 2022"
+        databox-source="Ministère de l'éducation nationale — participations aux campagnes Pix par établissement, via data.education.gouv.fr"
+        databox-download heading-level="3">
+      </dsfr-data-chart>
+      </div>
+      <dsfr-data-a11y for="g-aca" source="pix-aca-o" table download
+        filename="pix-parcours-par-eleve-academies.csv"
+        label-field="academie_nom" value-field="r" series-field="annee"
+        description="Nombre moyen de parcours Pix par élève participant dans chaque académie, campagnes 2022 et 2025, académies classées par valeur 2025 décroissante. Toutes celles présentes aux deux campagnes progressent ; la Nouvelle-Calédonie et Wallis-et-Futuna, absentes du jeu en 2025, n'ont que leur valeur 2022. Saint-Pierre-et-Miquelon, en tête, repose sur très peu d'établissements."></dsfr-data-a11y>
+    </div>
   </div>
 
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle pilote toute la page, elle merite la premiere ligne. -->
+  <!-- ---------- 4. Exploration ---------- -->
+  <div class="fr-container">
+    <h2 class="fr-h3">4. Trouver un établissement</h2>
+    <p class="fr-text--sm">Une campagne à la fois&nbsp;: chaque établissement est coloré selon le
+      nombre de parcours suivis par ses élèves participants. La recherche, l'année et les filtres
+      pilotent les compteurs, la carte et le tableau&nbsp;; ils ne touchent pas les graphiques
+      ci-dessus.</p>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-4 fr-col-lg-3">
+        <div class="fr-select-group">
+          <label class="fr-label" for="pix-annee">Campagne</label>
+          <select class="fr-select" id="pix-annee">
+            <option value="2025">2025</option>
+            <option value="2024">2024</option>
+            <option value="2023">2023</option>
+            <option value="2022">2022</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <h3 class="fr-h5 fr-mt-2w fr-mb-0">
+      <dsfr-data-context-value for="pix-ctx"
+        template="Les établissements de la campagne {{annee}}"
+        fallback="Les établissements, toutes campagnes confondues" live>
+      </dsfr-data-context-value>
+    </h3>
+  </div>
+
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="pix-q" source="pix-n"
-        fields="etablissement, commune_nom, uai"
-        label="Rechercher un établissement" placeholder="Nom, commune, code UAI…"
-        operator="words" count count-label="établissement" url-sync>
+          fields="etablissement, commune_nom, uai"
+          label="Rechercher un établissement" placeholder="Nom, commune, code UAI…"
+          operator="words" count count-label="établissement" url-sync>
         </dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-    <!-- Les compteurs suivent la recherche : pleine largeur, comme elle. -->
-    <div class="odv-viz" data-code="Quatre indicateurs, dont un taux en ratio de deux sommes">
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-3w">
-      <dsfr-data-kpi source="pix-f-calc" value="count" format="nombre"
-        heading="Établissements" label="ayant ouvert une campagne"></dsfr-data-kpi>
-      <dsfr-data-kpi source="pix-f-calc" value="total_participations:sum" format="compact"
-        heading="Participations" label="aux campagnes de l'année"></dsfr-data-kpi>
-      <dsfr-data-kpi source="pix-f-calc" value="total_partipants:sum" format="compact"
-        heading="Participants" label="élèves distincts"></dsfr-data-kpi>
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-3w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="pix-f-calc" value="uai:distinct" format="nombre"
+        heading="Établissements" label="de la sélection (codes UAI distincts)"></dsfr-data-kpi>
+      <dsfr-data-kpi source="pix-f-calc" value="total_participations:sum / total_partipants:sum"
+        format="decimal" decimals="2"
+        heading="Parcours par élève participant" label="somme des participations / somme des élèves"></dsfr-data-kpi>
       <dsfr-data-kpi source="pix-f-calc"
         value="total_participations_avec_envoi:sum / total_participations:sum"
         format="pourcentage" decimals="1"
-        heading="Taux d'envoi" label="participations effectivement transmises"></dsfr-data-kpi>
+        heading="Participations au résultat partagé" label="avec l'établissement"></dsfr-data-kpi>
     </dsfr-data-kpi-group>
-    </div>
 
-    <!-- Les filtres sont alignes sur la carte qu'ils pilotent, pas sur la page. -->
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <div class="fr-col-12 fr-col-md-3">
         <details class="odv-filtres odv-filtres--md" open>
           <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
           </summary>
-        <!-- La recherche rend de l'INTERFACE : sa place est la colonne de filtres,
-             pas la zone de pipeline ou vivent les sources. Declaree la-bas, elle
-             s'etalait sur toute la largeur du document. -->
-
-        <h2 class="fr-h6">Filtrer</h2>
-        <!-- Deux balises de facettes, et la raison est structurelle (BUG-013, #773).
-             Les quatre champs qui existent SUR LA SOURCE passent par le contexte
-             (`context="pix-ctx"`, ADR-104) : c'est le contexte qui porte l'URL, ce qui
-             ferme la collision de paramètres qu'une facette autonome ouvrait à côté de
-             lui. Mais `tranche_envoi` est CALCULÉ par le `dsfr-data-normalize` en aval :
-             le confier au contexte fait diffuser `where tranche_envoi = …` vers la source
-             Opendatasoft, où la colonne n'existe pas — HTTP 400 (échec franc, vérifié au
-             navigateur). Il reste donc en facette autonome sur `pix-q`, filtrée côté
-             client, avec un `url-param-map` qui borne explicitement sa lecture d'URL. -->
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- Deux balises de facettes (BUG-013, #773) : les champs réels passent par le
+             contexte, qui porte l'URL ; `tranche`, calculée en aval, ne peut pas être
+             déléguée à Opendatasoft (HTTP 400) et reste une facette autonome, client. -->
         <dsfr-data-facets id="pix-f" source="pix-q" context="pix-ctx"
-          fields="secteur, academie_nom, libelle_region, departement_nom"
-          labels="secteur:Secteur | academie_nom:Académie | libelle_region:Région | departement_nom:Département"
-          display="secteur:radio-inline | academie_nom:multiselect | libelle_region:multiselect | departement_nom:radio"
-          searchable="academie_nom, libelle_region, departement_nom"
-          disjunctive="academie_nom, libelle_region"
-          sort="academie_nom:alpha:asc | libelle_region:alpha:asc | departement_nom:alpha:asc"
+          fields="secteur, academie_nom, libelle_de_la_region, departement_nom"
+          labels="secteur:Secteur | academie_nom:Académie | libelle_de_la_region:Région | departement_nom:Département"
+          display="secteur:radio-inline | academie_nom:multiselect | libelle_de_la_region:multiselect | departement_nom:radio"
+          searchable="academie_nom, libelle_de_la_region, departement_nom"
+          disjunctive="academie_nom, libelle_de_la_region"
+          sort="academie_nom:alpha:asc | libelle_de_la_region:alpha:asc | departement_nom:alpha:asc"
           max-values="8">
         </dsfr-data-facets>
 
         <dsfr-data-facets id="pix-f-calc" source="pix-f"
-          fields="tranche_envoi"
-          labels="tranche_envoi:Taux d'envoi"
-          display="tranche_envoi:checkbox"
-          url-param-map="envoi:tranche_envoi"
+          fields="tranche"
+          labels="tranche:Parcours par élève"
+          display="tranche:checkbox"
+          url-param-map="intensite:tranche"
           max-values="8" url-sync url-params>
         </dsfr-data-facets>
         </details>
       </div>
       <div class="fr-col-12 fr-col-md-9">
-        <div class="odv-viz" data-code="Carte des établissements, colorée par taux d'envoi">
-        <!-- Phrase calculée : agrégat global (une ligne) qui suit l'année et les facettes ;
-             le taux est un ratio de sommes, pas une moyenne de taux d'établissements. -->
+        <div class="odv-viz" data-code="Carte des établissements, colorée par parcours par élève">
         <dsfr-data-repeat source="pix-lect" empty="Aucun établissement ne correspond à la sélection.">
           <template>
-            <p class="odv-lecture"><strong>{{taux:number:1|—}} %</strong> des
-              <strong>{{p:number}}</strong> participations ont été transmises dans les
-              <strong>{{n:number}}</strong> établissements de la sélection — la carte colore chaque
-              établissement selon son propre taux, du rouge (moins de 70 %) au bleu (95 % et plus).</p>
+            <p class="odv-lecture">Dans la sélection, <strong>{{part_bas:number:0|—}}&nbsp;%</strong>
+              des établissements font suivre moins d’un parcours et demi à leurs élèves participants,
+              et <strong>{{part_haut:number:0|—}}&nbsp;%</strong> en font suivre trois ou plus. Changer de
+              campagne montre le glissement&nbsp;: la couleur claire recule d'année en année.</p>
           </template>
         </dsfr-data-repeat>
 
@@ -224,211 +427,147 @@
           insets="drom" fit-bounds fit-max-zoom="13">
           <dsfr-data-map-layer id="couche-pix" source="pix-f-calc" type="circle"
             geo-field="position" radius="5" fill-opacity="0.9"
-            color-field="tranche_envoi"
-            color-map="Moins de 70 %:#c9191e,70 à 85 %:#e4794a,85 à 95 %:#7ab1e8,95 % et plus:#000091,Non calculable:#929292"
+            color-field="tranche"
+            color-map="Moins d’un parcours et demi:#cacafb,D’un et demi à deux parcours:#8585f6,De deux à trois parcours:#000091,Trois parcours ou plus:#1b1b35,Non calculable:#929292"
             tooltip-field="etablissement"
             max-items="15000" cluster cluster-radius="45">
           </dsfr-data-map-layer>
-          <dsfr-data-map-legend for="couche-pix" label="Taux d'envoi des participations"></dsfr-data-map-legend>
+          <dsfr-data-map-legend for="couche-pix" label="Parcours suivis par élève participant"></dsfr-data-map-legend>
           <dsfr-data-map-popup mode="panel-right" title-field="etablissement" width="380px">
             <template>
               <p class="fr-badge fr-badge--sm fr-mb-2v">{{secteur|secteur non renseigné}}</p>
-              <p class="fr-display--xs fr-mb-1v">{{taux_envoi:number:1|—}} %</p>
-              <p class="fr-text--sm fr-mb-3v">de participations transmises</p>
-
+              <p class="fr-display--xs fr-mb-1v">{{ratio_txt:number:2|—}}</p>
+              <p class="fr-text--sm fr-mb-3v">parcours par élève participant, campagne {{annee}}</p>
               <ul class="fr-text--sm fr-mb-3v">
-                <li>Participations : <strong>{{total_participations:number}}</strong></li>
-                <li>dont transmises : <strong>{{total_participations_avec_envoi:number}}</strong></li>
-                <li>Participants distincts : <strong>{{total_partipants:number}}</strong></li>
-                <li>Participations par élève : <strong>{{part_par_participant:number:1|—}}</strong></li>
+                <li>Participations&nbsp;: <strong>{{total_participations:number}}</strong></li>
+                <li>Élèves participants&nbsp;: <strong>{{total_partipants:number}}</strong></li>
+                <li>Participations au résultat partagé&nbsp;: <strong>{{taux_partage:number:1|—}}&nbsp;%</strong></li>
               </ul>
-
               <p class="fr-text--sm fr-mb-1v">
                 <strong>{{commune_nom}}</strong> — {{departement_nom}}<br>
-                académie de {{academie_nom}} · {{libelle_region}}
+                académie de {{academie_nom}}
               </p>
-              <p class="fr-text--xs fr-mb-0">UAI {{uai}} · campagne {{annee}}</p>
+              <p class="fr-text--xs fr-mb-0">UAI {{uai}}</p>
             </template>
           </dsfr-data-map-popup>
         </dsfr-data-map>
 
-        <dsfr-data-a11y source="pix-f-calc" for="carte-pix" table download
-          filename="pix-participations-par-etablissement.csv"
+        <dsfr-data-normalize id="pix-tableau" source="pix-f-calc"
+          rename="etablissement:Établissement | secteur:Secteur | total_participations:Participations | total_partipants:Élèves participants | ratio_txt:Parcours par élève | taux_partage:Résultat partagé (%) | commune_nom:Commune | academie_nom:Académie"></dsfr-data-normalize>
+        <dsfr-data-a11y source="pix-tableau" for="carte-pix" table download
+          filename="pix-etablissements.csv"
           label="Données de la carte"
-          description="Un établissement par ligne : nom, secteur, participations, participants, taux d'envoi, commune, académie."
-          label-field="etablissement"
-          value-field="secteur, total_participations, total_participations_avec_envoi, total_partipants, taux_envoi, commune_nom, academie_nom">
+          description="Un établissement par ligne pour la campagne et la sélection courantes : nom, secteur, participations, élèves participants, parcours par élève, part des participations au résultat partagé, commune, académie."
+          label-field="Établissement"
+          value-field="Secteur, Participations, Élèves participants, Parcours par élève, Résultat partagé (%), Commune, Académie">
         </dsfr-data-a11y>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-md-7">
-        <div class="odv-viz" data-code="Participations par académie, avec la part de la première">
-        <h2 class="fr-h5">Participations par académie</h2>
-        <dsfr-data-repeat source="pix-aca-top">
-          <template>
-            <p class="odv-lecture">L'académie de <strong>{{academie_nom}}</strong> concentre
-              <strong>{{p:number}}</strong> participations, soit <strong>{{part:number:1}} %</strong>
-              de la sélection.</p>
-          </template>
-        </dsfr-data-repeat>
-        <dsfr-data-chart id="g-pix-aca" source="pix-aca" type="bar" horizontal
-          label-field="academie_nom" value-field="p" name="Participations"
-          databox databox-title="Participations aux campagnes Pix, par académie"
-          databox-source="Ministère de l'éducation nationale — fr-en-pix_participations_aux_campagnes…"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-pix-aca" source="pix-aca" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-5">
-        <div class="odv-viz" data-code="Répartition des taux d'envoi, aux couleurs de la carte">
-        <h2 class="fr-h5">Répartition des taux d'envoi</h2>
-        <dsfr-data-repeat source="pix-lect">
-          <template>
-            <p class="odv-lecture"><strong>{{part_haut:number:0|—}} %</strong> des établissements
-              transmettent au moins 95 % de leurs participations ; les autres laissent une part
-              des parcours sans résultat.</p>
-          </template>
-        </dsfr-data-repeat>
-        <dsfr-data-chart id="g-pix-envoi" source="pix-envoi" type="pie"
-          label-field="tranche_envoi" value-field="n"
-          color-map="Moins de 70 %:#c9191e,70 à 85 %:#e4794a,85 à 95 %:#7ab1e8,95 % et plus:#000091,Non calculable:#929292"
-          databox databox-title="Établissements par tranche de taux d'envoi"
-          databox-source="Ministère de l'éducation nationale — fr-en-pix_participations_aux_campagnes…"
-          databox-download>
-        </dsfr-data-chart>
-        <dsfr-data-a11y for="g-pix-envoi" source="pix-envoi" table download></dsfr-data-a11y>
-        <p class="fr-text--xs fr-mt-1w">
-          Mêmes couleurs que la carte (<code>color-map</code>, 0.26.0). Une participation
-          non transmise est un parcours commencé dont les résultats ne remontent pas : c'est
-          l'indicateur de déperdition du dispositif, et il n'est affiché nulle part sur le portail.
-        </p>
-        </div>
-      </div>
+    <!-- Agrégat global (une ligne) pour la phrase de la carte. -->
+    <dsfr-data-query id="pix-tot" source="pix-f-calc"
+      aggregate="uai:count:n, bas:sum:n_bas, haut:sum:n_haut"></dsfr-data-query>
+    <dsfr-data-normalize id="pix-lect" source="pix-tot"
+      compute="part_bas = when n = 0 then null else round(n_bas / n * 100, 0); part_haut = when n = 0 then null else round(n_haut / n * 100, 0)"></dsfr-data-normalize>
+
+    <div class="fr-callout fr-icon-lightbulb-line fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <dsfr-data-repeat source="pix-bilan">
+        <template>
+          <p class="fr-callout__text">En trois ans, Pix a surtout changé d'intensité&nbsp;: les
+            participations ont augmenté de {{evp}}&nbsp;%, le nombre d'élèves participants de
+            {{evq}}&nbsp;%. La hausse vient d'abord des collèges et touche toutes les académies.
+            Les résultats sont aussi plus souvent partagés avec l'établissement
+            ({{t0:number:1}}&nbsp;% des participations en 2022, {{t1:number:1}}&nbsp;% en 2025).
+            Ce que le jeu ne dit pas&nbsp;: la part des élèves que Pix <em>ne</em> touche pas, le
+            type de parcours suivi, ni la réussite.</p>
+        </template>
+      </dsfr-data-repeat>
     </div>
+
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h5">Notes — les hypothèses éditoriales et ce qu'on ne montre pas</h2>
+      <ol class="fr-text--sm">
+        <li><strong>Des élèves comptés par établissement.</strong> « Élèves participants » est la
+          somme, sur les établissements, du nombre d'élèves distincts de chacun. Un élève compté
+          dans deux établissements la même année l'est deux fois. Le jeu ne donne pas les
+          effectifs scolarisés&nbsp;: on ne peut pas en tirer une part d'élèves touchés.</li>
+        <li><strong>Les petits nombres sont masqués.</strong> Le producteur ne publie pas les
+          résultats d'un établissement quand le nombre de participations est inférieur à 5
+          (règle de confidentialité)&nbsp;: les très petites participations manquent.</li>
+        <li><strong>Collège ou lycée se lit dans le nom.</strong> Le jeu n'a pas de champ de type
+          d'établissement&nbsp;; la section 2 classe « Collège… » d'un côté, « Lycée… », « LP… »,
+          « LGT… » de l'autre. Environ 166 lignes par campagne (EREA, ensembles scolaires,
+          campus) ne sont dans aucune des deux séries, mais restent dans les totaux nationaux.</li>
+        <li><strong>Quatorze établissements en double.</strong> En 2025, 14 codes UAI portent deux
+          lignes (une grande, une petite)&nbsp;: les sommes les additionnent, le compteur
+          d'établissements de l'exploration compte les codes distincts.</li>
+        <li><strong>Positions manquantes.</strong> Selon la campagne, 50 à 130 établissements n'ont
+          pas de position (54 en 2025)&nbsp;: absents de la carte, ils restent dans les compteurs
+          et le tableau.</li>
+        <li><strong>Deux académies intermittentes.</strong> La Nouvelle-Calédonie et
+          Wallis-et-Futuna figurent au jeu en 2022 et 2024, pas en 2023 ni en 2025 (78 établissements
+          et 33&nbsp;396 participations en 2022). Les retirer ne change la hausse nationale que
+          d'un point (+61&nbsp;% de participations, +12&nbsp;% d'élèves).</li>
+        <li><strong>« 2025 » est l'étiquette du producteur.</strong> Le champ <code>annee</code> est
+          décrit comme « année scolaire » sans préciser si 2025 désigne 2024-2025 ou 2025-2026&nbsp;;
+          la page reprend l'étiquette telle quelle.</li>
+        <li><strong>Angles écartés.</strong> Le « taux d'envoi » en couleur de carte (la
+          reproduction précédente)&nbsp;: il progresse aussi, mais c'est une conséquence
+          secondaire&nbsp;; le classement des établissements (il désigne des établissements, pas
+          un phénomène)&nbsp;; le public et le privé (même mouvement des deux côtés, le privé un
+          peu plus intense).</li>
+      </ol>
+    </section>
   </div>
 
-  <!-- `share_percent` (#926) : part de chaque académie dans l'ensemble filtré, avant `limit`. -->
-  <dsfr-data-query id="pix-aca" source="pix-f-calc" group-by="academie_nom"
-    aggregate="total_participations:sum:p, p:share_percent:part" where="academie_nom:isnotnull"
-    order-by="p:desc" limit="20"></dsfr-data-query>
-  <dsfr-data-query id="pix-aca-top" source="pix-aca" limit="1"></dsfr-data-query>
-  <dsfr-data-query id="pix-envoi" source="pix-f-calc" group-by="tranche_envoi"
-    aggregate="uai:count:n" order-by="n:desc"></dsfr-data-query>
-  <!-- Agrégat global (une ligne) pour les phrases de lecture. -->
-  <dsfr-data-query id="pix-tot" source="pix-f-calc"
-    aggregate="uai:count:n, total_participations:sum:p, total_participations_avec_envoi:sum:pe, envoi_haut:sum:n_haut"></dsfr-data-query>
-  <dsfr-data-normalize id="pix-lect" source="pix-tot"
-    compute="taux = when p = 0 then null else round(pe / p * 100, 1); part_haut = when n = 0 then null else round(n_haut / n * 100, 0)"></dsfr-data-normalize>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- ====================== Analyse ====================== -->
   <div class="fr-container fr-mb-8w">
-  <details class="odv-technique" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-    <section class="fr-pt-4w">
-    <div>
-      <h2>Analyse de reproduction — cartographie Pix</h2>
-
+    <details class="odv-technique" id="analyse">
+      <summary>Analyse technique — ce que la recréation a coûté</summary>
+      <section class="fr-py-4w">
+      <h2>Analyse — cartographie Pix</h2>
       <p class="fr-text--sm fr-mb-4w">
         Page d'origine :
-        <a href="https://data.education.gouv.fr/pages/carto-pix-fiche-etablissement/" target="_blank" rel="noopener external">/pages/carto-pix-fiche-etablissement/</a>,
-        page AngularJS à <strong>cinq contextes</strong> et cinq jeux, dont un de 354 012 lignes.
-        Fiche d'audit : <code>docs/portail-education/carto-pix-fiche-etablissement.md</code>.
+        <a href="https://data.education.gouv.fr/pages/carto-pix-fiche-etablissement/" target="_blank" rel="noopener external">/pages/carto-pix-fiche-etablissement/</a>
+        — un localisateur maître-détail à cinq jeux, dont la carte est inopérante. Fiche d'audit :
+        <code>docs/portail-education/carto-pix-fiche-etablissement.md</code>. Recréée le
+        2026-09-26 en page éditoriale.
       </p>
-
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Changer de source.</strong> Le jeu que la page d'origine cartographie est
-              inexploitable&nbsp;; un jeu frère du même producteur porte de vraies positions et
-              des mesures voisines. Basculer de l'un à l'autre est un attribut
-              <code>dataset-id</code>. <strong>C'est là tout le travail de reproduction</strong> —
-              le reste est le gabarit habituel.</li>
-            <li><strong>Le filtre d'année, obligatoire ici.</strong> Le jeu porte une ligne par
-              établissement <em>et par année</em> : charger les quatre millésimes superposerait
-              quatre points au même endroit et additionnerait quatre campagnes dans un même
-              cercle. Un <code>dsfr-data-context-filter</code> avec <code>default="2025"</code>
-              suffit à l'éviter.</li>
-            <li><strong>Le taux d'envoi.</strong> Un ratio de deux sommes pour le national
-              (#673), une expression <code>compute</code> pour le taux par établissement, une
-              tranche pour la couleur — et l'indicateur de déperdition du dispositif devient
-              lisible. Il n'est affiché nulle part sur le portail.</li>
-            <li><strong><code>color-map</code> sur le camembert.</strong> Les tranches y portent
-              les couleurs de la carte, ce qui n'était pas possible avant la 0.26.0.</li>
-            <li><strong>Le titre suit le filtre (lot 18).</strong> Le sélecteur d'année commandait
-              toute la page, et le titre restait muet.
-              <code>dsfr-data-context-value for="pix-ctx" template="Campagnes Pix de l'année {{annee}}"
-              live</code> (#742, 0.27.0) l'écrit dans le <code>h2</code>&nbsp;: <strong>vérifié au
-              navigateur</strong>, «&nbsp;Campagnes Pix de l'année 2025&nbsp;» puis
-              «&nbsp;… 2023&nbsp;» au changement, avec <code>aria-live="polite"</code>. Avant, la seule
-              voie était un <code>dsfr-data-display</code> sur une source d'une ligne — une requête pour
-              afficher un mot que le contexte connaît déjà (AM-057). Et
-              <code>sort="academie_nom:alpha:asc | …"</code> (#741) range les trois facettes
-              géographiques de A à Z sans toucher au tri par effectif des deux autres (PG-016).</li>
+            <li><strong>Agréger au serveur.</strong> Trois des quatre sources sont des
+              <code>group-by</code> Opendatasoft de 4 à 64 lignes&nbsp;; seule l'exploration
+              charge une campagne d'établissements.</li>
+            <li><strong>Collèges et lycées sans champ de type.</strong> Un <code>where</code>
+              ODSQL <code>startswith(etablissement, …)</code> par source, un
+              <code>dsfr-data-concat origin-field</code>, et la série se branche sur
+              <code>series-field</code>.</li>
+            <li><strong>Chapô et phrases calculés.</strong> Bornes 2022/2025 extraites par
+              <code>compute</code>, sommées par une query, rendues par
+              <code>dsfr-data-repeat</code>&nbsp;; KPI en <code>:first</code>, <code>:last</code>,
+              <code>:evolution</code>.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le défaut n'est pas reproductible : il est à signaler.</strong>
-              43 479 lignes, 11 113 établissements, <strong>une seule coordonnée</strong> — celle
-              de la première ligne du fichier. C'est le pire défaut de données rencontré par ce
-              banc, tous portails confondus, et le seul qui rende une dataviz entièrement
-              inopérante. La règle du dépôt dit qu'une dataviz non reproductible donne une
-              analyse&nbsp;; ici il y avait une troisième voie — <strong>changer de source</strong> —
-              parce que le producteur publie à côté un jeu correct. La chercher a demandé de
-              comparer les positions des quatre jeux frères.</li>
-            <li><strong>Aucun outil ne signale une position constante.</strong> Ni le portail, ni
-              la page d'origine, ni <code>dsfr-data</code>. <code>getSkippedCount()</code> vaut 0
-              — les coordonnées sont valides, elles sont simplement toutes identiques. Le cluster
-              affiche « 43 479 » et ne se disperse jamais, y compris au zoom 19 : le seul signe
-              visible est qu'<em>il ne se passe rien</em>. <strong>Une carte dont tous les points
-              sont confondus se comporte exactement comme une carte qui fonctionne mal</strong>,
-              et il faut interroger la donnée pour trancher.</li>
-            <li><strong>La reproduction s'écarte assumément de l'original.</strong> Les mesures
-              ne sont pas les mêmes — participations aux campagnes plutôt que certifications —
-              parce que ce sont celles que porte le jeu correctement géocodé. La page dit ce
-              qu'elle montre&nbsp;; elle ne prétend pas rejouer la fiche établissement du portail,
-              qui repose sur les quatre autres contextes.</li>
-            <li><strong>Le sélecteur d'année vidait la page — et la cause était mon câblage, pas la bibliothèque.</strong>
-              Choisir une autre année que celle par défaut rendait <strong>zéro</strong> partout&nbsp;:
-              KPI à 0, carte vide, tableau vide — alors que le compteur de
-              <code>dsfr-data-search</code> annonçait bien «&nbsp;10 186 résultats&nbsp;» et que la
-              requête partait correctement (HTTP 200, 10 186 lignes vérifiées à l'API). J'avais
-              conclu à une collision d'URL inhérente entre deux composants qui la possèdent tous
-              les deux, et déposé un bug. <strong>La relecture du mainteneur (issue #773) a montré
-              que la voie native existait et que je ne l'avais pas empruntée</strong>&nbsp;: j'avais
-              branché la facette en <em>autonome</em> à côté d'un <code>dsfr-data-context</code>,
-              alors que le motif livré en 0.23.0 impose <code>context="id"</code> — en mode contexte,
-              la lecture d'URL de la facette est neutralisée et c'est le contexte qui la porte.
-              Corrigé et vérifié au navigateur&nbsp;: l'année 2023 rend 10 186 établissements,
-              5,7&nbsp;M de participations et 80,2&nbsp;% de taux d'envoi, sans erreur console.</li>
-            <li><strong>Mais le mode contexte bute sur les champs calculés, et c'est pourquoi la page
-              porte deux balises de facettes.</strong> <code>tranche_envoi</code> n'existe pas dans le
-              jeu&nbsp;: il est fabriqué par le <code>dsfr-data-normalize compute</code> en aval de la
-              source. Le confier au contexte fait diffuser
-              <code>where tranche_envoi = "Moins de 70 %"</code> vers la source Opendatasoft, où la
-              colonne est inconnue — <strong>HTTP 400</strong>. L'échec est <em>franc</em>, ce qui vaut
-              mieux qu'un silence, mais il rend le mode contexte inapplicable dès qu'une facette porte
-              une tranche calculée. Les quatre champs réels passent donc par
-              <code>context="pix-ctx"</code>, et <code>tranche_envoi</code> reste en facette autonome
-              chaînée en aval, bornée par un <code>url-param-map</code>. Vérifié&nbsp;: cocher
-              «&nbsp;moins de 70&nbsp;%&nbsp;» rend 3 694 établissements à 54,7&nbsp;% de taux d'envoi,
-              URL <code>?annee=2023&amp;envoi=Moins+de+70+%25</code>, zéro erreur console. Ce que la
-              bibliothèque doit encore corriger n'est plus le blocage mais la largeur de sa liste
-              blanche&nbsp;: <code>knownFields</code> accepte <em>toute</em> colonne des données comme
-              paramètre d'URL, pas seulement les champs de facette.</li>
+            <li><strong>Trier les académies par un ratio.</strong> Opendatasoft refuse un
+              <code>order_by</code> sur un quotient d'agrégats (erreur ODSQL). Tri côté client
+              sur une clé calculée qui place 2025 devant 2022.</li>
+            <li><strong>Deux colonnes de région.</strong> <code>libelle_region</code>, utilisée par
+              la page précédente, est vide sur 645 lignes&nbsp;; <code>libelle_de_la_region</code>
+              sur 4. Rien ne le signale à l'écran.</li>
+            <li><strong>Une virgule dans une modalité casse l'URL.</strong> La tranche « 1,5 à 2
+              parcours » s'écrivait bien dans l'URL, mais au rechargement la facette découpait la
+              valeur sur la virgule&nbsp;: zéro établissement. Les tranches sont donc libellées en
+              toutes lettres («&nbsp;d’un et demi à deux parcours&nbsp;»).</li>
           </ul>
         </div>
       </div>
-
       <div class="fr-table fr-table--bordered">
         <table>
           <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
@@ -436,29 +575,22 @@
             <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>carte sur <code>…_certification_…_par_eple</code></td><td>carte sur <code>…_sans_collecte_de_profil</code></td><td><strong>Écart assumé</strong> : le jeu d'origine a une seule position pour 11 113 établissements</td></tr>
-            <tr><td>cluster affichant des lignes</td><td><code>cluster</code> + filtre d'année</td><td>Meilleur : un point par établissement, une année à la fois</td></tr>
-            <tr><td><code>refine-on-click</code> vers la fiche</td><td><code>dsfr-data-map-popup</code></td><td>Équivalent — et atteignable, ce que l'original n'est pas</td></tr>
-            <tr><td>—</td><td>taux d'envoi (ratio, <code>compute</code>, tranches)</td><td>Sans équivalent : l'indicateur de déperdition n'existe nulle part sur le portail</td></tr>
-            <tr><td>4 accordéons sur 4 autres jeux</td><td>—</td><td><strong>Hors périmètre</strong> de cette reproduction, qui porte sur la carte</td></tr>
+            <tr><td>carte sur <code>…_certification_…_par_eple</code></td><td>carte sur <code>…_sans_collecte_de_profil</code></td><td><strong>Écart assumé</strong> : une seule position pour 43 479 lignes</td></tr>
+            <tr><td>4 × <code>ods-facet</code>, sans filtre d'année</td><td><code>dsfr-data-context</code> (année) + <code>dsfr-data-facets context</code></td><td>Meilleur : une campagne à la fois, URL partageable</td></tr>
+            <tr><td><code>refine-on-click</code> vers la fiche</td><td><code>dsfr-data-map-popup</code></td><td>Équivalent pour la campagne affichée&nbsp;; les accordéons de détail des quatre autres jeux ne sont pas repris</td></tr>
+            <tr><td>—</td><td><code>group-by</code> serveur, <code>dsfr-data-concat</code>, <code>dsfr-data-pivot</code>, <code>dsfr-data-repeat</code></td><td>Sans équivalent : le récit n'existait pas</td></tr>
           </tbody>
         </table>
       </div>
-
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>immédiate</strong> une fois la bonne source trouvée — et c'est
-          tout le sujet. Cette page est la seule du banc dont la dataviz d'origine est
-          <strong>entièrement inopérante</strong> : ses 43 479 points sont au même endroit, celui
-          de sa première ligne. Le défaut ne se voit pas — les coordonnées sont valides, le
-          cluster s'affiche, rien n'échoue — et aucun outil, ni le portail ni la bibliothèque, ne
-          peut le dire. <strong>Il a fallu comparer les positions de quatre jeux frères pour
-          comprendre que trois d'entre eux étaient corrects.</strong> La reproduction ne recopie
-          donc pas la carte : elle en change la source, et le dit.</p>
+        <p>Aucune résistance de la bibliothèque&nbsp;; <strong>le travail a été de lire le
+          jeu</strong>. La page précédente mettait en avant le taux d'envoi&nbsp;; le fait saillant
+          est ailleurs, dans l'écart entre participations et élèves, que ni l'original ni la
+          reproduction ne montraient.</p>
       </div>
-    </div>
-  </section>
-  </details>
+      </section>
+    </details>
   </div>
 
 </main>
