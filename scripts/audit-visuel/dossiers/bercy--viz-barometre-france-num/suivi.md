@@ -1,0 +1,9 @@
+# Suivi — Baromètre France Num
+
+> Le journal de la transformation. Une ligne par intervention, la plus recente en haut.
+> **Ce fichier n'est jamais ecrase par un script.**
+
+| Date | Ce qui a change | Pourquoi | Verifie comment |
+|---|---|---|---|
+| 2026-09-26 | **Refonte `barometre-france-num-v2.html`** (la v1 n'est pas touchée), relecture métier R1-R11. « Ce qui bouge le plus » ne classe plus que les questions au même jeu de réponses les deux années (règle calculée : `mvt-o` → `mvt-q` → `mvt-qs`) et unifie « J'en ai »/« Oui » avant le pivot ; bilan compté en page (67 comparables / 28 nouvelles / 5 modifiées). Repère Connectivité = Très + Plutôt satisfaisant (règle du producteur). KPI « Poids du profil » (`max(poids_question)`). Phrases de lecture calculées (écarts, variations). Sélecteur de question = `dsfr-data-facets` client (`value-labels` + `default`), 16 options mortes retirées, source `chapitres` et deux sources `require-where` supprimées. En-têtes lisibles par `normalize rename`. Hypothèses 2, 4, 6 réécrites, 8 ajoutée (doublons). #analyse réécrite. | Relecture `dataviz-metier` : n° 1 des variations = artefact de scission d'item (1401), hypothèse 2 fausse, profils cumulés sans poids affiché, analyse décrivant une page antérieure | Playwright (Chromium, `localhost:3104`), profils France / `?region=Bretagne` / Bretagne × NTIC × 0 salarié : 0 erreur console (31 avertissements « calculés côté client », informatifs), 7 requêtes au chargement (10 avant), tableau `mvt-tab` = 713 19,21→32,09 / 801 12,79→25,63 / 802 9,46→21,91 ; Connectivité 81,0 % (France) / 75,2 % (Bretagne) ; poids 2,1 M / 109,4 k / 321 ; 100 `<h4>` et 100 options (92 sur le profil cumulé), aucune des 16 mortes ; détail 1422 = 14,06 ; survol du graphique des variations : infobulle stylée, pastilles #5C68E5/#82B5F2 (BUG-022, connu). `recette-pages.mjs` : err 0, kpi 5, graph 14, cfg 0. Chiffres recoupés à l'API le 2026-09-26. |
+| | | | |

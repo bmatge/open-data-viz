@@ -43,11 +43,11 @@ const STATUTS = {
   '/pages/accompagnements-actions-fnum/': ['analyse', '/viz/formations-france-num', 'Jeu de données à zéro enregistrement : analyse au lieu de reproduction'],
   '/pages/entreprises-restauration-notre-dame': ['reproduite', '/viz/entreprises-restauration-notre-dame', 'Carte à 2 couches issues de 2 portails Opendatasoft'],
   '/pages/fiscalite-locale-particuliers/?headless=true': ['reproduite', '/viz/fiscalite-locale', 'Choroplèthe départementale + tableau serveur sur 174 668 lignes'],
-  '/pages/barometre-france-num/': ['reproduite', '/viz/barometre-france-num', 'Explorateur des 6 millésimes ; jointure des libellés retirée (référentiels homonymes)'],
+  '/pages/barometre-france-num/': ['reproduite', '/viz/barometre-france-num', 'Refonte en trois régimes d’accès (profil partagé), relue le 2026-09-26 ; la reproduction fidèle a été retirée le même jour'],
 
   '/pages/comptabilite-etat/': ['analyse', '/viz/non-reproduites', 'Page 404, jeu supprimé — sujet couvert par la page Comptabilité générale'],
   '/pages/signalconso/': ['reproduite', '/viz/signalconso', 'Page 404 mais jeu vivant : 1,7 M de signalements reconstitués'],
-  '/pages/rappelconso/': ['reproduite', '/viz/rappelconso', 'Page 404 et jeu renommé : la v2 existe, mise à jour ce jour'],
+  '/pages/rappelconso/': ['reproduite', '/viz/rappelconso', 'Page 404 et jeu renommé : la v2 existe ; relecture métier du 2026-09-26, compte des fiches (jeu -espaces) et non des codes-barres'],
   '/pages/annuaire-centres-controles-techniques/': ['reproduite', '/viz/centres-controle-technique', 'Page 404 et jeux renommés : 6 113 centres retrouvés'],
   '/pages/livre-d-or/': ['analyse', '/viz/non-reproduites', 'Page 404, aucun jeu associé : rien à reprendre'],
   '/pages/visualisation-liste-des-complements-alimentaires/': ['analyse', '/viz/non-reproduites', 'Page servie mais jeu supprimé : seul un jeu « preprod » vide subsiste']
@@ -59,11 +59,11 @@ Object.assign(STATUTS, {
   'https://www.economie.gouv.fr/treshautdebit/la-fermeture-du-reseau-cuivre-dans-votre-commune':
     ['reproduite', '/viz/fermeture-reseau-cuivre', 'Page Drupal derrière Cloudflare ; pipeline serveur (recherche, facettes, pagination), carte par année'],
   '/explore/assets/registre-public-des-aides-de-minimis/view/':
-    ['reproduite', '/viz/aides-de-minimis', 'Page Studio (4 KPI, 4 filtres, tableau) : le JSON de Studio lu comme spécification'],
+    ['reproduite', '/viz/aides-de-minimis', 'Page Studio (4 KPI, 4 filtres, tableau) : le JSON de Studio lu comme spécification ; relecture métier du 2026-09-26'],
   '/explore/dataset/ir-declarations-2042-nat/':
-    ['reproduite', '/viz/impot-sur-le-revenu?nom=1AJ', 'Jeu sans dataviz : exploration case par case sur 19 ans, état dans l\'URL'],
+    ['reproduite', '/viz/impot-sur-le-revenu?nom=1AJ', 'Jeu sans dataviz : exploration case par case sur 19 ans, état dans l\'URL ; unité du montant calculée (relecture du 2026-09-26)'],
   'https://www.economie.gouv.fr/dgfip/bulletins-officiels':
-    ['reproduite', '/viz/bofip', 'Moteur de recherche plein texte serveur sur 9 146 documents, chronologie'],
+    ['reproduite', '/viz/bofip', 'Moteur de recherche plein texte serveur sur 9 148 documents, chronologie des versions publiées (relecture du 2026-09-26)'],
   'https://data.aide-developpement.gouv.fr':
     ['reproduite', '/viz/aide-publique-developpement', 'Portail Opendatasoft tiers : 7 contextes → 1, carte du monde en un attribut'],
   'https://prix.conso.gouv.fr/controle-technique':
