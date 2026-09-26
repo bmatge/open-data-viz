@@ -54,7 +54,7 @@ const STATUTS = {
   'Etablissements labellisés Euroscol': ['reproduite', '/education/etablissements-euroscol',
     'Recréée en récit (2026-09-26) : un label de lycée, 15,4 % des lycées contre 0,9 % des écoles ; « Lille 149 » classait la taille des académies (FP-035), « 34 % de sections européennes » en fait 73 % des lycées (FP-036)', 'vue'],
   'Annuaire des internats': ['reproduite', '/education/annuaire-des-internats',
-    'Gabarit annuaire éprouvé chez Bercy, rejoué sur un jeu à 44 colonnes vides sur 79', 'vue'],
+    'Recréée en récit (2026-09-26) : 78,7 % de lits occupés, 47 101 vides, collèges et EREA à 60 % ; fr-en-internats supprimé du portail (LIM-006), millésimes 2020-2024 permutés (PG-058)', 'vue'],
   'Données ouvertes de France Éducation international': ['reproduite', '/education/fei-chiffres-cles',
     'Recréée en récit (2026-09-26) : +54 % d’inscriptions au TCF, 86 % de la hausse par les tests canadiens — l’histoire tient dans `declinaison` ; la carte du monde écarte 749 dossiers ENIC, pas 85 (FP-040)', 'studio'],
   'Territoires numériques éducatifs': ['reproduite', '/education/tne-dashboard',
@@ -69,9 +69,9 @@ const STATUTS = {
   'Cartographie des labellisations Egalité fille-garçon': ['reproduite', '/education/label-egalite-fille-garcon',
     'Recréée en récit (2026-09-26) : 18,7 % des établissements publics, de 61,8 % (La Réunion) à 6,5 % (Strasbourg) ; 1 502 établissements, pas 1 529 — UAI en minuscule (FP-041)', 'angular'],
   'Cartographie de l’accompagnement de la déficience sensorielle': ['reproduite', '/education/accompagnement-deficience-sensorielle',
-    'Trois drapeaux repliés par fold ; la moitié du jeu ne dit pas quel accompagnement il propose', 'angular'],
+    'Recréée en récit (2026-09-26) : sans dispositif, 73 % des écoles mais 18 % des lycées ; le « 49,5 % muet » faisait la moyenne de trois niveaux (FP-042)', 'angular'],
   'Cartographie des ULIS-TFV': ['reproduite', '/education/implantation-ulis-tfv',
-    '52 dispositifs, 25 départements sur 101 ; le seul jeu du banc sans aucun trou', 'angular'],
+    'Recréée en récit (2026-09-26) : 44 dispositifs sur 52 avant le lycée, 8 après dans 4 villes ; « aucune ligne ultramarine » était faux (FP-045)', 'angular'],
 
   // --- Lot 16 : premiere page ecrite APRES la montee en 0.27.0.
   'Offre de langues dans les collèges et lycées': ['reproduite', '/education/offre-formation-langues',
@@ -84,17 +84,17 @@ const STATUTS = {
 
   // --- Lot 17 : les trois vues de jeu heritees.
   'Hybridation de l’enseignement en lycée': ['reproduite', '/education/hybridation-enseignement-lycee',
-    '19 régions portant leur geo_shape : premier emploi de fill-field, là où il fonctionne', 'vue'],
+    'Recréée en récit (2026-09-26) : taux fixé à 50 % pour 13 collectivités sur 19, la dépense par classe va de 121 à 1 408 € (FP-044)', 'vue'],
   "L'annuaire des bureaux des entreprises": ['reproduite', '/education/annuaire-bureaux-des-entreprises',
-    '1 381 métiers en multivalué (explode) ; cinq contacts valent « #N/A »', 'vue'],
+    'Recréée en récit (2026-09-26) : 233 bureaux privés pour 540 lycées privés, aucun à Rennes, en Normandie ni à Toulouse ; l’annuaire décrit la collecte (FP-043)', 'vue'],
   'Appel à projet Socle Numérique dans les Ecoles Elémentaires': ['reproduite', '/education/aap-socle-numerique-ecoles',
-    'Jumeau de l’hybridation à la maille communale : le même taux, coloré par un autre chemin', 'vue'],
+    'Recréée en récit (2026-09-26) : 52,5 % au national, 39,3 % sur les 107 plus grosses conventions ; 45 % des collectivités à 65 % ou plus (FP-042)', 'vue'],
 
   'Cartographie PIX fiche établissement': ['reproduite', '/education/carto-pix-fiche-etablissement',
     'Recréée en récit (2026-09-26) : +60 % de parcours pour +12 % d’élèves, 2,32 parcours par élève ; une tranche « 1,5 à 2 » perdue au rechargement d’URL (BUG-031)', 'angular'],
 
   'Suivi d\'impact de l\'Opération de Sensibilisation au risque de l\'hameçonnage "Cactus"': ['reproduite', '/education/cactus-hameconnage',
-    '904 réponses ; fold suppose des booléens, un questionnaire produit des ternaires', 'studio'],
+    'Recréée en récit (2026-09-26) : 30,4 % n’envisagent aucune suite, 12 points de plus sans sensibilisation préalable ; « 84 % de suivi » lisait un champ mal compris (FP-046)', 'studio'],
   'Quelles personnalités ont donné leur nom aux écoles ?': ['reproduite', '/education/patronymes-des-ecoles',
     'Recréée en récit (2026-09-26) : 20,0 % de femmes au stock, 48,2 % des gains 2019-2024 ; rentrées 2009-2018 écartées, noms recopiés en arrière (FP-022)', 'asset'],
 
@@ -116,15 +116,15 @@ const STATUTS = {
   'Les personnels dans les écoles primaires et maternelles': ['reproduite', '/education/personnels-ecoles-primaires',
     'Recréée en récit (2026-09-26) : les 50 ans et plus passent de 33,3 % à 35,2 %, dans 31 académies sur 31 ; âge sous secret pour 17,9 % des ETP, 63,8 % dans la Creuse', 'externe'],
   "Passe ton Hack d'abord!": ['reproduite', '/education/passe-ton-hack-dabord',
-    'huwise.com est un alias d’hôte, pas une autre plateforme : 200 en anonyme sur le portail officiel', 'externe'],
+    'Recréée en récit (2026-09-26) : jeu remis à zéro, 49 lignes au lieu de 557 ; 7,8 % de filles dans l’édition en cours contre 15,3 % à la clôture de la 4ᵉ (PG-036)', 'externe'],
   'Équipements sportifs en milieu scolaire': ['reproduite', '/education/equipements-sportifs-milieu-scolaire',
-    'equipements.sports.gouv.fr : API ouverte sans clé ; « 13 036 UAI uniques » en vaut 12 214', 'externe'],
+    'Recréée en récit (2026-09-26) : 19 % ouverts aux clubs, mais 51 % des gymnases et 7 % des terrains de cour (FP-042) ; champ académie désormais publié (FP-047)', 'externe'],
   'Accessibilité des équipements sportifs': ['reproduite', '/education/accessibilite-equipements-sportifs',
     'Recréée en récit (2026-09-26) : le recensement ne sait dire que « oui », 42,1 % de fiches vides en moteur (FP-029)', 'externe'],
   'Portrait de territoire': ['reproduite', '/education/portrait-de-territoire-sports',
     '40 indicateurs sur 4 jeux ; les ratios inter-jeux restent hors de portée', 'externe'],
   'Vue cartographique d’un établissement produite par la forge des communs numériques éducatifs': ['reproduite', '/education/educajou-ecolemap',
-    'L’application de la forge n’a aucune donnée propre : elle interroge le portail. LIM-006 à la lettre', 'externe'],
+    'Recréée en récit (2026-09-26) : 96,2 % des établissements placés à leur adresse, 62,3 % au centre de la commune quand l’adresse est « Le Bourg » (PG-059)', 'externe'],
 
   // --- Les trois galeries editoriales : aucune dataviz a reproduire.
   'Challenge wikidata en classe': ['analyse', '/education/non-reproduites',
