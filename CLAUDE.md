@@ -76,6 +76,13 @@ c'est la référence de fidélité des données.
   2. Mettre à jour la table `STATUTS` de `scripts/build-registre.mjs`, puis
      `node scripts/build-registre.mjs`.
   3. Reporter l'enseignement transverse dans `public/synthese.html`.
+  4. **`node scripts/build-catalogue.mjs`** — régénère `public/data/dataviz.json`, le catalogue
+     unique que l'accueil, `/dataviz`, `/demo` et les cinq pages de portail rendent avec la même
+     carte `fr-card` (titre-message = `<h1>`, résumé = `<meta name="description">` : les soigner).
+     Nature, méthode dataviz-metier (d'après l'historique git), origine (registres), API et
+     composants sont **déduits**, jamais saisis ; il n'y a plus de tuile à écrire à la main. Le
+     gabarit de carte est recopié dans chaque page (commentaire `gabarit:carte-dataviz`) : le
+     script échoue s'ils divergent — en modifier un, c'est les modifier tous.
 - **Un constat corrigé ne s'efface pas.** Quand une vérification invalide une critique déjà
   écrite, elle devient une entrée `faux-probleme` (ce que je croyais / ce qui est vrai /
   ce qui reste vrai / comment je l'ai vérifié), et l'analyse de la page concernée est
@@ -190,6 +197,7 @@ référence pour savoir ce que la page fait réellement — l'apparence seule ne
 ```bash
 npm start                          # serveur sur :3000
 node scripts/build-registre.mjs    # régénère le registre depuis le catalogue vivant
+node scripts/build-catalogue.mjs   # régénère public/data/dataviz.json (catalogue du site)
 ```
 
 ## Vault Obsidian
