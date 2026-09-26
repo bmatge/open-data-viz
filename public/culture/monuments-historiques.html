@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Les monuments historiques — open-data-viz</title>
+  <meta name="description" content="46 760 immeubles protégés au titre des monuments historiques : plus de quatre sur dix appartiennent à des propriétaires privés, et le Cantal en compte trois fois plus par habitant que Paris. Création avec dsfr-data sur la liste du ministère de la Culture (API Tabular de data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://public.opendatasoft.com" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 6 de docs/portail-culture/proposition.md.
+
+       LE JEU. « Immeubles protégés au titre des monuments historiques » (ministère
+       de la Culture, base Mérimée), ressource 3a52af4a… : 46 760 lignes, 82 colonnes,
+       95 Mo, mis à jour chaque semaine. On ne le charge JAMAIS : tout ce que la page
+       trace vient d'un regroupement fait par l'API Tabular (`group-by` + `aggregate`
+       délégués en `champ__groupby&Reference__count`). Quatre requêtes regroupées,
+       pas une ligne brute sauf la page de 20 du tableau de recherche.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-26) :
+       - « Un sur cinq classé » ne tient qu'en comptant la seule modalité exacte
+         `classé MH` (9 904). La typologie est multivaluée (41 modalités, dont
+         `classé MH partiellement;inscrit MH partiellement;protection totale`) :
+         14 990 immeubles portent un classement, en tout ou partie — un sur trois.
+         La page retient « classé, en tout ou partie ».
+       - « Deux sur cinq privés » compte la seule modalité `propriété privée`
+         (18 373). Le statut juridique a 318 libellés ; regroupés, particuliers et
+         sociétés font 20 580 immeubles, 44 %. La page le dit « plus de quatre sur dix ».
+       - L'histoire que la donnée porte le mieux n'est pas dans le titre du cadrage :
+         les privés possèdent la moitié des inscrits, les communes la moitié des
+         classés (croisement statut × typologie, 785 groupes).
+
+       POPULATION. Aucun jeu Culture ne donne la population des 101 départements
+       (Paris manque aux dépenses départementales). Elle vient des populations
+       légales de l'INSEE republiées par Opendatasoft (public.opendatasoft.com,
+       CORS ouvert, sans clé), millésime en vigueur au 1er janvier 2026
+       (recensement 2023), regroupées par code département côté serveur.
+       Piège trouvé en sondant : Saint-Pierre-et-Miquelon y est publié à
+       5 965 194 habitants (mille fois trop) ; 975, 977 et 978 sont écartés par le
+       `where` de la source. Mayotte n'a pas de ligne : ses 16 immeubles ne sont pas
+       rapportés à une population.
+       ========================================================================== -->
+
+  <!-- ---------- Statut juridique × typologie de protection (785 groupes, 4 pages de 200) ---------- -->
+  <dsfr-data-source id="mh-st" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="3a52af4a-f9da-4dcc-8110-b07774dfb3bc"
+    group-by="Statut_juridique_de_l_edifice, Typologie_de_la_protection"
+    aggregate="Reference:count">
+  </dsfr-data-source>
+  <!-- 318 libellés de propriétaire, 41 de protection : recodés ligne à ligne.
+       L'ordre des `when` compte : un libellé à « ; » (plusieurs propriétaires)
+       est pris avant de chercher « commune » ou « privée » dedans. -->
+  <dsfr-data-normalize id="st-n" source="mh-st"
+    rename="Statut_juridique_de_l_edifice:statut | Typologie_de_la_protection:typo | Reference__count:n"
+    compute="niveau = when is_empty(typo) then 'Non renseigné' when contains(typo, 'class') then 'Classé' else 'Inscrit';
+             proprio = when is_empty(statut) then 'Non renseigné'
+                       when contains(statut, ';') then 'Plusieurs propriétaires'
+                       when contains(statut, 'commune') then 'Commune'
+                       when contains(statut, 'privée') then 'Privé (particulier ou société)'
+                       when contains(statut, 'association') then 'Association'
+                       when contains(statut, 'État') or contains(statut, 'établissement public') or contains(statut, 'département') or contains(statut, 'région') or contains(statut, 'collectivité') then 'État et autres personnes publiques'
+                       else 'Autre libellé';
+             classe = when niveau = 'Classé' then n else 0;
+             inscrit = when niveau = 'Inscrit' then n else 0;
+             prive = when proprio = 'Privé (particulier ou société)' then n else 0;
+             commune = when proprio = 'Commune' then n else 0;
+             public = when proprio = 'État et autres personnes publiques' then n else 0;
+             classe_prive = when proprio = 'Privé (particulier ou société)' then classe else 0;
+             classe_commune = when proprio = 'Commune' then classe else 0;
+             inscrit_prive = when proprio = 'Privé (particulier ou société)' then inscrit else 0;
+             nr = when proprio = 'Non renseigné' then n else 0;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse, sur une ligne ---------- -->
+  <dsfr-data-query id="st-agg" source="st-n" group-by="k"
+    aggregate="n:sum:total, classe:sum:classe, inscrit:sum:inscrit, prive:sum:prive, commune:sum:commune, public:sum:public, classe_prive:sum:classe_prive, classe_commune:sum:classe_commune, inscrit_prive:sum:inscrit_prive, nr:sum:nr">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn" source="st-agg"
+    compute="p_prive = prive / total * 100;
+             p_commune = commune / total * 100;
+             p_public = public / total * 100;
+             p_classe = classe / total * 100;
+             p_inscrit = inscrit / total * 100;
+             p_classe_commune = classe_commune / classe * 100;
+             p_classe_prive = classe_prive / classe * 100;
+             p_inscrit_prive = inscrit_prive / inscrit * 100;
+             tx_prive = classe_prive / prive * 100;
+             tx_commune = classe_commune / commune * 100">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Les monuments historiques</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Plus de quatre monuments historiques sur dix appartiennent à des propriétaires privés</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          La France compte {{total:number}}&nbsp;immeubles protégés au titre des monuments historiques. <strong>{{p_prive:number:0}}&nbsp;%
+          appartiennent à des particuliers ou à des sociétés</strong>, {{p_commune:number:0}}&nbsp;% à des communes&nbsp;; l'État et
+          les autres personnes publiques n'en possèdent que {{p_public:number:0}}&nbsp;%. Un immeuble sur trois
+          ({{p_classe:number:0}}&nbsp;%) est classé, en tout ou partie, le plus haut niveau de protection&nbsp;; les autres sont
+          inscrits. Et les deux niveaux n'ont pas les mêmes propriétaires&nbsp;: les communes détiennent
+          {{p_classe_commune:number:0}}&nbsp;% des immeubles classés, les privés {{p_inscrit_prive:number:0}}&nbsp;% des inscrits.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, base Mérimée&nbsp;:
+      <a href="https://www.data.gouv.fr/datasets/immeubles-proteges-au-titre-des-monuments-historiques-2" target="_blank" rel="noopener external">immeubles
+      protégés au titre des monuments historiques</a>, fichier mis à jour chaque semaine, lu à l'ouverture de la page sur
+      l'API Tabular de data.gouv.fr. Les propriétaires sont regroupés par la page à partir de 318&nbsp;libellés différents
+      (voir «&nbsp;Ce que cette page ne montre pas&nbsp;»).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="total:max" format="nombre" span="3"
+        heading="Immeubles protégés" label="classés ou inscrits, toute la France"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_prive:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Privés" label="particuliers ou sociétés"
+        lines='[{"value":"prive:max","format":"nombre","decimals":0,"suffix":"immeubles"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_commune:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Communaux" label="propriété d'une commune"
+        lines='[{"value":"commune:max","format":"nombre","decimals":0,"suffix":"immeubles"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="p_classe:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Classés" label="en tout ou partie ; les autres sont inscrits"
+        lines='[{"value":"classe:max","format":"nombre","decimals":0,"suffix":"immeubles"}]'></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — à qui appartiennent-ils ======================= -->
+  <dsfr-data-query id="proprio" source="st-n" group-by="proprio"
+    aggregate="n:sum:n, n:share_percent:part" order-by="n:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="proprio-g" source="proprio"
+    round="part:1" rename="proprio:Propriétaire | part:Part des immeubles (%)">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-proprio">
+    <h2 id="t-proprio" class="fr-h3">L'État protège, mais ce sont les particuliers et les communes qui possèdent</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Deux propriétaires se partagent l'essentiel des monuments historiques&nbsp;: les particuliers et sociétés
+          ({{prive:number}}&nbsp;immeubles) et les communes ({{commune:number}}). À eux deux, <strong>{{p_prive:number:0}}&nbsp;% et
+          {{p_commune:number:0}}&nbsp;%</strong>. L'État, qui décide de la protection, et toutes les autres personnes publiques
+          réunies (départements, régions, établissements publics) en détiennent {{public:number}}. Pour
+          {{nr:number}}&nbsp;immeubles, la notice ne dit pas à qui ils appartiennent.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Répartition des immeubles protégés selon leur propriétaire">
+      <dsfr-data-chart id="g-proprio" source="proprio-g" type="bar" horizontal
+        label-field="Propriétaire" value-field="Part des immeubles (%)" name="Part des immeubles protégés (%)"
+        selected-palette="neutral" highlight-index="[0, 1]" unit-tooltip="%" x-min="0"
+        databox databox-title="Répartition des immeubles protégés au titre des monuments historiques, selon leur propriétaire (% des immeubles)"
+        databox-source="Ministère de la Culture — base Mérimée (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-proprio" source="proprio-g" label-field="Propriétaire" value-field="n, Part des immeubles (%)"
+        description="Barres horizontales triées : la part des immeubles protégés au titre des monuments historiques détenue par chaque type de propriétaire. Les deux premières barres, mises en évidence, les propriétaires privés (particuliers ou sociétés) et les communes, dépassent chacune 40 % ; toutes les autres restent sous 6 %. Le tableau donne aussi le nombre d'immeubles.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — classés et inscrits n'ont pas les mêmes propriétaires ======================= -->
+  <!-- Part classée PAR propriétaire : ratio de sommes dans chaque groupe (jamais
+       une moyenne de taux). « Autre libellé » (≈ 125 immeubles) écarté : trop petit
+       et hétérogène pour porter un taux. -->
+  <dsfr-data-query id="tx" source="st-n" where="proprio:neq:Autre libellé" group-by="proprio"
+    aggregate="n:sum:n, classe:sum:classe">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tx-n" source="tx"
+    compute="tx = round(classe / n * 100, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="tx-t" source="tx-n" order-by="tx:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="tx-g" source="tx-t"
+    rename="proprio:Propriétaire | tx:Part classée (%)">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-niveau">
+    <h2 id="t-niveau" class="fr-h3">Les privés possèdent surtout des immeubles inscrits, les communes gardent les classés</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          Le classement est le niveau le plus protecteur&nbsp;; l'inscription, le niveau d'entrée. Chez les communes,
+          {{tx_commune:number:0}}&nbsp;% des immeubles sont classés&nbsp;; chez les propriétaires privés, <strong>{{tx_prive:number:0}}&nbsp;%
+          seulement</strong>. Résultat&nbsp;: les privés détiennent {{p_inscrit_prive:number:0}}&nbsp;% des {{inscrit:number}}&nbsp;immeubles
+          inscrits, mais {{p_classe_prive:number:0}}&nbsp;% des {{classe:number}}&nbsp;classés, dont les communes possèdent
+          {{p_classe_commune:number:0}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part des immeubles classés selon le propriétaire">
+      <dsfr-data-chart id="g-niveau" source="tx-g" type="bar" horizontal
+        label-field="Propriétaire" value-field="Part classée (%)" name="Part classée, en tout ou partie (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%" x-min="0" x-max="100"
+        databox databox-title="Part des immeubles classés (en tout ou partie) parmi les immeubles protégés, selon le propriétaire (%)"
+        databox-source="Ministère de la Culture — base Mérimée (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-niveau" source="tx-g" label-field="Propriétaire" value-field="n, classe, Part classée (%)"
+        description="Barres horizontales triées de la plus courte à la plus longue, sur une échelle de 0 à 100 % : pour chaque type de propriétaire, la part de ses immeubles protégés qui sont classés, en tout ou partie, et non seulement inscrits. La première, mise en évidence, est celle des propriétaires privés, autour de 21 % ; les associations et les propriétaires non renseignés sont autour de 30 % ; les communes, l'État et les autres personnes publiques, et les immeubles à plusieurs propriétaires tournent autour de 40 à 45 %. Le tableau donne le nombre d'immeubles et de classés de chaque groupe.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      «&nbsp;Classé&nbsp;»&nbsp;: l'immeuble porte au moins une protection de classement, totale ou partielle, même s'il
+      est inscrit pour le reste (la typologie de protection combine souvent les deux). Les immeubles dont la protection
+      n'est pas renseignée (moins de 1&nbsp;%) comptent au dénominateur, jamais comme classés.
+    </p>
+  </section>
+
+  <!-- ======================= GÉOGRAPHIE — en nombre et par habitant ======================= -->
+  <!-- 104 codes département (dont 2 à « ; » : 01;71 et 12;81, une ligne chacun,
+       perdus par la jointure). Population : 103 lignes, 975/977/978 écartés. -->
+  <dsfr-data-source id="mh-dep" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="3a52af4a-f9da-4dcc-8110-b07774dfb3bc"
+    group-by="Departement_format_numerique"
+    aggregate="Reference:count">
+  </dsfr-data-source>
+  <dsfr-data-source id="pop" api-type="opendatasoft"
+    base-url="https://public.opendatasoft.com"
+    dataset-id="demographyref-france-pop-legale-departement-millesime"
+    where="year(start_year) = 2026 and not dep_code in ('975', '977', '978')"
+    group-by="dep_code, dep_name" aggregate="dep_pop_mun:sum">
+  </dsfr-data-source>
+  <!-- Côté droit unique : un regroupement par dep_code (100 lignes, vérifié à l'API). -->
+  <dsfr-data-join id="dep-j" left="mh-dep" right="pop" on="Departement_format_numerique=dep_code" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="dep" source="dep-j"
+    rename="Departement_format_numerique:code | dep_name:departement | Reference__count:n | dep_pop_mun__sum:pop"
+    compute="densite = round(n / pop * 10000, 1);
+             paris_n = when code = '75' then n else 0;
+             paris_pop = when code = '75' then pop else 0;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-agg" source="dep" group-by="k"
+    aggregate="n:sum:n, pop:sum:pop, densite:max:dmax, densite:min:dmin, paris_n:sum:paris_n, paris_pop:sum:paris_pop, n:count:ndep">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="dep-syn" source="dep-agg"
+    compute="nat = n / pop * 10000;
+             paris_d = paris_n / paris_pop * 10000;
+             fois = dmax / dmin;
+             fois_paris = dmax / (paris_n / paris_pop * 10000)">
+  </dsfr-data-normalize>
+
+  <dsfr-data-query id="top-n" source="dep" order-by="n:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-normalize id="top-n-g" source="top-n" rename="departement:Département | n:Immeubles protégés"></dsfr-data-normalize>
+  <dsfr-data-query id="top-d" source="dep" order-by="densite:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-normalize id="top-d-g" source="top-d" rename="departement:Département | densite:Pour 10 000 habitants"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-geo">
+    <h2 id="t-geo" class="fr-h3">Paris en compte le plus, mais c'est la France rurale qui en porte le plus par habitant</h2>
+    <dsfr-data-repeat source="dep-syn">
+      <template>
+        <p class="odv-lecture">
+          Paris est le premier département en nombre, avec {{paris_n:number}}&nbsp;immeubles protégés. Rapporté à ses
+          habitants, il n'en compte que {{paris_d:number:1}} pour 10&nbsp;000, près de la moyenne nationale
+          ({{nat:number:1}}). Le classement par habitant est celui de la France peu peuplée&nbsp;: <strong>{{dmax:number:1}}
+          pour 10&nbsp;000 habitants en tête</strong>, {{fois_paris:number:0}}&nbsp;fois Paris et {{fois:number:0}}&nbsp;fois le dernier
+          département ({{dmin:number:1}}). Un monument protégé est aussi une charge d'entretien&nbsp;: là où il y en a le plus
+          par habitant, il y a le moins d'habitants pour la porter.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Les dix départements qui comptent le plus d'immeubles protégés">
+          <dsfr-data-chart id="g-top-n" source="top-n-g" type="bar" horizontal
+            label-field="Département" value-field="Immeubles protégés" name="Immeubles protégés"
+            selected-palette="neutral" highlight-index="[0]" x-min="0"
+            databox databox-title="En nombre : les dix départements qui comptent le plus d'immeubles protégés"
+            databox-source="Ministère de la Culture — base Mérimée (data.gouv.fr, API Tabular)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-top-n" source="top-n-g" label-field="Département" value-field="Immeubles protégés, pop, densite"
+            description="Barres horizontales triées : les dix départements qui comptent le plus d'immeubles protégés au titre des monuments historiques. Paris, mis en évidence, arrive en tête avec près de 1 900 immeubles ; les neuf suivants, répartis de la Gironde au Bas-Rhin, en comptent entre 850 et 1 100. Le tableau donne aussi la population et le nombre d'immeubles pour 10 000 habitants.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Les dix départements qui comptent le plus d'immeubles protégés par habitant">
+          <dsfr-data-chart id="g-top-d" source="top-d-g" type="bar" horizontal
+            label-field="Département" value-field="Pour 10 000 habitants" name="Immeubles protégés pour 10 000 habitants"
+            selected-palette="neutral" highlight-index="[0]" x-min="0"
+            databox databox-title="Par habitant : les dix départements qui comptent le plus d'immeubles protégés pour 10 000 habitants"
+            databox-source="Ministère de la Culture — base Mérimée ; INSEE, populations légales 2023 en vigueur en 2026 (public.opendatasoft.com)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-top-d" source="top-d-g" label-field="Département" value-field="n, pop, Pour 10 000 habitants"
+            description="Barres horizontales triées : les dix départements qui comptent le plus d'immeubles protégés pour 10 000 habitants. Tous sont ruraux et peu peuplés, du Massif central au Grand Est ; le premier, mis en évidence, dépasse 28 immeubles pour 10 000 habitants, le dixième en compte environ 17. Paris n'y figure pas. Le tableau donne aussi le nombre d'immeubles et la population.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Population municipale de chaque département, recensement 2023 en vigueur au 1<sup>er</sup>&nbsp;janvier 2026 (INSEE,
+      republiée par Opendatasoft). Mayotte, absente de ce fichier de population, et les deux immeubles rattachés à deux
+      départements à la fois ne sont pas comptés ici.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — de quand datent-ils ======================= -->
+  <!-- 775 libellés de siècle, multivalués « ; » : regroupés au serveur, découpés
+       (`split`), éclatés (`explode`) puis rangés en périodes. Un immeuble à
+       campagnes multiples compte dans chaque siècle cité : les barres somment à
+       plus que le nombre d'immeubles. -->
+  <dsfr-data-source id="mh-siecle" api-type="tabular" lazy
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="3a52af4a-f9da-4dcc-8110-b07774dfb3bc"
+    group-by="Format_abrege_du_siecle_de_construction"
+    aggregate="Reference:count">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="siecle-s" source="mh-siecle"
+    rename="Format_abrege_du_siecle_de_construction:s | Reference__count:n"
+    split="Format_abrege_du_siecle_de_construction:;"
+    compute="renseigne = when is_empty(s) then 0 else n; multi = when len(s) > 1 then n else 0; k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="siecle-e" source="siecle-s" group-by="s" explode="s" aggregate="n:sum:n"></dsfr-data-query>
+  <dsfr-data-normalize id="siecle-o" source="siecle-e"
+    compute="ord = when s = 'Préhistoire' or s = 'Protohistoire' or s = 'Antiquité' or s = 'Antiquité (?)' or s = '1er s.' or s = '2e s.' or s = '3e s.' or s = '4e s.' or s = '5e s.' or s = '6e s.' or s = '7e s.' or s = '8e s.' or s = '9e s.' or s = '10e s.' then 10
+                   when s = '11e s.' then 11 when s = '12e s.' then 12 when s = '13e s.' then 13
+                   when s = '14e s.' then 14 when s = '15e s.' then 15 when s = '16e s.' then 16
+                   when s = '17e s.' then 17 when s = '18e s.' then 18 when s = '19e s.' then 19
+                   when s = '20e s.' or s = '21e s.' then 20 else 99;
+             periode = when ord = 10 then 'Avant le 11e siècle' when ord = 20 then '20e et 21e siècles'
+                       when ord = 99 then 'Sans siècle précis' else ord + 'e siècle'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="siecle" source="siecle-o" group-by="ord, periode" aggregate="n:sum:n" order-by="ord:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="siecle-g" source="siecle" rename="periode:Période | n:Immeubles"></dsfr-data-normalize>
+  <dsfr-data-query id="siecle-syn" source="siecle-s" group-by="k"
+    aggregate="n:sum:total, renseigne:sum:renseigne, multi:sum:multi">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="siecle-syn-n" source="siecle-syn"
+    compute="nr = total - renseigne; p_nr = nr / total * 100; p_multi = multi / renseigne * 100">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-siecle">
+    <h2 id="t-siecle" class="fr-h3">Trois siècles, du 16e au 18e, fournissent le gros des monuments protégés</h2>
+    <dsfr-data-repeat source="siecle-syn-n">
+      <template>
+        <p class="odv-lecture">
+          Chaque barre compte les immeubles dont <em>une</em> campagne de construction date de la période&nbsp;: une église
+          romane agrandie au 16e&nbsp;siècle compte deux fois. C'est le cas de {{p_multi:number:0}}&nbsp;% des immeubles datés,
+          d'où des barres qui somment à plus que le total. Le 16e, le 17e et le 18e&nbsp;siècle dominent, suivis du 12e, du 15e et
+          du 19e&nbsp;&nbsp;; le 20e&nbsp;siècle reste loin derrière. <strong>{{nr:number}}&nbsp;immeubles
+          ({{p_nr:number:0}}&nbsp;%) n'ont aucun siècle renseigné</strong> et ne figurent sur aucune barre.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Immeubles protégés dont une campagne de construction date de chaque période">
+      <dsfr-data-chart id="g-siecle" source="siecle-g" type="bar"
+        label-field="Période" value-field="Immeubles" name="Immeubles dont une campagne date de la période"
+        selected-palette="neutral" highlight-index="[6, 7, 8]" y-min="0"
+        databox databox-title="Immeubles protégés dont une campagne de construction date de chaque période (un immeuble compte dans chaque siècle cité)"
+        databox-source="Ministère de la Culture — base Mérimée (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-siecle" source="siecle-g" label-field="Période" value-field="Immeubles"
+        description="Barres verticales dans l'ordre chronologique : le nombre d'immeubles protégés dont une campagne de construction date de chaque période, d'avant le 11e siècle au 20e siècle, puis une barre pour les dates sans siècle précis (Moyen Âge, limites de siècles). Les 16e, 17e et 18e siècles, mis en évidence, dépassent chacun 8 000 immeubles ; le 12e, le 15e et le 19e en comptent entre 5 800 et 6 700 ; le 11e et le 20e restent autour de 1 300 et 3 000.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <dsfr-data-query id="carte" source="dep" where="code:neq:75"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-carte">
+    <h2 id="t-carte" class="fr-h3">Explorer&nbsp;: combien de monuments protégés pour 10&nbsp;000 habitants dans votre département&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Plus le département est foncé, plus il compte d'immeubles protégés par habitant. Le chiffre affiché sous le titre de
+      la carte est la moyenne nationale pondérée par la population (somme des immeubles sur somme des habitants), pas la
+      moyenne des départements. Paris y figure sans écraser l'échelle. Mayotte, absente du fichier de population, n'a pas
+      de valeur&nbsp;: la carte la peint pourtant d'un bleu vif qui n'appartient pas à l'échelle, ce n'est pas une donnée.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Carte des immeubles protégés pour 10 000 habitants, par département">
+      <dsfr-data-chart id="g-carte" source="dep" type="map"
+        code-field="code" value-field="densite" name="Immeubles protégés pour 10 000 habitants"
+        selected-palette="sequentialAscending"
+        map-summary="weighted" map-summary-weight="pop"
+        databox databox-title="Immeubles protégés au titre des monuments historiques pour 10 000 habitants, par département"
+        databox-source="Ministère de la Culture — base Mérimée ; INSEE, populations légales (public.opendatasoft.com)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="dep" label-field="departement" value-field="n, pop, densite"
+        description="Carte des départements colorés selon le nombre d'immeubles protégés pour 10 000 habitants, du plus clair (moins d'un, en Seine-Saint-Denis) au plus foncé (plus de 28, dans le Cantal). Les teintes foncées dessinent une diagonale peu peuplée, du Lot et de la Dordogne à la Haute-Marne et à la Meuse, en passant par le Massif central ; la petite couronne parisienne, le Nord et les grandes métropoles sont les plus clairs. Le tableau donne les valeurs de chaque département.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- Recherche serveur : la source est paginée par l'API (20 lignes), la
+       recherche part en `or=(Titre…__contains.q,Commune…__contains.q)`, le
+       compteur lit le total serveur. Projection sur 7 colonnes des 82. -->
+  <dsfr-data-source id="mh-liste" api-type="tabular" lazy
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="3a52af4a-f9da-4dcc-8110-b07774dfb3bc"
+    select="Reference, Titre_editorial_de_la_notice, Commune_forme_editoriale, Departement_en_lettres, Typologie_de_la_protection, Statut_juridique_de_l_edifice, Format_abrege_du_siecle_de_construction"
+    server-side page-size="20">
+  </dsfr-data-source>
+
+  <section class="odv-bandeau" aria-labelledby="t-recherche">
+    <div class="fr-container">
+      <h2 id="t-recherche" class="fr-h4">Et près de chez vous&nbsp;?</h2>
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="mh-q" source="mh-liste" server-search
+          fields="Titre_editorial_de_la_notice, Commune_forme_editoriale"
+          count count-label="immeuble protégé|immeubles protégés"
+          label="Nom du monument ou commune" placeholder="Ex. : Conques, abbaye, Vézelay">
+        </dsfr-data-search>
+      </div>
+      <p class="fr-text--xs fr-hint-text fr-mt-1w fr-mb-0">
+        La recherche porte sur le nom du monument et la commune&nbsp;; elle ignore les majuscules mais pas les accents
+        («&nbsp;eglise&nbsp;» ne trouve pas «&nbsp;Église&nbsp;»).
+      </p>
+    </div>
+  </section>
+
+  <div class="fr-container fr-mb-8w">
+    <div class="odv-viz" data-code="Liste des immeubles protégés, recherche par nom ou commune">
+      <dsfr-data-list source="mh-q"
+        columns="Titre_editorial_de_la_notice:Monument, Commune_forme_editoriale:Commune, Departement_en_lettres:Département, Typologie_de_la_protection:Protection, Statut_juridique_de_l_edifice:Propriétaire, Format_abrege_du_siecle_de_construction:Siècle(s), Reference:Référence Mérimée"
+        pagination="20" count-label="immeuble protégé|immeubles protégés"
+        caption="Immeubles protégés au titre des monuments historiques (base Mérimée)">
+      </dsfr-data-list>
+    </div>
+  </div>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>Des propriétaires tels que publiés.</strong> Le fichier en écrit 318&nbsp;formes différentes&nbsp;:
+        «&nbsp;propriété privée&nbsp;», «&nbsp;propriété d'une personne privée&nbsp;», «&nbsp;Propriété d'une personne
+        privée&nbsp;», «&nbsp;proprété privée&nbsp;»… La page les regroupe par mots&nbsp;: un libellé qui cite plusieurs
+        propriétaires (avec un point-virgule) va dans «&nbsp;Plusieurs propriétaires&nbsp;», puis «&nbsp;commune&nbsp;»,
+        «&nbsp;privée&nbsp;» (particuliers et sociétés), «&nbsp;association&nbsp;» (y compris cultuelles et diocésaines), puis
+        l'État, les établissements publics et les autres collectivités. Une centaine d'immeubles aux libellés isolés
+        («&nbsp;propriété publique&nbsp;», État étranger, organisme professionnel) restent à part. La seule modalité
+        «&nbsp;propriété privée&nbsp;» en regroupe près de quatre sur dix à elle seule (relevé du 26&nbsp;septembre 2026).</li>
+      <li><strong>Les objets mobiliers.</strong> Ce fichier ne recense que les immeubles (édifices, sites, vestiges). Les
+        objets protégés (retables, cloches, orgues) sont dans une autre base, Palissy.</li>
+      <li><strong>L'état des monuments ni l'argent public qui les entretient.</strong> Le fichier dit qui possède, pas qui
+        paie ni dans quel état est l'édifice.</li>
+      <li><strong>Une évolution.</strong> Le fichier donne l'état du jour de sa dernière mise à jour hebdomadaire, sans
+        historique&nbsp;: la page ne dit pas combien d'immeubles ont été protégés chaque année.</li>
+      <li><strong>Les communes de la protection, rapportées aux communes d'aujourd'hui.</strong> Le code commune du fichier est
+        celui en vigueur à la date de la protection&nbsp;: fusions de communes comprises, il ne se joint pas proprement à un
+        référentiel actuel. La page s'en tient aux départements.</li>
+      <li><strong>Mayotte et Saint-Pierre-et-Miquelon dans les calculs par habitant.</strong> Mayotte n'a pas de ligne dans le
+        fichier de population utilisé&nbsp;; Saint-Pierre-et-Miquelon y est publié avec une population mille fois trop
+        grande (près de 6&nbsp;millions d'habitants) et la page l'écarte. Leurs 16&nbsp;immeubles chacun restent comptés
+        partout ailleurs.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création sur la liste des immeubles protégés du ministère de la Culture, 46&nbsp;760
+        lignes et 82&nbsp;colonnes servies par l'API Tabular. Le cadrage annonçait «&nbsp;un sur cinq classé, deux sur cinq
+        privés&nbsp;»&nbsp;: les deux chiffres ne comptaient qu'une modalité exacte sur des champs multivalués. Rejoués sur
+        tous les libellés, ils deviennent un sur trois et plus de quatre sur dix, et le croisement des deux champs a donné
+        l'histoire de la page&nbsp;: les privés possèdent les inscrits, les communes les classés.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Ne jamais charger 95&nbsp;Mo.</strong> <code>group-by</code> + <code>aggregate="Reference:count"</code>
+              sur la source Tabular partent au serveur&nbsp;: 785&nbsp;groupes statut × protection en quatre pages de 200, les
+              départements en une page.</li>
+            <li><strong>Recoder 318&nbsp;libellés.</strong> Un <code>compute</code> à <code>when … contains()</code> range chaque
+              groupe dans sept familles, sans regex et sans script.</li>
+            <li><strong>Les siècles multivalués.</strong> <code>split="Format_abrege_du_siecle_de_construction:;"</code> puis <code>explode="s"</code> sur la
+              query&nbsp;: chaque siècle cité compte, et la page peut le dire.</li>
+            <li><strong>La recherche sur 46&nbsp;760&nbsp;lignes.</strong> <code>server-search</code> sur une source
+              <code>server-side</code>&nbsp;: une page de 20, un total serveur, sept colonnes par <code>select</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas de population dans la famille Culture.</strong> Il a fallu une deuxième plateforme
+              (populations légales INSEE sur public.opendatasoft.com), jointe sur le code département.</li>
+            <li><strong>Une population mille fois trop grande.</strong> Saint-Pierre-et-Miquelon publié à 5,97&nbsp;millions
+              d'habitants dans ce fichier&nbsp;: aucune erreur, seulement une densité absurde si on ne l'écarte pas.</li>
+            <li><strong><code>split</code> avant <code>rename</code>.</strong> Écrit sur le nom renommé
+              (<code>split="s:;"</code>), le découpage n'a rien fait, sans message&nbsp;: les siècles sont restés des
+              combinaisons et le graphique comptait «&nbsp;16e s.;17e s.&nbsp;» hors de toute barre. <code>split</code>
+              s'exécute avant <code>rename</code>&nbsp;: il faut y écrire le nom d'origine de la colonne.</li>
+            <li><strong>Un territoire sans donnée peint comme une valeur.</strong> Mayotte, absente de la jointure, reçoit
+              sur la carte de DSFR Chart un bleu vif (<code>#5C68E5</code>) hors de l'échelle séquentielle, au lieu d'un
+              gris «&nbsp;sans donnée&nbsp;». La page ne peut que le dire.</li>
+            <li><strong>Le libellé de siècle en double.</strong> 99&nbsp;immeubles citent deux fois le même siècle
+              («&nbsp;16e s.;16e s.&nbsp;»)&nbsp;: <code>explode</code> les compte deux fois dans la même barre (écart de 0,1&nbsp;% au plus).</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Compter sans charger 46&nbsp;760&nbsp;lignes</td><td><code>dsfr-data-source api-type="tabular" group-by aggregate</code></td><td>Natif (serveur)</td></tr>
+            <tr><td>Regrouper 318&nbsp;libellés de propriétaire</td><td><code>normalize compute</code> (<code>when</code>, <code>contains</code>)</td><td>Natif</td></tr>
+            <tr><td>Parts et taux par propriétaire</td><td><code>query share_percent</code>, ratio de sommes par <code>compute</code></td><td>Natif</td></tr>
+            <tr><td>Siècles multivalués</td><td><code>normalize split</code> + <code>query explode</code></td><td>Natif</td></tr>
+            <tr><td>Densité par habitant</td><td><code>dsfr-data-join</code> Tabular × Opendatasoft</td><td>Natif (deux plateformes)</td></tr>
+            <tr><td>Carte départementale, moyenne pondérée</td><td><code>type="map"</code> + <code>map-summary="weighted"</code></td><td>Natif</td></tr>
+            <tr><td>Recherche dans le jeu entier</td><td><code>dsfr-data-search server-search</code> + <code>dsfr-data-list</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un gros jeu qu'on ne charge jamais.</strong> 95&nbsp;Mo et 82&nbsp;colonnes se lisent en quatre regroupements
+          serveur et une recherche paginée&nbsp;; <code>dsfr-data</code> fait le reste dans la balise. Le vrai coût est
+          éditorial&nbsp;: des champs multivalués et 318&nbsp;façons d'écrire «&nbsp;propriétaire&nbsp;», qui font dire au même
+          fichier «&nbsp;un sur cinq&nbsp;» ou «&nbsp;un sur trois&nbsp;» selon qu'on lit une modalité ou toutes.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; la carte départementale est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

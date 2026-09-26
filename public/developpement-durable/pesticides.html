@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pesticides : le kilo n'est pas le danger — open-data-viz</title>
+  <meta name="description" content="Les substances les plus dangereuses ont presque disparu des achats de pesticides, mais le tonnage reste : à l'hectare, les vignobles achètent le plus, et c'est surtout du soufre. Création avec dsfr-data sur deux jeux du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — D5 de docs/portail-developpement-durable/proposition.md,
+       le « cas limite » du portail : le fichier départemental des achats de
+       pesticides compte 1 390 685 lignes (dept × produit × substance, 2013-2024),
+       DiDo n'agrège pas, Tabular ne le sert pas.
+
+       STRATÉGIE « GROS JEU » RETENUE (mesurée le 2026-09-26) :
+       - une année, filtrée au serveur (ANNEE=eq:2024) et réduite à 5 colonnes
+         (columns=) : 108 803 lignes, ≈ 13 Mo, ≈ 4 s. C'est elle qui porte les KPI,
+         les classes de danger, les kg/ha et la carte. L'année est donc ÉCRITE dans
+         l'URL : c'est le seul millésime en dur de la page, et il est dit en page ;
+       - deux séries longues filtrées sur une modalité, 2 colonnes : CMR1 (60 837
+         lignes, 2,8 Mo) et glyphosate (60 790 lignes, 2,8 Mo, source lazy) ;
+       - l'explorateur charge UN département, toutes années, par un filtre serveur
+         (CODE_DEPARTEMENT_ACHETEUR=eq:{{code}}) : Gironde 17 565 lignes, 3,0 Mo.
+         La source est dans le gabarit d'un dsfr-data-repeat piloté par une facette
+         select à défaut : changer de département = une nouvelle requête.
+       - NON CHARGÉ : le total national par année (tout le fichier, 1,39 M lignes).
+         La page le dit dans « ce qu'elle ne montre pas ».
+       DiDo refuse au-delà de 3 connexions simultanées : 3 sources au montage
+       (ach, itdd, cmr), le glyphosate et l'explorateur partent à l'approche.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué le 2026-09-26) :
+       - la SAU 2024 est publiée dans l'ITDD : kg/ha sur la même année que les achats.
+         Gironde 16,5 kg/ha (et non 16,1), France 2,56 kg/ha ;
+       - la corrélation « part de bio / kg par ha » r = +0,71 du cadrage est un
+         artefact des Hauts-de-Seine (1 ha de SAU, 100 % bio, 13 001 kg/ha) : sans eux
+         r = +0,37 (99 dép.), +0,39 avec le seuil de 10 000 ha (96 dép.). Le paradoxe
+         n'est donc PAS affirmé en page ; ce qui tient, c'est la part de soufre et de
+         cuivre dans les kilos des vignobles ;
+       - le glyphosate n'a pas baissé : 8 176 t en 2024, au niveau d'avant 2019.
+       ========================================================================== -->
+
+  <!-- ---------- Achats 2024, France entière (le gros chargement) ---------- -->
+  <dsfr-data-source id="ach"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/6fc4f14f-8510-48bb-82dc-9f29e3619761/json?ANNEE=eq:2024&amp;columns=ANNEE,CODE_DEPARTEMENT_ACHETEUR,DANGER_SUBSTANCE,UAB,QUANTITE_SUBSTANCE">
+  </dsfr-data-source>
+  <!-- Indicatrices ligne à ligne. Une quantité « na » reste « na » dans la branche
+       then, et la somme l'exclut (toNumber strict) ; `na` compte ces cellules. -->
+  <dsfr-data-normalize id="ach-n" source="ach"
+    compute="kg_uab = when UAB = 'uab' then QUANTITE_SUBSTANCE else 0;
+             kg_cmr1 = when DANGER_SUBSTANCE = 'CMR1' then QUANTITE_SUBSTANCE else 0;
+             kg_cmr = when DANGER_SUBSTANCE = 'CMR1' or DANGER_SUBSTANCE = 'CMR2' then QUANTITE_SUBSTANCE else 0;
+             na = when QUANTITE_SUBSTANCE = 'na' then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-a" source="ach-n" group-by="CODE_DEPARTEMENT_ACHETEUR, ANNEE"
+    aggregate="QUANTITE_SUBSTANCE:sum:kg, kg_uab:sum:s_uab, kg_cmr1:sum:s_cmr1, kg_cmr:sum:s_cmr, na:sum:n_na">
+  </dsfr-data-query>
+  <dsfr-data-query id="nat" source="dep-a" group-by="ANNEE"
+    aggregate="kg:sum:kg, s_uab:sum:s_uab, s_cmr1:sum:s_cmr1, s_cmr:sum:s_cmr, n_na:sum:n_na">
+  </dsfr-data-query>
+  <dsfr-data-query id="dep-ind" source="dep-a" where="CODE_DEPARTEMENT_ACHETEUR:eq:00"></dsfr-data-query>
+
+  <!-- Classes de danger : ordre fixe (du plus au moins dangereux), pour que la mise
+       en évidence des deux classes CMR ne dépende pas du tonnage. -->
+  <dsfr-data-query id="dang-q" source="ach" group-by="DANGER_SUBSTANCE"
+    aggregate="QUANTITE_SUBSTANCE:sum:kg, kg:share_percent:part">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="dang-n" source="dang-q"
+    compute="Tonnes = round(kg / 1000, 0);
+             Part = round(part, 1);
+             rang = when DANGER_SUBSTANCE = 'CMR1' then 1 when DANGER_SUBSTANCE = 'CMR2' then 2 when DANGER_SUBSTANCE = 'Sante-A' then 3 when DANGER_SUBSTANCE = 'Env-A' then 4 when DANGER_SUBSTANCE = 'Env-B' then 5 else 6;
+             Classe = when DANGER_SUBSTANCE = 'CMR1' then 'CMR avérée ou présumée (CMR1)' when DANGER_SUBSTANCE = 'CMR2' then 'CMR suspectée (CMR2)' when DANGER_SUBSTANCE = 'Sante-A' then 'Toxique pour la santé (Santé A)' when DANGER_SUBSTANCE = 'Env-A' then 'Dangereuse pour l’environnement (Env A)' when DANGER_SUBSTANCE = 'Env-B' then 'Dangereuse pour l’environnement (Env B)' else 'Aucune de ces classes (Autre)'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dang" source="dang-n" order-by="rang:asc"></dsfr-data-query>
+  <dsfr-data-query id="dang-autre" source="dang-n" where="DANGER_SUBSTANCE:eq:Autre"></dsfr-data-query>
+
+  <!-- ---------- ITDD : surface agricole (saue) et part de bio, par département ---------- -->
+  <dsfr-data-source id="itdd"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/aa011e5d-e888-469d-8e72-a8af4f73d123/json?VARIABLE=in:saue,part_agribio_surf">
+  </dsfr-data-source>
+  <dsfr-data-unpivot id="itdd-l" source="itdd"
+    id-cols="CODGEO_CODE, CODGEO_LIBELLE, VARIABLE"
+    value-cols-pattern="A{YYYY}" var-name="annee" var-format="{YYYY}" value-name="v" drop-empty>
+  </dsfr-data-unpivot>
+  <!-- Même année que les achats, lue dans la donnée (jointure interne sur l'année). -->
+  <dsfr-data-join id="itdd-an" left="itdd-l" right="nat" on="annee=ANNEE" type="inner" prefix-right="n_"></dsfr-data-join>
+  <dsfr-data-query id="sau" source="itdd-an" where="VARIABLE:eq:saue"></dsfr-data-query>
+  <dsfr-data-query id="bio" source="itdd-an" where="VARIABLE:eq:part_agribio_surf"></dsfr-data-query>
+  <dsfr-data-join id="itdd-d" left="sau" right="bio" on="CODGEO_CODE" type="left" prefix-right="b_"></dsfr-data-join>
+  <dsfr-data-query id="sau-tot" source="sau" group-by="annee" aggregate="v:sum:sau_tot, v:count:n_dep"></dsfr-data-query>
+
+  <!-- France : total des achats (département « 00 » indéterminé compris) / SAU totale. -->
+  <dsfr-data-join id="fr-j" left="nat" right="sau-tot" on="ANNEE=annee" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="fr" source="fr-j"
+    compute="t = kg / 1000;
+             kgha = kg / sau_tot;
+             t_cmr1 = s_cmr1 / 1000;
+             p_cmr1 = s_cmr1 / kg * 100;
+             p_cmr = s_cmr / kg * 100;
+             p_uab = s_uab / kg * 100;
+             k = 'fr'">
+  </dsfr-data-normalize>
+
+  <!-- Départements : achats × SAU de la même année. Paris (pas de SAU) et le code 00
+       (acheteur indéterminé) sortent par la jointure interne. -->
+  <dsfr-data-join id="dep-j" left="dep-a" right="itdd-d" on="CODE_DEPARTEMENT_ACHETEUR=CODGEO_CODE" type="inner" prefix-right="i_"></dsfr-data-join>
+  <dsfr-data-normalize id="dep" source="dep-j"
+    compute="code = CODE_DEPARTEMENT_ACHETEUR;
+             sau = v;
+             Tonnes = round(kg / 1000, 0);
+             kgha = kg / v;
+             kgha_r = round(kg / v, 1);
+             kgha_uab = round(s_uab / v, 1);
+             kgha_aut = round((kg - s_uab) / v, 1);
+             kgha_aut_x = (kg - s_uab) / v;
+             p_uab = round(s_uab / kg * 100, 0);
+             p_cmr = round(s_cmr / kg * 100, 0);
+             bio = round(b_v, 1);
+             k = 'fr'"
+    rename="CODGEO_LIBELLE:Département">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-f" source="dep" where="sau:gte:10000"></dsfr-data-query>
+  <dsfr-data-query id="dep-petits" source="dep" where="sau:lt:10000" order-by="kgha:desc"></dsfr-data-query>
+  <dsfr-data-query id="dep-top" source="dep-f" order-by="kgha:desc" limit="15"></dsfr-data-query>
+  <dsfr-data-query id="dep-max" source="dep-f" order-by="kgha:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-aut" source="dep-f" order-by="kgha_aut_x:desc" limit="4"></dsfr-data-query>
+  <dsfr-data-query id="dep-n" source="dep-f" group-by="k" aggregate="kgha:count:n"></dsfr-data-query>
+  <dsfr-data-join id="dep-max-fr" left="dep-max" right="fr" on="k" type="inner" prefix-right="fr_"></dsfr-data-join>
+  <dsfr-data-normalize id="dep-max-r" source="dep-max-fr" compute="fois = kgha / fr_kgha"></dsfr-data-normalize>
+
+  <!-- ---------- Substances CMR1, toutes années (filtre serveur sur la classe) ---------- -->
+  <dsfr-data-source id="cmr"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/6fc4f14f-8510-48bb-82dc-9f29e3619761/json?DANGER_SUBSTANCE=eq:CMR1&amp;columns=ANNEE,QUANTITE_SUBSTANCE">
+  </dsfr-data-source>
+  <!-- 2013, première année de la base, est écartée : un tiers de lignes de moins que
+       les années suivantes (91 474 contre 130 966 en 2015, compté le 2026-09-26). -->
+  <dsfr-data-query id="cmr-q" source="cmr" where="ANNEE:gte:2014" group-by="ANNEE"
+    aggregate="QUANTITE_SUBSTANCE:sum:kg" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="cmr-an" source="cmr-q" compute="Tonnes = round(kg / 1000, 0); k = 'fr'"></dsfr-data-normalize>
+  <dsfr-data-query id="cmr-max" source="cmr-an" order-by="kg:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="cmr-der" source="cmr-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="cmr-evo" left="cmr-der" right="cmr-max" on="k" type="inner" prefix-right="m_"></dsfr-data-join>
+  <dsfr-data-normalize id="cmr-evo-r" source="cmr-evo" compute="baisse = (m_kg - kg) / m_kg * 100"></dsfr-data-normalize>
+  <dsfr-data-join id="chapo" left="fr" right="cmr-evo-r" on="k" type="inner" prefix-right="c_"></dsfr-data-join>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Pesticides : le kilo n'est pas le danger</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Pesticides&nbsp;: le kilo n'est pas le danger — la Gironde en achète six fois la moyenne à l'hectare, dont près de la moitié de soufre</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="chapo">
+        <template>
+          En {{ANNEE}}, <strong>{{t:number:0}}&nbsp;tonnes de substances actives</strong> de pesticides ont été achetées
+          en France, {{kgha:number:2}}&nbsp;kg par hectare de surface agricole.
+          Les plus dangereuses — cancérogènes, mutagènes ou toxiques pour la reproduction avérées — n'en font
+          plus que <strong>{{t_cmr1:number:0}}&nbsp;tonnes</strong>, contre {{m_Tonnes:number:0}} en {{m_ANNEE}}&nbsp;:
+          {{baisse:number:0}}&nbsp;% de moins.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="dep-max-r">
+        <template>
+          Mais le poids ne dit pas le danger&nbsp;: le département qui en achète le plus à l'hectare, la {{Département}}
+          ({{kgha:number:1}}&nbsp;kg, {{fois:number:1}}&nbsp;fois la moyenne), achète surtout des substances autorisées
+          en agriculture biologique — {{p_uab:number:0}}&nbsp;% de ses kilos, du soufre et du cuivre pour la vigne.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: achats de produits phytosanitaires
+      par département de l'acheteur (Banque nationale des ventes des distributeurs, BNV-D), en kilos de
+      substance active, hors adjuvants&nbsp;; indicateurs territoriaux de développement durable (ITDD) pour la
+      surface agricole utilisée et la part de bio. <strong>Année chargée&nbsp;: 2024</strong>, la dernière publiée
+      au 26&nbsp;septembre 2026 — le fichier est trop lourd pour être lu en entier, voir plus bas.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="fr" value="t:max" decimals="0" unit="t" span="3"
+        heading="Substances actives achetées" label="France entière, 2024"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fr" value="kgha:max" decimals="2" unit="kg/ha" span="3"
+        heading="Par hectare agricole" label="achats rapportés à la surface agricole utilisée, 2024"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fr" value="t_cmr1:max" decimals="0" unit="t" span="3"
+        heading="Substances CMR avérées" label="catégorie 1, 2024"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fr" value="p_uab:max" decimals="0" unit="%" span="3"
+        heading="Utilisables en bio" label="part des kilos achetés, 2024"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= ACCROCHE — le danger recule ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-cmr">
+    <h2 id="t-cmr" class="fr-h3">Les substances les plus dangereuses ont presque disparu des achats</h2>
+    <dsfr-data-repeat source="cmr-evo-r">
+      <template>
+        <p class="odv-lecture">
+          Les substances classées cancérogènes, mutagènes ou toxiques pour la reproduction de catégorie&nbsp;1 (CMR1)
+          pesaient {{m_Tonnes:number:0}}&nbsp;tonnes en {{m_ANNEE}}. Retraits d'autorisation successifs (mancozèbe,
+          glufosinate, thiaclopride…) et redevance majorée les ont fait tomber à <strong>{{Tonnes:number:0}}&nbsp;tonnes
+          en {{ANNEE}}</strong>, {{baisse:number:1}}&nbsp;% de moins.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Achats de substances CMR1 par année">
+      <dsfr-data-chart id="g-cmr" source="cmr-an" type="bar"
+        label-field="ANNEE" value-field="Tonnes" name="Substances CMR1 achetées (t)"
+        selected-palette="neutral" unit-tooltip="t"
+        databox databox-title="Achats de substances CMR de catégorie 1, France entière, par année (tonnes de substance active)"
+        databox-source="SDES — BNV-D, achats par département (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-cmr" source="cmr-an" label-field="ANNEE" value-field="Tonnes"
+        description="Barres verticales, une par année de 2014 à la dernière publiée : tonnes de substances CMR de catégorie 1 achetées en France. Les achats oscillent entre environ 2 500 et 6 000 tonnes jusqu'en 2018, avec des pics en 2014 et en 2018, puis s'effondrent : environ 2 000 tonnes en 2019, 1 000 en 2020, moins de 150 à partir de 2022 et quelques dizaines la dernière année.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Année 2013 écartée&nbsp;: c'est la première année de la base, qui compte un tiers de lignes de moins que les
+      suivantes. 2018 est une année d'achats anticipés, avant la hausse de la redevance pour pollutions diffuses au
+      1<sup>er</sup>&nbsp;janvier 2019&nbsp;: son pic est en partie du stock.
+    </p>
+  </section>
+
+  <!-- ======================= PREUVE — mais pas le kilo ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dang">
+    <h2 id="t-dang" class="fr-h3">Aujourd'hui, un kilo sur six reste suspecté cancérogène, mutagène ou reprotoxique</h2>
+    <dsfr-data-repeat source="fr">
+      <template>
+        <p class="odv-lecture">
+          En {{ANNEE}}, les CMR avérées ne pèsent plus que {{p_cmr1:number:1}}&nbsp;% des kilos achetés. Mais avec les
+          CMR <em>suspectées</em> (catégorie&nbsp;2, comme le folpel ou le S-métolachlore), la part monte à
+          <strong>{{p_cmr:number:1}}&nbsp;%</strong>. Et la classe la plus lourde est celle des substances sans
+          mention de danger particulière, où l'on trouve le soufre, le kaolin et les phosphonates.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Achats par classe de danger">
+      <dsfr-data-chart id="g-dang" source="dang" type="bar" horizontal
+        label-field="Classe" value-field="Tonnes" name="Substances achetées (t)"
+        selected-palette="neutral" highlight-index="[0, 1]" unit-tooltip="t"
+        databox databox-title="Substances actives achetées par classe de danger, France entière, 2024 (tonnes)"
+        databox-source="SDES — BNV-D, achats par département (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dang" source="dang" label-field="Classe" value-field="Tonnes, Part"
+        description="Barres horizontales, une par classe de danger, rangées de la plus dangereuse à la moins classée ; les deux classes CMR sont mises en évidence. La barre des CMR avérées est presque invisible, quelques dizaines de tonnes. Celle des CMR suspectées dépasse 11 000 tonnes. Les deux classes les plus lourdes sont les substances dangereuses pour l'environnement (Env A, environ 25 000 tonnes, dont le glyphosate et les sels de cuivre) et les substances sans mention (Autre, environ 29 000 tonnes, dont le soufre). Le tableau donne aussi la part de chaque classe.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Classes telles que publiées dans le jeu (colonne «&nbsp;danger associé à la substance&nbsp;»), une par
+      substance&nbsp;; «&nbsp;CMR&nbsp;» signifie cancérogène, mutagène ou toxique pour la reproduction. Le classement dit la nature du danger, pas la dose épandue ni l'exposition.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — le glyphosate (lazy) ======================= -->
+  <dsfr-data-source id="gly" lazy
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/6fc4f14f-8510-48bb-82dc-9f29e3619761/json?SUBSTANCE=eq:glyphosate&amp;columns=ANNEE,QUANTITE_SUBSTANCE">
+  </dsfr-data-source>
+  <dsfr-data-query id="gly-q" source="gly" where="ANNEE:gte:2014" group-by="ANNEE"
+    aggregate="QUANTITE_SUBSTANCE:sum:kg" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="gly-an" source="gly-q" compute="Tonnes = round(kg / 1000, 0); k = 'fr'"></dsfr-data-normalize>
+  <dsfr-data-query id="gly-max" source="gly-an" order-by="kg:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="gly-min" source="gly-an" order-by="kg:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="gly-der" source="gly-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="gly-j1" left="gly-der" right="gly-max" on="k" type="inner" prefix-right="m_"></dsfr-data-join>
+  <dsfr-data-join id="gly-j" left="gly-j1" right="gly-min" on="k" type="inner" prefix-right="n_"></dsfr-data-join>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-gly">
+    <h2 id="t-gly" class="fr-h3">Le glyphosate, lui, est revenu à son niveau d'avant 2019</h2>
+    <dsfr-data-repeat source="gly-j">
+      <template>
+        <p class="odv-lecture">
+          Le plus connu des herbicides n'est pas classé CMR dans ce jeu&nbsp;: il ne profite pas du recul des
+          substances les plus dangereuses. Après le pic de {{m_ANNEE}} ({{m_Tonnes:number:0}}&nbsp;tonnes, achats
+          anticipés avant la hausse de la redevance) et un creux à {{n_Tonnes:number:0}}&nbsp;tonnes en {{n_ANNEE}},
+          les achats remontent à <strong>{{Tonnes:number:0}}&nbsp;tonnes en {{ANNEE}}</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Achats de glyphosate par année">
+      <dsfr-data-chart id="g-gly" source="gly-an" type="bar"
+        label-field="ANNEE" value-field="Tonnes" name="Glyphosate acheté (t)"
+        selected-palette="neutral" unit-tooltip="t"
+        databox databox-title="Achats de glyphosate, France entière, par année (tonnes de substance active)"
+        databox-source="SDES — BNV-D, achats par département (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-gly" source="gly-an" label-field="ANNEE" value-field="Tonnes"
+        description="Barres verticales, une par année depuis 2014 : tonnes de glyphosate achetées en France. Autour de 8 000 tonnes de 2014 à 2017, pic au-dessus de 9 000 en 2018, chute sous 6 000 en 2019, remontée à 8 500 en 2020, nouveau creux sous 6 000 en 2022, puis remontée au-dessus de 8 000 la dernière année. Pas de tendance à la baisse sur la période.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LA RÉVÉLATION — le kilo à l'hectare ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ha">
+    <h2 id="t-ha" class="fr-h3">À l'hectare, les vignobles achètent le plus — et d'abord des substances de l'agriculture bio</h2>
+    <dsfr-data-repeat source="dep-max-r">
+      <template>
+        <p class="odv-lecture">
+          Rapportés à la surface agricole, les achats classent en tête les départements de vigne. La {{Département}}
+          achète {{kgha:number:1}}&nbsp;kg de substances actives par hectare, {{fois:number:1}}&nbsp;fois la moyenne
+          nationale&nbsp;; mais {{kgha_uab:number:1}}&nbsp;kg sont des substances <strong>utilisables en agriculture
+          biologique</strong> — soufre et cuivre surtout, lourds car épandus à forte dose, contre le mildiou et l'oïdium.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les 15 départements qui achètent le plus de pesticides à l'hectare">
+      <dsfr-data-chart id="g-ha" source="dep-top" type="bar" horizontal stacked
+        label-field="Département"
+        value-field="kgha_uab:Substances utilisables en bio"
+        value-fields="kgha_aut:Autres substances"
+        unit-tooltip="kg/ha"
+        databox databox-title="Les 15 départements qui achètent le plus de substances actives par hectare agricole, 2024 (kg/ha)"
+        databox-source="SDES — BNV-D (DiDo) ; SDES / Insee — ITDD, surface agricole utilisée" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ha" source="dep-top" label-field="Département" value-field="kgha_uab, kgha_aut, kgha_r, bio"
+        description="Barres horizontales empilées, les quinze départements aux plus forts achats par hectare de surface agricole, triés du plus fort au plus faible. Chaque barre sépare les substances utilisables en agriculture biologique et les autres. La Gironde arrive loin devant, suivie du Vaucluse, du Gard, de l'Hérault, du Var, des Bouches-du-Rhône, des Pyrénées-Orientales et de l'Aude : tous viticoles, et chez tous la part utilisable en bio est la plus grosse. Plus bas viennent la Marne, la Somme ou le Pas-de-Calais, où les autres substances dominent. Le tableau donne aussi le total et la part de surfaces en bio.">
+      </dsfr-data-a11y>
+    </div>
+    <div class="odv-lecture">
+      Sans les substances utilisables en bio, le classement change de géographie. Les plus forts achats par hectare
+      des autres substances&nbsp;:
+      <dsfr-data-repeat source="dep-aut">
+        <template>
+          {{Département}} ({{kgha_aut:number:1}}&nbsp;kg/ha)&nbsp;;
+        </template>
+      </dsfr-data-repeat>
+      la vigne bordelaise reste en tête, mais les grandes plaines céréalières et betteravières du Nord la suivent.
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      «&nbsp;Utilisable en bio&nbsp;» est une propriété de la <em>substance</em> (colonne UAB du jeu), pas de
+      l'exploitation qui l'achète&nbsp;: un viticulteur conventionnel qui traite au soufre est compté du même côté
+      qu'un viticulteur bio. Les quantités à usage non renseigné sont rangées avec les autres substances.
+    </p>
+    <dsfr-data-repeat source="dep-petits">
+      <template>
+        <p class="fr-text--xs fr-hint-text fr-mb-0">
+          Écarté des classements et de la carte&nbsp;: {{Département}}, {{sau:number:0}}&nbsp;ha de surface agricole
+          pour {{Tonnes:number:0}}&nbsp;t achetées, soit {{kgha:number:0}}&nbsp;kg/ha.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Le kilo est compté à <strong>l'adresse de l'acheteur</strong>, pas sur la parcelle traitée&nbsp;: un
+      département presque sans terre agricole qui abrite des sièges de distributeurs ou de coopératives affiche
+      des ratios absurdes. Les départements de moins de 10&nbsp;000&nbsp;ha de surface agricole sont donc écartés.
+      Paris, sans surface agricole publiée, n'apparaît pas.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — la carte et le tableau ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-carte">
+    <h2 id="t-carte" class="fr-h3">Et dans mon département&nbsp;? La carte des achats à l'hectare suit celle de la vigne</h2>
+    <div class="odv-chart-slot odv-viz" data-code="Carte des achats de pesticides par hectare agricole">
+      <dsfr-data-chart id="g-carte" source="dep-f" type="map"
+        code-field="code" value-field="kgha_r" name="Substances actives achetées (kg/ha)" unit-tooltip="kg/ha"
+        selected-palette="sequentialAscending" map-summary="none"
+        databox databox-title="Substances actives achetées par hectare de surface agricole utilisée, par département, 2024 (kg/ha)"
+        databox-source="SDES — BNV-D (DiDo) ; SDES / Insee — ITDD" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="dep-f" label-field="Département" value-field="kgha_r"
+        description="Carte des départements colorés selon les kilos de substances actives achetés par hectare agricole. Les teintes les plus foncées dessinent le Bordelais et l'arc méditerranéen, du Var aux Pyrénées-Orientales, avec le Vaucluse et le Gard ; la Champagne, le Beaujolais et la Charente ressortent à un niveau intermédiaire, comme les plaines du Nord ; le Massif central, les Alpes et les outre-mer sont les plus clairs. Les départements écartés (surface agricole trop petite) sont peints d'un bleu uni qui ne porte aucune valeur. Le tableau ci-dessous donne toutes les valeurs, triables.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="dep-n">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          {{n}}&nbsp;départements. Les départements écartés (moins de 10&nbsp;000&nbsp;ha agricoles, dont Mayotte) sont
+          peints par la carte d'un bleu uni qui n'appartient pas à l'échelle&nbsp;: ce bleu ne porte aucune valeur.
+          Aucun résumé national n'est affiché sur la carte&nbsp;: le ratio national, en tête de page, compte aussi les
+          achats sans département connu et les départements écartés.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-list source="dep-f"
+      columns="Département:Département, code:Code, Tonnes:Substances achetées (t), kgha_r:Par hectare agricole (kg/ha), p_uab:Dont utilisables en bio (%), p_cmr:Dont CMR avérées ou suspectées (%), bio:Surfaces en bio (%)"
+      sort="kgha_r:desc" search pagination="15" count-label="département|départements" export="csv"
+      caption="Achats de substances actives de pesticides par département, 2024 : tonnes, kilos par hectare agricole, part utilisable en bio, part CMR, et part des surfaces cultivées en bio">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= EXPLORATION — un département, toutes années ======================= -->
+  <!-- Filtre SERVEUR par département : la facette (select à défaut, donc toujours
+       une valeur) émet une seule ligne ; le répéteur estampe pour elle une source
+       dont l'URL porte le code. Changer de département retire la ligne et en
+       estampe une autre : une requête DiDo par choix, jamais le fichier entier. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dep">
+    <h2 id="t-dep" class="fr-h3">Un département, douze ans d'achats et ses substances les plus lourdes</h2>
+    <p class="fr-text--sm">
+      Choisissez un département&nbsp;: la page interroge alors DiDo pour lui seul, toutes années confondues
+      (de quelques dizaines de kilo-octets à près de 4&nbsp;Mo selon le département).
+    </p>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-5">
+        <dsfr-data-facets id="dep-choix" source="dep"
+          fields="code" display="code:select"
+          labels="code:Département"
+          value-labels="code:Département"
+          default="code:33" sort="code:alpha"
+          max-values="200" hide-counts></dsfr-data-facets>
+      </div>
+    </div>
+    <dsfr-data-repeat source="dep-choix" key-field="code" lazy>
+      <template>
+        <h3 class="fr-h5 fr-mt-4w">{{Département}}&nbsp;: {{kgha:number:1}}&nbsp;kg par hectare agricole en {{ANNEE}}, dont {{p_uab}}&nbsp;% de substances utilisables en bio</h3>
+        <dsfr-data-source id="d-{{code}}"
+          url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/6fc4f14f-8510-48bb-82dc-9f29e3619761/json?CODE_DEPARTEMENT_ACHETEUR=eq:{{code}}&amp;columns=ANNEE,SUBSTANCE,UAB,DANGER_SUBSTANCE,QUANTITE_SUBSTANCE">
+        </dsfr-data-source>
+        <dsfr-data-normalize id="dn-{{code}}" source="d-{{code}}"
+          compute="t_uab = when UAB = 'uab' then QUANTITE_SUBSTANCE / 1000 else 0;
+                   t_aut = when UAB != 'uab' then QUANTITE_SUBSTANCE / 1000 else 0;
+                   na = when QUANTITE_SUBSTANCE = 'na' then 1 else 0;
+                   Bio = when UAB = 'uab' then 'oui' when UAB = 'non uab' then 'non' else 'non renseigné'">
+        </dsfr-data-normalize>
+        <dsfr-data-query id="dq-{{code}}" source="dn-{{code}}" where="ANNEE:gte:2014" group-by="ANNEE"
+          aggregate="t_uab:sum:su, t_aut:sum:sa, na:sum:n_na" order-by="ANNEE:asc"></dsfr-data-query>
+        <dsfr-data-normalize id="da-{{code}}" source="dq-{{code}}"
+          compute="Bio_t = round(su, 0); Autres_t = round(sa, 0); total = su + sa; k = 'd'"></dsfr-data-normalize>
+        <dsfr-data-query id="dd-{{code}}" source="da-{{code}}" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+        <dsfr-data-query id="dm-{{code}}" source="da-{{code}}" order-by="total:desc" limit="1"></dsfr-data-query>
+        <dsfr-data-join id="de-{{code}}" left="dd-{{code}}" right="dm-{{code}}" on="k" type="inner" prefix-right="m_"></dsfr-data-join>
+        <dsfr-data-join id="dl-{{code}}" left="dn-{{code}}" right="dd-{{code}}" on="ANNEE" type="inner" prefix-right="an_"></dsfr-data-join>
+        <dsfr-data-query id="ds-{{code}}" source="dl-{{code}}" group-by="SUBSTANCE, Bio, DANGER_SUBSTANCE"
+          aggregate="QUANTITE_SUBSTANCE:sum:kg, kg:share_percent:part" order-by="kg:desc" limit="10"></dsfr-data-query>
+        <dsfr-data-normalize id="dt-{{code}}" source="ds-{{code}}"
+          compute="Tonnes = round(kg / 1000, 1); Part = round(part, 1)"></dsfr-data-normalize>
+        <dsfr-data-query id="d1-{{code}}" source="dt-{{code}}" limit="1"></dsfr-data-query>
+
+        <dsfr-data-repeat source="de-{{code}}">
+          <template>
+            <p class="odv-lecture">
+              En {{ANNEE}}, {{total:number:0}}&nbsp;tonnes de substances actives achetées, dont {{Bio_t:number:0}}
+              utilisables en bio. Le maximum depuis 2014&nbsp;: {{m_total:number:0}}&nbsp;tonnes en {{m_ANNEE}}.
+            </p>
+          </template>
+        </dsfr-data-repeat>
+        <div class="odv-chart-slot odv-viz" data-code="Achats du département par année">
+          <dsfr-data-chart id="gd-{{code}}" source="da-{{code}}" type="bar" stacked
+            label-field="ANNEE"
+            value-field="Bio_t:Substances utilisables en bio"
+            value-fields="Autres_t:Autres substances"
+                unit-tooltip="t"
+            databox databox-title="{{Département}} : substances actives achetées par année (tonnes)"
+            databox-source="SDES — BNV-D, achats par département (DiDo)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="gd-{{code}}" source="da-{{code}}" label-field="ANNEE" value-field="Bio_t, Autres_t"
+            description="Barres verticales empilées, une par année depuis 2014 : tonnes de substances actives achetées dans le département choisi, séparées entre substances utilisables en agriculture biologique et autres substances. Les valeurs exactes sont dans le tableau.">
+          </dsfr-data-a11y>
+        </div>
+        <dsfr-data-repeat source="d1-{{code}}">
+          <template>
+            <p class="odv-lecture">
+              La substance la plus achetée, <strong>{{SUBSTANCE}}</strong>, pèse à elle seule {{Part:number:0}}&nbsp;%
+              des kilos de l'année.
+            </p>
+          </template>
+        </dsfr-data-repeat>
+        <dsfr-data-list source="dt-{{code}}"
+          columns="SUBSTANCE:Substance, Tonnes:Tonnes, Part:Part des kilos de l'année (%), Bio:Utilisable en bio, DANGER_SUBSTANCE:Classe de danger"
+          caption="Les dix substances les plus achetées dans le département, dernière année">
+        </dsfr-data-list>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>L'évolution du tonnage total.</strong> Le fichier départemental compte 1&nbsp;390&nbsp;685 lignes
+        (département × produit × substance, de 2013 à 2024)&nbsp;; l'API DiDo ne fait pas de sommes, et une année
+        pèse déjà 13&nbsp;Mo. La page charge donc <em>une</em> année entière, et deux séries longues filtrées au
+        serveur (les CMR1, le glyphosate). Le total national par année n'a pas pu être chargé dans le
+        navigateur&nbsp;: il demanderait tout le fichier, de l'ordre de 150&nbsp;Mo même réduit à cinq
+        colonnes (estimé d'après le poids d'une année).</li>
+      <li><strong>Le lieu et la date d'épandage.</strong> Un achat est compté à l'adresse de l'acheteur et à la date
+        de la vente. Un produit acheté en décembre sert au printemps suivant&nbsp;; un produit acheté par une
+        coopérative de la Marne peut être épandu dans l'Aisne.</li>
+      <li><strong>La toxicité réelle.</strong> Les classes de danger qualifient la substance, pas la dose&nbsp;: un
+        kilo de soufre et un kilo d'insecticide de synthèse n'ont rien de comparable, ni pour la santé ni pour
+        les pollinisateurs. Le kilo ne mesure pas non plus l'intensité du traitement&nbsp;: certaines substances
+        s'emploient à quelques grammes par hectare.</li>
+      <li><strong>Une corrélation entre bio et pesticides.</strong> Le cadrage de cette page avançait un lien fort
+        entre la part de surfaces en bio et les kilos par hectare. Recalculé, il tenait à un seul département
+        (les Hauts-de-Seine, 1&nbsp;ha de surface agricole, 100&nbsp;% bio)&nbsp;; sans lui, le lien est faible. Ce qui
+        tient, c'est le soufre et le cuivre des vignobles.</li>
+      <li><strong>Les ventes.</strong> Le même jeu publie les ventes, comptées au département du distributeur&nbsp;:
+        une autre géographie, non utilisée ici.</li>
+      <dsfr-data-repeat source="fr">
+        <template>
+          <li><strong>Des quantités non publiées.</strong> {{n_na:number:0}}&nbsp;lignes de {{ANNEE}} portent «&nbsp;na&nbsp;»
+            à la place d'une quantité&nbsp;: elles sont exclues des sommes, sans être comptées comme zéro, et le fichier
+            ne dit pas ce qu'elles pèsent.</li>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="dep-ind">
+        <template>
+          <li><strong>Les achats sans département.</strong> {{kg:number:0}}&nbsp;kg achetés en {{ANNEE}} ont un acheteur
+            «&nbsp;indéterminé&nbsp;» (code 00)&nbsp;: comptés dans le total national, absents de la carte.</li>
+        </template>
+      </dsfr-data-repeat>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Le cas limite du portail&nbsp;: un fichier de 1,39&nbsp;million de lignes, une API qui filtre mais n'agrège
+        pas, et aucune copie agrégeable sur data.gouv.fr. La page tient en ne chargeant que ce que chaque bloc
+        demande, filtré au serveur par l'URL.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Filtrer au serveur sans adaptateur.</strong> <code>ANNEE=eq:2024</code>,
+              <code>DANGER_SUBSTANCE=eq:CMR1</code>, <code>columns=</code>&nbsp;: tout s'écrit dans l'URL de
+              <code>dsfr-data-source</code>.</li>
+            <li><strong>Un filtre serveur piloté par l'usager.</strong> Une facette <code>select</code> avec
+              <code>default</code> émet toujours une seule ligne&nbsp;; un <code>dsfr-data-repeat</code> à
+              <code>key-field</code> estampe pour elle une source dont l'URL porte <code>{{code}}</code>.
+              Changer de département = une requête.</li>
+            <li><strong>Les «&nbsp;na&nbsp;» sortent des sommes</strong> sans devenir des zéros, et une indicatrice
+              les compte.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas d'agrégat serveur.</strong> Une année, c'est 108&nbsp;803 lignes et 13&nbsp;Mo non
+              compressés, pour une centaine de chiffres affichés. Le total national par année n'est pas chargeable.</li>
+            <li><strong>L'année est écrite dans l'URL.</strong> Sans agrégat, «&nbsp;la dernière année&nbsp;» ne se
+              lit qu'après avoir tout chargé&nbsp;: la page devra être modifiée quand 2025 sera publiée.</li>
+            <li><strong>Trois connexions simultanées au plus</strong> chez DiDo&nbsp;: la quatrième source doit
+              attendre (<code>lazy</code>), sinon l'API répond 429 sans en-tête CORS.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger une année d'un gros fichier DiDo</td><td><code>dsfr-data-source url=</code> avec filtre et <code>columns=</code></td><td>Natif, lourd</td></tr>
+            <tr><td>Total par département et par classe</td><td><code>dsfr-data-query group-by</code> côté client</td><td>Natif</td></tr>
+            <tr><td>Part d'une classe dans le total</td><td><code>aggregate="…:share_percent"</code></td><td>Natif</td></tr>
+            <tr><td>Kilos par hectare, même année</td><td><code>dsfr-data-unpivot</code> + <code>dsfr-data-join on="annee=ANNEE"</code></td><td>Natif</td></tr>
+            <tr><td>Un département à la demande, filtré au serveur</td><td><code>dsfr-data-facets default</code> + <code>dsfr-data-repeat key-field</code> + source dans le gabarit</td><td>Natif</td></tr>
+            <tr><td>Ne pas dépasser trois requêtes simultanées</td><td><code>lazy</code> sur la source, <code>lazy</code> sur le répéteur</td><td>Natif</td></tr>
+            <tr><td>Total national par année sur 1,39 M lignes</td><td>—</td><td>Hors de portée sans agrégat serveur</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un gros fichier DiDo se raconte, à condition de ne jamais le charger.</strong> Le filtre dans l'URL
+          et la source estampée par ligne font le travail d'un adaptateur&nbsp;; ce qui manque, c'est l'agrégation
+          serveur, et elle manque à l'API, pas à la bibliothèque. Le récit, lui, a changé en route&nbsp;: la corrélation
+          «&nbsp;bio = plus de kilos&nbsp;» du cadrage ne survivait pas au retrait d'un seul département.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; type="map" est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

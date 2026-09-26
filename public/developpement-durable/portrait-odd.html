@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portrait ODD d'un département — open-data-viz</title>
+  <meta name="description" content="Aucun département n'est bon partout : sept sur dix sont parmi les meilleurs sur un indicateur de développement durable et parmi les derniers sur un autre. Portrait de chaque département sur sept indicateurs du SDES (DiDo), avec dsfr-data.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — D8 de docs/portail-developpement-durable/proposition.md.
+
+       UN JEU DiDo, DEUX FICHIERS, DEUX REQUÊTES (sous le plafond de 3 connexions) :
+       - ITDD départemental (aa011e5d…) filtré au serveur sur sept variables et
+         réduit par columns= : 1 313 lignes, 250 Ko, 0,4 s (mesuré le 2026-09-26) ;
+       - ITDD France entière (305ea0e3…), mêmes variables : 3 lignes utiles.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-26) :
+       - Le cadrage prévoyait « la France en référence sur chaque bloc », lue dans
+         le fichier France. Ce fichier NE PUBLIE PAS trois des sept indicateurs
+         (GES par habitant, taux de pauvreté, déchets par habitant) et publie
+         le taux de valorisation à null : trois références sur sept. La référence de la
+         page est donc le RANG parmi les départements ; la valeur France n'est
+         affichée que là où elle est publiée, à la même année.
+       - Neuf indicateurs prévus, sept retenus. Écartés : la part de stations en
+         excès de pesticides (médiane nationale 0 : plus de la moitié des
+         départements sont ex æquo, un rang n'y veut rien dire, et 8 départements
+         dont toute l'Alsace-Moselle n'ont pas de valeur) ; les communes en
+         catastrophe naturelle (une exposition, pas une performance : aucun sens
+         « favorable ») ; les points de recharge (un volume, pas un taux) ;
+         l'artificialisation (des hectares, à rapporter à une surface d'un autre
+         indicateur). Ajouté : la part de voitures Crit'Air 1 ou électriques.
+       - L'histoire n'est pas « Mayenne 18,3 t contre Paris 2,66 » seulement :
+         c'est que ces deux-là ont des portraits INVERSÉS (Paris premier sur les
+         émissions, avant-dernier sur les logements suroccupés ; la Mayenne
+         l'inverse), et que c'est le cas général — 72 départements sur 101 sont
+         dans le meilleur quart sur au moins un indicateur ET dans le dernier
+         quart sur au moins un autre.
+
+       RANG : calculé dans le navigateur par une auto-jointure sur VARIABLE
+       (chaque département confronté aux autres, ≈ 70 000 paires), puis une
+       somme. Rang 1 = le plus favorable au sens de l'objectif (le sens est une
+       décision éditoriale, écrite dans la table `ind` ci-dessous et en page).
+       ========================================================================== -->
+
+  <!-- ---------- Table éditoriale : les sept indicateurs et leur sens ---------- -->
+  <dsfr-data-source id="ind" data='[
+    {"VARIABLE":"ges_emission_hab","ordre":1,"court":"Émissions de GES par habitant","libelle":"Émissions de gaz à effet de serre par habitant","unite":"t éq. CO₂/hab.","sens":-1,"odd":"ODD 13 — climat"},
+    {"VARIABLE":"taux_pvt","ordre":2,"court":"Taux de pauvreté","libelle":"Taux de pauvreté monétaire","unite":"%","sens":-1,"odd":"ODD 1 — pauvreté"},
+    {"VARIABLE":"taux_lgmt_suroccupes","ordre":3,"court":"Logements suroccupés","libelle":"Part des résidences principales suroccupées","unite":"%","sens":-1,"odd":"ODD 11 — villes et territoires"},
+    {"VARIABLE":"part_agribio_surf","ordre":4,"court":"Surface agricole en bio","libelle":"Part de la surface agricole cultivée en bio","unite":"%","sens":1,"odd":"ODD 2 — agriculture"},
+    {"VARIABLE":"part_critair_1_0_vp","ordre":5,"court":"Voitures Crit’Air 1 ou électriques","libelle":"Part des voitures Crit’Air 1 ou électriques dans le parc","unite":"%","sens":1,"odd":"ODD 9 — infrastructures"},
+    {"VARIABLE":"dma_qhab","ordre":6,"court":"Déchets ménagers par habitant","libelle":"Déchets ménagers et assimilés collectés par habitant","unite":"kg/hab.","sens":-1,"odd":"ODD 11 — villes et territoires"},
+    {"VARIABLE":"taux_val_dechets","ordre":7,"court":"Déchets valorisés","libelle":"Part des déchets ménagers valorisés en matière ou en compost","unite":"%","sens":1,"odd":"ODD 12 — consommation"}
+  ]'></dsfr-data-source>
+
+  <!-- ---------- ITDD départemental : sept variables, colonnes réduites ---------- -->
+  <!-- columns= garde les années 2019 à 2025 : la plus récente publiée pour ces
+       sept indicateurs va de 2021 à 2024. Un millésime 2026 ne serait pas vu
+       sans ajouter A2026 ici (sans columns=, la réponse pèse 17 fois plus). -->
+  <dsfr-data-source id="src"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/aa011e5d-e888-469d-8e72-a8af4f73d123/json?VARIABLE=in:ges_emission_hab,taux_pvt,taux_lgmt_suroccupes,part_agribio_surf,part_critair_1_0_vp,dma_qhab,taux_val_dechets&amp;columns=CODGEO_CODE,CODGEO_LIBELLE,VARIABLE,SOUS_CHAMP,A2019,A2020,A2021,A2022,A2023,A2024,A2025">
+  </dsfr-data-source>
+  <!-- Le taux de pauvreté est publié en sept lignes (total + six tranches d'âge) :
+       on garde « total ». Les autres ont SOUS_CHAMP à null, que notin conserve. -->
+  <dsfr-data-query id="src-t" source="src" where="SOUS_CHAMP:notin:moins30|30_39|40_49|50_59|60_74|75plus"></dsfr-data-query>
+  <dsfr-data-unpivot id="long" source="src-t"
+    id-cols="CODGEO_CODE, CODGEO_LIBELLE, VARIABLE"
+    value-cols-pattern="A{YYYY}" var-name="annee" var-format="{YYYY}" value-name="v" drop-empty>
+  </dsfr-data-unpivot>
+  <!-- Dernière année renseignée, PAR INDICATEUR, lue dans la donnée. -->
+  <dsfr-data-query id="der" source="long" group-by="VARIABLE" aggregate="annee:max:annee_der"></dsfr-data-query>
+  <dsfr-data-join id="last" left="long" right="der" on="VARIABLE,annee=annee_der" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="lastm" left="last" right="ind" on="VARIABLE" type="inner"></dsfr-data-join>
+
+  <!-- Rang : chaque département face à tous ceux qui ont une valeur la même année
+       pour le même indicateur. mieux/moins = l'autre fait mieux/moins bien. -->
+  <dsfr-data-join id="paires" left="lastm" right="last" on="VARIABLE" type="inner" prefix-right="o_"></dsfr-data-join>
+  <dsfr-data-normalize id="paires-n" source="paires"
+    compute="mieux = when (o_v - v) * sens > 0 then 1 else 0;
+             moins = when (o_v - v) * sens &lt; 0 then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="rk0" source="paires-n"
+    group-by="CODGEO_CODE, CODGEO_LIBELLE, VARIABLE, ordre, court, libelle, unite, sens, odd, annee, v"
+    aggregate="mieux:sum:nb_mieux, moins:sum:nb_moins, o_v:count:n">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="rk" source="rk0"
+    compute="rang = nb_mieux + 1;
+             pos = round(nb_moins / (n - 1) * 100, 0);
+             top = when rang &lt;= n / 4 then 1 else 0;
+             bot = when rang &gt; n * 3 / 4 then 1 else 0;
+             quart = when top = 1 then 'dans le meilleur quart' when bot = 1 then 'dans le dernier quart' else 'entre les deux';
+             vs = v * sens;
+             v1 = round(v, 1);
+             extr = when VARIABLE = 'ges_emission_hab' and (nb_mieux = 0 or nb_moins = 0) then 1 else 0;
+             k = 'fr'">
+  </dsfr-data-normalize>
+  <!-- Pour les petits multiples : du plus favorable au moins favorable. -->
+  <dsfr-data-query id="tri" source="rk" order-by="vs:desc"></dsfr-data-query>
+
+  <!-- ---------- Bilan national : combien de portraits contrastés ---------- -->
+  <dsfr-data-query id="bil" source="rk" group-by="CODGEO_CODE" aggregate="top:sum:nt, bot:sum:nb, v:count:ni"></dsfr-data-query>
+  <dsfr-data-normalize id="bil-n" source="bil"
+    compute="both = when nt &gt;= 1 and nb &gt;= 1 then 1 else 0;
+             zt = when nt = 0 then 1 else 0;
+             zb = when nb = 0 then 1 else 0;
+             zz = when nt = 0 and nb = 0 then 1 else 0;
+             k = 'fr'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="bil-t" source="bil-n" group-by="k"
+    aggregate="both:sum:n_both, zt:sum:n_zt, zb:sum:n_zb, zz:sum:n_zz, CODGEO_CODE:count:n_dep, nt:max:max_top, nb:max:max_bot">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="bil-p" source="bil-t" compute="pct = round(n_both / n_dep * 100, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="ans" source="rk" group-by="k" aggregate="annee:min:a_min, annee:max:a_max"></dsfr-data-query>
+
+  <!-- ---------- Les deux extrêmes des émissions par habitant ---------- -->
+  <dsfr-data-query id="ext" source="rk" where="extr:eq:1" order-by="v:desc"></dsfr-data-query>
+  <dsfr-data-join id="duo" left="rk" right="ext" on="CODGEO_CODE" type="inner" prefix-right="e_"></dsfr-data-join>
+  <!-- series-field dessine à 0 une cellule (indicateur, département) absente :
+       Paris n'a pas de surface bio, et le graphique l'aurait montré dernier. On ne
+       garde que les indicateurs publiés pour les deux, et on le dit sous le graphique. -->
+  <dsfr-data-query id="duo-c" source="duo" group-by="VARIABLE" aggregate="CODGEO_CODE:count:nd"></dsfr-data-query>
+  <dsfr-data-join id="duo-j" left="duo" right="duo-c" on="VARIABLE" type="inner"></dsfr-data-join>
+  <dsfr-data-query id="duo-t" source="duo-j" where="nd:eq:2" order-by="ordre:asc"></dsfr-data-query>
+  <dsfr-data-query id="duo-x" source="duo-c" where="nd:lt:2"></dsfr-data-query>
+  <dsfr-data-join id="duo-xl" left="duo-x" right="ind" on="VARIABLE" type="inner"></dsfr-data-join>
+  <dsfr-data-query id="duo-surocc" source="duo" where="VARIABLE:eq:taux_lgmt_suroccupes" order-by="v:asc"></dsfr-data-query>
+
+  <!-- ---------- ITDD France entière, pour la référence là où elle existe ---------- -->
+  <dsfr-data-source id="fr"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/305ea0e3-269b-47ee-bab5-7553fec6f010/json?VARIABLE=in:ges_emission_hab,taux_pvt,taux_lgmt_suroccupes,part_agribio_surf,part_critair_1_0_vp,dma_qhab,taux_val_dechets&amp;columns=VARIABLE,SOUS_CHAMP,A2019,A2020,A2021,A2022,A2023,A2024,A2025">
+  </dsfr-data-source>
+  <dsfr-data-unpivot id="fr-l" source="fr" id-cols="VARIABLE"
+    value-cols-pattern="A{YYYY}" var-name="annee" var-format="{YYYY}" value-name="v" drop-empty>
+  </dsfr-data-unpivot>
+  <dsfr-data-normalize id="fr-r" source="fr-l" compute="v1 = round(v, 1)"></dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Portrait ODD d'un département</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Aucun département n'est bon partout&nbsp;: sept sur dix figurent parmi les meilleurs sur un objectif et parmi les derniers sur un autre</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="bil-p">
+        <template>
+          Sur sept indicateurs des objectifs de développement durable — climat, pauvreté, logement, agriculture,
+          voitures, déchets —, <strong>{{n_both}}&nbsp;départements sur {{n_dep}} ({{pct}}&nbsp;%) sont à la fois dans
+          le meilleur quart sur au moins un indicateur et dans le dernier quart sur au moins un autre</strong>.
+          {{n_zb}}&nbsp;seulement ne tombent jamais dans le dernier quart&nbsp;; aucun n'est dans le meilleur quart
+          sur plus de {{max_top}} des sept.
+        </template>
+      </dsfr-data-repeat>
+      Les villes émettent peu mais s'entassent, les campagnes l'inverse&nbsp;: un portrait se lit indicateur par
+      indicateur, jamais en une note.
+    </div>
+    <dsfr-data-repeat source="ans">
+      <template>
+        <p class="fr-text--sm fr-hint-text fr-mb-4w">
+          Service des données et études statistiques (SDES) et Insee, plateforme DiDo&nbsp;: indicateurs territoriaux
+          de développement durable (ITDD), fichier départemental et fichier France entière. Pour chaque indicateur,
+          la dernière année publiée — de {{a_min}} à {{a_max}} selon l'indicateur —, lue au chargement de la page.
+          «&nbsp;Meilleur quart&nbsp;» et «&nbsp;dernier quart&nbsp;» sont calculés sur les départements qui ont une
+          valeur, dans le sens de l'objectif.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </div>
+
+  <!-- ======================= PREUVE — deux portraits inversés ======================= -->
+  <!-- Les deux départements aux extrêmes des émissions par habitant, lus dans la
+       donnée (extr : rang 1 ou personne ne fait moins bien). Échelle : la part des
+       autres départements qui font moins bien, de 0 à 100, dans le sens de
+       l'objectif — une échelle commune à des indicateurs d'unités différentes,
+       sans jamais les additionner. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-duo">
+    <h2 id="t-duo" class="fr-h3">Le moins émetteur et le plus émetteur ont des portraits presque inversés</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="ext">
+        <template>
+          <p class="fr-mb-1w">{{CODGEO_LIBELLE}}&nbsp;: <strong>{{v1:number:1}}&nbsp;tonnes équivalent CO₂ par habitant</strong> en {{annee}}, rang {{rang}} sur {{n}}.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="duo-surocc">
+        <template>
+          <p class="fr-mb-1w">Logements suroccupés, {{CODGEO_LIBELLE}}&nbsp;: {{v1:number:1}}&nbsp;% en {{annee}}, rang {{rang}} sur {{n}}.</p>
+        </template>
+      </dsfr-data-repeat>
+      <p>
+        Ce n'est pas une anomalie mais une géographie&nbsp;: les émissions sont comptées là où elles se produisent.
+        Un département d'élevage et d'industrie émet pour d'autres que ses habitants&nbsp;; une ville dense, où
+        l'on se chauffe à plusieurs et où l'on roule peu, émet peu par tête mais loge serré.
+      </p>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Deux portraits inversés">
+      <dsfr-data-chart id="g-duo" source="duo-t" type="bar" horizontal
+        label-field="court" value-field="pos" series-field="CODGEO_LIBELLE"
+        x-min="0" x-max="100" unit-tooltip="% des départements font moins bien"
+        databox databox-title="Part des autres départements qui font moins bien, par indicateur (0 = le dernier, 100 = le premier)"
+        databox-source="SDES / Insee — ITDD (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-duo" source="duo-t" label-field="court" value-field="pos" series-field="CODGEO_LIBELLE"
+        description="Barres horizontales groupées : pour chacun des sept indicateurs, la part des autres départements qui font moins bien que le département le moins émetteur de gaz à effet de serre par habitant et que le plus émetteur. Là où le premier est en tête — émissions, voitures récentes, déchets par habitant —, le second est en queue ; là où le second est en tête — logements suroccupés, valorisation des déchets —, le premier est en queue.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Lecture&nbsp;: 100 signifie qu'aucun autre département ne fait mieux, 0 qu'aucun ne fait moins bien — le
+      dernier d'un indicateur n'a donc pas de barre visible&nbsp;; le tableau donne la valeur.
+      <dsfr-data-repeat source="duo-xl">
+        <template>
+          Indicateur retiré parce qu'il n'est publié que pour l'un des deux départements&nbsp;: {{court}}.
+        </template>
+      </dsfr-data-repeat>
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — le portrait ======================= -->
+  <!-- Facette cliente sur `rk` (pas de contexte : en mode URL, une source refuse
+       les commandes where, #288). La facette émet les lignes du département choisi
+       sous son propre id ; tout le portrait en descend. `default` : la page
+       répond avant qu'on ait choisi. url-params + url-sync : le portrait se partage. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-portrait">
+    <h2 id="t-portrait" class="fr-h3">Et votre département&nbsp;?</h2>
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-2w">
+      <div class="fr-col-12 fr-col-md-6">
+        <dsfr-data-facets id="f" source="rk" fields="CODGEO_LIBELLE"
+          labels="CODGEO_LIBELLE:Département" display="CODGEO_LIBELLE:select"
+          default="CODGEO_LIBELLE:Mayenne" sort="CODGEO_LIBELLE:alpha:asc"
+          hide-counts no-reset url-params url-sync url-param-map="departement:CODGEO_LIBELLE">
+        </dsfr-data-facets>
+      </div>
+    </div>
+    <dsfr-data-join id="fiche" left="f" right="fr-r" on="VARIABLE,annee" type="left" prefix-right="fr_"></dsfr-data-join>
+    <dsfr-data-query id="fiche-t" source="fiche" order-by="ordre:asc"></dsfr-data-query>
+    <dsfr-data-query id="prof" source="f" group-by="CODGEO_LIBELLE" aggregate="top:sum:nb_top, bot:sum:nb_bot, v:count:nb_ind"></dsfr-data-query>
+
+    <dsfr-data-repeat source="prof">
+      <template>
+        <h3 class="fr-h4 fr-mb-1w">{{CODGEO_LIBELLE}}&nbsp;: dans le meilleur quart sur {{nb_top}} indicateur(s), dans le dernier sur {{nb_bot}}</h3>
+        <p class="odv-lecture">
+          Sur les {{nb_ind}}&nbsp;indicateurs publiés pour {{CODGEO_LIBELLE}}, {{nb_top}} le placent parmi le quart
+          des départements les plus favorables et {{nb_bot}} parmi le quart le moins favorable. Le graphique dit
+          où il se situe sur chacun&nbsp;; les petits graphiques plus bas le replacent parmi tous les départements.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Portrait du département choisi">
+      <dsfr-data-chart id="g-portrait" source="fiche-t" type="bar" horizontal
+        label-field="court" value-field="pos" name="Part des départements qui font moins bien (%)"
+        x-min="0" x-max="100" unit-tooltip="% des départements font moins bien"
+        databox databox-title="Position du département choisi sur chaque indicateur : part des autres départements qui font moins bien (0 = le dernier, 100 = le premier)"
+        databox-source="SDES / Insee — ITDD (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-portrait" source="fiche-t" label-field="court" value-field="pos"
+        description="Barres horizontales, une par indicateur, pour le département choisi : la part des autres départements qui font moins bien que lui, de 0 (il est le dernier) à 100 (il est le premier). Le tableau ci-dessous donne la valeur, l'année, le rang et la valeur France quand elle est publiée.">
+      </dsfr-data-a11y>
+    </div>
+
+    <dsfr-data-list source="fiche-t"
+      columns="court:Indicateur, v1:Valeur, unite:Unité, annee:Année, rang:Rang, n:Sur, quart:Position, fr_v1:France (même année), odd:Objectif"
+      caption="Portrait du département choisi : valeur, rang parmi les départements et valeur France quand le SDES la publie">
+    </dsfr-data-list>
+    <p class="fr-text--xs fr-hint-text">
+      Rang 1 = le plus favorable&nbsp;: le moins d'émissions, de pauvreté, de logements suroccupés et de déchets
+      par habitant&nbsp;; le plus de bio, de voitures récentes et de déchets valorisés. Deux départements à égalité
+      partagent le rang. La colonne France est vide quand le fichier France entière du SDES ne publie pas
+      l'indicateur (émissions, pauvreté, déchets par habitant) ou le publie vide (déchets valorisés)&nbsp;: aucune moyenne des départements
+      n'est substituée, elle ne serait pas le chiffre national.
+    </p>
+  </section>
+
+  <!-- ======================= PETITS MULTIPLES ======================= -->
+  <!-- Un graphique par indicateur, 100 barres environ, du plus favorable (à gauche)
+       au moins favorable. highlight-index est POSITIONNEL : il vaut nb_mieux, le
+       nombre de départements strictement meilleurs, donc la place du département
+       choisi dans `tri` (trié sur vs = v × sens). En cas d'égalité, la barre mise
+       en évidence peut être celle d'un ex æquo de même valeur. key-field : au
+       changement de département, les instances sont gardées, leurs attributs mis
+       à jour en place. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-multiples">
+    <h2 id="t-multiples" class="fr-h3">Indicateur par indicateur, parmi tous les départements</h2>
+    <p class="fr-text--sm">
+      Chaque graphique range les départements du plus favorable, à gauche, au moins favorable, à droite. La barre
+      foncée est le département choisi. Les échelles ne se comparent pas d'un graphique à l'autre&nbsp;: chaque
+      indicateur a son unité.
+    </p>
+    <dsfr-data-repeat source="fiche-t" key-field="VARIABLE" per-row="1 md:2" scopes="tri:VARIABLE:t">
+      <template>
+        <h3 class="fr-h5 fr-mb-1w" id="{{$uid}}">{{court}}</h3>
+        <p class="odv-lecture fr-text--sm">
+          {{CODGEO_LIBELLE}}&nbsp;: <strong>{{v1:number:1}}&nbsp;{{unite}}</strong> en {{annee}}, rang {{rang}} sur {{n}}, {{quart}}.{{#if fr_v1}} France&nbsp;: {{fr_v1:number:1}}&nbsp;{{unite}}.{{/if}}
+        </p>
+        <div class="odv-chart-slot">
+          <dsfr-data-chart id="g-{{$uid}}" source="{{$scope.t}}" type="bar"
+            label-field="CODGEO_LIBELLE" value-field="v1" name="{{court}} ({{unite}})"
+            selected-palette="neutral" highlight-index="[{{nb_mieux}}]" unit-tooltip="{{unite}}"
+            databox databox-title="{{libelle}}, {{annee}} ({{unite}}) — du plus favorable au moins favorable"
+            databox-source="SDES / Insee — ITDD (DiDo), {{odd}}">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-{{$uid}}" source="{{$scope.t}}" label-field="CODGEO_LIBELLE" value-field="v1"
+            description="Barres verticales, une par département, rangées du plus favorable au moins favorable pour l'indicateur « {{libelle}} » en {{annee}}. Le département choisi, {{CODGEO_LIBELLE}}, est mis en évidence au rang {{rang}} sur {{n}}, avec {{v1}} {{unite}}.">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>Aucune note globale.</strong> Les sept indicateurs n'ont ni la même unité ni le même poids&nbsp;;
+        une moyenne des rangs dirait surtout quels indicateurs on a choisis. Le compte de «&nbsp;meilleurs&nbsp;» et
+        de «&nbsp;derniers quarts&nbsp;» du titre est un constat, pas un classement.</li>
+      <li><strong>Le sens «&nbsp;favorable&nbsp;» est une décision.</strong> Moins d'émissions, de pauvreté, de
+        suroccupation et de déchets&nbsp;; plus de bio, de voitures récentes et de valorisation. C'est le sens des
+        cibles ODD citées par le SDES, pas un jugement sur les habitants.</li>
+      <li><strong>Des années différentes.</strong> Chaque indicateur a sa dernière année publiée (de 2021 à 2024
+        au 26&nbsp;septembre 2026)&nbsp;: le portrait juxtapose des millésimes, il ne décrit pas une année.</li>
+      <li><strong>Les valeurs aberrantes publiées.</strong> Les Hauts-de-Seine ont «&nbsp;100&nbsp;%&nbsp;» de surface
+        agricole en bio (une surface agricole résiduelle) et la Lozère 99,9&nbsp;% de déchets valorisés&nbsp;: ils sont
+        premiers, tels que publiés, sans que le jeu permette de dire ce que vaut le chiffre.</li>
+      <li><strong>Les départements sans valeur.</strong> Mayotte n'a que la part de voitures récentes&nbsp;; la Guyane et
+        la Guadeloupe n'ont pas de taux de pauvreté, Paris pas de surface bio. Ils sont rangés sur les seuls
+        indicateurs publiés, et le rang dit toujours «&nbsp;sur combien&nbsp;».</li>
+      <li><strong>Quatre indicateurs prévus et écartés</strong>&nbsp;: les pesticides dans les cours d'eau (plus de la
+        moitié des départements à 0&nbsp;%, ex æquo&nbsp;; huit sans valeur, dont toute l'Alsace-Moselle), les
+        catastrophes naturelles (une exposition, pas une performance), les points de recharge (un nombre, pas un
+        taux) et l'artificialisation (des hectares, sans la surface de référence dans le même indicateur).</li>
+      <li><strong>Aucun secret statistique</strong>&nbsp;: aucune cellule de ces sept indicateurs n'est remplacée par
+        «&nbsp;secret&nbsp;» ou «&nbsp;na&nbsp;» (compté sur l'export le 26&nbsp;septembre 2026)&nbsp;; les absences
+        sont des <code>null</code>.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: un portrait départemental construit sur deux fichiers de l'ITDD servis par DiDo,
+        sans adaptateur. Le cadrage promettait la France en référence&nbsp;; le fichier France ne la publie que pour
+        trois des sept indicateurs. La référence est devenue le rang — et le rang a fait apparaître l'histoire.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Deux requêtes, 250&nbsp;Ko.</strong> <code>VARIABLE=in:…</code> et <code>columns=</code> dans
+              l'URL réduisent le fichier de 71&nbsp;003 lignes à 1&nbsp;313.</li>
+            <li><strong>La dernière année par indicateur</strong>, sans année écrite&nbsp;: dépliage
+              <code>value-cols-pattern="A{YYYY}" drop-empty</code>, <code>group-by="VARIABLE"
+              aggregate="annee:max"</code>, jointure multi-clé <code>on="VARIABLE,annee=annee_der"</code>.</li>
+            <li><strong>Un graphique par indicateur qui suit la sélection</strong>&nbsp;: <code>dsfr-data-repeat
+              key-field scopes</code>, et <code>highlight-index="[{{nb_mieux}}]"</code> interpolé par ligne.</li>
+            <li><strong>Un portrait partageable</strong>&nbsp;: facette <code>select</code> avec <code>default</code>,
+              <code>url-params url-sync</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas de rang natif.</strong> Il se calcule par une auto-jointure sur l'indicateur
+              (≈&nbsp;70&nbsp;000 paires), une colonne «&nbsp;l'autre fait mieux&nbsp;» et une somme. Juste, mais
+              détourné&nbsp;: une fonction <code>rank</code> ou <code>percent_rank</code> par groupe le dirait en un
+              attribut.</li>
+            <li><strong>La mise en évidence est positionnelle.</strong> Il faut calculer l'index du département dans
+              le tri pour le passer à <code>highlight-index</code>&nbsp;; aucun attribut ne désigne une barre par son
+              libellé dans un graphique mono-série.</li>
+            <li><strong>Pas de filtre de contexte sur une source URL</strong> (#288)&nbsp;: la sélection passe par une
+              facette cliente, dont la sortie devient la source du portrait.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger sept indicateurs d'un gros fichier DiDo</td><td><code>dsfr-data-source url=</code>, filtre et <code>columns=</code> dans l'URL</td><td>Natif</td></tr>
+            <tr><td>Sens et libellés des indicateurs</td><td><code>dsfr-data-source data='[…]'</code> + <code>join</code></td><td>Natif</td></tr>
+            <tr><td>Dernière année par indicateur</td><td><code>unpivot</code> + <code>query group-by aggregate="annee:max"</code> + <code>join</code> multi-clé</td><td>Natif</td></tr>
+            <tr><td>Rang parmi les départements</td><td>auto-<code>join</code> + <code>normalize compute when</code> + <code>query sum</code></td><td>Faisable, détourné</td></tr>
+            <tr><td>Choisir un département</td><td><code>dsfr-data-facets display="select" default url-sync</code></td><td>Natif</td></tr>
+            <tr><td>Un graphique par indicateur, département en évidence</td><td><code>dsfr-data-repeat scopes</code> + <code>highlight-index</code> interpolé</td><td>Natif, index à calculer</td></tr>
+            <tr><td>Deux départements sur une échelle commune</td><td><code>chart series-field</code> sur un score 0-100</td><td>Natif</td></tr>
+            <tr><td>Référence France</td><td><code>join type="left"</code> sur le fichier France</td><td>Natif ; la donnée manque</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un portrait départemental tient en balises, sans script et en deux requêtes.</strong> Ce qui coûte
+          est le rang&nbsp;: la bibliothèque sait trier, filtrer, joindre et sommer, et c'est en combinant les quatre
+          qu'on classe. La donnée, elle, a changé le récit&nbsp;: sans référence France pour la plupart des
+          indicateurs, c'est la position parmi les autres qui porte le portrait — et elle dit qu'aucun département
+          n'est bon partout.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maisons et argiles — open-data-viz</title>
+  <meta name="description" content="Une maison exposée au retrait-gonflement des argiles sur cinq l'est fortement, et les maisons récentes n'y échappent pas. Création avec dsfr-data à partir des fichiers RGA et Sitadel du SDES (DiDo) et du référentiel des intercommunalités de geo.api.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://geo.api.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — deuxième vague (§ 5) du cadrage
+       docs/portail-developpement-durable/proposition.md : « Un logement sur cinq en
+       zone d'argile forte, et l'on construit dessus ». Titre corrigé : le fichier ne
+       compte que les MAISONS INDIVIDUELLES situées dans une zone d'exposition (faible,
+       moyenne ou forte) de la carte BRGM 2020 ; les maisons hors zone n'y sont pas.
+       « Une maison sur cinq » serait faux faute de dénominateur : c'est « une maison
+       EXPOSÉE sur cinq ».
+
+       QUATRE SOURCES, TROIS SUR DiDo (limite de trois connexions simultanées) :
+       - `tot` : RGA, maisons et surfaces par EPCI et niveau (7 404 lignes, long) ;
+       - `per` : RGA, maisons par EPCI, période de construction et niveau (7 404) ;
+       - `sit` : Sitadel, maisons (individuel pur + groupé) commencées 2019-2024, par
+         EPCI (≈ 15 000 lignes, deux colonnes). 2025 est exclu dans l'URL : LOG_COM de
+         la dernière année est null partout (« pas encore connu »). Quand 2025 sera
+         publiée, l'URL et les libellés « 2019-2024 » sont les seuls endroits à déplacer ;
+       - `geo` : geo.api.gouv.fr, superficie et population des EPCI (1 254 lignes).
+
+       LE SECRET. Une cellule sous secret vaut la chaîne « secret ». Aucune cellule ne
+       vaut 0 et la plus petite valeur publiée est 12 : le secret masque donc les petites
+       valeurs, zéro compris (392 des 423 EPCI « secret » en zone forte ont 0 km² de zone
+       forte). On le recode en 0 pour les sommes et on le COMPTE.
+
+       LE CONTRÔLE. Pour 1 EPCI sur 7 environ, la surface exposée publiée dépasse la
+       superficie de l'EPCI (jusqu'à 3,2 fois). Ces EPCI sont repérés en page par la
+       jointure avec geo.api (seuil : +5 %), comptés, écartés des blocs qui classent
+       les EPCI, et signalés dans le tableau. Les ratios nationaux sont recalculés sans
+       eux pour montrer qu'ils ne bougent pas.
+       ========================================================================== -->
+
+  <!-- ---------- RGA : maisons et surfaces par EPCI (format long) ---------- -->
+  <dsfr-data-source id="tot"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/1a9ad5c2-0929-4687-8455-78aac6530a76/json">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="tot-n" source="tot"
+    compute="v = when VALEUR_EXPOSITION = 'secret' then 0 else VALEUR_EXPOSITION;
+             r1 = when INDICATEUR_EXPOSITION = 'Maisons_indiv_exposees_RGA1' then v else 0;
+             r2 = when INDICATEUR_EXPOSITION = 'Maisons_indiv_exposees_RGA2' then v else 0;
+             r3 = when INDICATEUR_EXPOSITION = 'Maisons_indiv_exposees_RGA3' then v else 0;
+             s3 = when INDICATEUR_EXPOSITION = 'Maisons_indiv_exposees_RGA3' and VALEUR_EXPOSITION = 'secret' then 1 else 0;
+             sec = when contains(INDICATEUR_EXPOSITION, 'Maisons') and VALEUR_EXPOSITION = 'secret' then 1 else 0;
+             cel = when contains(INDICATEUR_EXPOSITION, 'Maisons') then 1 else 0;
+             sf = when contains(INDICATEUR_EXPOSITION, 'Surface') then v else 0;
+             smf = when INDICATEUR_EXPOSITION = 'Surface_exposee_RGA2_km2' or INDICATEUR_EXPOSITION = 'Surface_exposee_RGA3_km2' then v else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="epci" source="tot-n" group-by="EPCI_CODE, EPCI_LIBELLE"
+    aggregate="r1:sum:r1, r2:sum:r2, r3:sum:r3, s3:sum:s3, sec:sum:sec, cel:sum:cel, sf:sum:sf, smf:sum:smf">
+  </dsfr-data-query>
+
+  <!-- ---------- geo.api : superficie (ha) et population des EPCI ---------- -->
+  <dsfr-data-source id="geo" url="https://geo.api.gouv.fr/epcis?fields=code,surface,population"></dsfr-data-source>
+  <dsfr-data-join id="epci-geo" left="epci" right="geo" on="EPCI_CODE=code" type="left"></dsfr-data-join>
+
+  <!-- ---------- Sitadel : maisons commencées 2019-2024, par EPCI ---------- -->
+  <dsfr-data-source id="sit"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/cb3c0612-e7d9-4a87-91be-cc0fb6448a4f/json?ANNEE=in:2019,2020,2021,2022,2023,2024&amp;TYPE_LGT=in:Individuel%20pur,Individuel%20groupe&amp;columns=EPCI,LOG_COM">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="sit-n" source="sit" compute="k = 1"></dsfr-data-normalize>
+  <!-- group-by EPCI AVANT la jointure : une ligne par EPCI du côté droit (ADR-122). -->
+  <dsfr-data-query id="sit-epci" source="sit-n" group-by="EPCI" aggregate="LOG_COM:sum:neuf"></dsfr-data-query>
+  <dsfr-data-query id="sit-tot" source="sit-n" group-by="k" aggregate="LOG_COM:sum:neuf_tot"></dsfr-data-query>
+  <dsfr-data-join id="epci-sit" left="epci-geo" right="sit-epci" on="EPCI_CODE=EPCI" type="left"></dsfr-data-join>
+
+  <!-- ---------- Une ligne par EPCI, calculée ---------- -->
+  <dsfr-data-normalize id="epci-t" source="epci-sit"
+    compute="cl = r1 + r2 + r3;
+             part3 = when s3 = 1 then null else round(r3 / cl * 100, 1);
+             sup = surface / 100;
+             incoh = when is_null(sup) then 0 when sf > sup * 1.05 then 1 else 0;
+             ratio_sup = round(sf / sup, 1);
+             controle = when incoh = 1 then 'Surface exposée supérieure à la superficie' else '';
+             neuf0 = coalesce(neuf, 0);
+             ordre = when s3 = 1 then 1 when part3 &lt; 10 then 2 when part3 &lt; 25 then 3 when part3 &lt; 50 then 4 else 5;
+             tranche = when ordre = 1 then 'Presque aucune (secret)' when ordre = 2 then 'Moins de 10 %' when ordre = 3 then 'De 10 à 25 %' when ordre = 4 then 'De 25 à 50 %' else '50 % ou plus';
+             ok = 1 - incoh;
+             cl_ok = when incoh = 0 then cl else 0;
+             r3_ok = when incoh = 0 then r3 else 0;
+             neuf_ok = when incoh = 0 then neuf0 else 0;
+             cl_ko = when incoh = 1 then cl else 0;
+             neuf_ko = when incoh = 1 then neuf0 else 0;
+             quart = when incoh = 0 and ordre >= 4 then 1 else 0;
+             cl_q = when quart = 1 then cl else 0;
+             neuf_q = when quart = 1 then neuf0 else 0;
+             k = 1; un = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse nationale, sur une ligne ---------- -->
+  <dsfr-data-query id="nat" source="epci-t" group-by="k"
+    aggregate="cl:sum:cl, r2:sum:r2, r3:sum:r3, un:sum:n_epci, incoh:sum:n_incoh, s3:sum:n_s3, sec:sum:n_sec, cel:sum:n_cel,
+               smf:sum:smf, sup:sum:sup, cl_ok:sum:cl_ok, r3_ok:sum:r3_ok, neuf0:sum:neuf, neuf_ok:sum:neuf_ok,
+               cl_ko:sum:cl_ko, neuf_ko:sum:neuf_ko, cl_q:sum:cl_q, neuf_q:sum:neuf_q, ratio_sup:max:ratio_max">
+  </dsfr-data-query>
+  <dsfr-data-join id="nat-sit" left="nat" right="sit-tot" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="nat-t" source="nat-sit"
+    compute="part3 = r3 / cl * 100;
+             part_mf = (r2 + r3) / cl * 100;
+             part3_ok = r3_ok / cl_ok * 100;
+             terr_mf = smf / sup * 100;
+             hors_rga = neuf_tot - neuf;
+             p_q_parc = cl_q / cl_ok * 100;
+             p_q_neuf = neuf_q / neuf_ok * 100;
+             p_ko_cl = cl_ko / cl * 100;
+             p_ko_neuf = neuf_ko / neuf * 100">
+  </dsfr-data-normalize>
+
+  <!-- ---------- RGA par période de construction ---------- -->
+  <dsfr-data-source id="per"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/1d6ff531-fe68-4102-9591-8da9ffdf8300/json?columns=EPCI_CODE,PERIODE_CONSTRUCTION,MAISONS_INDIV_EXPOSES_RGA1,MAISONS_INDIV_EXPOSES_RGA2,MAISONS_INDIV_EXPOSES_RGA3">
+  </dsfr-data-source>
+  <!-- Les bornes « <1919 » / « >2005 » sont du texte : ordre explicite. -->
+  <dsfr-data-normalize id="per-n" source="per"
+    compute="ordre = when PERIODE_CONSTRUCTION = '&lt;1919' then 1 when PERIODE_CONSTRUCTION = '1919-1945' then 2 when PERIODE_CONSTRUCTION = '1945-1970' then 3 when PERIODE_CONSTRUCTION = '1970-1990' then 4 when PERIODE_CONSTRUCTION = '1990-2005' then 5 else 6;
+             periode = when ordre = 1 then 'Avant 1919' when ordre = 6 then 'Après 2005' else PERIODE_CONSTRUCTION;
+             n1 = when MAISONS_INDIV_EXPOSES_RGA1 = 'secret' then 0 else MAISONS_INDIV_EXPOSES_RGA1;
+             n2 = when MAISONS_INDIV_EXPOSES_RGA2 = 'secret' then 0 else MAISONS_INDIV_EXPOSES_RGA2;
+             n3 = when MAISONS_INDIV_EXPOSES_RGA3 = 'secret' then 0 else MAISONS_INDIV_EXPOSES_RGA3;
+             sec3 = when MAISONS_INDIV_EXPOSES_RGA3 = 'secret' then 1 else 0;
+             m3 = when sec3 = 1 then null else MAISONS_INDIV_EXPOSES_RGA3;
+             k = 1; un = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-join id="per-j" left="per-n" right="epci-t" on="EPCI_CODE" type="left" prefix-right="e_"></dsfr-data-join>
+  <dsfr-data-normalize id="per-jn" source="per-j"
+    compute="t_ok = when incoh = 0 then n1 + n2 + n3 else 0;
+             n3_ok = when incoh = 0 then n3 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="per-an" source="per-jn" group-by="ordre, periode"
+    aggregate="n1:sum:n1, n2:sum:n2, n3:sum:n3, t_ok:sum:t_ok, n3_ok:sum:n3_ok, sec3:sum:sec3" order-by="ordre:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="per-t" source="per-an"
+    compute="tot = n1 + n2 + n3;
+             part3 = round(n3 / tot * 100, 1);
+             part3_ok = round(n3_ok / t_ok * 100, 1);
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="per-g" source="per-t" rename="periode:Période de construction | part3:Part en zone forte (%)"></dsfr-data-normalize>
+  <dsfr-data-query id="per-vieux" source="per-t" where="ordre:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="per-neuf" source="per-t" where="ordre:eq:6"></dsfr-data-query>
+  <dsfr-data-query id="per-sec" source="per-n" group-by="k" aggregate="sec3:sum:nsec, un:sum:ncel, m3:min:mini, n3:sum:n3"></dsfr-data-query>
+  <dsfr-data-join id="per-s1" left="per-neuf" right="per-vieux" on="k" prefix-right="v_"></dsfr-data-join>
+  <dsfr-data-join id="per-s2" left="per-s1" right="per-sec" on="k" prefix-right="s_"></dsfr-data-join>
+  <dsfr-data-join id="per-s3" left="per-s2" right="nat-t" on="k" prefix-right="nat_"></dsfr-data-join>
+  <dsfr-data-normalize id="per-syn" source="per-s3"
+    compute="borne = (mini - 1) * nsec;
+             borne_pct = borne / s_n3 * 100;
+             ecart_fichiers = r3 - s_n3">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Maisons et argiles</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Argiles&nbsp;: une maison exposée sur cinq l'est fortement, et l'on construit toujours dessus</h1>
+
+    <dsfr-data-repeat source="per-syn">
+      <template>
+        <p class="fr-text--lead">
+          En France métropolitaine, {{cl:number}}&nbsp;maisons individuelles sont bâties sur un sol argileux qui
+          se rétracte à la sécheresse et gonfle à la pluie. {{r3:number}} d'entre elles, <strong>{{nat_part3:number:1}}&nbsp;%</strong>,
+          sont en zone d'exposition forte&nbsp;; {{part_mf:number:0}}&nbsp;% en zone moyenne ou forte. Les maisons récentes
+          n'ont pas évité ces sols&nbsp;: {{part3:number:1}}&nbsp;% de celles bâties après 2005 sont en zone forte, contre
+          {{v_part3:number:1}}&nbsp;% de celles d'avant 1919.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      SDES, exposition des maisons individuelles au retrait-gonflement des argiles (carte d'exposition BRGM 2020
+      croisée avec les logements de la base Fidéli 2021 de l'Insee), par intercommunalité&nbsp;; Sitadel pour les
+      maisons commencées de 2019 à 2024&nbsp;; geo.api.gouv.fr pour la superficie des intercommunalités. Données lues à
+      l'ouverture de la page sur <a href="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/" target="_blank" rel="noopener external">l'API DiDo</a>
+      et <a href="https://geo.api.gouv.fr/" target="_blank" rel="noopener external">l'API Découpage administratif</a>.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="nat-t" value="r3:max" format="nombre" span="4"
+        heading="Maisons en zone d'argile forte" label="France métropolitaine, parc 2021"
+        lines='[{"value":"part3:max","decimals":1,"suffix":"des maisons exposées"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="per-neuf" value="n3:max" format="nombre" span="4"
+        heading="Dont bâties après 2005" label="maisons en zone forte construites de 2006 à 2021"
+        lines='[{"value":"part3:max","decimals":1,"suffix":"des maisons exposées de cette période"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="nat-t" value="p_q_neuf:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Des maisons commencées de 2019 à 2024" label="l'ont été dans une intercommunalité dont au moins un quart des maisons exposées sont en zone forte"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les périodes de construction ======================= -->
+  <!-- highlight-index="[5]" = « Après 2005 », sixième et dernière période (ordre fixe). -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-periode">
+    <h2 id="t-periode" class="fr-h3">Les maisons récentes sont aussi exposées que les anciennes, un peu plus même</h2>
+    <dsfr-data-repeat source="per-syn">
+      <template>
+        <p class="odv-lecture">
+          Sur cent maisons exposées bâties avant 1919, {{v_part3:number:0}} sont en zone forte. Sur cent bâties après 2005,
+          {{part3:number:0}}. D'une période à l'autre, la part oscille entre 17 et 21&nbsp;% sans jamais décroître avec le
+          temps&nbsp;: les maisons construites depuis 1970 sont même un peu plus exposées que les plus anciennes. En nombre, {{n3:number}}&nbsp;maisons bâties
+          après 2005 sont en zone forte. Sans les intercommunalités aux chiffres incohérents (voir plus bas), le
+          constat est le même&nbsp;: {{v_part3_ok:number:1}}&nbsp;% avant 1919, {{part3_ok:number:1}}&nbsp;% après 2005.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part des maisons exposées situées en zone forte, par période de construction">
+      <dsfr-data-chart id="g-periode" source="per-g" type="bar"
+        label-field="Période de construction" value-field="Part en zone forte (%)" name="Part en zone d'exposition forte"
+        selected-palette="neutral" highlight-index="[5]" unit-tooltip="%" y-min="0"
+        databox databox-title="Part des maisons individuelles exposées au retrait-gonflement des argiles qui sont en zone d'exposition forte, par période de construction (%)"
+        databox-source="SDES — exposition des maisons individuelles au RGA, par période de construction (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-periode" source="per-g" label-field="Période de construction" value-field="Part en zone forte (%)"
+        description="Barres verticales, une par période de construction, de « Avant 1919 » à « Après 2005 », sur un axe partant de zéro : la part des maisons exposées qui sont en zone d'argile forte. Toutes les barres sont proches de 20 % ; celles des périodes postérieures à 1970 sont un peu plus hautes que les plus anciennes. La dernière, après 2005, est mise en évidence.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Part = maisons en zone forte / maisons en zone faible, moyenne ou forte, pour chaque période. Les maisons hors de
+      toute zone argileuse ne sont pas dans le fichier. «&nbsp;Après 2005&nbsp;» s'arrête en 2021, année de la base Fidéli.
+    </p>
+  </section>
+
+  <!-- ======================= ET AUJOURD'HUI — Sitadel ======================= -->
+  <!-- EPCI cohérents seulement : la tranche dépend des chiffres de l'EPCI. -->
+  <dsfr-data-query id="tr-ok" source="epci-t" where="incoh:eq:0"></dsfr-data-query>
+  <dsfr-data-query id="tr" source="tr-ok" group-by="ordre, tranche"
+    aggregate="cl:sum:parc, neuf0:sum:neuf, un:sum:n_epci" order-by="ordre:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tr-k" source="tr" compute="k = 1"></dsfr-data-normalize>
+  <dsfr-data-join id="tr-j" left="tr-k" right="nat-t" on="k" prefix-right="nat_"></dsfr-data-join>
+  <dsfr-data-normalize id="tr-t" source="tr-j"
+    compute="p_parc = round(parc / cl_ok * 100, 1);
+             p_neuf = round(neuf / neuf_ok * 100, 1)">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-neuf">
+    <h2 id="t-neuf" class="fr-h3">Les intercommunalités les plus argileuses reçoivent leur part des maisons neuves</h2>
+    <dsfr-data-repeat source="nat-t">
+      <template>
+        <p class="odv-lecture">
+          De 2019 à 2024, {{neuf:number}}&nbsp;maisons ont été mises en chantier dans les intercommunalités couvertes par
+          la carte. Celles où au moins un quart des maisons exposées sont en zone forte en ont accueilli
+          <strong>{{p_q_neuf:number:0}}&nbsp;%</strong>, pour {{p_q_parc:number:0}}&nbsp;% du parc de maisons exposées&nbsp;: on
+          y construit ni plus ni moins qu'ailleurs. Seules les intercommunalités presque sans zone forte prennent
+          nettement plus que leur part des maisons neuves.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Parc de maisons exposées et maisons commencées 2019-2024, par tranche d'exposition forte de l'intercommunalité">
+      <dsfr-data-chart id="g-neuf" source="tr-t" type="bar"
+        label-field="tranche" value-field="p_parc:Parc de maisons exposées (2021)" value-fields="p_neuf:Maisons commencées de 2019 à 2024"
+        unit-tooltip="%" y-min="0"
+        databox databox-title="Répartition du parc de maisons exposées et des maisons commencées de 2019 à 2024, selon la part des maisons de l'intercommunalité situées en zone d'argile forte (%)"
+        databox-source="SDES — RGA par EPCI et Sitadel, logements commencés par EPCI (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-neuf" source="tr-t" label-field="tranche" value-field="p_parc, p_neuf"
+        description="Barres groupées, deux par tranche d'intercommunalités classées selon la part de leurs maisons exposées qui sont en zone forte (presque aucune, sous le secret statistique, moins de 10 %, 10 à 25 %, 25 à 50 %, 50 % ou plus). Pour chaque tranche, la première barre donne sa part du parc de maisons exposées, la seconde sa part des maisons commencées de 2019 à 2024. Les deux barres sont proches dans les tranches les plus exposées ; les intercommunalités presque sans zone forte ont une part des maisons neuves un peu plus haute que leur part du parc.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Attention à l'échelle&nbsp;: une maison neuve bâtie dans une intercommunalité très exposée n'est pas forcément
+      bâtie en zone forte. Sitadel ne localise pas les chantiers sur la carte des argiles&nbsp;: la comparaison se fait
+      entre intercommunalités, pas entre parcelles. Maisons commencées&nbsp;: individuel pur et individuel groupé, en date
+      réelle. Intercommunalités aux chiffres incohérents écartées (voir plus bas).
+    </p>
+  </section>
+
+  <!-- ======================= OÙ — la concentration ======================= -->
+  <dsfr-data-query id="top" source="tr-ok" order-by="r3:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-normalize id="top-g" source="top" rename="EPCI_LIBELLE:Intercommunalité | r3:Maisons en zone forte"></dsfr-data-normalize>
+  <dsfr-data-query id="top2" source="tr-ok" order-by="r3:desc" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="top2-s" source="top2" group-by="k" aggregate="r3:sum:r3_2"></dsfr-data-query>
+  <dsfr-data-join id="top2-j" left="top2-s" right="nat-t" on="k" prefix-right="nat_"></dsfr-data-join>
+  <dsfr-data-normalize id="top2-t" source="top2-j" compute="p2 = r3_2 / r3 * 100"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ou">
+    <h2 id="t-ou" class="fr-h3">Paris et Marseille en tête, puis les campagnes du Sud-Ouest</h2>
+    <dsfr-data-repeat source="top2-t">
+      <template>
+        <p class="odv-lecture">
+          Les métropoles du Grand Paris et d'Aix-Marseille-Provence réunissent à elles deux {{r3_2:number}}&nbsp;maisons en
+          zone forte, {{p2:number:0}}&nbsp;% du total national. Derrière elles, surtout des territoires ruraux de
+          Charente-Maritime, de Gironde et de Haute-Garonne&nbsp;: des pays de maisons, sur des sols argileux.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les dix intercommunalités qui comptent le plus de maisons en zone d'argile forte">
+      <dsfr-data-chart id="g-top" source="top-g" type="bar" horizontal
+        label-field="Intercommunalité" value-field="Maisons en zone forte" name="Maisons en zone forte"
+        selected-palette="neutral" highlight-index="[0, 1]" unit-tooltip="maisons"
+        databox databox-title="Les dix intercommunalités qui comptent le plus de maisons individuelles en zone d'exposition forte aux argiles (hors intercommunalités aux chiffres incohérents)"
+        databox-source="SDES — exposition des maisons individuelles au RGA par EPCI (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-top" source="top-g" label-field="Intercommunalité" value-field="Maisons en zone forte"
+        description="Barres horizontales triées : le nombre de maisons individuelles en zone d'argile forte dans les dix intercommunalités qui en comptent le plus. Les deux premières, mises en évidence, sont la Métropole du Grand Paris et la Métropole d'Aix-Marseille-Provence, chacune bien au-delà de 100 000 maisons ; les suivantes, surtout rurales et du Sud-Ouest, en comptent de 20 000 à 40 000.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — la qualité du fichier ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-qualite">
+    <h2 id="t-qualite" class="fr-h3">Un fichier cohérent au total, faux pour une intercommunalité sur sept</h2>
+    <dsfr-data-repeat source="nat-t">
+      <template>
+        <p class="odv-lecture">
+          Pour {{n_incoh:number}}&nbsp;intercommunalités sur {{n_epci:number}}, la surface argileuse publiée dépasse de plus
+          de 5&nbsp;% la superficie de l'intercommunalité elle-même — jusqu'à {{ratio_max:number:1}}&nbsp;fois. Ces lignes
+          sont impossibles&nbsp;; elles portent {{cl_ko:number}}&nbsp;maisons exposées ({{p_ko_cl:number:0}}&nbsp;% du total). La page
+          les écarte des classements, les signale dans le tableau, et vérifie qu'elles ne changent pas le constat&nbsp;:
+          sans elles, {{part3_ok:number:1}}&nbsp;% des maisons exposées sont en zone forte, contre {{part3:number:1}}&nbsp;% avec.
+          Au total, le fichier classe {{terr_mf:number:0}}&nbsp;% de la superficie des intercommunalités en exposition moyenne
+          ou forte&nbsp;: c'est la part que le ministère donne pour la carte de 2020 (48&nbsp;%).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Le contrôle ne voit que les erreurs de surface. Une intercommunalité peut porter un nombre de maisons faux sans que
+      sa surface le trahisse&nbsp;: les chiffres d'une intercommunalité isolée sont à lire avec prudence. Superficie&nbsp;:
+      geo.api.gouv.fr, découpage actuel, alors que le fichier date de 2021.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: et dans votre intercommunalité&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Une ligne par intercommunalité de France métropolitaine. Une part en zone forte vide signifie moins de 12&nbsp;maisons
+      en zone forte (valeur couverte par le secret statistique). La colonne «&nbsp;Contrôle&nbsp;» signale les lignes dont
+      la surface exposée dépasse la superficie&nbsp;: leurs chiffres sont faux.
+    </p>
+    <dsfr-data-list source="epci-t"
+      columns="EPCI_LIBELLE:Intercommunalité, cl:Maisons exposées (2021), r3:Maisons en zone forte, part3:Part en zone forte (%), neuf0:Maisons commencées 2019-2024, controle:Contrôle"
+      sort="r3:desc" search pagination="15" count-label="intercommunalité|intercommunalités" export="csv"
+      caption="Maisons individuelles exposées au retrait-gonflement des argiles, dont en zone forte, et maisons commencées de 2019 à 2024, par intercommunalité">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm fr-mb-0">
+      <li><strong>Les maisons hors zone argileuse.</strong> Le fichier ne compte que les maisons situées dans une zone
+        d'exposition faible, moyenne ou forte&nbsp;: sans le nombre total de maisons, on ne peut pas dire quelle part de
+        <em>toutes</em> les maisons est exposée. D'où «&nbsp;une maison exposée sur cinq&nbsp;», et non «&nbsp;une maison sur cinq&nbsp;».</li>
+      <li><strong>Les appartements</strong>, que le fichier ne compte pas&nbsp;: leurs fondations profondes les rendent peu
+        sensibles au phénomène.</li>
+      <li><strong>Les sinistres.</strong> Être en zone forte n'est pas être fissuré. Le classement «&nbsp;fort&nbsp;» combine
+        la nature du sol et les sinistres déjà observés&nbsp;: il ne dit rien de l'état d'une maison.</li>
+      <li><strong>La parcelle.</strong> La carte est établie au 1/50&nbsp;000&nbsp;: elle ne dit pas si une maison donnée repose
+        sur de l'argile. Le SDES la déconseille à l'échelle parcellaire.</li>
+      <li><strong>Une carte des intercommunalités</strong>&nbsp;: DSFR Chart n'a pas de fond intercommunal, et une ligne sur
+        sept serait peinte d'une couleur fausse. Le tableau en tient lieu.</li>
+      <li><strong>La nouvelle carte.</strong> Depuis le 1<sup>er</sup>&nbsp;juillet 2026, un nouveau zonage s'applique&nbsp;: les
+        zones d'exposition moyenne et forte y couvrent 55&nbsp;% du territoire hexagonal, contre 48&nbsp;% en 2020 (ministère
+        de la Transition écologique). Les chiffres de cette page reposent sur la carte de 2020&nbsp;: l'exposition actuelle
+        est vraisemblablement plus large.</li>
+      <li><strong>La façon dont on construit.</strong> Construire en zone moyenne ou forte n'est pas interdit&nbsp;: depuis la loi
+        ÉLAN (2018), une étude géotechnique est exigée. Aucune donnée ici ne dit si elle a été faite ni suivie.</li>
+    </ul>
+    <dsfr-data-repeat source="per-syn">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Le secret statistique.</strong> Dans le fichier par période, {{nsec:number}}&nbsp;cellules «&nbsp;zone
+            forte&nbsp;» sur {{ncel:number}} valent «&nbsp;secret&nbsp;» au lieu d'un nombre&nbsp;; elles comptent pour zéro dans les
+            sommes. La plus petite valeur publiée est {{mini:number}}&nbsp;: si le secret masque les valeurs inférieures,
+            comme tout l'indique, il manque au plus {{borne:number}}&nbsp;maisons en zone forte ({{borne_pct:number:1}}&nbsp;%). Le
+            fichier par intercommunalité, moins découpé, en compte {{ecart_fichiers:number}} de plus que la somme des périodes.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="nat-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>L'outre-mer</strong>, hors de la carte&nbsp;: {{hors_rga:number}}&nbsp;maisons commencées de 2019 à 2024 dans
+            des intercommunalités absentes du fichier (outre-mer surtout, intercommunalités recomposées depuis 2021) ne
+            sont pas comptées.</li>
+          <li><strong>Les maisons bâties depuis 2022</strong>&nbsp;: le parc est celui de Fidéli 2021. Les mises en chantier
+            récentes viennent de Sitadel, qui ne dit pas si elles sont en zone argileuse.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir de deux fichiers du SDES sur les argiles et du fichier Sitadel
+        par intercommunalité, servis par DiDo, contrôlés par la superficie des intercommunalités de geo.api.gouv.fr. Le titre
+        du cadrage («&nbsp;un logement sur cinq&nbsp;») a été corrigé&nbsp;: le fichier compte des maisons, et seulement celles qui
+        sont en zone argileuse.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Deux producteurs joints par le code.</strong> DiDo en mode URL, geo.api.gouv.fr en mode URL, un
+              <code>dsfr-data-join</code> sur <code>EPCI_CODE=code</code>&nbsp;: le contrôle de cohérence se fait dans la page,
+              sans script.</li>
+            <li><strong>Le secret recodé et compté.</strong> <code>when … = 'secret' then 0</code>, un drapeau par cellule, et
+              la borne de l'erreur calculée depuis la plus petite valeur publiée (<code>min</code> ignore les chaînes).</li>
+            <li><strong>Un format long replié sans pivot.</strong> Un <code>compute</code> par indicateur puis un
+              <code>group-by</code> par intercommunalité.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>La donnée, pas la bibliothèque.</strong> Des surfaces argileuses plus grandes que l'intercommunalité&nbsp;:
+              rien ne l'annonce, seul un recoupement avec un second producteur le montre.</li>
+            <li><strong>Les bornes de période sont du texte.</strong> «&nbsp;&lt;1919&nbsp;» et «&nbsp;&gt;2005&nbsp;» se trient mal&nbsp;:
+              un ordre explicite par <code>when</code>.</li>
+            <li><strong>Les phrases de synthèse demandent des jointures.</strong> «&nbsp;Après 2005 face à avant 1919, et le
+              secret&nbsp;» passe par trois jointures sur une clé constante.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Lire DiDo filtré</td><td><code>dsfr-data-source url=".../json?COL=in:v&amp;columns=…"</code></td><td>Natif (mode URL)</td></tr>
+            <tr><td>Replier un fichier long par indicateur</td><td><code>normalize compute</code> + <code>query group-by</code></td><td>Natif</td></tr>
+            <tr><td>Compter et borner le secret</td><td><code>compute when</code> + <code>aggregate min</code></td><td>Natif</td></tr>
+            <tr><td>Contrôler une ligne par un autre producteur</td><td>source geo.api + <code>dsfr-data-join</code></td><td>Natif</td></tr>
+            <tr><td>Parc face aux mises en chantier</td><td><code>group-by</code> côté Sitadel puis <code>join</code> (unicité à droite)</td><td>Natif</td></tr>
+            <tr><td>Ordonner des périodes textuelles</td><td><code>compute when</code> + <code>order-by</code></td><td>Natif, verbeux</td></tr>
+            <tr><td>Carte des intercommunalités</td><td>—</td><td>Pas de fond EPCI dans DSFR Chart&nbsp;; remplacé par le tableau</td></tr>
+            <tr><td>Tableau exportable</td><td><code>dsfr-data-list</code> (recherche, tri, CSV)</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Le travail a été de douter du fichier.</strong> Le constat tient (une maison exposée sur cinq en zone forte,
+          autant chez les récentes que chez les anciennes), mais une intercommunalité sur sept porte des surfaces
+          impossibles. <code>dsfr-data</code> permet de le montrer dans la page même, en joignant un second producteur, et de
+          recalculer le constat sans les lignes fausses.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte Leaflet. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
