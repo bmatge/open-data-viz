@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 20 demandes cadrées — 10 bugs,
-> 7 améliorations,
+> 22 demandes cadrées — 11 bugs,
+> 8 améliorations,
 > 3 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -42,7 +42,7 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-59 critiques ont été **retirées** au fil du
+62 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
 `faux-probleme` du registre), et 109
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
@@ -84,25 +84,27 @@ _5 demandes — S 5, M 0, L 0._
 | BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 3 | Déposer chez dsfr-data |
 | AM-089 | `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro | amelioration | S | 1 | Déposer chez dsfr-data |
 | BUG-029 | `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul | bug | S | 7 | Déposer chez dsfr-data |
-| AM-103 | `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune | amelioration | S | 5 | Déposer chez dsfr-data |
-| BUG-033 | `color-map` sur `type="line"` recolore le trait et la légende, pas les points : quatrième surface de la famille BUG-016 / BUG-022 | bug | S | 3 | Déposer chez dsfr-data |
+| AM-103 | `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune | amelioration | S | 7 | Déposer chez dsfr-data |
+| BUG-033 | `color-map` sur `type="line"` recolore le trait et la légende, pas les points : quatrième surface de la famille BUG-016 / BUG-022 | bug | S | 4 | Déposer chez dsfr-data |
 | BUG-035 | La vue tableau de la DataBox ne montre que `label-field` et `value-field` : les séries de `value-fields` en sont absentes, et les lignes sont coupées à 100 | bug | S | 1 | Déposer chez dsfr-data |
 | AM-107 | `radius-field` fait croître le rayon, pas l'aire, et la plus petite valeur prend `radius-min` : pas de cercles proportionnels honnêtes, et `compute` n'a pas de racine carrée pour compenser | amelioration | S | 1 | Déposer chez dsfr-data |
 | BUG-034 | Un encart de carte clone la couche entière : chaque encart dessine tous les points, parfois en double, et garde les anciens après un filtre | bug | M | 2 | Déposer chez dsfr-data |
+| BUG-038 | `min` / `max` de `dsfr-data-query` sur plus de ~125 000 valeurs par groupe : `Math.min(...values)` dépasse la pile, et l'affichage garde l'ancien résultat | bug | XS | 1 | Déposer chez dsfr-data |
 | AM-087 | La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-_11 demandes — S 9, M 1, L 0._
+_12 demandes — S 9, M 1, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
-| AM-088 | `subtitle-field` du podium affiche le nombre brut : ni séparateur de milliers, ni format, ni suffixe | amelioration | S | 1 | Déposer chez dsfr-data |
+| AM-110 | `share_percent` n'a pas de partition : la part se calcule sur toutes les lignes de sortie, jamais par groupe — une part « parmi les répondants de l'année » coûte un second `group-by`, une jointure et un `compute` | amelioration | S | 1 | Déposer chez dsfr-data |
+| AM-088 | Le podium ne formate ni sa valeur ni son sous-titre : la valeur est arrondie à l'unité (9,98 et 10,41 deviennent « 10 »), `subtitle-field` affiche le nombre brut | amelioration | S | 2 | Déposer chez dsfr-data |
 | AM-102 | Préréglages d'encart : La Réunion (zoom 9) coupe le sud de l'île, et Wallis-et-Futuna (zoom 7) laisse ses deux îles hors cadre | amelioration | S | 2 | Déposer chez dsfr-data |
 | AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 3 | Déposer chez dsfr-data |
 | BUG-037 | Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2 | bug | XS | 1 | Déposer chez dsfr-data |
 
-_4 demandes — S 2, M 0, L 0._
+_5 demandes — S 3, M 0, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -575,13 +577,15 @@ Remplir de `null` dans `_processTidyData`, comme `dsfr-data-pivot`. Même règle
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-normalize`
-**Rencontré sur** 5 page(s) : culture/entrepreneurs-spectacles, culture/depenses-culturelles-collectivites, developpement-durable/reseaux-chaleur, developpement-durable/entrepots, culture/architecture-contemporaine
+**Rencontré sur** 7 page(s) : culture/entrepreneurs-spectacles, culture/depenses-culturelles-collectivites, developpement-durable/reseaux-chaleur, developpement-durable/entrepots, culture/architecture-contemporaine, culture/imprimeurs-19e, demo/vacance-logements
 
 ### Constat
 
 Entrepreneurs de spectacles : impossible de tirer le SIREN (les 9 premiers caractères) du SIRET. Le renouvellement des licences est donc mesuré au SIRET (45 %), alors qu'il vaut 58 % au SIREN : une entreprise qui change d'établissement n'est pas une nouvelle entreprise. Dépenses culturelles : impossible de filtrer les communes par département, faute de lire les deux premiers caractères du code INSEE. La liste blanche de `compute` compte `lower`, `upper`, `trim`, `len`, `concat`, `replace` et `contains`, mais ni `left` ni `substr`. Distinct d'AM-038 (`replace-fields` sans motif).
 
 **Vague 3 de création (2026-09-27)** : Trois pages de plus. **Entrepôts** : lire la borne basse d'une tranche « ] 6 500 000 ; 6 600 000 ] m² » demande quatre `replace()` imbriqués puis `floor()`. Ce contournement tient tant que les bornes sont entières et séparées par un seul « ; ». Il cesse de marcher sur « 50 à 99 » ou « Moins de 171 » (règle 5 du lot 11). **Architecture contemporaine** : il n'y a pas non plus d'index de tableau. Tirer la première année d'une datation multivaluée coûte quatre étapes (`split`, `explode`, `numeric`, `min`) et une jointure, et la dénomination principale (le premier terme) reste hors d'atteinte. **Réseaux de chaleur** : le département ne se dérive pas du code commune. Une carte a été écartée pour cette raison, entre autres. La demande s'élargit : `left`, `substr`, et un accès au n-ième élément d'un tableau.
+
+**Vague 4 de création (2026-09-27)** et **Démonstrations n° 4 et 5 (2026-09-27)** : deux pages de plus. Imprimeurs : impossible d'extraire l'année d'une date écrite « 4 décembre 1837 ». La page passe par une cascade de `contains(debut, '181')` … `'187'` (FP-059), qui ne marche que sur ce type de texte. Vacance des logements : la commune parente d'un arrondissement se calcule par des intervalles de codes (`code >= '75101' and code <= '75120'`), faute de `substr`.
 
 ### Impact de l'erreur ou du manque
 
@@ -600,6 +604,8 @@ Structurel : SIRET/SIREN et commune/département sont les deux hiérarchies de c
 Liste blanche relue à la consignation (origin/main, `packages/shared/src/utils/compute.ts`, objet `FUNCTIONS`, 2026-09-27). 45 % et 58 % : DuckDB, agent, 2026-09-26, non rejoués.
 
 Vague 3 (2026-09-27) : Liste blanche relue sur origin/main (5b3bf7e, 2026-09-27), `packages/shared/src/utils/compute.ts`, objet `FUNCTIONS` : ni `left`, ni `substr`, ni index de tableau. Entrepôts : 88,2 M m² en somme des bornes basses, identiques au calcul Python sur l'export (agent). Architecture : agent, 2026-09-27.
+
+Vague 4 : relu sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : la table `FUNCTIONS` de `packages/shared/src/utils/compute.ts` n'a ni `substr`, ni `left`, ni `match` (abs, floor, ceil, round, lower, upper, trim, len, concat, replace, coalesce, is_null, is_empty, join, contains…). Intervalles relus dans `public/demo/vacance-logements.html` à la consignation.
 
 ### Contournement actuel
 
@@ -620,11 +626,13 @@ Aucun dans la page ; mesurer à la maille disponible et le dire.
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-chart`
-**Rencontré sur** 3 page(s) : developpement-durable/qualite-air, culture/entrepreneurs-spectacles, culture/livre-trente-ans
+**Rencontré sur** 4 page(s) : developpement-durable/qualite-air, culture/entrepreneurs-spectacles, culture/livre-trente-ans, culture/sibil-lieux
 
 ### Constat
 
 Sur une courbe, `color-map` pose `borderColor` et `backgroundColor` du jeu de données, mais ni `pointBackgroundColor` ni `pointBorderColor` : les points gardent la palette par défaut. Qualité de l'air : trait gris, points violets. Entrepreneurs : courbe orange, points bleu clair. Livre : de 603 à 790 pixels par couleur demandée, contre 2 796 à 2 981 par couleur de la palette par défaut (`#5c68e5`, `#82b5f2`, `#29598f`, `#31a7ae`, `#81eef5`, `#b478f1`). Le défaut se produit avec et sans `databox`. **Règle 4 : c'est `dsfr-data`.** Le recoloriage est fait par `utils/color-map.ts` sur les jeux de données Chart.js, après le rendu de DSFR Chart, et c'est lui qui omet les propriétés des points.
+
+**Vague 4 de création (2026-09-27)** : Sibil, sans `databox` : trois lignes recolorées, points restés à la palette par défaut. Cinquième page ; toujours `dsfr-data` (règle 4).
 
 ### Impact de l'erreur ou du manque
 
@@ -641,6 +649,8 @@ Structurel : toute courbe multisérie avec `color-map`.
 ### Comment ça a été vérifié
 
 Agents, 0.42.0, 2026-09-26 : capture (qualité de l'air), page minimale à deux séries avec et sans `databox` (entrepreneurs, `rejeu-colormap-points-ligne.png`), pixels du canvas comptés (livre). **Source relu à la consignation** (origin/main, `packages/core/src/utils/color-map.ts` l. 90-112) : seules `backgroundColor`, `borderColor`, `hoverBackgroundColor` et `hoverBorderColor` sont posées ; aucune occurrence de `pointBackgroundColor`.
+
+Vague 4 : agent, page minimale à trois lignes inline sans `databox`, 0.42.0, capture `rejeu-colormap-courbe.png`. Relu sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `git grep pointBackgroundColor` dans `packages/core/src/utils/color-map.ts` ne trouve toujours rien.
 
 ### Contournement actuel
 
@@ -782,6 +792,47 @@ Filtrer la couche clonée à l'emprise de l'encart, et remplacer (au lieu d'ajou
 
 ---
 
+## BUG-038 — `min` / `max` de `dsfr-data-query` sur plus de ~125 000 valeurs par groupe : `Math.min(...values)` dépasse la pile, et l'affichage garde l'ancien résultat
+
+**Priorité** P2 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-query`
+**Rencontré sur** 1 page(s) : culture/sibil-lieux
+
+### Constat
+
+`_computeAggregate` calcule `min` et `max` par `Math.min(...values)` et `Math.max(...values)`. L'étalement passe chaque valeur en argument, et V8 lève « RangeError: Maximum call stack size exceeded » entre 120 000 et 125 000 arguments. Sibil (204 628 lignes) : la date minimale sur tout le jeu plante la query, et le `dsfr-data-repeat` en aval continue d'afficher l'ancien résultat, sans message à l'écran. Le même motif est dans `utils/aggregations.ts` (min/max du KPI) et dans `dsfr-data-map-layer.ts` (bornes de la discrétisation). Le seuil dépend du moteur : ce n'est pas un plafond qu'une page peut connaître d'avance.
+
+### Impact de l'erreur ou du manque
+
+Un agrégat sur un grand jeu échoue et l'affichage garde un chiffre périmé, sans rien à l'écran.
+
+### Objectif métier de la correction
+
+Que `min` et `max` tiennent sur n'importe quel volume chargé.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : `fetch-mode="export"` rend courants les jeux de plus de 100 000 lignes.
+
+### Comment ça a été vérifié
+
+Agent, page minimale inline, 0.42.0, 2026-09-27 : 100 000 lignes passent, 200 000 lèvent la `RangeError`. **Rejoué à la consignation** : Node 24 (V8), `Math.min(...new Array(n).fill(1))` passe à 120 000, lève « Maximum call stack size exceeded » à 125 000. Source relu sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `dsfr-data-query.ts` l. 1846-1849, `packages/core/src/utils/aggregations.ts` l. 616, `dsfr-data-map-layer.ts` l. 1126-1127.
+
+### Contournement actuel
+
+Regrouper d'abord (par date), puis prendre le minimum des groupes.
+
+### Demande
+
+Remplacer l'étalement par une boucle (`reduce`) partout où un tableau de données est étalé en arguments.
+
+### Critères d'acceptation
+
+- [ ] `aggregate="x:min"` sur 500 000 lignes rend la bonne valeur.
+- [ ] Plus aucun `Math.min(...` / `Math.max(...` sur un tableau de données dans `packages/core/src`.
+
+---
+
 ## AM-087 — La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises
 
 **Priorité** P2 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
@@ -825,15 +876,58 @@ Corriger la fiche `apiProviders` : retirer Tabular de la phrase sur les APIs san
 
 ---
 
-## AM-088 — `subtitle-field` du podium affiche le nombre brut : ni séparateur de milliers, ni format, ni suffixe
+## AM-110 — `share_percent` n'a pas de partition : la part se calcule sur toutes les lignes de sortie, jamais par groupe — une part « parmi les répondants de l'année » coûte un second `group-by`, une jointure et un `compute`
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-query`
+**Rencontré sur** 1 page(s) : culture/usagers-archives
+
+### Constat
+
+Usagers des archives compare deux enquêtes (2014 et 2021) : la part de chaque réponse parmi les répondants d'une question, une année donnée. `share_percent` rapporte chaque ligne au total de **toutes** les lignes de sortie. Avec `group-by="annee, question, reponse"`, la part d'une réponse est donc divisée par la somme des deux années et de toutes les questions. Il a fallu un second `group-by="question, annee"`, un `join on="question,annee"` et un `compute n / tot * 100`. Le motif « part au sein d'un groupe » est le cas courant des enquêtes et des séries par catégorie.
+
+### Impact de l'erreur ou du manque
+
+Toute répartition par catégorie à plusieurs groupes (année, région) coûte trois balises de plus.
+
+### Objectif métier de la correction
+
+Qu'une part au sein d'un groupe s'écrive dans la query qui compte.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : enquêtes, séries par catégorie, compositions par territoire.
+
+### Comment ça a été vérifié
+
+Agent, navigateur, 0.42.0, 2026-09-27 : parts identiques au recalcul pandas avec le contournement. **Relu à la consignation** sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `dsfr-data-query.ts` l. 1807-1821 (`_applyShareAggregate` : `total` = somme de la colonne sur toutes les lignes `data`), JSDoc l. 347-375 (« divisée par la somme de cette colonne sur toutes les lignes de sortie ») ; aucune option de partition.
+
+### Contournement actuel
+
+Second `group-by` sur la partition, `dsfr-data-join` sur ses clés, puis `compute` du ratio.
+
+### Demande
+
+Une partition pour `share` / `share_percent` (par exemple `share-by="annee, question"`).
+
+### Critères d'acceptation
+
+- [ ] Avec une partition `annee`, les parts de chaque année somment à 100.
+- [ ] Sans l'attribut, le comportement actuel est inchangé.
+
+---
+
+## AM-088 — Le podium ne formate ni sa valeur ni son sous-titre : la valeur est arrondie à l'unité (9,98 et 10,41 deviennent « 10 »), `subtitle-field` affiche le nombre brut
 
 **Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-podium`
-**Rencontré sur** 1 page(s) : aides-de-minimis
+**Rencontré sur** 2 page(s) : aides-de-minimis, demo/diabete-age-egal
 
 ### Constat
 
 Pour porter le nombre d'aides sous chaque barre du podium — ce qui rend lisible le paradoxe « qui déclare le plus n'est pas qui verse le plus » —, `subtitle-field="nb"` afficherait « 5164 ». Le podium lit le champ par `String(getByPath(record, subtitleField))` et n'offre aucun attribut de format.
+
+**Démonstrations n° 4 et 5 (2026-09-27)** : **la valeur du podium elle-même est arrondie à l'unité, sans attribut de décimales.** Diabète à âge égal : la Nièvre (9,98 %) et la Seine-Saint-Denis (10,41 %) affichaient toutes deux « 10 % ». Un classement de taux proches devient illisible. Le constat couvre donc les deux textes du podium : le sous-titre brut, et la valeur arrondie.
 
 ### Impact de l'erreur ou du manque
 
@@ -851,13 +945,15 @@ Tout podium qui croise deux mesures.
 
 Source `packages/core/src/components/dsfr-data-podium.ts` l. 389-391 (`String()`, aucun format), identique sur origin/main (0.42.0) le 2026-09-26. Navigateur 2026-09-26, /viz/aides-de-minimis, 0.33.0 du CDN : avec le contournement, le podium rend « 5 164 aides », « 937 aides », « 1 aide ».
 
+Démonstrations : agent, navigateur, 0.42.0, 2026-09-27. **Relu à la consignation** sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `dsfr-data-podium.ts` l. 436-438, `_formatValue` appelle `formatNumber(value)` sans décimales ; `packages/shared/src/utils/formatters.ts` l. 140-145, sans `decimals` → `Math.round(value)`. Aucune `@property` de décimales ni de format parmi celles du podium.
+
 ### Contournement actuel
 
 Un `dsfr-data-normalize compute` de cinq assignations (milliers, reste, zéros de tête, espace fine insécable, singulier) produit « 5 164 aides ».
 
 ### Demande
 
-Un `subtitle-format` (nombre, euro, pourcentage) avec suffixe, ou un `subtitle-template` qui accepte la grammaire de gabarit (`{{nb:number}} aides`).
+Un `subtitle-format` (nombre, euro, pourcentage) avec suffixe, ou un `subtitle-template` qui accepte la grammaire de gabarit (`{{nb:number}} aides`). Et un attribut `decimals` (ou `format`) pour la valeur, comme sur `dsfr-data-kpi`.
 
 ### Critères d'acceptation
 
