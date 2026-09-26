@@ -42,7 +42,7 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-62 critiques ont été **retirées** au fil du
+63 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
 `faux-probleme` du registre), et 109
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
@@ -84,7 +84,7 @@ _5 demandes — S 5, M 0, L 0._
 | BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 3 | Déposer chez dsfr-data |
 | AM-089 | `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro | amelioration | S | 1 | Déposer chez dsfr-data |
 | BUG-029 | `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul | bug | S | 7 | Déposer chez dsfr-data |
-| AM-103 | `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune | amelioration | S | 7 | Déposer chez dsfr-data |
+| AM-103 | `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune | amelioration | S | 9 | Déposer chez dsfr-data |
 | BUG-033 | `color-map` sur `type="line"` recolore le trait et la légende, pas les points : quatrième surface de la famille BUG-016 / BUG-022 | bug | S | 4 | Déposer chez dsfr-data |
 | BUG-035 | La vue tableau de la DataBox ne montre que `label-field` et `value-field` : les séries de `value-fields` en sont absentes, et les lignes sont coupées à 100 | bug | S | 1 | Déposer chez dsfr-data |
 | AM-107 | `radius-field` fait croître le rayon, pas l'aire, et la plus petite valeur prend `radius-min` : pas de cercles proportionnels honnêtes, et `compute` n'a pas de racine carrée pour compenser | amelioration | S | 1 | Déposer chez dsfr-data |
@@ -100,8 +100,8 @@ _12 demandes — S 9, M 1, L 0._
 |---|---|---|---|---|---|
 | AM-110 | `share_percent` n'a pas de partition : la part se calcule sur toutes les lignes de sortie, jamais par groupe — une part « parmi les répondants de l'année » coûte un second `group-by`, une jointure et un `compute` | amelioration | S | 1 | Déposer chez dsfr-data |
 | AM-088 | Le podium ne formate ni sa valeur ni son sous-titre : la valeur est arrondie à l'unité (9,98 et 10,41 deviennent « 10 »), `subtitle-field` affiche le nombre brut | amelioration | S | 2 | Déposer chez dsfr-data |
-| AM-102 | Préréglages d'encart : La Réunion (zoom 9) coupe le sud de l'île, et Wallis-et-Futuna (zoom 7) laisse ses deux îles hors cadre | amelioration | S | 2 | Déposer chez dsfr-data |
-| AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 3 | Déposer chez dsfr-data |
+| AM-102 | Préréglages d'encart : La Réunion (zoom 9) coupe le sud de l'île, et Wallis-et-Futuna (zoom 7) laisse ses deux îles hors cadre | amelioration | S | 3 | Déposer chez dsfr-data |
+| AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 4 | Déposer chez dsfr-data |
 | BUG-037 | Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2 | bug | XS | 1 | Déposer chez dsfr-data |
 
 _5 demandes — S 3, M 0, L 0._
@@ -577,7 +577,7 @@ Remplir de `null` dans `_processTidyData`, comme `dsfr-data-pivot`. Même règle
 
 **Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-normalize`
-**Rencontré sur** 7 page(s) : culture/entrepreneurs-spectacles, culture/depenses-culturelles-collectivites, developpement-durable/reseaux-chaleur, developpement-durable/entrepots, culture/architecture-contemporaine, culture/imprimeurs-19e, demo/vacance-logements
+**Rencontré sur** 9 page(s) : culture/entrepreneurs-spectacles, culture/depenses-culturelles-collectivites, developpement-durable/reseaux-chaleur, developpement-durable/entrepots, culture/architecture-contemporaine, culture/imprimeurs-19e, demo/vacance-logements, culture/prefets-prefetes, culture/journees-patrimoine
 
 ### Constat
 
@@ -586,6 +586,8 @@ Entrepreneurs de spectacles : impossible de tirer le SIREN (les 9 premiers carac
 **Vague 3 de création (2026-09-27)** : Trois pages de plus. **Entrepôts** : lire la borne basse d'une tranche « ] 6 500 000 ; 6 600 000 ] m² » demande quatre `replace()` imbriqués puis `floor()`. Ce contournement tient tant que les bornes sont entières et séparées par un seul « ; ». Il cesse de marcher sur « 50 à 99 » ou « Moins de 171 » (règle 5 du lot 11). **Architecture contemporaine** : il n'y a pas non plus d'index de tableau. Tirer la première année d'une datation multivaluée coûte quatre étapes (`split`, `explode`, `numeric`, `min`) et une jointure, et la dénomination principale (le premier terme) reste hors d'atteinte. **Réseaux de chaleur** : le département ne se dérive pas du code commune. Une carte a été écartée pour cette raison, entre autres. La demande s'élargit : `left`, `substr`, et un accès au n-ième élément d'un tableau.
 
 **Vague 4 de création (2026-09-27)** et **Démonstrations n° 4 et 5 (2026-09-27)** : deux pages de plus. Imprimeurs : impossible d'extraire l'année d'une date écrite « 4 décembre 1837 ». La page passe par une cascade de `contains(debut, '181')` … `'187'` (FP-059), qui ne marche que sur ce type de texte. Vacance des logements : la commune parente d'un arrondissement se calcule par des intervalles de codes (`code >= '75101' and code <= '75120'`), faute de `substr`.
+
+**Vague 5 de création (2026-09-27)** : Deux pages de plus. **Préfets** : ni sous-chaîne ni minimum sur les éléments d'un tableau. Le premier poste listé est pris pour le plus ancien, ce qui est faux sur 3 lignes (dont 2 changent de décennie) ; et l'année se lit en détournant `year()` (PG-081). **Journées du patrimoine** : la colonne `Département` est inexploitable (126 graphies, 664 vides) et le département ne se tire pas des deux premiers caractères du code INSEE.
 
 ### Impact de l'erreur ou du manque
 
@@ -606,6 +608,8 @@ Liste blanche relue à la consignation (origin/main, `packages/shared/src/utils/
 Vague 3 (2026-09-27) : Liste blanche relue sur origin/main (5b3bf7e, 2026-09-27), `packages/shared/src/utils/compute.ts`, objet `FUNCTIONS` : ni `left`, ni `substr`, ni index de tableau. Entrepôts : 88,2 M m² en somme des bornes basses, identiques au calcul Python sur l'export (agent). Architecture : agent, 2026-09-27.
 
 Vague 4 : relu sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : la table `FUNCTIONS` de `packages/shared/src/utils/compute.ts` n'a ni `substr`, ni `left`, ni `match` (abs, floor, ceil, round, lower, upper, trim, len, concat, replace, coalesce, is_null, is_empty, join, contains…). Intervalles relus dans `public/demo/vacance-logements.html` à la consignation.
+
+Vague 5 (2026-09-27) : Agents, recalcul Python, 2026-09-27. Liste blanche relue à la consignation (`packages/shared/src/utils/compute.ts`, origin/main 23b1b9a, `FUNCTIONS` l. 167-257) : ni `substr`, ni `left`, ni `min` sur tableau.
 
 ### Contournement actuel
 
@@ -966,11 +970,13 @@ Un `subtitle-format` (nombre, euro, pourcentage) avec suffixe, ou un `subtitle-t
 
 **Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map-inset`, `dsfr-data-map`
-**Rencontré sur** 2 page(s) : edu/implantation-ulis-tfv, edu/hybridation-enseignement-lycee
+**Rencontré sur** 3 page(s) : edu/implantation-ulis-tfv, edu/hybridation-enseignement-lycee, culture/expositions-interet-national
 
 ### Constat
 
 Dans un encart de 10 rem × 160 px (largeur posée par `site.css`, AM-032), deux préréglages de `utils/territories.ts` ne montrent pas leur territoire. `la-reunion` (centre −21,115 / 55,53, zoom 9) : Saint-Pierre (−21,347) sort du cadre, et l'encart ULIS-TFV, dont l'unique point ultramarin est le Collège Terre Sainte, était vide. `wallis-et-futuna` (centre −13,80 / −177,15, zoom 7) : Wallis (≈ −176,2) et Futuna (≈ −178,1) sont chacune à près d'un degré de longitude du centre, au-delà d'une demi-largeur de 80 px, et l'encart de l'hybridation était vide. Règle 4 : c'est bien `dsfr-data` (préréglages de la bibliothèque), pas DSFR Chart.
+
+**Vague 5 de création (2026-09-27)** : Expositions d'intérêt national : l'encart de La Réunion ne montre qu'un des cinq musées labellisés de l'île. Même cause que ci-dessus (préréglage au zoom 9).
 
 ### Impact de l'erreur ou du manque
 
@@ -987,6 +993,8 @@ Permanent : toute carte qui pose ces deux encarts.
 ### Comment ça a été vérifié
 
 Agents, 0.42.0, 2026-09-26 : captures des encarts vides ; `zoom="8"` (La Réunion) et `center="-13.75,-177.15" zoom="6"` (Wallis-et-Futuna) font apparaître les points. **Préréglages relus et calculés à la consignation** (origin/main, `packages/core/src/utils/territories.ts` l. 10 et 21). En Web Mercator, une carte fait 256·2^z px pour 360°. Au zoom 9, cela donne 364 px par degré de longitude, soit ≈ 390 px par degré de latitude à −21° : Saint-Pierre, à 0,23° au sud du centre, tombe à ≈ 90 px, hors d'une demi-hauteur de 80 px. Au zoom 7, 91 px par degré : Wallis et Futuna, à ≈ 0,97° du centre, tombent à ≈ 88 px, hors d'une demi-largeur de 80 px.
+
+Vague 5 (2026-09-27) : Agent, capture de la carte, 2026-09-27. Non rejoué à la consignation ; cohérent avec le calcul de l'emprise ci-dessus.
 
 ### Contournement actuel
 
@@ -1007,7 +1015,7 @@ Recaler les deux préréglages pour une emprise de 160 px : La Réunion au zoom 
 
 **Priorité** P3 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-normalize`
-**Rencontré sur** 3 page(s) : barometre-france-num, entreprises-restauration-notre-dame, edu/cactus-hameconnage
+**Rencontré sur** 4 page(s) : barometre-france-num, entreprises-restauration-notre-dame, edu/cactus-hameconnage, culture/ete-culturel
 
 ### Constat
 
@@ -1016,6 +1024,8 @@ Le tokenizer de `compute` (`packages/shared/src/utils/compute.ts`) termine un li
 **Lot 4 de recréation (2026-09-26)** : la famille « Métiers d'art et du patrimoine » de /viz/entreprises-restauration-notre-dame ne s'écrit pas en littéral ; contournée par `contains(…, 'art et du patrimoine')`. Deuxième jeu public qui bute sur la même apostrophe.
 
 **Lot 6 de recréation (2026-09-26)** : Cactus contourne l'apostrophe de « heure de vie de classe » par `contains(join(…), 'heure de vie de classe')`, sans essayer d'échappement. C'est cohérent avec ce constat.
+
+**Vague 5 de création (2026-09-27)** : Été culturel : « Provence-Alpes-Côte d'Azur » ne s'écrit pas dans un littéral. L'erreur est signalée, pas silencieuse : `''` donne « "then" attendu … trouvé 'Oise' », `\'` donne « chaîne non terminée ». Contournement natif : `replace-fields`.
 
 ### Impact de l'erreur ou du manque
 
@@ -1034,6 +1044,8 @@ Permanent : l'apostrophe est partout dans les nomenclatures françaises.
 Source `compute.ts` l. 330-340 (boucle jusqu'à `input[j] !== "'"`) relue le 2026-09-26, grammaire identique dans le bundle 0.33.0 du CDN et sur origin/main (0.42.0). Contournement appliqué sur /viz/barometre-france-num : 802-807 unifiées, 802 9,46 → 21,91 affichée au navigateur. — Lot 4 (2026-09-26) : page Notre-Dame, 0.42.0, chiffres de la famille identiques au recalcul sur l'export (103 entreprises).
 
 Contournement lu dans /education/cactus-hameconnage (agent, 2026-09-26).
+
+Vague 5 (2026-09-27) : Agent, page minimale 0.42.0 `core`, 2026-09-27. Non rejoué à la consignation.
 
 ### Contournement actuel
 
