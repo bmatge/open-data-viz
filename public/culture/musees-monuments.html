@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Musées de France dans un monument historique — open-data-viz</title>
+  <meta name="description" content="Quatre musées de France sur dix sont installés dans un monument historique, et ils reçoivent deux entrées sur trois : plus un musée est fréquenté, plus il a de chances d'occuper un bâtiment protégé. Création avec dsfr-data à partir de Muséofile et de la fréquentation des musées (ministère de la Culture), servies par l'API Tabular de data.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 13 de docs/portail-culture/proposition.md.
+
+       DEUX JEUX, DEUX REQUÊTES :
+       - Muséofile (ministère de la Culture), ressource Tabular 5ccd6238 : 1 216 musées
+         de France, un par ligne, 1 216 identifiants distincts (vérifié sur l'export
+         complet le 2026-09-27). Colonne `Protection_batiment` : texte libre, vide pour
+         727 musées.
+       - Fréquentation des Musées de France, ressource 7708e380 (même source que la
+         page /culture/frequentation-musees) : un site × une année.
+       Les deux par fetch-mode="export" (Parquet, sans where ni group-by sur la source).
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué sur les exports le 2026-09-27) :
+       - 487 tient, mais seulement en comparant SANS la casse : 486 cellules écrivent
+         « Monuments historiques », une « monuments historiques ». `lower()` puis
+         `contains()`. Deux cellules non vides ne parlent pas de monument historique
+         (« Site patrimonial remarquable. », le nom d'un cabinet d'architectes).
+       - « 133 sont en Île-de-France » était faux : 133 est le nombre de musées de
+         France franciliens ; 65 d'entre eux sont dans un monument historique.
+       - L'histoire s'est complétée par la jointure avec la fréquentation : ces 40 %
+         de musées reçoivent 67 % des entrées de 2024, et encore 56 % hors Louvre et
+         Versailles. Plus un musée est fréquenté, plus il occupe un monument.
+       - Les Expositions d'intérêt national (EIN) du cadrage sont écartées : autre
+         question, dite en fin de page.
+       ========================================================================== -->
+
+  <!-- ---------- Muséofile, sans les longs textes (Histoire, Atout, Interet) ---------- -->
+  <dsfr-data-source id="museo" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="5ccd6238-4fb0-4b2c-b14a-581909489320"
+    fetch-mode="export"
+    select="Identifiant, Nom_officiel, Ville, Departement, Region, Protection_batiment, Refmer, Domaine_thematique, Coordonnees">
+  </dsfr-data-source>
+
+  <!-- ---------- Fréquentation, toutes années ---------- -->
+  <dsfr-data-source id="freq" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="7708e380-e7f8-4b56-936a-5d2a262d852d"
+    fetch-mode="export"
+    select="IDMuseofile, annee, total">
+  </dsfr-data-source>
+
+  <!-- Dernière année du fichier de fréquentation, lue dans la donnée -->
+  <dsfr-data-normalize id="fq-n" source="freq" compute="k = 'fr'"></dsfr-data-normalize>
+  <dsfr-data-query id="fq-an" source="fq-n" group-by="annee, k" aggregate="total:sum:tot_all" order-by="annee:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="fq-der" left="fq-n" right="fq-an" on="annee" type="inner" prefix-right="a_"></dsfr-data-join>
+  <!-- Un musée de France = un identifiant Muséofile ; ses sites sont additionnés.
+       Côté droit de la jointure suivante : unique par construction (group-by). -->
+  <dsfr-data-query id="fq-mu" source="fq-der" where="IDMuseofile:isnotnull" group-by="IDMuseofile, annee"
+    aggregate="total:sum:entrees"></dsfr-data-query>
+
+  <!-- Musée par musée : protection déclarée, domaines, coordonnées -->
+  <dsfr-data-join id="mj" left="museo" right="fq-mu" on="Identifiant=IDMuseofile" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="mn" source="mj"
+    compute="k = 'fr';
+             un = 1;
+             pb = lower(coalesce(Protection_batiment, ''));
+             mh = when contains(pb, 'monuments historiques') then 1 else 0;
+             statut = when mh = 1 then 'Dans un monument historique' else 'Sans protection déclarée';
+             autre = when mh = 0 and not is_empty(Protection_batiment) then 1 else 0;
+             geo = concat('[', Coordonnees, ']');
+             dom = replace(replace(replace(replace(replace(replace(replace(replace(replace(lower(coalesce(Domaine_thematique, '')),
+                     'histoire', 'Histoire'), 'archéologie', 'Archéologie'), 'ethnologie', 'Ethnologie'),
+                     'beaux-arts', 'Beaux-arts'), 'arts décoratifs', 'Arts décoratifs'),
+                     'technique et industrie', 'Technique et industrie'),
+                     'art moderne et contemporain', 'Art moderne et contemporain'),
+                     'sciences de la nature', 'Sciences de la nature'), 'photographie', 'Photographie');
+             decl = when entrees > 0 then 1 else 0;
+             nogeo = when is_empty(Coordonnees) then 1 else 0;
+             pa = when contains(coalesce(Refmer, ''), 'PA') then 1 else 0;
+             pa_mh = when pa = 1 and mh = 1 then 1 else 0;
+             pa_non = when pa = 1 and mh = 0 then 1 else 0;
+             e_mh = when mh = 1 then entrees else 0;
+             lv = when Identifiant = 'M5031' or Identifiant = 'M5077' then 1 else 0;
+             e_hlv = when lv = 0 then entrees else 0;
+             e_mh_hlv = when lv = 0 and mh = 1 then entrees else 0;
+             tranche = when entrees >= 1000000 then '1 million et plus'
+                       when entrees >= 100000 then '100 000 à 1 million'
+                       when entrees >= 10000 then '10 000 à 100 000'
+                       when entrees > 0 then 'Moins de 10 000'
+                       else 'Aucune entrée déclarée';
+             ordre = when entrees >= 1000000 then 1 when entrees >= 100000 then 2 when entrees >= 10000 then 3 when entrees > 0 then 4 else 5">
+  </dsfr-data-normalize>
+  <!-- Domaines : texte « a;b;c » → tableau (split s'exécute avant compute, d'où un
+       second normalize). Casse ramenée d'abord : « Beaux-Arts » et « Beaux-arts »
+       coexistent dans le fichier (108 et 428 cellules). -->
+  <dsfr-data-normalize id="ms" source="mn" split="dom:;"
+    rename="Region:Région | Departement:Département | Nom_officiel:Musée | Ville:Commune"></dsfr-data-normalize>
+
+  <!-- Synthèse nationale -->
+  <dsfr-data-query id="syn" source="mn" group-by="k"
+    aggregate="un:sum:n, mh:sum:nmh, entrees:sum:e_all, e_mh:sum:e_mh, e_hlv:sum:e_hlv, e_mh_hlv:sum:e_mh_hlv, decl:sum:ndecl, autre:sum:autre, nogeo:sum:nogeo, pa_mh:sum:pa_mh, pa_non:sum:pa_non, annee:max:annee">
+  </dsfr-data-query>
+  <dsfr-data-join id="syn-j" left="syn" right="fq-an" on="k" type="inner" prefix-right="f_"></dsfr-data-join>
+  <dsfr-data-normalize id="syn-t" source="syn-j"
+    compute="p_mh = nmh / n * 100;
+             p_e = e_mh / e_all * 100;
+             p_e_hlv = e_mh_hlv / e_hlv * 100;
+             nsans = n - nmh;
+             nzero = n - ndecl;
+             hors = tot_all - e_all;
+             e_all_m = e_all / 1000000">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Musées de France dans un monument historique</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Quatre musées de France sur dix occupent un monument historique, et reçoivent deux entrées sur trois</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="syn-t">
+        <template>
+          Sur les {{n:number:0}}&nbsp;musées de France de Muséofile, <strong>{{nmh:number:0}} déclarent être installés dans un
+          bâtiment protégé au titre des monuments historiques</strong>, soit {{p_mh:number:1}}&nbsp;%.
+          En {{annee}}, ces musées ont reçu <strong>{{p_e:number:0}}&nbsp;% des entrées</strong> — et encore
+          {{p_e_hlv:number:0}}&nbsp;% sans le Louvre ni Versailles&nbsp;: le monument n'est pas qu'un décor, il fait venir.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, «&nbsp;Muséofile — musées de France&nbsp;» (colonne «&nbsp;protection du bâtiment&nbsp;»,
+      renseignée par les musées) et «&nbsp;Fréquentation des Musées de France&nbsp;» (enquête Patrimostat), servis par
+      l'API Tabular de data.gouv.fr. Entrées de la dernière année du fichier de fréquentation, sites d'un même musée
+      additionnés. Un musée qui ne déclare pas de protection n'est pas pour autant hors monument&nbsp;: voir en fin de page.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="nmh:max" decimals="0" span="3"
+        heading="Musées dans un monument historique" label="bâtiment déclaré protégé, Muséofile"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_mh:max" decimals="1" unit="%" span="3"
+        heading="Part des musées de France" label="tous musées de Muséofile"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_e:max" decimals="0" unit="%" span="3"
+        heading="Part des entrées" label="dernière année du fichier de fréquentation"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_e_hlv:max" decimals="0" unit="%" span="3"
+        heading="Sans le Louvre ni Versailles" label="part des entrées des autres musées"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — plus il est fréquenté, plus il est protégé ======================= -->
+  <dsfr-data-query id="tr" source="mn" group-by="ordre, tranche" aggregate="un:sum:n, mh:sum:nmh" order-by="ordre:asc"></dsfr-data-query>
+  <!-- `rename` s'exécute AVANT `compute` : la part se calcule sur les noms bruts, les
+       libellés du tableau équivalent sont posés par un second normalize. -->
+  <dsfr-data-normalize id="tr-c" source="tr" compute="Part = round(nmh / n * 100, 1)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="tr-t" source="tr-c"
+    rename="tranche:Entrées annuelles | n:Musées | nmh:Dans un monument historique"></dsfr-data-normalize>
+  <dsfr-data-query id="tr-1" source="tr-t" where="ordre:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="tr-4" source="tr-t" where="ordre:eq:4"></dsfr-data-query>
+  <dsfr-data-query id="tr-5" source="tr-t" where="ordre:eq:5"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-tranche">
+    <h2 id="t-tranche" class="fr-h3">Plus un musée est fréquenté, plus il a de chances d'occuper un monument</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="tr-1">
+        <template>
+          Parmi les {{Musées:number:0}}&nbsp;musées qui dépassent le million d'entrées, <strong>{{Dans un monument historique:number:0}}
+          sont dans un monument historique</strong> ({{Part:number:0}}&nbsp;%).
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="tr-4">
+        <template>
+          Parmi les {{Musées:number:0}}&nbsp;musées qui en reçoivent moins de 10&nbsp;000, la part tombe à
+          <strong>{{Part:number:0}}&nbsp;%</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="tr-5">
+        <template>
+          Elle est la même, {{Part:number:0}}&nbsp;%, chez les {{Musées:number:0}}&nbsp;musées qui ne déclarent aucune entrée.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des musées installés dans un monument historique, par tranche de fréquentation">
+      <dsfr-data-chart id="g-tranche" source="tr-t" type="bar"
+        label-field="Entrées annuelles" value-field="Part" name="Part des musées dans un monument historique (%)"
+        y-min="0" y-max="100" unit-tooltip="%"
+        databox databox-title="Part des musées de France installés dans un monument historique, selon leurs entrées de la dernière année (%)"
+        databox-source="Ministère de la Culture — Muséofile et Fréquentation des Musées de France (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-tranche" source="tr-t" label-field="Entrées annuelles" value-field="Part,Musées,Dans un monument historique"
+        description="Cinq barres verticales sur une échelle de 0 à 100 %, des musées les plus fréquentés aux musées sans entrée déclarée : la part de ceux qui sont installés dans un monument historique. Elle est de 70 % pour la dizaine de musées au million d'entrées, d'environ 50 % dans les deux tranches suivantes (100 000 à 1 million, 10 000 à 100 000), et tombe à environ un tiers pour les musées de moins de 10 000 entrées comme pour ceux qui n'en déclarent aucune. Le tableau donne aussi, par tranche, le nombre de musées.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      La tranche du million ne compte qu'une dizaine de musées&nbsp;: sa part bouge de dix points pour un musée de plus
+      ou de moins. Le tableau donne les effectifs. Ce lien entre monument et fréquentation n'est pas une causalité&nbsp;:
+      les grands musées nationaux sont aussi les plus anciens, installés dans des palais bien avant d'être protégés.
+    </p>
+  </section>
+
+  <!-- ======================= GÉOGRAPHIE — une affaire de régions ======================= -->
+  <dsfr-data-query id="reg" source="ms" group-by="Région" aggregate="un:sum:n, mh:sum:nmh"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-c" source="reg" compute="Part = round(nmh / n * 100, 1)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="reg-t" source="reg-c" rename="n:Musées | nmh:Dans un monument historique"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-s" source="reg-t" order-by="Part:desc"></dsfr-data-query>
+  <dsfr-data-query id="reg-1" source="reg-s" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-der" source="reg-t" order-by="Part:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-idf" source="reg-t" where="Région:eq:Île-de-France"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-region">
+    <h2 id="t-region" class="fr-h3">Un musée sur deux en Bourgogne-Franche-Comté, un sur quatre dans les Pays de la Loire</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="reg-1">
+        <template>
+          En {{Région}}, {{Dans un monument historique:number:0}}&nbsp;musées de France sur {{Musées:number:0}} sont dans un
+          monument historique&nbsp;: <strong>{{Part:number:1}}&nbsp;%</strong>, la part la plus forte.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-der">
+        <template>
+          La plus faible est en {{Région}}&nbsp;: {{Dans un monument historique:number:0}} sur {{Musées:number:0}},
+          <strong>{{Part:number:1}}&nbsp;%</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-idf">
+        <template>
+          L'Île-de-France en compte {{Dans un monument historique:number:0}} sur {{Musées:number:0}} ({{Part:number:1}}&nbsp;%).
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des musées de France installés dans un monument historique, par région">
+      <dsfr-data-chart id="g-region" source="reg-s" type="bar" horizontal
+        label-field="Région" value-field="Part" name="Part des musées dans un monument historique (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%" x-min="0"
+        databox databox-title="Part des musées de France installés dans un monument historique, par région (%)"
+        databox-source="Ministère de la Culture — Muséofile (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-region" source="reg-s" label-field="Région" value-field="Part,Musées,Dans un monument historique"
+        description="Quatorze barres horizontales triées de la plus longue à la plus courte : pour chaque région, la part de ses musées de France installés dans un monument historique. La Bourgogne-Franche-Comté, mise en évidence, dépasse la moitié ; la Corse, l'Île-de-France et la Normandie suivent, entre 45 et 50 % ; la plupart des régions sont entre un tiers et deux sur cinq ; l'outre-mer, regroupé en une ligne, et les Pays de la Loire ferment la marche, un peu au-dessus d'un quart. Le tableau donne le nombre de musées de chaque région.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Région telle que Muséofile l'écrit&nbsp;; l'outre-mer y forme une seule ligne. La Corse ne compte que dix musées&nbsp;:
+      une part sur si peu de lieux ne se compare qu'avec prudence.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — ce qu'on y montre ======================= -->
+  <dsfr-data-query id="dom" source="ms" group-by="dom" explode="dom" aggregate="un:sum:n, mh:sum:nmh"></dsfr-data-query>
+  <dsfr-data-normalize id="dom-c" source="dom" compute="Part = round(nmh / n * 100, 1)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="dom-t" source="dom-c" rename="dom:Domaine | n:Musées | nmh:Dans un monument historique"></dsfr-data-normalize>
+  <dsfr-data-query id="dom-s" source="dom-t" where="Musées:gte:150" order-by="Part:desc"></dsfr-data-query>
+  <dsfr-data-query id="dom-1" source="dom-s" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dom-der" source="dom-s" order-by="Part:asc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-domaine">
+    <h2 id="t-domaine" class="fr-h3">Les arts décoratifs logent le plus souvent dans un monument, les techniques le moins</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="dom-1">
+        <template>
+          Parmi les {{Musées:number:0}}&nbsp;musées qui déclarent des collections «&nbsp;{{Domaine}}&nbsp;»,
+          <strong>{{Part:number:0}}&nbsp;%</strong> sont dans un monument historique&nbsp;:
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="dom-der">
+        <template>
+          c'est {{Part:number:0}}&nbsp;% pour les {{Musées:number:0}}&nbsp;musées «&nbsp;{{Domaine}}&nbsp;». Château, hôtel
+          particulier ou abbaye abritent un mobilier&nbsp;; une usine ou un carreau de mine se protègent plus rarement.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des musées installés dans un monument historique, par domaine de collection">
+      <dsfr-data-chart id="g-domaine" source="dom-s" type="bar" horizontal
+        label-field="Domaine" value-field="Part" name="Part des musées dans un monument historique (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%" x-min="0"
+        databox databox-title="Part des musées de France installés dans un monument historique, par domaine de collection déclaré (%) — domaines déclarés par au moins 150 musées"
+        databox-source="Ministère de la Culture — Muséofile (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-domaine" source="dom-s" label-field="Domaine" value-field="Part,Musées,Dans un monument historique"
+        description="Neuf barres horizontales triées : pour chaque domaine de collection déclaré par au moins 150 musées, la part de ces musées installés dans un monument historique. Les arts décoratifs, mis en évidence, dépassent la moitié ; beaux-arts, art moderne et contemporain, archéologie, histoire, photographie et ethnologie sont entre 40 et 50 % ; les sciences de la nature et la technique et l'industrie sont sous 40 %, autour d'un tiers. Le tableau donne le nombre de musées de chaque domaine.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Un musée déclare souvent plusieurs domaines&nbsp;: il compte dans chacune de ses barres, qui ne s'additionnent donc
+      pas. Les domaines déclarés par moins de 150 musées (collections d'Afrique, d'Asie, littérature…) sont dans le
+      tableau d'exploration, pas dans ce graphique.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — carte et tableau ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: les 1&nbsp;216 musées de France</h2>
+    <p class="fr-text--sm">
+      Un point par musée, bleu s'il déclare occuper un monument historique. Filtrez par région, par département ou
+      par domaine de collection&nbsp;; le tableau suit, avec les entrées de la dernière année et le texte de la
+      protection tel que le musée l'a écrit.
+    </p>
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- Facettes CLIENT (Tabular n'a pas de facettes serveur) ; `dom` est un
+             tableau (split), une case par domaine. `|` sépare les entrées (PG-022). -->
+        <dsfr-data-facets id="mf" source="ms"
+          fields="statut, Région, Département, dom"
+          labels="statut:Bâtiment | Région:Région | Département:Département | dom:Domaine de collection"
+          display="statut:checkbox | Région:select | Département:select | dom:multiselect">
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des musées de France, selon que leur bâtiment est un monument historique">
+          <!-- 1 216 points, sous le plafond de 5 000 (PG-013). Rayon FIXE : `radius-field`
+               est linéaire en rayon (l'aire croît comme le carré des entrées) et `compute`
+               n'a pas de racine carrée ; un rayon proportionnel aux entrées aurait fait du
+               Louvre un disque et du reste des points invisibles. Pas d'encarts (voir
+               bibliotheques.html) ; vue clippée à la métropole. -->
+          <dsfr-data-map id="carte" name="Musées de France selon que leur bâtiment est un monument historique"
+            height="560px" tiles="ign-plan" tiles-style="muted"
+            fit-bounds fit-zone="41,-5.5,51.5,10" fit-max-zoom="13">
+            <dsfr-data-map-layer id="couche" source="mf" type="circle"
+              geo-field="geo" radius="5" fill-opacity="0.85"
+              color-field="statut"
+              color-map="Dans un monument historique:#000091,Sans protection déclarée:#929292"
+              tooltip-field="Musée">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-legend for="couche" label="Bâtiment du musée"></dsfr-data-map-legend>
+            <dsfr-data-map-popup mode="panel-right" title-field="Musée" width="360px">
+              <template>
+                <p class="fr-badge fr-badge--sm fr-mb-2v">{{statut}}</p>
+                <p class="fr-text--sm fr-mb-1v"><strong>{{Commune}}</strong> — {{Département}}</p>
+                <p class="fr-text--sm fr-mb-1v">Entrées {{annee|}}&nbsp;: {{entrees:number|non déclarées}}</p>
+                <p class="fr-text--xs fr-mb-0">Protection déclarée&nbsp;: {{Protection_batiment|aucune}}</p>
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
+          <dsfr-data-a11y for="carte" source="mf" download filename="musees-monuments-selection.csv"
+            label="Données de la carte"
+            description="Carte de France, un point par musée de France de la sélection, bleu s'il déclare occuper un bâtiment protégé au titre des monuments historiques, gris sinon. Sans filtre, les points bleus se mêlent aux gris sur tout le territoire, plus serrés à Paris, dans le Nord-Est et en Bourgogne. Le tableau sous la carte donne les mêmes musées.">
+          </dsfr-data-a11y>
+          <dsfr-data-repeat source="syn-t">
+            <template>
+              <p class="fr-text--xs fr-hint-text fr-mt-1w">
+                La carte s'ouvre sur la métropole&nbsp;; les musées d'outre-mer y sont aussi, hors du cadre&nbsp;: faire
+                glisser la carte pour les voir, ou les retrouver dans le tableau. {{nogeo:number:0}}&nbsp;musée(s) sans
+                coordonnées dans Muséofile ne figurent que dans le tableau.
+              </p>
+            </template>
+          </dsfr-data-repeat>
+        </div>
+
+        <h3 class="fr-h5 fr-mt-6w">Les musées de la sélection</h3>
+        <dsfr-data-list source="mf"
+          columns="Musée:Musée, Commune:Commune, Département:Département, statut:Bâtiment, entrees:Entrées (dernière année), Protection_batiment:Protection déclarée"
+          sort="entrees:desc" search pagination="15" count-label="musée|musées" export="csv" decimals="0"
+          caption="Musées de France de la sélection : commune, bâtiment, entrées de la dernière année du fichier de fréquentation, protection déclarée dans Muséofile">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Les musées dont la protection n'est pas déclarée.</strong> {{nsans:number:0}}&nbsp;musées ne
+            mentionnent pas de monument historique. La colonne est remplie par les musées eux-mêmes, en texte libre&nbsp;:
+            un champ vide dit que rien n'a été déclaré, pas que le bâtiment n'est pas protégé. Les {{nmh:number:0}} sont
+            donc un minimum — mais un minimum solide&nbsp;: la colonne des références Mérimée du même fichier porte une
+            référence de monument historique (PA…) pour {{pa_mh:number:0}} d'entre eux, et pour {{pa_non:number:0}}
+            seulement des autres musées, sans dire si elle désigne le bâtiment du musée ou un monument voisin. {{autre:number:0}}&nbsp;cellules remplies ne parlent pas de monument historique (un site
+            patrimonial remarquable, un nom d'architecte)&nbsp;: elles sont comptées «&nbsp;sans protection déclarée&nbsp;».</li>
+          <li><strong>La casse.</strong> Une cellule écrit «&nbsp;monuments historiques&nbsp;» en minuscules&nbsp;: la
+            recherche ignore la casse, sans quoi elle manquerait un musée.</li>
+          <li><strong>Les musées sans entrée.</strong> {{nzero:number:0}}&nbsp;musées n'ont aucune entrée la dernière année
+            du fichier de fréquentation, faute de ligne ou avec zéro&nbsp;; ils forment la dernière barre du premier
+            graphique, sans être supposés fermés.</li>
+          <li><strong>Les entrées sans musée.</strong> Les parts d'entrées se calculent sur les musées de Muséofile
+            ({{e_all_m:number:1}}&nbsp;millions d'entrées). {{hors:number:0}}&nbsp;entrées du fichier de
+            fréquentation n'ont pas d'identifiant Muséofile qui les rattache à un musée (dont les sites de Lens et de
+            Metz)&nbsp;: elles sont hors du calcul.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Le niveau de protection.</strong> Muséofile ne distingue pas un bâtiment classé d'un bâtiment inscrit,
+        ni une façade protégée d'un édifice entier&nbsp;: la plupart des cellules disent «&nbsp;Protégé au titre des
+        Monuments historiques.&nbsp;» et rien de plus. Les références Mérimée du fichier permettraient de le chercher
+        dans la base des immeubles protégés&nbsp;: c'est une autre jointure, pas faite ici.</li>
+      <li><strong>Les protections d'espace</strong> (site patrimonial remarquable, abords, site classé)&nbsp;: une autre
+        colonne de Muséofile, qui décrit le quartier et non le bâtiment.</li>
+      <li><strong>Les expositions d'intérêt national.</strong> Le cadrage proposait de croiser les labels d'exposition&nbsp;;
+        c'est une autre question (quels musées programment), écartée pour garder un seul propos.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création sur deux fichiers du ministère de la Culture servis par l'API Tabular.
+        Le cadrage annonçait 487 musées sur 1&nbsp;216 et «&nbsp;133 en Île-de-France&nbsp;»&nbsp;; rejoué, le premier
+        chiffre tient à condition d'ignorer la casse, le second était le nombre de musées franciliens (65 sont dans un
+        monument). La jointure avec la fréquentation a donné l'histoire&nbsp;: ces musées reçoivent deux entrées sur trois.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Deux jeux entiers, deux requêtes.</strong> <code>fetch-mode="export"</code> sur Muséofile et sur
+              la fréquentation, un <code>select</code> qui écarte les longs textes (histoire, atouts)&nbsp;; tout le
+              reste est calculé dans la page.</li>
+            <li><strong>Une jointure dont la clé droite est unique par construction.</strong> Le
+              <code>group-by="IDMuseofile"</code> qui additionne les sites d'un musée est aussi le dédoublonnage
+              (PG-001)&nbsp;: 1&nbsp;216 lignes entrent, 1&nbsp;216 sortent.</li>
+            <li><strong>Un texte libre devenu indicateur.</strong> <code>contains(lower(…), 'monuments historiques')</code>
+              dans <code>compute</code>&nbsp;; puis <code>explode</code> sur les domaines multivalués, aligné sur les
+              facettes du même champ.</li>
+            <li><strong>Des coordonnées « lat, lon » en texte.</strong> <code>concat('[', Coordonnees, ']')</code> en
+              fait un tableau JSON que <code>geo-field</code> lit tel quel.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>La casse d'une modalité saisie à la main.</strong> Une égalité ou un <code>contains</code> sans
+              <code>lower()</code> compte 486 au lieu de 487, sans erreur. Même chose pour les domaines&nbsp;:
+              «&nbsp;Beaux-Arts&nbsp;» et «&nbsp;Beaux-arts&nbsp;» font deux barres tant qu'on ne ramène pas la casse,
+              et la remettre en forme a coûté neuf <code>replace()</code> imbriqués.</li>
+            <li><strong><code>split</code> avant <code>compute</code>.</strong> Découper un champ calculé exige un
+              second <code>dsfr-data-normalize</code>&nbsp;: l'ordre des étapes est documenté, mais il se paie d'une
+              balise.</li>
+            <li><strong>Pas de cercles proportionnels honnêtes.</strong> <code>radius-field</code> met le rayon, pas
+              l'aire, à l'échelle de la valeur, et <code>compute</code> n'a pas de racine carrée pour compenser&nbsp;: la
+              carte garde un rayon fixe au lieu du «&nbsp;rayon = entrées&nbsp;» du cadrage.</li>
+            <li><strong>Pas de médiane.</strong> «&nbsp;Un musée dans un monument reçoit deux fois plus qu'un autre&nbsp;»
+              se dit par la médiane (22&nbsp;820 contre 10&nbsp;911 entrées, relevé hors page)&nbsp;; aucun agrégat ne
+              la calcule. Les tranches de fréquentation portent le même message sans elle.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger deux jeux Tabular entiers</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export"</code></td><td>Natif</td></tr>
+            <tr><td>Rattacher les entrées au musée</td><td><code>dsfr-data-query group-by</code> puis <code>dsfr-data-join on="Identifiant=IDMuseofile" type="left"</code></td><td>Natif</td></tr>
+            <tr><td>Repérer « monuments historiques » dans un texte libre</td><td><code>compute="contains(lower(…), …)"</code></td><td>Natif, casse à ramener soi-même</td></tr>
+            <tr><td>Part par tranche, par région, par domaine</td><td><code>dsfr-data-query group-by</code> (+ <code>explode</code>) puis <code>compute</code></td><td>Natif</td></tr>
+            <tr><td>Carte de points depuis « lat, lon » en texte</td><td><code>compute concat</code> + <code>dsfr-data-map-layer geo-field</code></td><td>Natif</td></tr>
+            <tr><td>Cercles proportionnels aux entrées</td><td><code>radius-field</code></td><td>Non retenu&nbsp;: échelle linéaire du rayon</td></tr>
+            <tr><td>Médiane des entrées</td><td>—</td><td>Absent</td></tr>
+            <tr><td>Filtrer, chercher, exporter</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-list search</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Deux fichiers, une jointure, et une colonne de texte libre suffit à raconter.</strong> Ce qui a coûté
+          tient à la donnée — une casse qui varie, une protection que le musée déclare lui-même — plus qu'à l'outil,
+          qui n'a manqué que de deux fonctions de calcul (racine carrée, médiane).</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la page porte une carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le prix du terrain à bâtir — open-data-viz</title>
+  <meta name="description" content="Le mètre carré de terrain à bâtir coûte quatre fois plus cher en Île-de-France qu'en Bourgogne-Franche-Comté, mais l'écart n'a jamais été aussi faible, et partout on achète moins de terrain pour un prix qui a doublé. Création avec dsfr-data sur l'enquête EPTB du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — deuxième vague (§ 5) de
+       docs/portail-developpement-durable/proposition.md.
+
+       UN SEUL FICHIER DiDo (jeu 31, EPTB, fichier 1 « Terrains achetés par
+       région »), 14 zones × années, filtré au serveur depuis 2010 : 210 lignes.
+       Une seule requête : la limite de 3 connexions DiDo n'est pas en jeu.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-27) :
+       - « 227 vs 55 €/m² » : exact (2024), soit 4,1 fois. Mais ce n'est pas
+         l'histoire entière : l'écart entre la région la plus chère et la moins
+         chère est au plus bas depuis 2010 (5,2 fois en 2012 et 2019).
+       - « maison 164 → 266 k€ (2006→2024) » : ce sont les prix de
+         l'Île-de-France seule, pas un prix national (le fichier n'a pas de ligne
+         France). Écarté de la page : le prix de la maison est un autre fichier.
+       - PTM2_MOY est un RATIO DE MOYENNES (PT_MOY / SURFT_MOY, vérifié sur les
+         266 lignes) : c'est pourquoi il est souvent sous la médiane. Le national
+         se calcule donc en ratio de sommes (Σ prix / Σ surface), pas en moyenne
+         des moyennes régionales.
+       - Aucune cellule « secret » ni « na » dans ce fichier (0 sur 266 lignes).
+       - Depuis 2010 seulement : avant, l'enquête était un échantillon
+         (notice méthodologique EPTB, novembre 2025), et l'Île-de-France perd
+         35 €/m² entre 2009 et 2010, ce qui ressemble à une rupture de champ.
+       ========================================================================== -->
+
+  <dsfr-data-source id="ter"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/7b0b1184-f92e-4f8a-8a6a-19b4b23d5118/json?ANNEE=gte:2010">
+  </dsfr-data-source>
+
+  <!-- P et S : prix total et surface totale de la région (moyenne × nombre),
+       pour recomposer le national en ratio de sommes. -->
+  <dsfr-data-normalize id="ter-n" source="ter"
+    compute="k = 'fr';
+             Région = when ZONE_CODE = 'XX' then 'Outre-mer (DROM regroupés)' else ZONE_LIBELLE;
+             P = PT_MOY * NB_TERRAINS;
+             S = SURFT_MOY * NB_TERRAINS;
+             prix_k = round(PT_MOY / 1000, 1)">
+  </dsfr-data-normalize>
+
+  <!-- France entière, par année -->
+  <dsfr-data-query id="ter-an" source="ter-n" group-by="ANNEE, k"
+    aggregate="P:sum:tP, S:sum:tS, NB_TERRAINS:sum:tN" order-by="ANNEE:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="ter-an-t" source="ter-an"
+    compute="pm2 = tP / tS; prix = tP / tN; surf = tS / tN; nb = tN">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ter-der" source="ter-an-t" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="ter-10" source="ter-an-t" where="ANNEE:eq:2010"></dsfr-data-query>
+  <dsfr-data-query id="ter-pic" source="ter-an-t" order-by="nb:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="fr-j" left="ter-der" right="ter-10" on="k" type="inner" prefix-right="r10_"></dsfr-data-join>
+  <dsfr-data-join id="fr-jp" left="fr-j" right="ter-pic" on="k" type="inner" prefix-right="pic_"></dsfr-data-join>
+  <dsfr-data-normalize id="fr-syn" source="fr-jp"
+    compute="x_pm2 = pm2 / r10_pm2;
+             v_prix = (prix / r10_prix - 1) * 100;
+             v_surf = (1 - surf / r10_surf) * 100;
+             d_nb10 = r10_nb / nb;
+             d_nbpic = pic_nb / nb">
+  </dsfr-data-normalize>
+
+  <!-- Régions, dernière année (jointure interne sur l'année de ter-der) -->
+  <dsfr-data-join id="reg-der" left="ter-n" right="ter-der" on="ANNEE" type="inner" prefix-right="nat_"></dsfr-data-join>
+  <dsfr-data-query id="reg-tri" source="reg-der" order-by="PTM2_MOY:desc"></dsfr-data-query>
+  <dsfr-data-query id="reg-med" source="reg-der" order-by="PTM2_MED:desc"></dsfr-data-query>
+  <dsfr-data-query id="reg-prix" source="reg-der" order-by="PT_MOY:desc"></dsfr-data-query>
+  <dsfr-data-query id="reg-max" source="reg-der" order-by="PTM2_MOY:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-min" source="reg-der" order-by="PTM2_MOY:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-pmax" source="reg-der" order-by="PT_MOY:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="ext-j" left="reg-max" right="reg-min" on="k" type="inner" prefix-right="min_"></dsfr-data-join>
+  <dsfr-data-normalize id="ext" source="ext-j"
+    compute="ratio = PTM2_MOY / min_PTM2_MOY;
+             ratio_t = PT_MOY / min_PT_MOY;
+             ratio_s = min_SURFT_MOY / SURFT_MOY;
+             q1_sup = when PTM2_Q1 > min_PTM2_Q3 then 'oui' else ''">
+  </dsfr-data-normalize>
+
+  <!-- Les deux régions extrêmes en 2010 (même région, jointure sur le code) -->
+  <dsfr-data-query id="reg-10" source="ter-n" where="ANNEE:eq:2010"></dsfr-data-query>
+  <!-- Toutes les années de la région la plus chère (jointure 1-N voulue : une ligne à gauche), puis son record -->
+  <dsfr-data-join id="max-all" left="reg-max" right="ter-n" on="ZONE_CODE" type="inner" prefix-right="a_"></dsfr-data-join>
+  <dsfr-data-query id="max-pic" source="max-all" order-by="a_PTM2_MOY:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="max-pic-t" source="max-pic" compute="v = (PTM2_MOY / a_PTM2_MOY - 1) * 100"></dsfr-data-normalize>
+  <dsfr-data-join id="min-10" left="reg-min" right="reg-10" on="ZONE_CODE" type="inner" prefix-right="a_"></dsfr-data-join>
+  <dsfr-data-normalize id="min-10-t" source="min-10" compute="v = (PTM2_MOY / a_PTM2_MOY - 1) * 100"></dsfr-data-normalize>
+
+  <!-- Écart entre la région la plus chère et la moins chère, par année -->
+  <dsfr-data-query id="ecart-an" source="ter-n" group-by="ANNEE, k"
+    aggregate="PTM2_MOY:max:pmax, PTM2_MOY:min:pmin" order-by="ANNEE:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="ecart" source="ecart-an"
+    compute="Ecart = round(pmax / pmin, 2)"></dsfr-data-normalize>
+  <dsfr-data-query id="ecart-bas" source="ecart" order-by="Ecart:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="ecart-haut" source="ecart" order-by="Ecart:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="ecart-10" source="ecart" where="ANNEE:eq:2010"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Le prix du terrain à bâtir</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Le terrain à bâtir coûte quatre fois plus cher au mètre carré en Île-de-France qu'en Bourgogne-Franche-Comté, et l'écart n'a jamais été aussi faible</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="ext">
+        <template>
+          En {{ANNEE}}, les particuliers qui ont acheté un terrain pour y faire construire leur maison l'ont payé
+          en moyenne {{PTM2_MOY:number:0}}&nbsp;€ le mètre carré en {{ZONE_LIBELLE}}, contre
+          {{min_PTM2_MOY:number:0}}&nbsp;€ en {{min_ZONE_LIBELLE}}&nbsp;: <strong>{{ratio:number:1}}&nbsp;fois plus</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="ecart-haut">
+        <template>
+          L'écart entre la région la plus chère et la moins chère atteignait {{Ecart:number:1}} en {{ANNEE}}&nbsp;;
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="ecart-bas">
+        <template>
+          il touche son plus bas en {{ANNEE}}.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="fr-syn">
+        <template>
+          Partout, le mètre carré a été multiplié par {{x_pm2:number:1}} depuis 2010, et l'on en achète
+          {{v_surf:number:0}}&nbsp;% de moins.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: enquête sur le prix des terrains
+      et du bâti (EPTB), terrains achetés par région. Terrains achetés par des particuliers pour construire une
+      maison individuelle hors lotissement, par année de délivrance du permis. Dernier millésime du fichier au
+      chargement de la page, euros courants.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="reg-max" value="PTM2_MOY:max" decimals="0" unit="€" span="3"
+        heading="Le mètre carré le plus cher" label="région la plus chère, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="reg-min" value="PTM2_MOY:max" decimals="0" unit="€" span="3"
+        heading="Le mètre carré le moins cher" label="région la moins chère, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ext" value="ratio:max" decimals="1" span="3"
+        heading="Rapport entre les deux" label="fois plus cher, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="ter-der" value="pm2:max" decimals="0" unit="€" span="3"
+        heading="Le mètre carré en France" label="France entière, outre-mer compris, dernière année"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — le classement des régions ======================= -->
+  <!-- Tri décroissant : la plus chère en tête (index 0), la moins chère en dernier.
+       14 zones dans le fichier (13 régions + DROM regroupés), d'où l'index 13 :
+       vérifié au navigateur ; si une zone disparaissait, la mise en évidence
+       glisserait d'un rang. Mono-série : pas de color-map, BUG-022 hors jeu. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-regions">
+    <h2 id="t-regions" class="fr-h3">L'Île-de-France et la Provence-Alpes-Côte d'Azur loin devant toutes les autres régions</h2>
+    <dsfr-data-repeat source="ter-der">
+      <template>
+        <p class="odv-lecture">
+          En {{ANNEE}}, le mètre carré de terrain à bâtir coûte en moyenne {{pm2:number:0}}&nbsp;€ en France.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Prix moyen du mètre carré de terrain par région">
+      <dsfr-data-chart id="g-regions" source="reg-tri" type="bar" horizontal
+        label-field="Région" value-field="PTM2_MOY" name="Prix moyen (€/m²)"
+        selected-palette="neutral" highlight-index="[0, 13]" unit-tooltip="€/m²"
+        databox databox-title="Prix moyen du mètre carré de terrain à bâtir par région, dernière année (euros par m²)"
+        databox-source="SDES — enquête sur le prix des terrains et du bâti (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-regions" source="reg-tri" label-field="Région" value-field="PTM2_MOY"
+        description="Barres horizontales triées du plus cher au moins cher : prix moyen du mètre carré de terrain à bâtir dans chacune des 13 régions et dans les départements d'outre-mer regroupés, pour la dernière année de l'enquête. L'Île-de-France, en tête, et la Bourgogne-Franche-Comté, en dernier, sont mises en évidence ; la Provence-Alpes-Côte d'Azur suit de près l'Île-de-France, l'outre-mer et la Corse viennent ensuite, puis les régions de l'Ouest et de Rhône-Alpes.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= PREUVE 2 — pas un effet de moyenne ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-quartiles">
+    <h2 id="t-quartiles" class="fr-h3">Ce n'est pas un effet de moyenne&nbsp;: les terrains franciliens bon marché coûtent plus que les chers de Bourgogne-Franche-Comté</h2>
+    <dsfr-data-repeat source="ext">
+      <template>
+        <p class="odv-lecture">
+          En {{ZONE_LIBELLE}}, un terrain sur quatre se vend moins de {{PTM2_Q1:number:0}}&nbsp;€ le mètre carré&nbsp;;
+          en {{min_ZONE_LIBELLE}}, un sur quatre se vend <em>plus</em> de {{min_PTM2_Q3:number:0}}&nbsp;€.
+          <strong>{{#if q1_sup}}Les terrains les moins chers de la région la plus chère restent donc au-dessus des plus chers de la région la moins chère.{{/if}}</strong>
+          {{#unless q1_sup}}Les deux marchés se recouvrent donc à leurs marges&nbsp;: les terrains les moins chers de la région la plus chère descendent sous les plus chers de la région la moins chère.{{/unless}}
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Quartiles du prix du mètre carré de terrain par région">
+      <dsfr-data-chart id="g-quartiles" source="reg-med" type="bar"
+        label-field="Région" value-field="PTM2_Q1:1er quartile"
+        value-fields="PTM2_MED:Médiane, PTM2_Q3:3e quartile" unit-tooltip="€/m²"
+        databox databox-title="Prix du mètre carré de terrain à bâtir par région : premier quartile, médiane, troisième quartile, dernière année (euros par m²)"
+        databox-source="SDES — enquête sur le prix des terrains et du bâti (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-quartiles" source="reg-med" label-field="Région"
+        value-field="PTM2_Q1,PTM2_MED,PTM2_Q3"
+        description="Barres groupées par région, triées par prix médian décroissant : pour chaque région, trois barres donnent le prix au mètre carré sous lequel se vendent un quart, la moitié et les trois quarts des terrains. En Île-de-France, la plus basse des trois barres dépasse la plus haute de la Bourgogne-Franche-Comté ; le tableau donne les valeurs exactes.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Le prix moyen publié par l'enquête est le prix moyen des terrains divisé par leur surface moyenne&nbsp;:
+      les grands terrains, moins chers au mètre carré, y pèsent plus. C'est pourquoi il est souvent
+      <em>inférieur</em> à la médiane, qui compte chaque terrain pour un. Les deux mesures donnent le même
+      classement aux extrêmes.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — au terrain entier ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-terrain">
+    <h2 id="t-terrain" class="fr-h3">Au terrain entier, l'écart se réduit de près de moitié&nbsp;: on achète presque deux fois moins de surface en Île-de-France</h2>
+    <dsfr-data-repeat source="ext">
+      <template>
+        <p class="odv-lecture">
+          Un terrain acheté en {{ZONE_LIBELLE}} mesure en moyenne {{SURFT_MOY:number:0}}&nbsp;m², contre
+          {{min_SURFT_MOY:number:0}}&nbsp;m² en {{min_ZONE_LIBELLE}} ({{ratio_s:number:1}}&nbsp;fois plus grand).
+          Le prix du terrain, lui, n'est que <strong>{{ratio_t:number:1}}&nbsp;fois plus élevé</strong>&nbsp;:
+          {{PT_MOY:number:0}}&nbsp;€ contre {{min_PT_MOY:number:0}}&nbsp;€.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="reg-pmax">
+      <template>
+        <p class="odv-lecture">
+          Et le terrain le plus cher n'est pas francilien&nbsp;: c'est en {{Région}} qu'il coûte le plus,
+          {{PT_MOY:number:0}}&nbsp;€ en moyenne pour {{SURFT_MOY:number:0}}&nbsp;m².
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Prix moyen d'un terrain par région">
+      <dsfr-data-chart id="g-prix" source="reg-prix" type="bar" horizontal
+        label-field="Région" value-field="prix_k" name="Prix moyen d'un terrain (milliers d'euros)" unit-tooltip="k€"
+        databox databox-title="Prix moyen d'un terrain à bâtir par région, dernière année (milliers d'euros)"
+        databox-source="SDES — enquête sur le prix des terrains et du bâti (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-prix" source="reg-prix" label-field="Région" value-field="prix_k,SURFT_MOY"
+        description="Barres horizontales triées du plus cher au moins cher : prix moyen d'un terrain à bâtir, en milliers d'euros, par région, pour la dernière année. La Provence-Alpes-Côte d'Azur passe devant l'Île-de-France ; les écarts entre régions sont bien plus faibles qu'au mètre carré, parce que les terrains sont petits là où le mètre carré est cher. Le tableau donne aussi la surface moyenne.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= ÉVOLUTION — l'écart se resserre ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ecart">
+    <h2 id="t-ecart" class="fr-h3">L'écart se resserre&nbsp;: le mètre carré francilien a reculé depuis son record</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="ecart-10">
+        <template>
+          En 2010, le mètre carré le plus cher valait {{Ecart:number:1}}&nbsp;fois le moins cher.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="ecart-haut">
+        <template>
+          Il a culminé à {{Ecart:number:1}} en {{ANNEE}}.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="max-pic-t">
+        <template>
+          En {{ZONE_LIBELLE}}, le mètre carré a atteint son record en {{a_ANNEE}}, {{a_PTM2_MOY:number:0}}&nbsp;€&nbsp;;
+          <strong>il est retombé à {{PTM2_MOY:number:0}}&nbsp;€ en {{ANNEE}}</strong> ({{v:number:0}}&nbsp;%).
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="min-10-t">
+        <template>
+          En {{ZONE_LIBELLE}}, il est passé de {{a_PTM2_MOY:number:0}}&nbsp;€ en 2010 à {{PTM2_MOY:number:0}}&nbsp;€
+          (+{{v:number:0}}&nbsp;%).
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Rapport entre le mètre carré le plus cher et le moins cher, par année">
+      <dsfr-data-chart id="g-ecart" source="ecart" type="bar"
+        label-field="ANNEE" value-field="Ecart" name="Rapport région la plus chère / la moins chère" unit-tooltip="fois"
+        y-min="0"
+        databox databox-title="Combien de fois le mètre carré de la région la plus chère vaut celui de la moins chère, par année"
+        databox-source="SDES — enquête sur le prix des terrains et du bâti (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ecart" source="ecart" label-field="ANNEE" value-field="Ecart,pmax,pmin"
+        description="Barres verticales, une par année depuis 2010 : rapport entre le prix moyen du mètre carré de la région la plus chère (l'Île-de-France chaque année) et celui de la moins chère (la Bourgogne-Franche-Comté chaque année). Il oscille entre 4,4 et 5,3 fois jusqu'en 2022, puis descend à 4,3 en 2023 et atteint son plus bas la dernière année.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Axe partant de zéro. Les deux régions extrêmes sont les mêmes chaque année depuis 2010&nbsp;; le tableau
+      du graphique donne les deux prix.
+    </p>
+  </section>
+
+  <!-- ======================= PARTOUT — plus cher, plus petit, plus rare ======================= -->
+  <dsfr-data-join id="b100-j" left="ter-an-t" right="ter-10" on="k" type="inner" prefix-right="r10_"></dsfr-data-join>
+  <dsfr-data-normalize id="b100" source="b100-j"
+    compute="i_pm2 = round(pm2 / r10_pm2 * 100, 0);
+             i_prix = round(prix / r10_prix * 100, 0);
+             i_surf = round(surf / r10_surf * 100, 0)"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-b100">
+    <h2 id="t-b100" class="fr-h3">Partout, le mètre carré a presque doublé, mais les terrains ont rétréci&nbsp;: la facture ne monte que de moitié</h2>
+    <dsfr-data-repeat source="fr-syn">
+      <template>
+        <p class="odv-lecture">
+          France entière, le mètre carré est passé de {{r10_pm2:number:0}}&nbsp;€ en 2010 à {{pm2:number:0}}&nbsp;€ en
+          {{ANNEE}} (×&nbsp;{{x_pm2:number:1}}). Dans le même temps, la surface moyenne est tombée de
+          {{r10_surf:number:0}} à {{surf:number:0}}&nbsp;m²&nbsp;: <strong>le prix d'un terrain n'a augmenté que de
+          {{v_prix:number:0}}&nbsp;%</strong>, de {{r10_prix:number:0}} à {{prix:number:0}}&nbsp;€.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Prix au mètre carré, prix et surface des terrains, base 100 en 2010">
+      <dsfr-data-chart id="g-b100" source="b100" type="line"
+        label-field="ANNEE" value-field="i_pm2:Prix du mètre carré"
+        value-fields="i_prix:Prix du terrain, i_surf:Surface du terrain"
+        reference-lines='[{"axis":"y","value":100,"label":"2010 = 100","dash":true}]'
+        databox databox-title="Prix du mètre carré, prix et surface moyens des terrains à bâtir, France entière (indice base 100 en 2010)"
+        databox-source="SDES — enquête sur le prix des terrains et du bâti (DiDo), calcul France entière" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-b100" source="b100" label-field="ANNEE"
+        value-field="i_pm2,i_prix,i_surf,pm2,prix,surf"
+        description="Trois courbes, indice 100 en 2010, une valeur par année jusqu'à la dernière de l'enquête : le prix du mètre carré monte régulièrement jusque vers 180 ; la surface moyenne des terrains descend vers 85 ; le prix d'un terrain, produit des deux, monte moins vite, vers 150. Le tableau donne aussi les valeurs en euros et en mètres carrés.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Euros courants, sans correction de l'inflation. Le national n'est pas publié&nbsp;: il est recalculé ici
+      comme le total des prix divisé par le total des surfaces de toutes les régions, outre-mer compris — la même
+      définition que le prix moyen régional.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — un marché qui fond ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-nombre">
+    <h2 id="t-nombre" class="fr-h3">Des prix qui tiennent sur un marché qui a fondu des deux tiers</h2>
+    <dsfr-data-repeat source="fr-syn">
+      <template>
+        <p class="odv-lecture">
+          L'enquête compte {{nb:number:0}}&nbsp;terrains achetés en {{ANNEE}}, <strong>{{d_nbpic:number:1}}&nbsp;fois
+          moins qu'en {{pic_ANNEE}}</strong> ({{pic_nb:number:0}}) et {{d_nb10:number:1}}&nbsp;fois moins qu'en 2010.
+          Le prix au mètre carré, lui, n'a pas reculé.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Nombre de terrains achetés par année">
+      <dsfr-data-chart id="g-nombre" source="ter-an-t" type="bar"
+        label-field="ANNEE" value-field="nb" name="Terrains achetés"
+        y-min="0"
+        databox databox-title="Nombre de terrains à bâtir achetés par des particuliers, France entière, par année de permis"
+        databox-source="SDES — enquête sur le prix des terrains et du bâti (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-nombre" source="ter-an-t" label-field="ANNEE" value-field="nb"
+        description="Barres verticales, une par année depuis 2010 : nombre de terrains achetés par des particuliers pour construire une maison hors lotissement. Il baisse jusqu'en 2014, remonte par à-coups jusqu'à un pic en 2021, puis s'effondre en 2022, 2023 et la dernière année, à environ un tiers de ce pic.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Ce nombre ne compte que les permis de maisons individuelles hors lotissement délivrés à des particuliers
+      <em>avec</em> achat du terrain&nbsp;: ni les maisons bâties sur un terrain hérité ou déjà possédé, ni les
+      lotissements, ni les logements collectifs. Il dit la tendance du secteur, pas la construction totale.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: votre région, année par année</h2>
+    <p class="fr-text--sm">
+      Choisissez une région pour suivre, depuis 2010, le prix sous lequel se vendent un quart, la moitié et les
+      trois quarts des terrains, et le prix moyen de l'enquête.
+    </p>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="reg-f" source="ter-n"
+          fields="Région" display="Région:select" sort="Région:alpha:asc"
+          default="Région:Île-de-France" hide-counts>
+        </dsfr-data-facets>
+      </details>
+
+      <div>
+        <div class="odv-chart-slot odv-viz" data-code="Prix du mètre carré de terrain dans la région choisie, par année">
+          <dsfr-data-chart id="g-region" source="reg-f" type="line"
+            label-field="ANNEE" value-field="PTM2_Q1:1er quartile"
+            value-fields="PTM2_MED:Médiane, PTM2_Q3:3e quartile, PTM2_MOY:Prix moyen" unit-tooltip="€/m²"
+            y-min="0"
+            databox databox-title="Prix du mètre carré de terrain à bâtir dans la région choisie, par année (euros par m²)"
+            databox-source="SDES — enquête sur le prix des terrains et du bâti (DiDo)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-region" source="reg-f" label-field="ANNEE"
+            value-field="PTM2_Q1,PTM2_MED,PTM2_Q3,PTM2_MOY"
+            description="Quatre courbes pour la région choisie, une valeur par année depuis 2010 : premier quartile, médiane et troisième quartile du prix au mètre carré des terrains, et prix moyen de l'enquête. Le tableau donne les valeurs exactes.">
+          </dsfr-data-a11y>
+        </div>
+
+        <h3 class="fr-h5 fr-mt-6w">Toutes les années de la région</h3>
+        <dsfr-data-list source="reg-f"
+          columns="ANNEE:Année, NB_TERRAINS:Terrains achetés, PTM2_MOY:Prix moyen (€/m²), PTM2_Q1:1er quartile (€/m²), PTM2_MED:Médiane (€/m²), PTM2_Q3:3e quartile (€/m²), SURFT_MOY:Surface moyenne (m²), PT_MOY:Prix moyen du terrain (€)"
+          sort="ANNEE:desc" pagination="15" count-label="année|années" export="csv"
+          caption="Terrains à bâtir achetés dans la région choisie, par année">
+        </dsfr-data-list>
+      </div>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">Toutes les régions, dernière année</h3>
+    <dsfr-data-list source="reg-tri"
+      columns="Région:Région, NB_TERRAINS:Terrains achetés, PTM2_MOY:Prix moyen (€/m²), PTM2_Q1:1er quartile (€/m²), PTM2_MED:Médiane (€/m²), PTM2_Q3:3e quartile (€/m²), SURFT_MOY:Surface moyenne (m²), PT_MOY:Prix moyen du terrain (€)"
+      sort="PTM2_MOY:desc" count-label="zone|zones" export="csv"
+      caption="Terrains à bâtir achetés par région, dernière année de l'enquête">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>Les terrains en lotissement, et le logement collectif.</strong> L'enquête ne porte que sur
+        les maisons individuelles construites hors lotissement («&nbsp;secteur diffus&nbsp;») par des
+        particuliers. Un prix «&nbsp;régional&nbsp;» est celui de ce marché-là, pas de tout le foncier.</li>
+      <li><strong>Les départements et les communes.</strong> Le fichier s'arrête à la région&nbsp;: à
+        l'intérieur de l'Île-de-France ou de la Provence-Alpes-Côte d'Azur, les écarts sont sans doute plus
+        grands que ceux montrés ici, mais ce jeu ne permet pas de le dire.</li>
+      <li><strong>Les années 2006 à 2009.</strong> Le fichier remonte à 2006, mais l'enquête ne devient
+        exhaustive sur son champ qu'en 2010&nbsp;; le prix francilien perd 35&nbsp;€ le mètre carré d'une année
+        sur l'autre à ce moment, ce qui ressemble davantage à un changement de mesure qu'à une baisse. La page
+        part de 2010.</li>
+      <li><strong>Le prix de la maison.</strong> Il est publié dans un autre fichier de la même enquête. Le
+        cadrage de cette page annonçait «&nbsp;164&nbsp;000 → 266&nbsp;000&nbsp;€&nbsp;» pour une maison neuve
+        en France&nbsp;: ce sont en réalité les prix de l'Île-de-France seule (2006 et 2024).</li>
+      <li><strong>L'inflation.</strong> Tous les prix sont en euros courants.</li>
+      <li><strong>Les départements d'outre-mer un par un.</strong> Faute d'un nombre suffisant de terrains,
+        l'enquête les publie regroupés, sous le libellé «&nbsp;Région fictive&nbsp;», renommé ici.</li>
+      <li><strong>Pas de secret statistique à signaler.</strong> Relevé le 27&nbsp;septembre 2026&nbsp;: aucune
+        cellule de ce fichier n'est remplacée par «&nbsp;secret&nbsp;» ou «&nbsp;na&nbsp;».</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création sur un seul fichier du SDES, servi par l'API
+        DiDo sans adaptateur. Le cadrage tenait pour le «&nbsp;quatre fois&nbsp;», mais il manquait la moitié
+        de l'histoire — l'écart se resserre — et son prix de la maison n'était pas national.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Une requête pour toute la page.</strong> 210&nbsp;lignes filtrées au serveur par
+              <code>ANNEE=gte:2010</code> dans l'URL&nbsp;; tout le reste — national, extrêmes, écart annuel,
+              indice — se dérive côté client.</li>
+            <li><strong>Les deux régions extrêmes lues dans la donnée.</strong> Deux <code>dsfr-data-query
+              limit="1"</code> (tri croissant et décroissant) jointes sur une clé constante donnent le rapport,
+              les surfaces et les quartiles des deux régions sans en nommer aucune.</li>
+            <li><strong>Une phrase qui ne peut pas mentir.</strong> «&nbsp;Le quart le moins cher reste au-dessus
+              du quart le plus cher&nbsp;» est écrite dans un <code>{{#if}}</code>, avec sa phrase contraire dans
+              un <code>{{#unless}}</code>&nbsp;: si la donnée change, la page change d'avis.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Une moyenne qui n'en est pas une.</strong> Le «&nbsp;prix moyen au m²&nbsp;» est un
+              ratio de moyennes (prix moyen ÷ surface moyenne), souvent sous la médiane. Recomposer un national
+              juste demande de repasser par les totaux (<code>compute</code> puis <code>sum</code>), pas de
+              moyenner les régions.</li>
+            <li><strong>La phrase conditionnelle a demandé deux essais.</strong> <code>0</code> est vrai pour
+              <code>{{#if}}</code> (seuls <code>null</code>, <code>''</code>, <code>[]</code> et <code>false</code>
+              sont faux, lu dans le source)&nbsp;: l'indicateur émet <code>'oui'</code> ou une chaîne vide. Et un
+              bloc ne peut pas englober un élément&nbsp;: le premier essai, <code>{{#if}}&lt;strong&gt;…</code>,
+              a été refusé en console, et le bloc est passé <em>dans</em> le <code>&lt;strong&gt;</code>.</li>
+            <li><strong>La mise en évidence dépend du rang.</strong> <code>highlight-index="[0, 13]"</code>
+              suppose quatorze zones&nbsp;; qu'une disparaisse et la mauvaise barre ressort.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger le fichier DiDo filtré</td><td><code>dsfr-data-source url=</code> (filtre dans l'URL)</td><td>Natif, une requête</td></tr>
+            <tr><td>National absent du jeu</td><td><code>normalize compute</code> (prix × nombre) + <code>query group-by aggregate sum</code></td><td>Natif</td></tr>
+            <tr><td>Région la plus chère et la moins chère, rapport</td><td><code>query limit="1"</code> × 2 + <code>dsfr-data-join</code></td><td>Natif, sans région en dur</td></tr>
+            <tr><td>Écart annuel max ÷ min</td><td><code>query aggregate="x:max, x:min"</code> + <code>compute</code></td><td>Natif</td></tr>
+            <tr><td>Indice base 100</td><td><code>join</code> sur l'année de référence + <code>compute</code></td><td>Faisable</td></tr>
+            <tr><td>Phrase conditionnelle</td><td><code>dsfr-data-repeat</code> + <code>{{#if}}</code> / <code>{{#unless}}</code></td><td>Natif (0 est vrai)</td></tr>
+            <tr><td>Une région à la fois</td><td><code>dsfr-data-facets display="select" default</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un fichier de 210 lignes, une requête, et sept chiffres calculés en page.</strong> Ce qui a
+          coûté, c'est de comprendre la donnée&nbsp;: une moyenne définie comme un ratio, une rupture en 2010, un
+          chiffre du cadrage qui était francilien. L'outil n'a pas freiné&nbsp;; il a
+          signalé en console, à raison, le seul gabarit mal formé.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

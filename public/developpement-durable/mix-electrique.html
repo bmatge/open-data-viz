@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le mix électrique mois par mois — open-data-viz</title>
+  <meta name="description" content="Importatrice d'électricité en 2022 pour la seule fois depuis 1981, la France n'a jamais autant exporté qu'en 2025 : moins de consommation, plus de vent et de soleil, un nucléaire revenu sans dépasser 2019.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — deuxième vague (§ 5) de
+       docs/portail-developpement-durable/proposition.md : « Le mix électrique mois
+       par mois ».
+
+       UN SEUL FICHIER DiDo : conjoncture mensuelle de l'énergie, « 3.1. Électricité »
+       (rid 691526bb-4148-4f34-b465-4d5223a0172c), dernier millésime, 9 colonnes
+       (≈ 65 Ko). Une requête : la limite de trois connexions simultanées de DiDo
+       n'est pas en jeu.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-27) :
+       - le cadrage ne proposait qu'un titre descriptif (« mois par mois »). La donnée
+         a une histoire : 2022 est la SEULE année importatrice nette depuis 1981
+         (+14,7 TWh), nucléaire à 279 TWh, au plus bas depuis 1988 ; 2025 est le
+         record d'exportations (93,8 TWh). Le titre suit la donnée.
+       - le record ne vient pas du nucléaire, resté sous 2019 (373,0 contre 379,5 TWh
+         nets) : éolien + solaire +36,8 TWh, consommation −30,0, thermique −24,9.
+       - le « mois par mois » devient le bloc du soleil : depuis juillet 2025, le
+         solaire dépasse l'hydraulique certains mois d'été (4 mois sur 547).
+       - les colonnes « nettes » (PRODN_*) sont retenues : ce qui entre sur le réseau.
+         Le fichier « 4.2 Synthèse » compte le nucléaire en équivalent primaire
+         (chaleur), à ne pas mélanger.
+       ========================================================================== -->
+
+  <dsfr-data-source id="el"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/691526bb-4148-4f34-b465-4d5223a0172c/json?columns=PERIODE,PRODN_ELE,PRODN_NUCL,PRODN_HYDRO,PRODN_EOL,PRODN_PV,PRODN_ELE_THERM,QSOLI_ELE,EAR_ELE">
+  </dsfr-data-source>
+
+  <!-- Mois : libellés, TWh, parts. Les 12 mois de 1980 n'ont pas de production. -->
+  <dsfr-data-normalize id="el-n" source="el"
+    compute="k = 'fr'; un = 1;
+             an = concat('', year(PERIODE)); yn = year(PERIODE); m = month(PERIODE);
+             mc = when m = 1 then 'janv.' when m = 2 then 'févr.' when m = 3 then 'mars' when m = 4 then 'avr.' when m = 5 then 'mai' when m = 6 then 'juin' when m = 7 then 'juil.' when m = 8 then 'août' when m = 9 then 'sept.' when m = 10 then 'oct.' when m = 11 then 'nov.' else 'déc.';
+             ml = when m = 1 then 'janvier' when m = 2 then 'février' when m = 3 then 'mars' when m = 4 then 'avril' when m = 5 then 'mai' when m = 6 then 'juin' when m = 7 then 'juillet' when m = 8 then 'août' when m = 9 then 'septembre' when m = 10 then 'octobre' when m = 11 then 'novembre' else 'décembre';
+             Mois = concat(mc, ' ', an);
+             MoisLong = concat(ml, ' ', an);
+             Total = round(PRODN_ELE / 1000, 2);
+             Nucleaire = round(PRODN_NUCL / 1000, 2);
+             Hydraulique = round(PRODN_HYDRO / 1000, 2);
+             Eolien = round(PRODN_EOL / 1000, 2);
+             Solaire = round(PRODN_PV / 1000, 2);
+             Thermique = round(PRODN_ELE_THERM / 1000, 2);
+             Export = round(0 - QSOLI_ELE / 1000, 2);
+             p_pv = PRODN_PV / PRODN_ELE * 100;
+             p_hy = PRODN_HYDRO / PRODN_ELE * 100;
+             p_eo = PRODN_EOL / PRODN_ELE * 100;
+             pvh = when PRODN_PV > PRODN_HYDRO then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="el-v" source="el-n" where="PRODN_ELE:isnotnull" order-by="PERIODE:asc"></dsfr-data-query>
+  <dsfr-data-query id="el-vide" source="el-n" where="PRODN_ELE:isnull" group-by="k" aggregate="un:sum:n"></dsfr-data-query>
+
+  <!-- ---------- Années complètes (12 mois renseignés) ---------- -->
+  <dsfr-data-query id="an-q" source="el-v" group-by="an, k"
+    aggregate="yn:max:yn, un:sum:nm, PRODN_ELE:sum:tot, PRODN_NUCL:sum:nuc, PRODN_HYDRO:sum:hyd, PRODN_EOL:sum:eol, PRODN_PV:sum:pv, PRODN_ELE_THERM:sum:the, QSOLI_ELE:sum:solde, EAR_ELE:sum:ear"
+    order-by="an:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="an-p" source="an-q" where="nm:eq:12"></dsfr-data-query>
+  <dsfr-data-normalize id="an-t" source="an-p"
+    compute="Annee = an;
+             Nucleaire = round(nuc / 1000, 1);
+             Conso = round(ear / 1000, 1);
+             EnR = round((eol + pv) / 1000, 1);
+             Export = round(0 - solde / 1000, 1);
+             Import = round(solde / 1000, 1);
+             Production = round(tot / 1000, 1);
+             p_nuc = nuc / tot * 100;
+             p_pv = pv / tot * 100;
+             p_the = the / tot * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="an-o" source="an-t" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-query id="an-der" source="an-t" order-by="an:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-deb" source="an-t" order-by="an:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-rec" source="an-t" order-by="Export:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-imp" source="an-t" order-by="Export:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="an-un" source="an-t" compute="un = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="an-imp-c" source="an-un" where="Export:lt:0" group-by="k" aggregate="un:sum:n"></dsfr-data-query>
+
+  <!-- « Au plus bas depuis » : la dernière année, avant l'année importatrice, où le
+       nucléaire a produit moins qu'elle. Calculé, pas écrit. -->
+  <dsfr-data-join id="imp-j" left="an-t" right="an-imp" on="k" type="inner" prefix-right="m_"></dsfr-data-join>
+  <dsfr-data-normalize id="imp-jn" source="imp-j"
+    compute="inf = when nuc < m_nuc and yn < m_yn then yn else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="imp-dep" source="imp-jn" group-by="k" aggregate="inf:max:depuis"></dsfr-data-query>
+  <dsfr-data-join id="imp-syn" left="an-imp" right="imp-dep" on="k" type="inner"></dsfr-data-join>
+
+  <!-- Référence 2019, dernière année ordinaire avant la crise -->
+  <dsfr-data-normalize id="ref-n" source="an-t"
+    compute="r_nuc = when an = '2019' then nuc else 0;
+             r_enr = when an = '2019' then eol + pv else 0;
+             r_the = when an = '2019' then the else 0;
+             r_ear = when an = '2019' then ear else 0;
+             r_sol = when an = '2019' then solde else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ref-19" source="ref-n" group-by="k"
+    aggregate="r_nuc:sum:nuc19, r_enr:sum:enr19, r_the:sum:the19, r_ear:sum:ear19, r_sol:sum:sol19"></dsfr-data-query>
+  <dsfr-data-join id="der-j" left="an-der" right="ref-19" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="der-t" source="der-j"
+    compute="d_exp = (sol19 - solde) / 1000;
+             d_nuc = (nuc - nuc19) / 1000;
+             d_nuc_abs = abs(nuc - nuc19) / 1000;
+             d_enr = (eol + pv - enr19) / 1000;
+             d_ear = (ear19 - ear) / 1000;
+             d_the = (the19 - the) / 1000;
+             nuc19_t = nuc19 / 1000;
+             nuc_mot = when nuc < nuc19 then 'il reste sous son niveau de 2019' else 'il dépasse son niveau de 2019';
+             nuc_sens = when nuc < nuc19 then 'de moins' else 'de plus';
+             exp19 = (0 - sol19) / 1000">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Le soleil : mois où le solaire passe devant l'hydraulique ---------- -->
+  <dsfr-data-query id="pv-h" source="el-v" where="pvh:eq:1" order-by="PERIODE:asc"></dsfr-data-query>
+  <dsfr-data-query id="pv-h-n" source="pv-h" group-by="k" aggregate="un:sum:n"></dsfr-data-query>
+  <dsfr-data-query id="pv-h-1" source="pv-h" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="pv-h-der" source="pv-h" order-by="PERIODE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="pv-n" source="el-v" group-by="k" aggregate="un:sum:n"></dsfr-data-query>
+  <dsfr-data-join id="pv-syn" left="pv-h-n" right="pv-n" on="k" type="inner" prefix-right="tot_"></dsfr-data-join>
+  <dsfr-data-query id="pv-rec" source="el-v" order-by="PRODN_PV:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="soleil" source="el-v" where="yn:gte:2019"></dsfr-data-query>
+  <dsfr-data-query id="el-der" source="el-v" order-by="PERIODE:desc" limit="1"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Le mix électrique mois par mois</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Électricité&nbsp;: importatrice en 2022, la France n'a jamais autant exporté qu'en 2025</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="imp-syn">
+        <template>
+          En {{an}}, la France a importé plus d'électricité qu'elle n'en a vendu à ses voisins&nbsp;: un solde
+          importateur de <strong>{{Import:number:1}}&nbsp;TWh</strong>, avec un parc nucléaire tombé à
+          {{Nucleaire:number:0}}&nbsp;TWh, au plus bas depuis {{depuis}}.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-rec">
+        <template>
+          Le balancier est reparti depuis&nbsp;: en {{an}}, elle a exporté <strong>{{Export:number:1}}&nbsp;TWh
+          de plus qu'elle n'en a importé</strong>, un record.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="der-t">
+        <template>
+          Ce n'est pas le nucléaire qui l'explique&nbsp;: en {{an}}, {{nuc_mot}}. Ce sont le vent et le soleil
+          (+{{d_enr:number:0}}&nbsp;TWh) et une consommation qui a baissé ({{d_ear:number:0}}&nbsp;TWh de moins).
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: conjoncture mensuelle de l'énergie,
+      fichier «&nbsp;Électricité&nbsp;» (production nette par filière, échanges physiques avec l'étranger, énergie appelée),
+      dernier millésime au chargement de la page. Production nette&nbsp;: ce que les centrales injectent sur le réseau.
+      France métropolitaine jusqu'en 2017, départements d'outre-mer compris depuis 2018.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="an-rec" value="Export:max" decimals="1" unit="TWh" span="3"
+        heading="Record d'exportations nettes" label="solde exportateur de la meilleure année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="an-imp" value="Export:max" decimals="1" unit="TWh" span="3"
+        heading="L'année importatrice" label="solde de la pire année (négatif : importations nettes)"></dsfr-data-kpi>
+      <dsfr-data-kpi source="an-der" value="p_nuc:max" decimals="1" unit="%" span="3"
+        heading="Part du nucléaire" label="production nette, dernière année complète"></dsfr-data-kpi>
+      <dsfr-data-kpi source="an-der" value="p_pv:max" decimals="1" unit="%" span="3"
+        heading="Part du solaire" label="production nette, dernière année complète"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — le solde, année par année ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-solde">
+    <h2 id="t-solde" class="fr-h3">Une seule année sous la ligne depuis 1981&nbsp;: 2022</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="an-deb">
+        <template>
+          Chaque barre est le solde des échanges physiques d'électricité de l'année&nbsp;: au-dessus de zéro, la France
+          exporte plus qu'elle n'importe. De {{an}} à aujourd'hui,
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-imp-c">
+        <template>
+          <strong>{{n:number:0}}&nbsp;année</strong> seulement passe sous la ligne.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="der-t">
+        <template>
+          En {{an}}, dernière année complète, le solde atteint {{Export:number:1}}&nbsp;TWh, contre {{exp19:number:1}} en 2019.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Solde exportateur d'électricité par année">
+      <dsfr-data-chart id="g-solde" source="an-o" type="bar"
+        label-field="Annee" value-field="Export" name="Solde exportateur net (TWh)" unit-tooltip="TWh"
+        reference-lines='[{"axis":"x","value":"2022","label":"2022 : importations nettes","dash":true}]'
+        databox databox-title="Solde des échanges physiques d'électricité avec l'étranger, par année complète (TWh ; positif = exportations nettes)"
+        databox-source="SDES — conjoncture mensuelle de l'énergie, électricité (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-solde" source="an-o" label-field="Annee" value-field="Export"
+        description="Barres verticales, une par année complète depuis 1981 : le solde des échanges physiques d'électricité de la France, en térawattheures, positif quand les exportations dépassent les importations. Le solde monte de 5 TWh en 1981 à près de 77 TWh en 2002, oscille ensuite entre 26 et 68 TWh jusqu'en 2021, passe sous zéro en 2022, seule année négative, repart en 2023 et dépasse 90 TWh en 2024 et 2025, les deux plus hautes barres de la série.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Échanges physiques mesurés aux frontières par RTE, pas contrats commerciaux&nbsp;: une électricité qui ne fait que
+      traverser la France est comptée à l'entrée et à la sortie, sans effet sur le solde.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — ce n'est pas le nucléaire ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-cause">
+    <h2 id="t-cause" class="fr-h3">Le nucléaire est revenu sans dépasser 2019&nbsp;; le vent, le soleil et la sobriété ont fait le record</h2>
+    <dsfr-data-repeat source="der-t">
+      <template>
+        <p class="odv-lecture">
+          En {{an}}, les réacteurs ont produit {{Nucleaire:number:1}}&nbsp;TWh, soit {{d_nuc_abs:number:1}}&nbsp;TWh {{nuc_sens}}
+          qu'en 2019 ({{nuc19_t:number:1}}). Pourtant le pays a exporté {{d_exp:number:1}}&nbsp;TWh de plus. L'écart vient
+          d'ailleurs&nbsp;: <strong>l'éolien et le solaire ont ajouté {{d_enr:number:1}}&nbsp;TWh</strong>, la consommation
+          (énergie appelée, pertes comprises) en a perdu {{d_ear:number:1}}, et les centrales thermiques ont produit
+          {{d_the:number:1}}&nbsp;TWh de moins.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Production nucléaire, éolienne et solaire, consommation, par année">
+      <dsfr-data-chart id="g-cause" source="an-o" type="line"
+        label-field="Annee" value-field="Nucleaire:Production nucléaire nette" value-fields="Conso:Consommation (énergie appelée), EnR:Éolien et solaire"
+        unit-tooltip="TWh" y-min="0"
+        reference-lines='[{"axis":"x","value":"2019","label":"2019","dash":true},{"axis":"x","value":"2022","label":"2022","dash":true}]'
+        databox databox-title="Production nucléaire nette, production éolienne et solaire, et énergie appelée, par année complète (TWh)"
+        databox-source="SDES — conjoncture mensuelle de l'énergie, électricité (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-cause" source="an-o" label-field="Annee" value-field="Nucleaire,Conso,EnR"
+        description="Trois courbes, une valeur par année complète depuis 1981, en térawattheures. La consommation (énergie appelée, pertes comprises) monte de 300 à près de 500 TWh jusqu'en 2010, puis s'érode et descend vers 440 à 450 TWh depuis 2023. La production nucléaire nette monte de 100 à 430 TWh jusqu'en 2005, redescend doucement, chute à 279 TWh en 2022 puis remonte sans retrouver son niveau de 2019. L'éolien et le solaire, nuls avant 2005, dépassent 80 TWh en 2025.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      L'énergie appelée n'est <strong>pas corrigée du climat</strong>&nbsp;: un hiver doux la réduit. Les écarts ne
+      s'additionnent pas exactement au solde&nbsp;: l'hydraulique et le pompage des stations de transfert d'énergie
+      jouent aussi. Le thermique réunit gaz, charbon, fioul et bioénergies (bois, déchets, biogaz)&nbsp;: le fichier ne
+      les sépare pas.
+    </p>
+  </section>
+
+  <!-- ======================= LE SOLEIL ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-soleil">
+    <h2 id="t-soleil" class="fr-h3">L'été, le solaire passe désormais devant l'hydraulique</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="pv-syn">
+        <template>
+          Sur {{tot_n:number:0}}&nbsp;mois publiés, le solaire a produit plus que les barrages
+          <strong>{{n:number:0}}&nbsp;fois</strong>&nbsp;:
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="pv-h-1">
+        <template>
+          la première en {{MoisLong}},
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="pv-h-der">
+        <template>
+          la dernière en {{MoisLong}}.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="pv-rec">
+        <template>
+          Le mois le plus solaire de la série est {{MoisLong}}&nbsp;: {{Solaire:number:2}}&nbsp;TWh, {{p_pv:number:1}}&nbsp;%
+          de la production du mois, contre {{p_hy:number:1}}&nbsp;% pour l'hydraulique et {{p_eo:number:1}}&nbsp;% pour
+          l'éolien.
+        </template>
+      </dsfr-data-repeat>
+      Chaque hiver, l'ordre s'inverse&nbsp;: l'éolien et l'eau reprennent la main.
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Production solaire, hydraulique et éolienne par mois depuis 2019">
+      <dsfr-data-chart id="g-soleil" source="soleil" type="line"
+        label-field="Mois" value-field="Solaire:Solaire photovoltaïque" value-fields="Hydraulique:Hydraulique, Eolien:Éolien"
+        unit-tooltip="TWh" y-min="0"
+        color-map="Solaire photovoltaïque:#C3992A,Hydraulique:#009081,Éolien:#6A6AF4"
+        databox databox-title="Production nette d'électricité solaire, hydraulique et éolienne, par mois depuis janvier 2019 (TWh)"
+        databox-source="SDES — conjoncture mensuelle de l'énergie, électricité (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-soleil" source="soleil" label-field="Mois" value-field="Solaire,Hydraulique,Eolien"
+        description="Trois courbes mensuelles depuis janvier 2019, en térawattheures. L'hydraulique oscille entre 3 et 8 TWh, plus haut au printemps. L'éolien, entre 1,5 et 7 TWh, culmine en hiver. Le solaire dessine une vague chaque été, de plus en plus haute : autour de 1,5 TWh l'été 2019, plus de 5 TWh l'été 2026 ; il croise la courbe de l'hydraulique en juillet et août 2025, puis en juin et juillet 2026.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Le dernier mois publié est provisoire&nbsp;; le SDES prévient que les productions éolienne et solaire font
+      partie des séries les plus révisées. L'hydraulique varie aussi avec la pluie et la neige d'une année à l'autre.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — mois par mois ======================= -->
+  <dsfr-data-query id="mix-24" source="mix-f" order-by="PERIODE:desc" limit="24"></dsfr-data-query>
+  <dsfr-data-query id="mix" source="mix-24" order-by="PERIODE:asc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-mix">
+    <h2 id="t-mix" class="fr-h3">Explorer&nbsp;: le mix électrique, mois par mois</h2>
+    <dsfr-data-repeat source="el-der">
+      <template>
+        <p class="odv-lecture">
+          Par défaut, les 24 derniers mois publiés, jusqu'à {{MoisLong}}&nbsp;: le nucléaire fournit
+          chaque mois les deux tiers de la production, l'été fait monter le solaire, l'hiver l'éolien et le thermique.
+          Choisissez une année pour voir ses douze mois — 2022 montre le creux du nucléaire, de mai à octobre.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="mix-f" source="el-v"
+          fields="an" display="an:select" labels="an:Année" sort="an:alpha:desc" hide-counts>
+        </dsfr-data-facets>
+        <p class="fr-text--xs fr-hint-text">Sans année choisie&nbsp;: les 24 derniers mois.</p>
+      </details>
+      <div>
+        <div class="odv-chart-slot odv-viz" data-code="Production nette d'électricité par filière et par mois">
+          <dsfr-data-chart id="g-mix" source="mix" type="bar" stacked
+            label-field="Mois" value-field="Nucleaire:Nucléaire" value-fields="Hydraulique:Hydraulique, Eolien:Éolien, Solaire:Solaire photovoltaïque, Thermique:Thermique"
+            unit-tooltip="TWh"
+            color-map="Nucléaire:#000091,Hydraulique:#009081,Éolien:#6A6AF4,Solaire photovoltaïque:#C3992A,Thermique:#7F7F7F"
+            databox databox-title="Production nette d'électricité par filière et par mois (TWh)"
+            databox-source="SDES — conjoncture mensuelle de l'énergie, électricité (DiDo)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-mix" source="mix" label-field="Mois" value-field="Nucleaire,Hydraulique,Eolien,Solaire,Thermique"
+            description="Barres empilées, une par mois (les 24 derniers mois publiés, ou les douze mois de l'année choisie) : la production nette d'électricité en térawattheures, par filière, nucléaire en bas puis hydraulique, éolien, solaire et thermique. Les barres sont plus hautes en hiver (autour de 55 TWh) qu'en été (autour de 40 TWh) ; le nucléaire en fait à peu près les deux tiers ; le solaire grossit de mai à août, l'éolien et le thermique de novembre à février.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">Tous les mois depuis 1981</h3>
+    <dsfr-data-list source="el-v"
+      columns="PERIODE:Mois, Total:Production nette (TWh), Nucleaire:Nucléaire (TWh), Hydraulique:Hydraulique (TWh), Eolien:Éolien (TWh), Solaire:Solaire (TWh), Thermique:Thermique (TWh), Export:Solde exportateur (TWh)"
+      sort="PERIODE:desc" pagination="12" count-label="mois|mois" export="csv"
+      caption="Production nette d'électricité par filière et solde des échanges, par mois">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>Le gaz, le charbon et le fioul séparément.</strong> Le fichier donne une seule production
+        «&nbsp;thermique&nbsp;», bioénergies comprises&nbsp;: la page ne peut pas dire combien d'électricité vient du gaz.</li>
+      <li><strong>Les prix et la valeur des échanges.</strong> Le solde est compté en énergie, pas en euros&nbsp;; exporter
+        la nuit ou un dimanche d'été, à prix bas, ne rapporte pas ce que rapporte un soir d'hiver.</li>
+      <li><strong>Les causes de 2022.</strong> La corrosion sous contrainte découverte sur plusieurs réacteurs et une
+        sécheresse qui a réduit l'hydraulique sont documentées ailleurs&nbsp;; ce fichier mesure la production, pas les
+        arrêts.</li>
+      <li><strong>Une rupture de champ en 2018.</strong> Jusqu'en décembre 2017 les séries portent sur la métropole,
+        depuis janvier 2018 elles incluent les cinq départements d'outre-mer (note méthodologique du SDES). L'effet est
+        faible à l'échelle nationale, mais il existe.</li>
+      <li><strong>L'année en cours.</strong> Les totaux annuels ne retiennent que les années de douze mois&nbsp;; l'année
+        entamée n'apparaît que dans l'exploration mensuelle.</li>
+      <li>
+        <dsfr-data-repeat source="el-vide">
+          <template>
+            <strong>Les {{n:number:0}}&nbsp;mois sans production.</strong> Le fichier commence en janvier 1980 pour les
+            degrés-jours, mais la production n'y est renseignée qu'à partir de 1981&nbsp;: ces lignes sont écartées.
+            Aucune cellule «&nbsp;secret&nbsp;» ni «&nbsp;na&nbsp;» dans les colonnes utilisées.
+          </template>
+        </dsfr-data-repeat>
+      </li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création à partir d'un seul fichier du SDES servi par l'API DiDo.
+        Le cadrage ne proposait qu'un titre descriptif («&nbsp;mois par mois&nbsp;»)&nbsp;; la donnée avait une histoire,
+        le creux de 2022 et le record qui l'a suivi, et une explication qui n'était pas celle qu'on attendait.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Une requête pour toute la page.</strong> <code>columns=</code> réduit le fichier de 33 à
+              9 colonnes&nbsp;; 559 lignes, aucune limite de connexions en jeu.</li>
+            <li><strong>Les années du récit sont calculées.</strong> L'année importatrice, le record et «&nbsp;au plus
+              bas depuis&nbsp;» sortent de <code>order-by … limit="1"</code> et d'une jointure sur la ligne
+              retenue&nbsp;: aucune année écrite en dur dans les phrases.</li>
+            <li><strong>Deux vues d'une même source.</strong> Un <code>dsfr-data-facets</code> sur l'année suivi d'un
+              <code>limit="24"</code> donne «&nbsp;les 24 derniers mois&nbsp;» sans sélection, et les douze mois d'une
+              année une fois choisie.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas de nom de mois.</strong> <code>compute</code> n'a pas de format de date&nbsp;: «&nbsp;juil. 2025&nbsp;»
+              s'écrit avec un <code>when</code> à douze branches, deux fois (court et long).</li>
+            <li><strong>Les années incomplètes.</strong> Sans compter les mois (<code>un:sum</code> puis
+              <code>nm:eq:12</code>), l'année entamée serait une demi-année rangée parmi les autres — et deviendrait
+              l'année «&nbsp;la plus basse&nbsp;».</li>
+            <li><strong>Le signe du solde.</strong> Le SDES publie un solde importateur (négatif quand on exporte)&nbsp;;
+              le lecteur attend l'inverse. Un <code>0 - solde</code> le retourne, mais les graphiques et le tableau
+              doivent tous porter la même convention, écrite.</li>
+            <li><strong>L'infobulle du mix empilé.</strong> Au survol, elle liste cinq valeurs («&nbsp;33,1 TWh
+              6,84 TWh…&nbsp;») sans nommer les filières (AM-086, déjà au registre, côté DSFR Chart)&nbsp;: c'est la légende
+              et le tableau équivalent qui disent quelle valeur est quelle filière.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger un fichier DiDo réduit à 9 colonnes</td><td><code>dsfr-data-source url=</code> (mode URL, <code>columns=</code>)</td><td>Natif, une requête</td></tr>
+            <tr><td>Totaux annuels sur années complètes</td><td><code>dsfr-data-query group-by</code> + compte des mois + <code>where="nm:eq:12"</code></td><td>Natif</td></tr>
+            <tr><td>Année importatrice, record, «&nbsp;au plus bas depuis&nbsp;»</td><td><code>query order-by limit</code> + <code>join</code> + <code>normalize compute when</code></td><td>Natif, sans année en dur</td></tr>
+            <tr><td>Écart à 2019 décomposé par filière</td><td>ligne de référence (<code>when … else 0</code> + <code>group-by</code>) jointe à la dernière année</td><td>Faisable, verbeux</td></tr>
+            <tr><td>Libellé de mois lisible</td><td><code>compute</code> à douze <code>when</code></td><td>Contournement (pas de format de date)</td></tr>
+            <tr><td>24 derniers mois ou une année au choix</td><td><code>dsfr-data-facets display="select"</code> + <code>query limit</code></td><td>Natif</td></tr>
+            <tr><td>Mix empilé aux couleurs des filières</td><td><code>type="bar" stacked</code> + <code>color-map</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Une source, aucun script, et un récit entièrement calculé.</strong> Le travail a été de trouver
+          l'histoire&nbsp;: 2022 est la seule année importatrice depuis 1981, et le record qui suit ne tient pas au
+          nucléaire, resté sous 2019, mais au vent, au soleil et à une consommation en baisse. La bibliothèque suit&nbsp;;
+          seul le libellé des mois coûte des lignes.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

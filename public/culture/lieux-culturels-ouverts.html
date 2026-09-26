@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trouver un lieu culturel ouvert — open-data-viz</title>
+  <meta name="description" content="La Base des lieux culturels ouverts recense plus de 36 000 lieux, mais deux fiches sur trois ne disent pas si le lieu est ouvert au public — et celles des bibliothèques sont les plus souvent muettes. Un explorateur pour trouver un lieu près de chez soi, créé avec dsfr-data à partir de la base du ministère de la Culture (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 12 de docs/portail-culture/proposition.md.
+       Page EXPLORATEUR : trois repères, puis la recherche. Angle « trouver » ; la
+       page Basilic (fiche 11) compte les lieux, celle-ci aide à en trouver un et
+       dit ce que la base ne dit pas. Les deux bases ne s'additionnent pas.
+
+       LE CHAMP. « Base des lieux culturels ouverts » du ministère de la Culture,
+       ressource Tabular 4bd1a20e-…, mise à jour quotidienne, contributions en
+       ligne modérées (basedeslieux.culture.gouv.fr). « Ouvert » y veut dire
+       ACCESSIBLE AU PUBLIC (colonne accessible_au_public), pas « ouvert en ce
+       moment » : la base ne publie aucun horaire.
+
+       LE CHARGEMENT. 36 392 lignes sondées le 2026-09-27 : `fetch-mode="export"`
+       lit l'export Parquet (11 Mo) en ne rapatriant que les colonnes du `select`
+       (≈ 3,5 Mo : ni `description`, 3,7 Mo à elle seule, ni les adresses
+       doublées). ⚠️ `max-records` relevé à 60 000 : le plafond Tabular par
+       défaut (25 000) couperait le jeu, avec un simple avertissement console.
+
+       LES CHAMPS « TABLEAU ». Le Parquet rend domaines, accessible_au_public,
+       conditions_ouverture et site_internet… en TEXTE JSON (`["ouvert","accès
+       handicap moteur"]`), et les domaines d'un lieu à plusieurs sources en
+       tableaux concaténés (`["Patrimoine"],["Patrimoine"]`, 2 851 lignes).
+       Un `split` sur la virgule casserait « Lecture, livre et presse », et un
+       split brut compterait deux fois « Patrimoine » dans la facette (elle ne
+       dédoublonne pas un tableau). D'où : un `compute` qui teste chaque
+       modalité par `contains()` et reconstruit une liste sans doublon séparée
+       par `|`, puis un second normalize qui la découpe.
+       ========================================================================== -->
+
+  <dsfr-data-source id="lieux" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="4bd1a20e-4dfd-40ff-bd4d-c714f7085de8"
+    fetch-mode="export" max-records="60000"
+    select="id, nom_du_lieu, domaines, adresse_complete, commune, departement, region, latitude, longitude, accessible_au_public, conditions_ouverture, site_internet_et_autres_liens">
+  </dsfr-data-source>
+
+  <!-- 1) Recodage ligne à ligne. contains() est insensible à la casse (« Ouvert »,
+       deux lignes, compte comme « ouvert »). Statut : « ouvert » l'emporte sur
+       « fermé » pour les deux lignes qui portent les deux.
+       Liens : chaque élément reçoit « https:// » s'il n'a pas de schéma (1 800
+       liens « www.… » ou nus) ; ceux qui en ont un le gardent. -->
+  <dsfr-data-normalize id="l-n1" source="lieux"
+    rename="nom_du_lieu:nom | adresse_complete:adresse | site_internet_et_autres_liens:liens_bruts"
+    compute="ouv = when contains(accessible_au_public, 'ouvert') then 1 else 0;
+             fer = when ouv = 0 and contains(accessible_au_public, 'fermé') then 1 else 0;
+             renseigne = ouv + fer;
+             muet = 1 - renseigne;
+             hand = when contains(accessible_au_public, 'handicap') then 1 else 0;
+             statut = when ouv = 1 then 'Déclaré ouvert au public' when fer = 1 then 'Déclaré fermé au public' else 'Non renseigné';
+             acces = when hand = 1 then 'Accès handicap moteur déclaré' else 'Non déclaré';
+             hand_lib = when hand = 1 then 'Accès handicap moteur déclaré' else '';
+             dom_txt = concat(when contains(domaines, 'Patrimoine') then 'Patrimoine|' else '',
+                              when contains(domaines, 'Lecture') then 'Lecture, livre et presse|' else '',
+                              when contains(domaines, 'Cinéma') then 'Cinéma et audiovisuel|' else '',
+                              when contains(domaines, 'Arts du spectacle') then 'Arts du spectacle|' else '',
+                              when contains(domaines, 'Archives') then 'Archives|' else '',
+                              when contains(domaines, 'Éducation') then 'Éducation et formation|' else '',
+                              when contains(domaines, 'Arts visuels') then 'Arts visuels|' else '');
+             cond_txt = concat(when contains(conditions_ouverture, 'année') then 'À l’année|' else '',
+                               when contains(conditions_ouverture, 'saisonni') then 'Saisonnière|' else '',
+                               when contains(conditions_ouverture, 'de jour') then 'De jour|' else '',
+                               when contains(conditions_ouverture, 'de nuit') then 'De nuit|' else '',
+                               when contains(conditions_ouverture, 'travaux') then 'En travaux|' else '');
+             liens_a = replace(replace(replace(coalesce(liens_bruts, ''), '&quot;],[&quot;', '|§'), '&quot;,&quot;', '|§'), '[&quot;', '§');
+             liens_b = replace(replace(replace(replace(liens_a, '&quot;]', ''), '§http', 'http'), '§Http', 'Http'), '§HTTP', 'HTTP');
+             liens_txt = replace(liens_b, '§', 'https://');
+             fiche = 'https://basedeslieux.culture.gouv.fr/lieux/' + id;
+             hors_region = when is_empty(region) then 1 else 0;
+             un = 1;
+             k = 1">
+  </dsfr-data-normalize>
+  <!-- 2) Découpe des listes reconstruites (compute s'exécute APRÈS split dans un
+       même normalize : il en faut deux). -->
+  <dsfr-data-normalize id="l-n" source="l-n1" split="dom_txt:|, cond_txt:|, liens_txt:|"
+    rename="dom_txt:domaine | cond_txt:conditions | liens_txt:liens">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="l-n" group-by="k"
+    aggregate="un:sum:n, ouv:sum:ouv, fer:sum:fer, renseigne:sum:renseigne, muet:sum:muet, hand:sum:hand, hors_region:sum:hors_region">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="p_ouv = ouv / n * 100;
+             p_muet = muet / n * 100;
+             p_rens = renseigne / n * 100;
+             p_hand = hand / n * 100">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Par domaine (un lieu à plusieurs domaines compte dans chacun) ---------- -->
+  <dsfr-data-query id="dom" source="l-n" group-by="domaine" explode="domaine"
+    aggregate="un:sum:n, renseigne:sum:r, ouv:sum:o"></dsfr-data-query>
+  <dsfr-data-normalize id="dom-t" source="dom" compute="p = round(r / n * 100, 1); muets = n - r"></dsfr-data-normalize>
+  <dsfr-data-query id="dom-tri" source="dom-t" order-by="p:asc"></dsfr-data-query>
+  <dsfr-data-query id="dom-bas" source="dom-t" order-by="p:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dom-haut" source="dom-t" order-by="p:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="dom-g" source="dom-tri" rename="domaine:Domaine | p:Part des lieux qui disent s'ils sont ouverts (%) | n:Lieux du domaine | r:Dont statut renseigné"></dsfr-data-normalize>
+
+  <!-- ---------- Par région ---------- -->
+  <dsfr-data-query id="reg" source="l-n" where="region:isnotnull" group-by="region"
+    aggregate="un:sum:n, renseigne:sum:r"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-t" source="reg" compute="p = round(r / n * 100, 1)"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-grandes" source="reg-t" where="n:gte:1000" order-by="p:desc"></dsfr-data-query>
+  <dsfr-data-query id="reg-haut" source="reg-t" where="n:gte:1000" order-by="p:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-bas" source="reg-t" where="n:gte:1000" order-by="p:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-petites" source="reg-t" where="n:lt:1000" order-by="p:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-g" source="reg-grandes" rename="region:Région | p:Part des lieux qui disent s'ils sont ouverts (%) | n:Lieux recensés | r:Dont statut renseigné"></dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Trouver un lieu culturel ouvert</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Trouver un lieu culturel&nbsp;: deux fiches sur trois ne disent pas si l'on peut y entrer</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          La Base des lieux culturels ouverts du ministère de la Culture recense {{n:number}}&nbsp;lieux&nbsp;:
+          bibliothèques, monuments, cinémas, salles de spectacle, archives. {{ouv:number}} se déclarent ouverts au
+          public, {{fer:number}} fermés. Pour les {{muet:number}} autres, <strong>{{p_muet:number:0}}&nbsp;% de la
+          base</strong>, la fiche ne dit rien de l'accès. Avant de vous déplacer, la recherche ci-dessous vous dit ce
+          que la base sait de chaque lieu — et ce qu'elle ignore.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture — <em>Base des lieux culturels ouverts</em>, mise à jour quotidienne, alimentée par
+      les jeux spécialisés du ministère puis par des contributions en ligne vérifiées par l'administration centrale
+      et les DRAC. Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/base-des-lieux-culturels-ouverts" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular). «&nbsp;Ouvert&nbsp;» y signifie <em>accessible au public</em>&nbsp;: la base
+      ne publie pas d'horaires.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="4"
+        heading="Lieux recensés" label="en France et, pour quelques-uns, à l'étranger"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_ouv:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Déclarés ouverts au public" label="la fiche porte la mention « ouvert »"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_muet:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Sans information d'accès" label="ni « ouvert » ni « fermé » sur la fiche"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les domaines ======================= -->
+  <!-- Tri croissant : la barre la plus basse (la moins renseignée) est en tête,
+       mise en évidence par highlight-index="[0]". La phrase qui la nomme est
+       calculée (dom-bas) : si l'ordre change, le texte suit. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dom">
+    <h2 id="t-dom" class="fr-h3">Les bibliothèques, lieux de proximité par excellence, sont les moins renseignées</h2>
+    <dsfr-data-repeat source="dom-bas">
+      <template>
+        <p class="odv-lecture fr-mb-1v">
+          {{n:number}}&nbsp;lieux relèvent de «&nbsp;{{domaine}}&nbsp;», bibliothèques et médiathèques pour l'essentiel.
+          C'est le domaine où la fiche dit le moins souvent si le lieu est ouvert&nbsp;: <strong>{{p:number:0}}&nbsp;%</strong>
+          des cas, {{r:number}} sur {{n:number}}.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="dom-haut">
+      <template>
+        <p class="odv-lecture">
+          À l'autre bout, «&nbsp;{{domaine}}&nbsp;»&nbsp;: {{p:number:0}}&nbsp;% ({{r:number}} sur {{n:number}}). La lacune
+          n'est donc pas celle des lieux rares ou confidentiels&nbsp;: c'est la médiathèque de la commune, celle où
+          l'on passe sans rendez-vous, dont la fiche est le plus souvent muette.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part des lieux dont la fiche dit s'ils sont ouverts, par domaine">
+      <dsfr-data-chart id="g-dom" source="dom-g" type="bar" horizontal
+        label-field="Domaine" value-field="Part des lieux qui disent s'ils sont ouverts (%)" name="Lieux dont la fiche dit s'ils sont ouverts (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%" x-min="0" x-max="100"
+        databox databox-title="Part des lieux dont la fiche dit s'ils sont ouverts ou fermés au public, par domaine (%)"
+        databox-source="Ministère de la Culture — Base des lieux culturels ouverts (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dom" source="dom-g" label-field="Domaine"
+        value-field="Part des lieux qui disent s'ils sont ouverts (%), Lieux du domaine, Dont statut renseigné"
+        description="Barres horizontales sur une échelle de 0 à 100 %, triées de la moins renseignée à la plus renseignée : pour chaque domaine, la part des lieux dont la fiche dit s'ils sont ouverts ou fermés au public. « Lecture, livre et presse », mise en évidence en tête, est sous 20 % ; le patrimoine et le cinéma autour de 40 % ; les arts du spectacle autour de 75 % ; les arts visuels près de 100 %. Un lieu rattaché à plusieurs domaines compte dans chacun.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      «&nbsp;Dit s'il est ouvert&nbsp;»&nbsp;: la colonne d'accès au public porte «&nbsp;ouvert&nbsp;» ou «&nbsp;fermé&nbsp;».
+      Un lieu rattaché à plusieurs domaines (un monument qui abrite une salle de spectacle) compte dans chacun&nbsp;:
+      les barres ne s'additionnent pas.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — les régions ======================= -->
+  <!-- Régions de plus de 1 000 lieux seulement dans le graphique : la Corse et les
+       cinq DROM (12 à 249 lieux) y feraient des extrêmes sur de petits effectifs.
+       Ils sont listés en toutes lettres dessous. highlight-index="[0]" = la plus
+       renseignée (tri décroissant). -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">D'une région à l'autre, la part des fiches renseignées varie du simple au triple</h2>
+    <dsfr-data-repeat source="reg-haut">
+      <template>
+        <p class="odv-lecture fr-mb-1v">
+          Parmi les régions de plus de 1&nbsp;000&nbsp;lieux, {{region}} renseigne l'accès de <strong>{{p:number:0}}&nbsp;%</strong>
+          de ses lieux ({{r:number}} sur {{n:number}}).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="reg-bas">
+      <template>
+        <p class="odv-lecture">
+          {{region}}, {{p:number:0}}&nbsp;% seulement ({{r:number}} sur {{n:number}}). L'écart mesure la
+          complétude des fiches, pas l'accès aux lieux&nbsp;: le fichier ne dit ni qui a renseigné une fiche ni quand, et ne
+          permet pas d'attribuer la différence à une source ou à un service.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part des lieux dont la fiche dit s'ils sont ouverts, par région">
+      <dsfr-data-chart id="g-reg" source="reg-g" type="bar" horizontal
+        label-field="Région" value-field="Part des lieux qui disent s'ils sont ouverts (%)" name="Lieux dont la fiche dit s'ils sont ouverts (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%" x-min="0" x-max="100"
+        databox databox-title="Part des lieux dont la fiche dit s'ils sont ouverts ou fermés au public, régions de plus de 1 000 lieux (%)"
+        databox-source="Ministère de la Culture — Base des lieux culturels ouverts (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-g" label-field="Région"
+        value-field="Part des lieux qui disent s'ils sont ouverts (%), Lieux recensés, Dont statut renseigné"
+        description="Barres horizontales sur une échelle de 0 à 100 %, triées de la plus renseignée à la moins renseignée, pour les douze régions qui comptent plus de 1 000 lieux. La première, mise en évidence, dépasse 60 % ; la suivante est sous 50 % ; les dix autres se tiennent entre 20 et 40 %.">
+      </dsfr-data-a11y>
+    </div>
+    <div class="fr-text--sm">
+      <p class="fr-text--sm fr-mb-1v">
+        Hors du graphique, les territoires de moins de 1&nbsp;000&nbsp;lieux, aux effectifs trop petits pour se comparer
+        aux autres&nbsp;:
+      </p>
+      <dsfr-data-repeat source="reg-petites">
+        <template>
+          <p class="fr-text--sm fr-mb-0">{{region}}&nbsp;: {{p:number:0}}&nbsp;% des fiches renseignées ({{r:number}} sur {{n:number}})</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+  </section>
+
+  <!-- ======================= CE QUE « OUVERT » VEUT DIRE ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ouvert">
+    <h2 id="t-ouvert" class="fr-h3">«&nbsp;Ouvert&nbsp;» veut dire accessible au public, pas ouvert aujourd'hui</h2>
+    <div class="fr-callout fr-icon-information-line">
+      <dsfr-data-repeat source="syn-t">
+        <template>
+          <p class="fr-callout__text">
+            La fiche d'un lieu peut dire qu'il est «&nbsp;ouvert&nbsp;» ou «&nbsp;fermé&nbsp;» au public, s'il se visite
+            «&nbsp;à l'année&nbsp;» ou «&nbsp;en saison&nbsp;», «&nbsp;de jour&nbsp;» ou «&nbsp;de nuit&nbsp;», s'il est
+            «&nbsp;en travaux&nbsp;», et si l'accès en fauteuil est prévu ({{hand:number}}&nbsp;lieux, {{p_hand:number:0}}&nbsp;%
+            de la base, le déclarent). Elle ne donne ni horaires ni jours de fermeture&nbsp;: vérifiez auprès du lieu.
+            Une fiche muette ne veut pas dire un lieu fermé&nbsp;: elle veut dire que personne ne l'a encore renseignée.
+            Chaque fiche de l'explorateur mène au formulaire du ministère pour la compléter.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="odv-bandeau" aria-labelledby="t-explorer">
+    <div class="fr-container">
+      <h2 id="t-explorer" class="fr-h4">Et près de chez vous&nbsp;?</h2>
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="l-q" source="l-n" fields="nom, commune, adresse" operator="starts" count
+          count-label="lieu|lieux"
+          label="Nom du lieu, commune ou adresse" placeholder="Ex. : médiathèque, Arles, 13200">
+        </dsfr-data-search>
+      </div>
+    </div>
+  </section>
+
+  <section class="fr-container fr-mb-8w" aria-label="Explorer les lieux">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="l-fac" value="count" format="nombre"
+        heading="Lieux" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="l-fac" value="ouv:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Déclarés ouverts au public" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="l-fac" value="muet:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Sans information d'accès" label="dans la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="l-fac" source="l-q"
+          fields="domaine, statut, conditions, acces, region, departement"
+          labels="domaine:Domaine | statut:Accès au public | conditions:Conditions d'ouverture | acces:Accessibilité | region:Région | departement:Département"
+          display="domaine:checkbox | statut:checkbox | conditions:checkbox | acces:checkbox | region:multiselect | departement:multiselect"
+          disjunctive="domaine, statut, conditions, region, departement"
+          searchable="region, departement"
+          sort="region:alpha:asc | departement:alpha:asc"
+          max-values="7" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <p class="fr-text--sm fr-hint-text">
+          Un point par lieu, coloré selon ce que dit sa fiche&nbsp;: ouvert au public, fermé, ou rien. Les pastilles
+          numérotées regroupent les lieux proches (bleues, puis rouges au-delà de cent)&nbsp;: leur couleur dit le
+          nombre, pas l'accès. Zoomez ou filtrez pour voir chaque lieu, puis cliquez-le pour sa fiche.
+        </p>
+        <div class="odv-viz" data-code="Carte des lieux culturels selon ce que dit leur fiche sur l'accès au public">
+          <!-- Regroupement (cluster) : sans lui, 36 000 cercles SVG par cadre (carte +
+               cinq encarts) ; les grappes se défont au zoom et chaque point prend alors la
+               couleur de son statut. Les grappes ont des couleurs FIXES de la
+               bibliothèque (bleu France < 10, bleu écume < 100, rouge erreur au-delà) :
+               la palette des points les évite (vert, violet, gris), sinon une grappe
+               bleue se lirait « ouvert » et une rouge « fermé ». -->
+          <dsfr-data-map id="carte-lieux"
+            name="Lieux culturels, selon ce que dit leur fiche sur l'accès au public"
+            height="620px" tiles="ign-plan" tiles-style="muted"
+            insets="drom"
+            fit-bounds fit-max-zoom="14">
+            <dsfr-data-map-layer id="couche-lieux" source="l-fac" type="circle"
+              lat-field="latitude" lon-field="longitude" radius="6" fill-opacity="0.85"
+              color-field="statut"
+              color-map="Déclaré ouvert au public:#18753c,Déclaré fermé au public:#a558a0,Non renseigné:#929292"
+              tooltip-field="nom"
+              cluster cluster-radius="60"
+              max-items="60000">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-legend for="couche-lieux" label="Ce que dit la fiche"></dsfr-data-map-legend>
+            <dsfr-data-map-popup mode="panel-right" title-field="nom" width="380px">
+              <template>
+                <p class="fr-badge fr-badge--sm fr-mb-3v">{{statut}}</p>
+                <p class="fr-text--sm fr-mb-1v">{{adresse|Adresse non renseignée}}</p>
+                <p class="fr-text--sm fr-mb-1v">{{commune}} — {{departement}}</p>
+                <p class="fr-text--sm fr-mb-1v">Domaine&nbsp;: {{domaine:join:, }}</p>
+                {{#if conditions}}<p class="fr-text--sm fr-mb-1v">Ouverture&nbsp;: {{conditions:join:, }}</p>{{/if}}
+                {{#if hand_lib}}<p class="fr-text--sm fr-mb-1v">{{hand_lib}}</p>{{/if}}
+                <ul class="fr-text--sm fr-mb-2v">
+                  {{#each liens}}<li><a href="{{.:url}}" target="_blank" rel="noopener external">{{.}}</a></li>{{/each}}
+                </ul>
+                <p class="fr-text--sm fr-mb-0"><a href="{{fiche:url}}" target="_blank" rel="noopener external">Compléter ou corriger cette fiche</a></p>
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
+
+          <dsfr-data-normalize id="l-tableau" source="l-fac"
+            rename="nom:Lieu | commune:Commune | departement:Département | statut:Accès au public"></dsfr-data-normalize>
+          <dsfr-data-a11y source="l-tableau" for="carte-lieux" table download
+            filename="lieux-culturels-selection.csv"
+            label="Données de la carte"
+            description="Un lieu par ligne pour la sélection courante : nom, commune, département et ce que dit la fiche sur l'accès au public."
+            label-field="Lieu"
+            value-field="Commune, Département, Accès au public">
+          </dsfr-data-a11y>
+        </div>
+
+        <h3 class="fr-h5 fr-mt-6w">Les fiches</h3>
+        <dsfr-data-display source="l-fac" per-row="2" pagination="12" uid-field="id"
+          empty="Aucun lieu ne correspond à cette recherche.">
+          <template>
+            <div class="fr-card fr-card--sm">
+              <div class="fr-card__body">
+                <div class="fr-card__content">
+                  <h4 class="fr-card__title">{{nom}}</h4>
+                  <p class="fr-card__desc fr-text--sm">{{adresse|Adresse non renseignée}}<br>{{commune}} — {{departement}}</p>
+                  <div class="fr-card__start">
+                    <p class="fr-text--xs fr-mb-1v">{{domaine:join: · }}</p>
+                  </div>
+                  <div class="fr-card__end">
+                    <p class="fr-text--sm fr-mb-1v"><strong>{{statut}}</strong></p>
+                    {{#if conditions}}<p class="fr-text--xs fr-mb-1v">Ouverture&nbsp;: {{conditions:join:, }}</p>{{/if}}
+                    {{#if hand_lib}}<p class="fr-text--xs fr-mb-1v">{{hand_lib}}</p>{{/if}}
+                    <ul class="fr-text--xs fr-mb-1v">
+                      {{#each liens}}<li><a href="{{.:url}}" target="_blank" rel="noopener external">{{.}}</a></li>{{/each}}
+                    </ul>
+                    <p class="fr-text--xs fr-mb-0"><a href="{{fiche:url}}" target="_blank" rel="noopener external">Compléter ou corriger cette fiche</a></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </dsfr-data-display>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Les horaires.</strong> La base ne les publie pas. «&nbsp;Ouvert&nbsp;» veut dire accessible au
+            public, pas ouvert aujourd'hui.</li>
+          <li><strong>Ce que valent les fiches muettes.</strong> {{muet:number}}&nbsp;lieux n'ont ni «&nbsp;ouvert&nbsp;» ni
+            «&nbsp;fermé&nbsp;»&nbsp;: la page les montre en gris, sans présumer de leur accès.</li>
+          <li><strong>{{fer:number}}&nbsp;lieux déclarés fermés au public</strong>, dans une base «&nbsp;des lieux ouverts&nbsp;».
+            Ils restent dans les chiffres, la carte (en violet) et les fiches&nbsp;: les retirer ferait passer leur fermeture
+            pour une absence.</li>
+          <li><strong>{{hors_region:number}}&nbsp;lieux hors des régions</strong> (Nouvelle-Calédonie, Polynésie,
+            Saint-Pierre-et-Miquelon, Saint-Barthélemy, Saint-Martin, Wallis-et-Futuna, et une trentaine à l'étranger)&nbsp;:
+            dans les chiffres, les fiches et la carte (en dézoomant), pas dans le graphique des régions ni dans les encarts
+            ultramarins, réservés aux cinq DROM.</li>
+          <li><strong>Une densité par habitant.</strong> La carte montre des adresses, pas des taux&nbsp;: une région
+            peuplée compte mécaniquement plus de lieux.</li>
+          <li><strong>La Base Basilic.</strong> Elle recense aussi des lieux culturels, avec d'autres règles&nbsp;; les deux
+            bases ne s'additionnent pas.</li>
+          <li><strong>Les descriptions, téléphones et courriels.</strong> Non chargés&nbsp;: la description pèse à elle seule
+            plus que tout ce que la page lit. La fiche du ministère les donne.</li>
+          <li><strong>Des liens réécrits.</strong> Un lien publié sans «&nbsp;https://&nbsp;» («&nbsp;www.…&nbsp;») le reçoit
+            pour devenir cliquable&nbsp;; les liens publiés en «&nbsp;http://&nbsp;» restent tels quels.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'un seul fichier du ministère de la Culture servi par l'API
+        Tabular de data.gouv.fr. Le titre provisoire du cadrage («&nbsp;36&nbsp;392 lieux ouverts au public, avec leurs
+        conditions d'ouverture&nbsp;») ne tient pas&nbsp;: deux fiches sur trois n'ont aucune condition d'ouverture.
+        L'explorateur est resté, mais l'histoire est devenue celle de la fiche muette.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>36&nbsp;000 lignes en une lecture.</strong> <code>fetch-mode="export"</code> lit l'export Parquet
+              et <code>select</code> n'en rapatrie que douze colonnes&nbsp;: la description, un tiers du fichier, reste sur
+              le serveur.</li>
+            <li><strong>Un chargement, toutes les vues.</strong> Synthèse, domaines, régions, carte, fiches&nbsp;: des
+              <code>dsfr-data-query</code> côté client sur la même source.</li>
+            <li><strong>Un domaine multiple compté juste.</strong> <code>explode</code> sur le <code>group-by</code> range un
+              lieu dans chacun de ses domaines.</li>
+            <li><strong>Des liens multiples.</strong> <code>{{#each}}</code> rend un lien par élément, filtré par
+              <code>:url</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Des tableaux servis en texte, parfois concaténés.</strong> <code>["Patrimoine"],["Patrimoine"]</code>
+              et <code>["Lecture, livre et presse"]</code>&nbsp;: ni <code>split</code> sur la virgule, ni facette sur le
+              tableau brut (elle compterait deux fois un élément répété). Il a fallu reconstruire chaque liste par
+              <code>contains()</code> dans un premier normalize, et la découper dans un second, <code>compute</code>
+              passant après <code>split</code>.</li>
+            <li><strong>Le plafond de 25&nbsp;000 lignes.</strong> L'export Parquet l'applique aussi&nbsp;: sans
+              <code>max-records</code>, près d'un tiers de la base manquerait aux chiffres de la page, signalé
+              seulement en console.</li>
+            <li><strong>Des liens sans schéma.</strong> 1&nbsp;800 liens «&nbsp;www.…&nbsp;» passeraient
+              <code>:url</code> comme URL relatives et pointeraient vers ce site. Préfixe par <code>replace()</code>
+              en chaîne, faute de test «&nbsp;commence par&nbsp;».</li>
+            <li><strong>36&nbsp;000 points, et des grappes aux couleurs imposées.</strong> Sans regroupement, la carte
+              dessinerait 36&nbsp;000 cercles SVG dans chacun de ses six cadres (la page des festivals mesurait déjà 2,4&nbsp;s
+              par clic avec 7&nbsp;250). Avec <code>cluster</code>, un clic de facette se répercute en moins d'une demi-seconde
+              — mais les grappes sont bleues puis rouges, en dur&nbsp;: la palette des points a dû les contourner.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 36&nbsp;392 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select max-records</code></td><td>Natif (Parquet, colonnes projetées)</td></tr>
+            <tr><td>Tableaux JSON en texte, concaténés</td><td>deux <code>normalize</code>&nbsp;: <code>compute</code> (<code>contains</code>, <code>concat</code>) puis <code>split</code></td><td>Contournement natif</td></tr>
+            <tr><td>Un lieu dans chacun de ses domaines</td><td><code>query group-by explode</code></td><td>Natif</td></tr>
+            <tr><td>Recherche nom, commune, adresse</td><td><code>dsfr-data-search</code> (mode client)</td><td>Natif</td></tr>
+            <tr><td>Filtres, chiffres, carte et fiches liés</td><td><code>dsfr-data-facets</code> + KPI + carte + <code>dsfr-data-display</code></td><td>Natif</td></tr>
+            <tr><td>36&nbsp;000 points sur une carte</td><td><code>dsfr-data-map-layer cluster lat-field lon-field</code></td><td>Natif</td></tr>
+            <tr><td>Grappes qui ne se confondent pas avec les couleurs de la légende</td><td>palette des points choisie hors du bleu et du rouge des grappes</td><td>Contournement (couleurs de grappe fixes)</td></tr>
+            <tr><td>Plusieurs liens par lieu</td><td><code>{{#each liens}}</code> + <code>:url</code></td><td>Natif</td></tr>
+            <tr><td>Préfixer un lien sans schéma</td><td><code>replace()</code> en chaîne</td><td>Contournement (pas de «&nbsp;commence par&nbsp;»)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>L'outil suit, la donnée résiste.</strong> Le jeu entier se charge en une lecture et un explorateur
+          complet — recherche, facettes, carte, fiches — tient en balises. Ce qui a coûté, c'est la forme des colonnes&nbsp;:
+          des tableaux sérialisés, concaténés d'une source à l'autre, et des liens sans schéma. Et le cadrage a dû
+          céder&nbsp;: une base «&nbsp;des lieux ouverts&nbsp;» dont deux fiches sur trois ne disent pas si le lieu l'est.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la carte des lieux est une dsfr-data-map (Leaflet). -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

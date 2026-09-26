@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lieux culturels, patrimoine et bibliothèques — open-data-viz</title>
+  <meta name="description" content="Six lieux culturels recensés sur dix sont du patrimoine, pour l'essentiel des monuments historiques ; et plus la commune est rurale, plus le reste se résume à une bibliothèque. Création avec dsfr-data à partir de la base Basilic du ministère de la Culture, servie par l'API Tabular de data.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — fiche 11 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte Basilic, la « Base des lieux et équipements
+       culturels » du DEPS (ministère de la Culture), 86 366 lignes, servie par Tabular.
+
+       L'UNITÉ. Une ligne = un lieu ou un équipement recensé, TOUTES sources confondues :
+       un immeuble protégé au titre des monuments historiques, une bibliothèque, une
+       maison de la presse, un cinéma. La base additionne des objets de nature très
+       différente ; la page ne les compare qu'en PARTS, et rapporte aux habitants
+       seulement les lieux hors patrimoine.
+
+       LE CHARGEMENT. Le cadrage prévoyait des agrégats serveur (86 366 lignes = 432 pages
+       de 200). La ressource a un export Parquet (10,6 Mo, toutes colonnes) :
+       `fetch-mode="export"` + `select` de treize colonnes n'en lit qu'une partie, et
+       toutes les vues se calculent côté client. `max-records` relevé à 100 000 : le
+       défaut (25 000) tronquerait en silence.
+
+       LES MODALITÉS (sondées le 2026-09-27 sur l'export complet). `Domaine` a onze
+       valeurs ; « Spectacle vivant » n'en est pas une (c'est « Arts du spectacle »).
+       `Demographie_AP` vaut « Actif » sur les 86 366 lignes : pas de lieu fermé à écarter.
+       `GCD` (grille communale de densité) est vide pour 84 lieux, tous hors des régions
+       de la grille (collectivités d'outre-mer, étranger).
+
+       LA POPULATION. Jeu « Dépenses culturelles des régions 2023 » du même ministère
+       (17 lignes). Ses libellés diffèrent de Basilic (« Grand-Est » / « Grand Est »,
+       « Pays-de-la-Loire » / « Pays de la Loire ») : jointure sur le CODE région
+       (`N_Région` = `code_insee`), pas sur le nom. Mayotte n'y est pas.
+       ========================================================================== -->
+
+  <dsfr-data-source id="bas" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="dced78ee-0823-4b61-86e6-57717308d4e4"
+    fetch-mode="export" max-records="100000"
+    select="Nom, libelle_geographique, Département, N_Région, Région, Domaine, Type équipement ou lieu, Label et appellation, GCD, identifiant_QPV_24, Multiplexe, Nombre_ecrans, Nombre_fauteuils_de_cinema">
+  </dsfr-data-source>
+
+  <dsfr-data-normalize id="bas-n" source="bas" trim
+    rename="Type équipement ou lieu:type | Label et appellation:label | N_Région:nreg | Région:region | Département:departement | libelle_geographique:commune | identifiant_QPV_24:qpv_id | Nombre_ecrans:ecrans | Nombre_fauteuils_de_cinema:fauteuils | Domaine:domaine"
+    compute="un = 1; k = 1;
+             pat = when domaine = 'Patrimoine' then 1 else 0;
+             hors = 1 - pat;
+             bib = when domaine = 'Lecture publique' then 1 else 0;
+             liv = when domaine = 'Livre et presse' then 1 else 0;
+             aut = hors - bib - liv;
+             mh = when label = 'Monument historique' then 1 else 0;
+             mon = when type = 'Monument' then 1 else 0;
+             cine = when domaine = 'Cinéma' then 1 else 0;
+             mx = when cine = 1 and Multiplexe = true then 1 else 0;
+             ecr = when cine = 1 then coalesce(ecrans, 0) else 0;
+             fau = when cine = 1 then coalesce(fauteuils, 0) else 0;
+             ecr_mx = when mx = 1 then ecr else 0;
+             fau_mx = when mx = 1 then fau else 0;
+             qpv = when is_empty(qpv_id) then 0 else 1;
+             qpv_hors = qpv * hors;
+             sans_gcd = when is_empty(GCD) then 1 else 0;
+             gcd_ord = when GCD = '1 - Grands centres urbains' then 1
+                       when GCD = '2 - Centres urbains intermédiaires' then 2
+                       when GCD = '3 - Petites villes' then 3
+                       when GCD = '4 - Ceintures urbaines' then 4
+                       when GCD = '5 - Bourgs ruraux' then 5
+                       when GCD = '6 - Rural à habitat dispersé' then 6
+                       when GCD = '7 - Rural à habitat très dispersé' then 7
+                       else null;
+             gcd = when gcd_ord = 1 then 'Grands centres urbains'
+                   when gcd_ord = 2 then 'Centres urbains intermédiaires'
+                   when gcd_ord = 3 then 'Petites villes'
+                   when gcd_ord = 4 then 'Ceintures urbaines'
+                   when gcd_ord = 5 then 'Bourgs ruraux'
+                   when gcd_ord = 6 then 'Rural à habitat dispersé'
+                   when gcd_ord = 7 then 'Rural à habitat très dispersé'
+                   else 'Hors grille (outre-mer hors DROM, étranger)';
+             famille = when pat = 1 then 'Patrimoine' when bib = 1 then 'Bibliothèque'
+                       when liv = 1 then 'Librairie, presse' else 'Autre équipement'">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="bas-n" group-by="k"
+    aggregate="un:sum:n, pat:sum:pat, hors:sum:hors, bib:sum:bib, liv:sum:liv, aut:sum:aut, mh:sum:mh, mon:sum:mon,
+               cine:sum:cine, mx:sum:mx, ecr:sum:ecr, fau:sum:fau, ecr_mx:sum:ecr_mx, fau_mx:sum:fau_mx,
+               qpv:sum:qpv, qpv_hors:sum:qpv_hors, sans_gcd:sum:sans_gcd">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="p_pat = pat / n * 100;
+             p_mh = mh / n * 100;
+             p_mon = mon / n * 100;
+             p_bib_hors = bib / hors * 100;
+             p_mx = mx / cine * 100;
+             p_ecr_mx = ecr_mx / ecr * 100;
+             p_fau_mx = fau_mx / fau * 100;
+             p_qpv = qpv / n * 100;
+             p_qpv_hors = qpv_hors / hors * 100">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Lieux culturels</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Six lieux culturels sur dix sont du patrimoine&nbsp;; dans les campagnes, presque tout le reste est une bibliothèque</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          La base des lieux et équipements culturels du ministère recense {{n:number}}&nbsp;lieux.
+          <strong>{{pat:number}} relèvent du patrimoine</strong>, soit {{p_pat:number:0}}&nbsp;%&nbsp;— et parmi eux
+          {{mh:number}}&nbsp;monuments historiques, plus d'un lieu sur deux de toute la base. Les {{hors:number}} autres
+          sont d'abord des bibliothèques ({{bib:number}}) et des librairies ou maisons de la presse ({{liv:number}})&nbsp;;
+          cinémas, scènes, conservatoires, archives et centres d'art ne sont que {{aut:number}}. Et plus la commune est
+          rurale, plus la bibliothèque est seule&nbsp;: hors patrimoine, elle représente l'essentiel des lieux des
+          campagnes peu denses.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture (DEPS) — <em>Base des lieux et équipements culturels (Basilic)</em>, agrégation des bases
+      des directions du ministère, du CNC, du CNL et d'Artcena&nbsp;; fichier mis à jour le 18&nbsp;février 2026. Une ligne
+      par lieu ou équipement. Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/base-des-lieux-et-equipements-culturels-basilic" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="3"
+        heading="Lieux recensés" label="toutes natures confondues"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_pat:max" format="decimal" decimals="0" unit="%" span="3"
+        heading="Patrimoine" label="part des lieux du domaine « Patrimoine »"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="bib:max" format="nombre" span="3"
+        heading="Bibliothèques" label="premier type de lieu hors patrimoine"></dsfr-data-kpi>
+      <dsfr-data-kpi source="nat-t" value="taux:max" format="decimal" decimals="0" span="3"
+        heading="Hors patrimoine" label="lieux pour 100 000 habitants (régions et DROM hors Mayotte)"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les types de lieux ======================= -->
+  <dsfr-data-query id="typ" source="bas-n" group-by="type" aggregate="un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="typ-g" source="typ" rename="type:Type de lieu | n:Lieux"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-type">
+    <h2 id="t-type" class="fr-h3">Les monuments font à eux seuls plus de la moitié de la base</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{mon:number}}&nbsp;lieux sont des monuments ({{p_mon:number:0}}&nbsp;% de la base)&nbsp;: {{mh:number}} sont
+          protégés au titre des monuments historiques, les autres portent le label «&nbsp;Architecture contemporaine
+          remarquable&nbsp;», une inscription au patrimoine mondial ou l'appellation «&nbsp;monument national&nbsp;». Une chapelle inscrite, un portail classé, une façade
+          protégée comptent chacun pour un lieu, comme une médiathèque ou un multiplexe. La base additionne des objets de
+          nature très différente&nbsp;: c'est pourquoi la suite de la page raisonne en parts, et met le patrimoine à part.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Lieux culturels recensés par type">
+      <dsfr-data-chart id="g-type" source="typ-g" type="bar" horizontal
+        label-field="Type de lieu" value-field="Lieux" name="Lieux"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="lieux"
+        databox databox-title="Lieux et équipements culturels recensés, par type"
+        databox-source="Ministère de la Culture (DEPS) — Basilic (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-type" source="typ-g" label-field="Type de lieu" value-field="Lieux"
+        description="Vingt barres horizontales triées de la plus longue à la plus courte : le nombre de lieux recensés par type. La barre des monuments, mise en évidence, dépasse 48 000 et écrase toutes les autres ; viennent ensuite les bibliothèques, autour de 15 700, les papeteries et maisons de la presse, les librairies, puis les cinémas, un peu plus de 2 000. Les quinze autres types, des musées aux opéras, comptent moins de 2 000 lieux chacun.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LE CONTRASTE — la grille de densité ======================= -->
+  <dsfr-data-query id="gcd" source="bas-n" where="gcd_ord:isnotnull" group-by="gcd_ord, gcd"
+    aggregate="un:sum:n, pat:sum:pat, hors:sum:hors, bib:sum:bib, liv:sum:liv, aut:sum:aut" order-by="gcd_ord:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="gcd-t" source="gcd"
+    compute="k = 1;
+             p_pat = round(pat / n * 100, 1);
+             p_bib = round(bib / n * 100, 1);
+             p_liv = round(liv / n * 100, 1);
+             p_aut = round(100 - p_pat - p_bib - p_liv, 1);
+             p_bib_hors = round(bib / hors * 100, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="gcd-1" source="gcd-t" where="gcd_ord:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="gcd-7" source="gcd-t" where="gcd_ord:eq:7"></dsfr-data-query>
+  <dsfr-data-query id="gcd-4" source="gcd-t" where="gcd_ord:eq:4"></dsfr-data-query>
+  <dsfr-data-join id="gcd-17" left="gcd-1" right="gcd-7" on="k" type="inner" prefix-right="r_"></dsfr-data-join>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-gcd">
+    <h2 id="t-gcd" class="fr-h3">Plus la commune est rurale, plus la culture recensée est du patrimoine — et le reste, une bibliothèque</h2>
+    <dsfr-data-repeat source="gcd-17">
+      <template>
+        <p class="odv-lecture">
+          Dans les grands centres urbains, {{p_pat:number:0}}&nbsp;% des lieux recensés relèvent du patrimoine&nbsp;; dans
+          les communes rurales à habitat très dispersé, {{r_p_pat:number:0}}&nbsp;%. Ce qui reste change de nature en
+          chemin. En ville, librairies et maisons de la presse ({{p_liv:number:0}}&nbsp;% des lieux) et les autres
+          équipements — cinémas, scènes, conservatoires, archives — ({{p_aut:number:0}}&nbsp;%) pèsent plus que les
+          bibliothèques. À la campagne, ils ont presque disparu ({{r_p_liv:number:1}} et {{r_p_aut:number:1}}&nbsp;%)&nbsp;:
+          hors patrimoine, <strong>{{r_p_bib_hors:number:0}}&nbsp;% des lieux culturels du rural très dispersé sont des
+          bibliothèques</strong>, contre {{p_bib_hors:number:0}}&nbsp;% dans les grands centres urbains.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-lg-7">
+        <div class="odv-chart-slot odv-viz" data-code="Répartition des lieux culturels selon la grille de densité">
+          <dsfr-data-chart id="g-gcd" source="gcd-t" type="bar" horizontal stacked
+            label-field="gcd"
+            value-field="p_pat:Patrimoine"
+            value-fields="p_bib:Bibliothèques, p_liv:Librairies et presse, p_aut:Autres équipements"
+            color-map="Patrimoine:#929292,Bibliothèques:#000091,Librairies et presse:#6a6af4,Autres équipements:#c3992a"
+            unit-tooltip="%"
+            databox databox-title="Part de chaque famille de lieux, selon la densité de la commune (%)"
+            databox-source="Ministère de la Culture (DEPS) — Basilic ; grille communale de densité de l'Insee (data.gouv.fr)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-gcd" source="gcd-t" label-field="gcd" value-field="p_pat, p_bib, p_liv, p_aut, n"
+            description="Sept barres horizontales empilées à 100 %, de la commune la plus dense à la moins dense : la part du patrimoine (gris), des bibliothèques (bleu), des librairies et maisons de la presse (bleu clair) et des autres équipements (ocre). Le gris occupe un peu plus de la moitié de la barre dans les grands centres urbains et près de quatre cinquièmes dans le rural à habitat très dispersé ; seules les ceintures urbaines descendent sous la moitié. Le bleu clair et l'ocre, un bon tiers de la barre en ville, se réduisent à un filet dans le rural ; le bleu des bibliothèques, lui, grossit jusqu'aux bourgs ruraux et au rural dispersé.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-lg-5">
+        <div class="odv-chart-slot odv-viz" data-code="Part des bibliothèques dans les lieux hors patrimoine, selon la grille de densité">
+          <dsfr-data-chart id="g-bib" source="gcd-t" type="bar" horizontal
+            label-field="gcd" value-field="p_bib_hors" name="Bibliothèques, en % des lieux hors patrimoine"
+            selected-palette="neutral" highlight-index="[6]" unit-tooltip="%"
+            databox databox-title="Hors patrimoine, part des bibliothèques dans les lieux culturels (%)"
+            databox-source="Ministère de la Culture (DEPS) — Basilic (data.gouv.fr)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-bib" source="gcd-t" label-field="gcd" value-field="p_bib_hors, hors, bib"
+            description="Sept barres horizontales, de la commune la plus dense à la moins dense : la part des bibliothèques parmi les lieux culturels hors patrimoine. Elle monte presque sans interruption, d'environ un sixième dans les grands centres urbains à plus de neuf sur dix dans le rural à habitat très dispersé, barre mise en évidence.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+    <dsfr-data-repeat source="gcd-4">
+      <template>
+        <p class="fr-text--xs fr-hint-text fr-mt-2w">
+          Grille communale de densité de l'Insee, sept niveaux, portée par chaque ligne de la base. Une exception au
+          gradient&nbsp;: les ceintures urbaines, où le patrimoine descend à {{p_pat:number:0}}&nbsp;% et les bibliothèques
+          montent à {{p_bib:number:0}}&nbsp;% des lieux. Les parts se lisent à l'intérieur de chaque niveau&nbsp;: elles ne
+          disent pas combien de lieux chaque habitant a près de chez lui (la base ne publie pas la population par niveau
+          de densité).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= OÙ — rapporté aux habitants ======================= -->
+  <dsfr-data-source id="pop" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="4dfccc0d-962c-4800-8599-b47730823a33"
+    select="code_insee, libelle_region, population_annee">
+  </dsfr-data-source>
+  <dsfr-data-query id="reg-n" source="bas-n" where="hors:eq:1, nreg:isnotnull" group-by="nreg, region" aggregate="un:sum:n, bib:sum:bib"></dsfr-data-query>
+  <dsfr-data-join id="reg-j" left="reg-n" right="pop" on="nreg=code_insee" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="reg-t" source="reg-j"
+    compute="taux = round(n / population_annee * 100000, 1);
+             taux_bib = round(bib / population_annee * 100000, 1);
+             drom = when nreg = '01' or nreg = '02' or nreg = '03' or nreg = '04' then 1 else 0;
+             k = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-tri" source="reg-t" order-by="taux:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-g" source="reg-tri" rename="region:Région | taux:Lieux hors patrimoine pour 100 000 habitants | n:Lieux hors patrimoine"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-top" source="reg-tri" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-bas-metro" source="reg-t" where="drom:eq:0" order-by="taux:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-idf" source="reg-t" where="nreg:eq:11"></dsfr-data-query>
+  <dsfr-data-query id="reg-drom" source="reg-t" where="drom:eq:1" group-by="k" aggregate="n:sum:n, population_annee:sum:pop"></dsfr-data-query>
+  <dsfr-data-normalize id="reg-drom-t" source="reg-drom" compute="taux = n / pop * 100000"></dsfr-data-normalize>
+  <dsfr-data-query id="nat" source="reg-t" group-by="k" aggregate="n:sum:n, population_annee:sum:pop"></dsfr-data-query>
+  <dsfr-data-normalize id="nat-t" source="nat" compute="taux = n / pop * 100000"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">Rapportés aux habitants, les lieux hors patrimoine sont plus de deux fois plus rares outre-mer qu'en Bourgogne-Franche-Comté</h2>
+    <p class="odv-lecture">
+      <dsfr-data-repeat source="nat-t"><template>Hors patrimoine, la base compte {{taux:number:0}}&nbsp;lieux culturels pour 100&nbsp;000&nbsp;habitants dans les régions représentées.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-top"><template>{{region}} en a le plus, {{taux:number:0}}.</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-idf"><template>L'Île-de-France, qui concentre le plus de lieux en nombre ({{n:number}}), n'en a que {{taux:number:0}} rapportés à ses habitants&nbsp;;</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-bas-metro"><template>une seule région de l'Hexagone fait moins&nbsp;: {{region}} ({{taux:number:0}}).</template></dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-drom-t"><template>Les quatre départements et régions d'outre-mer présents dans le fichier de population descendent à {{taux:number:0}} ensemble.</template></dsfr-data-repeat>
+    </p>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Lieux culturels hors patrimoine pour 100 000 habitants, par région">
+      <dsfr-data-chart id="g-reg" source="reg-g" type="bar" horizontal
+        label-field="Région" value-field="Lieux hors patrimoine pour 100 000 habitants" name="Lieux hors patrimoine pour 100 000 habitants"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="pour 100 000 hab."
+        databox databox-title="Lieux culturels hors patrimoine pour 100 000 habitants, par région (population 2023)"
+        databox-source="Ministère de la Culture — Basilic (DEPS) ; Dépenses culturelles des régions 2023 (population) — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-g" label-field="Région" value-field="Lieux hors patrimoine pour 100 000 habitants, Lieux hors patrimoine"
+        description="Dix-sept barres horizontales triées de la plus longue à la plus courte : pour chaque région, le nombre de lieux culturels hors patrimoine pour 100 000 habitants. La Bourgogne-Franche-Comté, mise en évidence, est en tête, un peu au-dessus de 60 ; les régions de l'Hexagone et la Corse s'étagent ensuite jusqu'à un peu moins de 40, l'Île-de-France et les Hauts-de-France fermant la marche ; les quatre départements et régions d'outre-mer sont en bas, entre 20 et 30.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Région de la commune du lieu. Population 2023 du fichier régional du ministère&nbsp;; Mayotte, les collectivités
+      d'outre-mer et les lieux à l'étranger n'y sont pas (voir plus bas). Le patrimoine est exclu du taux&nbsp;: un
+      immeuble protégé n'est pas un équipement dont les habitants disposent, et sa densité dit l'histoire du bâti, pas
+      l'offre culturelle.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — cinémas et quartiers prioritaires ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-nuance">
+    <h2 id="t-nuance" class="fr-h3">Compter des lieux ne dit pas leur taille&nbsp;: un cinéma sur huit est un multiplexe, mais il porte près d'un écran sur deux</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          La base recense {{cine:number}}&nbsp;cinémas, {{ecr:number}}&nbsp;écrans et {{fau:number}}&nbsp;fauteuils. Les
+          {{mx:number}} multiplexes ne sont que {{p_mx:number:0}}&nbsp;% des cinémas, mais portent {{p_ecr_mx:number:0}}&nbsp;%
+          des écrans et {{p_fau_mx:number:0}}&nbsp;% des fauteuils. Une salle de village et un multiplexe de périphérie
+          pèsent pourtant chacun «&nbsp;un lieu&nbsp;» dans les décomptes de cette page&nbsp;: c'est la limite de toute
+          lecture par nombre de lieux, et la raison pour laquelle aucun classement de territoire n'est fait ici sur le
+          seul compte.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="syn-t" value="p_mx:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Multiplexes" label="part des cinémas"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="p_ecr_mx:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Écrans des multiplexes" label="part de tous les écrans recensés"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="qpv:max" format="nombre" span="4"
+        heading="En quartier prioritaire" label="lieux situés dans un QPV 2024"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <h3 class="fr-h5">Les quartiers prioritaires, une mesure sans point de comparaison</h3>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{qpv:number}}&nbsp;lieux ({{p_qpv:number:1}}&nbsp;%) sont situés dans un quartier prioritaire de la politique de
+          la ville (géographie 2024)&nbsp;; hors patrimoine, {{qpv_hors:number}}, soit {{p_qpv_hors:number:1}}&nbsp;%. La page
+          ne dit pas si c'est peu ou beaucoup&nbsp;: aucun des deux fichiers lus ne donne la population des quartiers
+          prioritaires, et la comparer à un chiffre recopié d'ailleurs ferait tenir la conclusion à une source que la page
+          ne lit pas.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: quels lieux, dans quelle commune&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Les filtres agissent sur les chiffres et sur la liste. La recherche porte sur le nom du lieu et la commune. Pour
+      trouver un lieu ouvert au public avec ses horaires, la base qui prend la suite de Basilic est la
+      <em>Base des lieux culturels ouverts</em> du ministère.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="fac" value="count" format="nombre"
+        heading="Lieux" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="pat:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Patrimoine" label="part de la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="fac" value="bib:sum / hors:sum" format="pourcentage" decimals="0"
+        heading="Bibliothèques" label="part des lieux hors patrimoine de la sélection"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="fac" source="bas-n"
+          fields="famille, type, gcd, region, departement, label"
+          labels="famille:Famille | type:Type de lieu | gcd:Densité de la commune | region:Région | departement:Département | label:Label ou appellation"
+          display="famille:checkbox | type:multiselect | gcd:checkbox | region:multiselect | departement:multiselect | label:multiselect"
+          disjunctive="famille, type, gcd, region, departement, label"
+          searchable="type, region, departement, label"
+          sort="region:alpha:asc | departement:alpha:asc"
+          max-values="8" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <dsfr-data-list source="fac"
+          columns="Nom:Lieu, commune:Commune, departement:Département, type:Type, label:Label ou appellation"
+          search sort="commune:asc" pagination="20" count-label="lieu|lieux" export="csv"
+          caption="Lieux et équipements culturels (sélection courante)">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Une offre culturelle.</strong> Basilic recense des lieux, pas ce qui s'y passe&nbsp;: ni horaires, ni
+            ouverture au public, ni fréquentation, ni programmation. Un monument historique privé fermé à la visite compte
+            comme un musée national.</li>
+          <li><strong>Une densité de patrimoine par habitant.</strong> Rapporter des immeubles protégés à une population
+            classerait les territoires par l'âge de leur bâti&nbsp;; le patrimoine est donc sorti du taux régional.</li>
+          <li><strong>Des lieux rapportés aux habitants de chaque niveau de densité.</strong> Ni Basilic ni le fichier de
+            population régional ne donnent la population par niveau de la grille&nbsp;: la section sur la densité compare des
+            parts, pas des densités.</li>
+          <li><strong>Une carte départementale.</strong> Le fichier départemental de population du ministère n'a pas de
+            ligne pour Paris et compte le Rhône avec la Métropole de Lyon&nbsp;: un taux départemental aurait été faux là où
+            les lieux sont les plus nombreux.</li>
+          <li><strong>Une carte de points.</strong> {{n:number}}&nbsp;points n'apprennent rien à l'échelle nationale, et la
+            recherche d'un lieu près de chez soi relève de la <em>Base des lieux culturels ouverts</em>, qui en donne les
+            conditions d'accès. Les deux bases ne s'additionnent pas.</li>
+          <li><strong>{{sans_gcd:number}}&nbsp;lieux hors de la grille de densité</strong> (collectivités d'outre-mer, lieux
+            à l'étranger comme la Villa Médicis) et, dans le taux régional, les lieux de Mayotte et des collectivités
+            d'outre-mer, absents du fichier de population&nbsp;: comptés dans les totaux, hors des répartitions
+            correspondantes.</li>
+          <li><strong>Des doublons certains.</strong> Le producteur prévient que la base peut contenir des doublons et des
+            erreurs d'adresse&nbsp;; une même protection peut aussi couvrir plusieurs parties d'un édifice, chacune sur sa
+            ligne. Aucun dédoublonnage n'est tenté ici.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir de Basilic, servie par l'API Tabular. Les chiffres du cadrage
+        tiennent (86&nbsp;366 lieux, 53&nbsp;503 de patrimoine, 15&nbsp;702 bibliothèques, 2&nbsp;081 cinémas le 27 septembre
+        2026)&nbsp;; l'histoire s'est précisée&nbsp;: le patrimoine, c'est d'abord la liste des monuments historiques, et le
+        vrai contraste est ce qui reste une fois ce patrimoine mis à part.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>86&nbsp;366 lignes sans agrégat serveur.</strong> Le cadrage prévoyait 432 pages ou des agrégats
+              délégués&nbsp;; la ressource a un export Parquet, que <code>fetch-mode="export"</code> lit en ne demandant que
+              les treize colonnes du <code>select</code>.</li>
+            <li><strong>Des familles de lieux recodées.</strong> Quatre familles, sept niveaux de densité ordonnés, un
+              drapeau multiplexe&nbsp;: tout en <code>compute</code>.</li>
+            <li><strong>Une répartition à 100&nbsp;%.</strong> Parts calculées par <code>compute</code> après un
+              <code>group-by</code>, puis <code>stacked</code> + <code>color-map</code>.</li>
+            <li><strong>Un taux par habitant.</strong> Jointure sur le code région avec le fichier de population du même
+              ministère.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Deux fichiers du même ministère, deux orthographes de régions.</strong> «&nbsp;Grand-Est&nbsp;» et
+              «&nbsp;Grand Est&nbsp;», «&nbsp;Pays-de-la-Loire&nbsp;» et «&nbsp;Pays de la Loire&nbsp;»&nbsp;: une jointure sur
+              le nom aurait perdu deux régions sans erreur. Joindre sur le code.</li>
+            <li><strong>Une phrase qui compare deux lignes.</strong> Grands centres urbains et rural très dispersé&nbsp;:
+              deux requêtes filtrées, jointes sur une clé constante avec <code>prefix-right</code>.</li>
+            <li><strong>Borner une barre horizontale à 100&nbsp;%.</strong> <code>x-max</code> n'agit que sur les
+              courbes et nuages de points&nbsp;; <code>y-max="100"</code> sur une barre horizontale ajoute une catégorie
+              fantôme «&nbsp;100&nbsp;» à l'axe des libellés. Des parts arrondies qui somment à 100,1 poussaient l'axe à
+              120&nbsp;: la dernière part est calculée en reste (<code>100 - a - b - c</code>) et l'axe retombe à 100.</li>
+            <li><strong>Pas de population par niveau de densité.</strong> Le contraste ville-campagne ne peut se dire
+              qu'en parts&nbsp;; c'est une limite des jeux publiés, pas de la bibliothèque.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 86&nbsp;366 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select max-records</code></td><td>Natif (Parquet)</td></tr>
+            <tr><td>Familles, densité ordonnée, multiplexes</td><td><code>normalize compute</code> (<code>when</code>, <code>coalesce</code>, <code>is_empty</code>)</td><td>Natif</td></tr>
+            <tr><td>Répartition à 100&nbsp;% par densité</td><td><code>query group-by</code> + <code>compute</code> + <code>chart stacked color-map</code></td><td>Natif</td></tr>
+            <tr><td>Deux lignes dans une phrase</td><td><code>dsfr-data-join on="k" prefix-right</code></td><td>Natif</td></tr>
+            <tr><td>Lieux pour 100&nbsp;000 habitants</td><td><code>dsfr-data-join on="nreg=code_insee"</code> avec la population régionale</td><td>Natif</td></tr>
+            <tr><td>Chercher un lieu</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-list search</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Le travail est éditorial, pas technique.</strong> La bibliothèque charge et découpe la base sans
+          contournement&nbsp;; ce qui demande du soin, c'est de ne pas additionner une façade protégée et un multiplexe,
+          et de ne rapporter aux habitants que ce qui est un équipement.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte Leaflet sur la page. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

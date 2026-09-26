@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Les réseaux de chaleur et le gaz — open-data-viz</title>
+  <meta name="description" content="Un tiers de la chaleur des réseaux vient encore du gaz, et le seul réseau de Paris en brûle plus d'un quart ; le charbon, lui, a presque disparu depuis 2018. Création avec dsfr-data sur les données locales de chaleur du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-27) — deuxième vague (§ 5) de
+       docs/portail-developpement-durable/proposition.md, jeu 18 « Données locales de
+       consommation de chaleur et de froid — commune (à partir de 2018) ».
+
+       UN FICHIER PAR ANNÉE (sept, 2018 → 2024), chacun un « datafile » DiDo avec son
+       propre identifiant : l'année suivante sera un NOUVEAU fichier, à ajouter ici à la
+       main. Chaque fichier est filtré au serveur sur la chaleur (FILIERE=eq:C ; le froid,
+       une trentaine de réseaux, est écarté) et réduit par `columns=` au même jeu de
+       colonnes, pour que `dsfr-data-concat` accepte de les empiler (schéma identique
+       exigé). Environ 0,5 Mo par fichier, 3,8 Mo pour les sept.
+
+       DIDO : 3 connexions simultanées au maximum par adresse IP (au-delà : 429 sans
+       en-tête CORS, rapporté « Failed to fetch »). Une seule source part au chargement
+       (2024) ; 2018-2020 partent quand la section #t-paris approche, 2021-2023 quand
+       le graphique d'évolution lui-même approche (#g-evo-slot). Les cibles sont
+       choisies sur la page AVANT données : à ce moment tout est tassé, et une cible
+       placée sur le graphique des filières (817 px) partait au chargement avec 2024
+       — quatre requêtes, une 429 (mesuré le 2026-09-27). #t-paris est à 1 317 px
+       avant données. Au défilement de la recette (0,8 écran / 250 ms), les deux
+       vagues sont espacées de ~500 ms pour ~350 ms de requête : 3 en vol au plus,
+       mesuré deux fois. Un saut direct à l'évolution ne lance que 2021-2023 ;
+       l'évolution attend alors qu'on remonte à #t-paris (voir l'analyse).
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-27) :
+       - « 33,5 TWh, gaz 31,6 % » du cadrage compte le froid avec la chaleur. Chaleur
+         seule, 2024 : 961 réseaux, 33,1 TWh, gaz 10,6 TWh = 32,0 %. Le titre tient.
+       - L'histoire plus forte : le premier réseau, Paris et communes limitrophes, fait
+         18,2 % de toute la chaleur et brûle 27,0 % de tout le gaz des réseaux. Sans lui,
+         la part du gaz tombe à 28,6 %. Les 162 réseaux majoritairement au gaz ne font
+         que 10,3 % de la chaleur.
+       - Évolution : la part du gaz passe de 36,3 % (2018) à 29,7 % (2022) puis remonte à
+         32,0 % (2024) ; charbon + fioul + GPL : 1,51 → 0,34 TWh.
+       - Les trois familles se partagent la chaleur par tiers en 2024 : fossiles 33,1 %,
+         chaleur récupérée (incinération des déchets surtout) 34,6 %, renouvelables 32,3 %.
+       - Pièges du jeu : PRODUCTION_TOTALE est déclarée « MW » dans les métadonnées
+         2018-2020 (ce sont des MWh) ; PUISSANCE 2022 recopie la production sur plusieurs
+         réseaux (Meudon : 80 421 « MW ») — la puissance n'est pas utilisée ici. 2018 met
+         `null` là où 2024 met 0 : `coalesce(…, 0)` avant toute somme de filières.
+         CONSOTOT et PDL sont sous « secret » pour 140 réseaux en 2024 : la page ne
+         s'appuie que sur la production, jamais sous secret.
+       ========================================================================== -->
+
+  <!-- ---------- Les sept millésimes (même URL, même filtre, mêmes colonnes) ---------- -->
+  <dsfr-data-source id="c24"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/b0c273bb-1578-42f3-b22b-074d78de3ca3/json?FILIERE=eq:C&amp;columns=ID,OPERATEUR,COMMUNE_CODE,COMMUNE_LIBELLE,ANNEE,PRODUCTION_TOTALE,PRODUCTION_GAZ_NATUREL,PRODUCTION_CHARBON,PRODUCTION_FIOUL_DOMESTIQUE,PRODUCTION_FIOUL_LOURD,PRODUCTION_GPL,PRODUCTION_BIOMASSE_SOLIDE,PRODUCTION_DECHETS_INTERNES,PRODUCTION_UIOM,PRODUCTION_BIOGAZ,PRODUCTION_GEOTHERMIE,PRODUCTION_PAC,PRODUCTION_SOLAIRE_THERMIQUE,PRODUCTION_AUTRES_ENR,PRODUCTION_CHALEUR_INDUSTRIEL,PRODUCTION_AUTRE_CHALEUR_RECUPEREE,PRODUCTION_CHAUDIERES_ELECTRIQUES,PRODUCTION_AUTRES,CONTENU_EN_CO2,CONSOTOT">
+  </dsfr-data-source>
+  <dsfr-data-source id="c18" lazy lazy-target="#t-paris"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/3c35f565-ad18-4493-bc2d-088345193ca1/json?FILIERE=eq:C&amp;columns=ID,OPERATEUR,COMMUNE_CODE,COMMUNE_LIBELLE,ANNEE,PRODUCTION_TOTALE,PRODUCTION_GAZ_NATUREL,PRODUCTION_CHARBON,PRODUCTION_FIOUL_DOMESTIQUE,PRODUCTION_FIOUL_LOURD,PRODUCTION_GPL,PRODUCTION_BIOMASSE_SOLIDE,PRODUCTION_DECHETS_INTERNES,PRODUCTION_UIOM,PRODUCTION_BIOGAZ,PRODUCTION_GEOTHERMIE,PRODUCTION_PAC,PRODUCTION_SOLAIRE_THERMIQUE,PRODUCTION_AUTRES_ENR,PRODUCTION_CHALEUR_INDUSTRIEL,PRODUCTION_AUTRE_CHALEUR_RECUPEREE,PRODUCTION_CHAUDIERES_ELECTRIQUES,PRODUCTION_AUTRES,CONTENU_EN_CO2,CONSOTOT">
+  </dsfr-data-source>
+  <dsfr-data-source id="c19" lazy lazy-target="#t-paris"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/eeccf641-6292-47b4-9ac4-138902672488/json?FILIERE=eq:C&amp;columns=ID,OPERATEUR,COMMUNE_CODE,COMMUNE_LIBELLE,ANNEE,PRODUCTION_TOTALE,PRODUCTION_GAZ_NATUREL,PRODUCTION_CHARBON,PRODUCTION_FIOUL_DOMESTIQUE,PRODUCTION_FIOUL_LOURD,PRODUCTION_GPL,PRODUCTION_BIOMASSE_SOLIDE,PRODUCTION_DECHETS_INTERNES,PRODUCTION_UIOM,PRODUCTION_BIOGAZ,PRODUCTION_GEOTHERMIE,PRODUCTION_PAC,PRODUCTION_SOLAIRE_THERMIQUE,PRODUCTION_AUTRES_ENR,PRODUCTION_CHALEUR_INDUSTRIEL,PRODUCTION_AUTRE_CHALEUR_RECUPEREE,PRODUCTION_CHAUDIERES_ELECTRIQUES,PRODUCTION_AUTRES,CONTENU_EN_CO2,CONSOTOT">
+  </dsfr-data-source>
+  <dsfr-data-source id="c20" lazy lazy-target="#t-paris"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/e42b772e-b189-48a2-8954-e48c1728ef91/json?FILIERE=eq:C&amp;columns=ID,OPERATEUR,COMMUNE_CODE,COMMUNE_LIBELLE,ANNEE,PRODUCTION_TOTALE,PRODUCTION_GAZ_NATUREL,PRODUCTION_CHARBON,PRODUCTION_FIOUL_DOMESTIQUE,PRODUCTION_FIOUL_LOURD,PRODUCTION_GPL,PRODUCTION_BIOMASSE_SOLIDE,PRODUCTION_DECHETS_INTERNES,PRODUCTION_UIOM,PRODUCTION_BIOGAZ,PRODUCTION_GEOTHERMIE,PRODUCTION_PAC,PRODUCTION_SOLAIRE_THERMIQUE,PRODUCTION_AUTRES_ENR,PRODUCTION_CHALEUR_INDUSTRIEL,PRODUCTION_AUTRE_CHALEUR_RECUPEREE,PRODUCTION_CHAUDIERES_ELECTRIQUES,PRODUCTION_AUTRES,CONTENU_EN_CO2,CONSOTOT">
+  </dsfr-data-source>
+  <dsfr-data-source id="c21" lazy lazy-target="#g-evo-slot"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/f8a22527-85f7-4076-a24a-20337828c942/json?FILIERE=eq:C&amp;columns=ID,OPERATEUR,COMMUNE_CODE,COMMUNE_LIBELLE,ANNEE,PRODUCTION_TOTALE,PRODUCTION_GAZ_NATUREL,PRODUCTION_CHARBON,PRODUCTION_FIOUL_DOMESTIQUE,PRODUCTION_FIOUL_LOURD,PRODUCTION_GPL,PRODUCTION_BIOMASSE_SOLIDE,PRODUCTION_DECHETS_INTERNES,PRODUCTION_UIOM,PRODUCTION_BIOGAZ,PRODUCTION_GEOTHERMIE,PRODUCTION_PAC,PRODUCTION_SOLAIRE_THERMIQUE,PRODUCTION_AUTRES_ENR,PRODUCTION_CHALEUR_INDUSTRIEL,PRODUCTION_AUTRE_CHALEUR_RECUPEREE,PRODUCTION_CHAUDIERES_ELECTRIQUES,PRODUCTION_AUTRES,CONTENU_EN_CO2,CONSOTOT">
+  </dsfr-data-source>
+  <dsfr-data-source id="c22" lazy lazy-target="#g-evo-slot"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/4b5a7094-0ff3-4c1e-a95f-9786b789cb92/json?FILIERE=eq:C&amp;columns=ID,OPERATEUR,COMMUNE_CODE,COMMUNE_LIBELLE,ANNEE,PRODUCTION_TOTALE,PRODUCTION_GAZ_NATUREL,PRODUCTION_CHARBON,PRODUCTION_FIOUL_DOMESTIQUE,PRODUCTION_FIOUL_LOURD,PRODUCTION_GPL,PRODUCTION_BIOMASSE_SOLIDE,PRODUCTION_DECHETS_INTERNES,PRODUCTION_UIOM,PRODUCTION_BIOGAZ,PRODUCTION_GEOTHERMIE,PRODUCTION_PAC,PRODUCTION_SOLAIRE_THERMIQUE,PRODUCTION_AUTRES_ENR,PRODUCTION_CHALEUR_INDUSTRIEL,PRODUCTION_AUTRE_CHALEUR_RECUPEREE,PRODUCTION_CHAUDIERES_ELECTRIQUES,PRODUCTION_AUTRES,CONTENU_EN_CO2,CONSOTOT">
+  </dsfr-data-source>
+  <dsfr-data-source id="c23" lazy lazy-target="#g-evo-slot"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/5f93b3f9-8d0f-414c-ad35-51db742c421c/json?FILIERE=eq:C&amp;columns=ID,OPERATEUR,COMMUNE_CODE,COMMUNE_LIBELLE,ANNEE,PRODUCTION_TOTALE,PRODUCTION_GAZ_NATUREL,PRODUCTION_CHARBON,PRODUCTION_FIOUL_DOMESTIQUE,PRODUCTION_FIOUL_LOURD,PRODUCTION_GPL,PRODUCTION_BIOMASSE_SOLIDE,PRODUCTION_DECHETS_INTERNES,PRODUCTION_UIOM,PRODUCTION_BIOGAZ,PRODUCTION_GEOTHERMIE,PRODUCTION_PAC,PRODUCTION_SOLAIRE_THERMIQUE,PRODUCTION_AUTRES_ENR,PRODUCTION_CHALEUR_INDUSTRIEL,PRODUCTION_AUTRE_CHALEUR_RECUPEREE,PRODUCTION_CHAUDIERES_ELECTRIQUES,PRODUCTION_AUTRES,CONTENU_EN_CO2,CONSOTOT">
+  </dsfr-data-source>
+
+  <!-- ---------- 2024, réseau par réseau ----------
+       Familles (décision éditoriale, rappelée sous le graphique) :
+       fossiles = gaz + charbon + fioul + GPL ; chaleur récupérée = incinération des
+       déchets (usines externes et interne) + chaleur industrielle + autre chaleur
+       récupérée ; renouvelables = biomasse + géothermie + pompes à chaleur + biogaz +
+       solaire + autres ENR ; reste = chaudières électriques + « autres ».
+       Les parts par réseau sont nulles (et non 0) quand la production est nulle. -->
+  <dsfr-data-normalize id="n24" source="c24"
+    compute="prod = coalesce(PRODUCTION_TOTALE, 0);
+             gaz = coalesce(PRODUCTION_GAZ_NATUREL, 0);
+             cf = coalesce(PRODUCTION_CHARBON, 0) + coalesce(PRODUCTION_FIOUL_DOMESTIQUE, 0) + coalesce(PRODUCTION_FIOUL_LOURD, 0) + coalesce(PRODUCTION_GPL, 0);
+             dech = coalesce(PRODUCTION_UIOM, 0) + coalesce(PRODUCTION_DECHETS_INTERNES, 0);
+             recau = coalesce(PRODUCTION_CHALEUR_INDUSTRIEL, 0) + coalesce(PRODUCTION_AUTRE_CHALEUR_RECUPEREE, 0);
+             bio = coalesce(PRODUCTION_BIOMASSE_SOLIDE, 0);
+             geo = coalesce(PRODUCTION_GEOTHERMIE, 0);
+             pac = coalesce(PRODUCTION_PAC, 0);
+             biogaz = coalesce(PRODUCTION_BIOGAZ, 0);
+             enra = coalesce(PRODUCTION_SOLAIRE_THERMIQUE, 0) + coalesce(PRODUCTION_AUTRES_ENR, 0);
+             elec = coalesce(PRODUCTION_CHAUDIERES_ELECTRIQUES, 0) + coalesce(PRODUCTION_AUTRES, 0);
+             rec = dech + recau;
+             enr = bio + geo + pac + biogaz + enra;
+             co2w = CONTENU_EN_CO2 * 1000 * prod;
+             p_gaz = round(gaz / prod * 100, 1);
+             p_enrr = round((rec + enr) / prod * 100, 1);
+             co2_g = round(CONTENU_EN_CO2 * 1000, 0);
+             gwh = round(prod / 1000, 1);
+             maj_gaz = when gaz / prod > 0.5 then 1 else 0;
+             prod_maj_gaz = when gaz / prod > 0.5 then prod else 0;
+             gaz_maj_gaz = when gaz / prod > 0.5 then gaz else 0;
+             sans_gaz = when gaz = 0 and prod > 0 then 1 else 0;
+             sous_secret = when CONSOTOT = 'secret' then 1 else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="s24" source="n24" group-by="ANNEE"
+    aggregate="prod:sum:prod, gaz:sum:gaz, cf:sum:cf, dech:sum:dech, recau:sum:recau, bio:sum:bio, geo:sum:geo, pac:sum:pac, biogaz:sum:biogaz, enra:sum:enra, elec:sum:elec, rec:sum:rec, enr:sum:enr, co2w:sum:co2w, ID:count:n, maj_gaz:sum:n_maj, prod_maj_gaz:sum:prod_maj, gaz_maj_gaz:sum:gaz_maj, sans_gaz:sum:n_sans, sous_secret:sum:n_secret">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="a24" source="s24"
+    compute="twh = prod / 1000000;
+             gaz_twh = gaz / 1000000;
+             p_gaz = gaz / prod * 100;
+             p_fos = (gaz + cf) / prod * 100;
+             p_rec = rec / prod * 100;
+             p_enr = enr / prod * 100;
+             p_enrr = (rec + enr) / prod * 100;
+             p_dech = dech / prod * 100;
+             p_bio = bio / prod * 100;
+             co2 = co2w / prod;
+             p_prod_maj = prod_maj / prod * 100;
+             p_gaz_maj = gaz_maj / gaz * 100;
+             k = 'fr'">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Les réseaux de chaleur et le gaz</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Les réseaux de chaleur&nbsp;: un tiers encore au gaz, et Paris en brûle plus d'un quart</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="a24">
+        <template>
+          En {{ANNEE}}, les {{n}}&nbsp;réseaux de chaleur recensés ont produit <strong>{{twh:number:1}}&nbsp;TWh</strong>.
+          <strong>Le gaz naturel en fournit {{p_gaz:number:1}}&nbsp;%</strong>. Le reste se partage presque à
+          égalité entre la chaleur récupérée — surtout celle des usines d'incinération des déchets —
+          ({{p_rec:number:1}}&nbsp;%) et les énergies renouvelables, bois en tête ({{p_enr:number:1}}&nbsp;%).
+          Ce tiers de gaz n'est pas réparti&nbsp;: un seul réseau, celui de Paris, en brûle plus d'un quart.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: données locales de chaleur et de
+      froid par réseau, issues de l'enquête annuelle sur les réseaux de chaleur et de froid. Chaleur seule (le froid
+      est écarté), production thermique en mégawattheures, climat non corrigé. Un fichier par année, de 2018 au
+      dernier publié.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="a24" value="twh:max" decimals="1" unit="TWh" span="3"
+        heading="Chaleur produite" label="par les réseaux de chaleur, dernière année publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="a24" value="p_gaz:max" decimals="1" unit="%" span="3"
+        heading="Vient du gaz naturel" label="part de la chaleur produite"></dsfr-data-kpi>
+      <dsfr-data-kpi source="a24" value="p_enrr:max" decimals="1" unit="%" span="3"
+        heading="Renouvelable ou récupérée" label="bois, déchets incinérés, géothermie…"></dsfr-data-kpi>
+      <dsfr-data-kpi source="a24" value="co2:max" decimals="0" unit="g/kWh" span="3"
+        heading="CO₂ émis par kWh" label="rejet direct, moyenne pondérée par la production"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les filières ======================= -->
+  <!-- Une barre par filière, dépliée depuis la ligne agrégée de 2024. Tri décroissant :
+       le gaz arrive en tête (10,6 TWh contre 9,9 pour les déchets incinérés, vérifié au
+       navigateur), d'où highlight-index [0]. highlight-index désigne un RANG : si les
+       déchets passaient devant, la mauvaise barre serait mise en avant. -->
+  <dsfr-data-normalize id="fil-r" source="a24"
+    compute="f_gaz = round(gaz / 1000000, 2); f_dech = round(dech / 1000000, 2); f_bio = round(bio / 1000000, 2);
+             f_geo = round(geo / 1000000, 2); f_recau = round(recau / 1000000, 2); f_pac = round(pac / 1000000, 2);
+             f_cf = round(cf / 1000000, 2); f_enra = round((enra + biogaz) / 1000000, 2); f_elec = round(elec / 1000000, 2)">
+  </dsfr-data-normalize>
+  <dsfr-data-unpivot id="fil" source="fil-r"
+    value-cols="f_gaz:Gaz naturel, f_dech:Incinération des déchets, f_bio:Bois et biomasse, f_geo:Géothermie, f_recau:Chaleur industrielle récupérée, f_pac:Pompes à chaleur, f_cf:Charbon et fioul, f_enra:Solaire et autres renouvelables, f_elec:Électricité et autres"
+    var-name="Filière" value-name="TWh">
+  </dsfr-data-unpivot>
+  <dsfr-data-query id="fil-tri" source="fil" order-by="TWh:desc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-filieres">
+    <h2 id="t-filieres" class="fr-h3">Le gaz reste la première source de chaleur, juste devant l'incinération des déchets</h2>
+    <dsfr-data-repeat source="a24">
+      <template>
+        <p class="odv-lecture">
+          En {{ANNEE}}, les réseaux ont tiré {{gaz_twh:number:1}}&nbsp;TWh du gaz naturel, soit {{p_gaz:number:1}}&nbsp;% de
+          leur chaleur. L'incinération des déchets ménagers en fournit {{p_dech:number:1}}&nbsp;%, le bois et la
+          biomasse {{p_bio:number:1}}&nbsp;%. Rassemblées, les énergies fossiles — gaz, charbon, fioul — pèsent
+          {{p_fos:number:1}}&nbsp;%&nbsp;: le tiers du titre.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div id="g-filieres-slot" class="odv-chart-slot odv-viz" data-code="Chaleur des réseaux par filière, dernière année">
+      <dsfr-data-chart id="g-filieres" source="fil-tri" type="bar" horizontal
+        label-field="Filière" value-field="TWh" name="Chaleur produite (TWh)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="TWh"
+        databox databox-title="Chaleur produite par les réseaux selon la filière, dernière année publiée (TWh)"
+        databox-source="SDES — données locales de chaleur et de froid (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-filieres" source="fil-tri" label-field="Filière" value-field="TWh"
+        description="Barres horizontales triées de la plus grande à la plus petite : chaleur produite par les réseaux selon la filière, la dernière année publiée. Le gaz naturel, mis en évidence, arrive en tête avec un peu plus de 10 TWh, juste devant l'incinération des déchets, un peu moins de 10 TWh, puis le bois et la biomasse, près de 8 TWh. La géothermie, la chaleur industrielle récupérée et les pompes à chaleur suivent, entre 0,8 et 1,8 TWh ; le charbon, le fioul et le GPL réunis ne font plus qu'un tiers de TWh.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Regroupement des 18 filières publiées&nbsp;: «&nbsp;incinération des déchets&nbsp;» réunit la chaleur livrée par
+      les usines d'incinération extérieures au réseau et celle des déchets brûlés sur le réseau même&nbsp;; la
+      statistique publique compte la moitié de cette chaleur comme renouvelable, cette page la range entière dans
+      la chaleur <em>récupérée</em>. Les pompes à chaleur, qui consomment de l'électricité, sont rangées dans les
+      renouvelables, comme le fait l'enquête. «&nbsp;Charbon et fioul&nbsp;» comprend le GPL&nbsp;; «&nbsp;solaire et
+      autres renouvelables&nbsp;» comprend le biogaz.
+    </p>
+  </section>
+
+  <!-- ======================= LA CONCENTRATION — Paris ======================= -->
+  <!-- Le premier réseau est lu dans la donnée (tri par production), pas écrit en dur.
+       Jointure interne sur ANNEE avec la ligne agrégée pour calculer ses parts. -->
+  <dsfr-data-query id="top1" source="n24" order-by="prod:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="top1-j" left="top1" right="a24" on="ANNEE" type="inner" prefix-right="t_"></dsfr-data-join>
+  <dsfr-data-normalize id="top1-p" source="top1-j"
+    compute="p_prod = prod / t_prod * 100;
+             p_gaz_tot = gaz / t_gaz * 100;
+             p_gaz_sans = (t_gaz - gaz) / (t_prod - prod) * 100;
+             twh = prod / 1000000;
+             gaz_twh = gaz / 1000000">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="top10" source="n24" order-by="prod:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-normalize id="top10-g" source="top10"
+    compute="Gaz = round(gaz / 1000, 0); Autres = round((prod - gaz) / 1000, 0); Reseau = OPERATEUR + ' (' + COMMUNE_LIBELLE + ')'">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-paris">
+    <h2 id="t-paris" class="fr-h3">Un réseau fait près d'un cinquième de la chaleur, et plus d'un quart du gaz</h2>
+    <dsfr-data-repeat source="top1-p">
+      <template>
+        <p class="odv-lecture">
+          Le réseau «&nbsp;{{OPERATEUR}}&nbsp;» a produit à lui seul {{twh:number:1}}&nbsp;TWh en {{ANNEE}}&nbsp;:
+          <strong>{{p_prod:number:1}}&nbsp;% de la chaleur de tous les réseaux</strong>, dont {{p_gaz:number:0}}&nbsp;% au gaz.
+          Il brûle ainsi <strong>{{p_gaz_tot:number:1}}&nbsp;% de tout le gaz des réseaux</strong>. Sans lui, la part du
+          gaz dans les autres réseaux tombe à {{p_gaz_sans:number:1}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les dix plus gros réseaux de chaleur, part du gaz">
+      <dsfr-data-chart id="g-top10" source="top10-g" type="bar" horizontal stacked
+        label-field="Reseau" value-field="Gaz:Gaz naturel" value-fields="Autres:Autres sources"
+        color-map="Gaz naturel:#E4794A,Autres sources:#929292" unit-tooltip="GWh"
+        databox databox-title="Les dix réseaux de chaleur qui produisent le plus, dernière année publiée : chaleur tirée du gaz et des autres sources (GWh)"
+        databox-source="SDES — données locales de chaleur et de froid (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-top10" source="top10-g" label-field="Reseau" value-field="Gaz,Autres"
+        description="Barres horizontales empilées, une par réseau, pour les dix réseaux qui produisent le plus de chaleur la dernière année publiée ; la partie orange est la chaleur tirée du gaz naturel, la partie grise celle des autres sources. Le réseau de Paris et des communes limitrophes écrase les autres : environ 6 000 GWh, près de la moitié au gaz. Les neuf suivants — Saint-Maurice-l'Exil, Grenoble, Lyon, Metz, Saint-Denis, Cergy, Dijon, Nantes, Créteil — produisent chacun entre 300 et 900 GWh, avec une part de gaz comprise entre 5 et 35 %.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="a24">
+      <template>
+        <p class="odv-lecture">
+          À l'autre bout, le gaz domine surtout de petits réseaux&nbsp;: {{n_maj:number:0}}&nbsp;réseaux sur {{n}} tirent plus de
+          la moitié de leur chaleur du gaz, mais ils ne produisent ensemble que {{p_prod_maj:number:1}}&nbsp;% de la chaleur
+          (et {{p_gaz_maj:number:1}}&nbsp;% du gaz). {{n_sans:number:0}}&nbsp;réseaux n'en brûlent pas du tout.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Le nom du réseau est celui que porte la donnée&nbsp;; la commune est la commune d'implantation retenue par le
+      SDES, qui n'est pas toujours la ville desservie (le réseau de Lyon est rattaché à Albigny-sur-Saône).
+    </p>
+  </section>
+
+  <!-- ======================= ÉVOLUTION — sept années ======================= -->
+  <!-- Les sept fichiers empilés par dsfr-data-concat (schémas identiques grâce à
+       columns=), puis les mêmes familles qu'en 2024 — coalesce indispensable : 2018
+       écrit null là où 2024 écrit 0, et null + x = null. -->
+  <dsfr-data-concat id="tous" sources="c18, c19, c20, c21, c22, c23, c24"></dsfr-data-concat>
+  <dsfr-data-normalize id="tous-n" source="tous"
+    compute="prod = coalesce(PRODUCTION_TOTALE, 0);
+             gaz = coalesce(PRODUCTION_GAZ_NATUREL, 0);
+             cf = coalesce(PRODUCTION_CHARBON, 0) + coalesce(PRODUCTION_FIOUL_DOMESTIQUE, 0) + coalesce(PRODUCTION_FIOUL_LOURD, 0) + coalesce(PRODUCTION_GPL, 0);
+             rec = coalesce(PRODUCTION_UIOM, 0) + coalesce(PRODUCTION_DECHETS_INTERNES, 0) + coalesce(PRODUCTION_CHALEUR_INDUSTRIEL, 0) + coalesce(PRODUCTION_AUTRE_CHALEUR_RECUPEREE, 0);
+             enr = coalesce(PRODUCTION_BIOMASSE_SOLIDE, 0) + coalesce(PRODUCTION_GEOTHERMIE, 0) + coalesce(PRODUCTION_PAC, 0) + coalesce(PRODUCTION_BIOGAZ, 0) + coalesce(PRODUCTION_SOLAIRE_THERMIQUE, 0) + coalesce(PRODUCTION_AUTRES_ENR, 0);
+             elec = coalesce(PRODUCTION_CHAUDIERES_ELECTRIQUES, 0) + coalesce(PRODUCTION_AUTRES, 0)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="evo-s" source="tous-n" group-by="ANNEE"
+    aggregate="prod:sum:prod, gaz:sum:gaz, cf:sum:cf, rec:sum:rec, enr:sum:enr, elec:sum:elec, ID:count:n">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="evo" source="evo-s"
+    compute="Gaz = round(gaz / 1000000, 2);
+             Charbon = round(cf / 1000000, 2);
+             Recuperee = round(rec / 1000000, 2);
+             Renouvelables = round(enr / 1000000, 2);
+             Autres = round(elec / 1000000, 2);
+             twh = prod / 1000000;
+             cf_twh = cf / 1000000;
+             pct_gaz = gaz / prod * 100;
+             k = 'fr'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="evo-tri" source="evo" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-query id="evo-prem" source="evo" order-by="ANNEE:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="evo-der" source="evo" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="evo-min" source="evo" order-by="pct_gaz:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="evo-pd" left="evo-der" right="evo-prem" on="k" type="inner" prefix-right="d_"></dsfr-data-join>
+  <dsfr-data-join id="evo-l" left="evo-pd" right="evo-min" on="k" type="inner" prefix-right="m_"></dsfr-data-join>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-evolution">
+    <h2 id="t-evolution" class="fr-h3">Le charbon a presque disparu&nbsp;; le recul du gaz en 2022 n'a pas tenu</h2>
+    <dsfr-data-repeat source="evo-l">
+      <template>
+        <p class="odv-lecture">
+          En {{d_ANNEE}}, {{d_n}}&nbsp;réseaux produisaient {{d_twh:number:1}}&nbsp;TWh, dont {{d_pct_gaz:number:1}}&nbsp;% au gaz.
+          En {{ANNEE}}, ils sont {{n}} et produisent {{twh:number:1}}&nbsp;TWh, <strong>dont {{pct_gaz:number:1}}&nbsp;% au gaz</strong>.
+          Le point bas est {{m_ANNEE}}, l'année où le prix du gaz a flambé&nbsp;: {{m_pct_gaz:number:1}}&nbsp;%. La part est remontée
+          depuis. Ce qui a vraiment reculé, c'est le reste du fossile&nbsp;: charbon, fioul et GPL passent de
+          {{d_cf_twh:number:2}} à <strong>{{cf_twh:number:2}}&nbsp;TWh</strong>. La croissance des réseaux est venue de la chaleur
+          récupérée et des renouvelables.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div id="g-evo-slot" class="odv-chart-slot odv-viz" data-code="Chaleur des réseaux par famille de sources et par année">
+      <dsfr-data-chart id="g-evo" source="evo-tri" type="bar" stacked
+        label-field="ANNEE"
+        value-field="Gaz:Gaz naturel"
+        value-fields="Charbon:Charbon et fioul, Recuperee:Chaleur récupérée, Renouvelables:Renouvelables, Autres:Électricité et autres"
+        color-map="Gaz naturel:#E4794A,Charbon et fioul:#3A3A3A,Chaleur récupérée:#A558A0,Renouvelables:#009081,Électricité et autres:#CECECE"
+        unit-tooltip="TWh"
+        databox databox-title="Chaleur produite par les réseaux selon la famille de sources, par année (TWh)"
+        databox-source="SDES — données locales de chaleur et de froid (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-evo" source="evo-tri" label-field="ANNEE"
+        value-field="Gaz,Charbon,Recuperee,Renouvelables,Autres"
+        description="Barres empilées, une par année de 2018 à la dernière publiée, découpées en familles de sources. Le total oscille entre 31 et 36 TWh, avec un pic en 2021, année froide. Le gaz naturel, en orange, reste autour de 10 à 12 TWh, avec un creux à moins de 10 TWh en 2022. Le charbon, le fioul et le GPL, en gris foncé, passent d'environ 1,5 TWh à un tiers de TWh. La chaleur récupérée, en violet, passe d'environ 10 à 11,5 TWh ; les renouvelables, en vert, d'environ 8,5 à 10,7 TWh.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Production brute, <strong>non corrigée du climat</strong>&nbsp;: un hiver froid (2021) fait monter toutes les filières.
+      Le nombre de réseaux enquêtés change d'une année à l'autre&nbsp;; une hausse de la production peut venir d'un
+      réseau nouvellement recensé autant que d'un réseau qui grandit.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — mon réseau ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Et mon réseau&nbsp;? Un sur trois ne brûle pas de gaz du tout</h2>
+    <p class="fr-text--sm">
+      Tous les réseaux de chaleur de la dernière année publiée, du plus gros au plus petit. Chercher un nom ou une
+      commune&nbsp;; trier par part du gaz pour trouver les réseaux qui en dépendent le plus. Le contenu en CO₂ est le
+      rejet direct de la production (hors fabrication des installations et transport du combustible), en grammes par
+      kilowattheure produit.
+    </p>
+    <dsfr-data-list source="n24"
+      columns="OPERATEUR:Réseau, COMMUNE_LIBELLE:Commune d'implantation, COMMUNE_CODE:Code commune, gwh:Chaleur produite (GWh), p_gaz:Part du gaz (%), p_enrr:Part renouvelable ou récupérée (%), co2_g:CO₂ direct (g/kWh)"
+      sort="gwh:desc" search pagination="15" count-label="réseau|réseaux" export="csv"
+      caption="Réseaux de chaleur : production, part du gaz, part renouvelable ou récupérée et contenu en CO₂, dernière année publiée">
+    </dsfr-data-list>
+    <p class="fr-text--xs fr-hint-text">
+      Quelques réseaux déclarent une production nulle&nbsp;: leurs parts restent vides plutôt que d'afficher un
+      zéro qui ne voudrait rien dire.
+    </p>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="a24">
+      <template>
+        <p class="fr-text--sm fr-mb-2v"><strong>La consommation.</strong> Le jeu publie aussi la chaleur livrée aux clients
+          et le nombre de points de livraison, mais pour {{n_secret}}&nbsp;réseaux sur {{n}} en {{ANNEE}} ces cellules
+          valent «&nbsp;secret&nbsp;» au lieu d'un nombre. Une somme les écarterait sans le dire. La page ne s'appuie
+          donc que sur la <em>production</em>, qui n'est jamais sous secret. L'écart entre les deux — les pertes du
+          réseau — n'est pas montré.</p>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Le froid.</strong> Une trentaine de réseaux de froid figurent dans les mêmes fichiers&nbsp;; ils
+        sont écartés au serveur. Ils expliquent l'écart avec un total «&nbsp;chaleur et froid&nbsp;» un peu plus
+        élevé.</li>
+      <li><strong>La puissance installée.</strong> Sa colonne change de sens d'une année à l'autre&nbsp;: en 2022,
+        plusieurs réseaux y portent leur production (des mégawattheures dans une colonne en mégawatts), et la somme
+        nationale est six fois celle des autres années. Elle n'est pas utilisée.</li>
+      <li><strong>Le contenu en CO₂ dans le temps.</strong> Il manque pour près d'un réseau sur cinq en 2018 et
+        2019&nbsp;: une moyenne sur ces années ne comparerait pas les mêmes réseaux. Il n'est montré que pour la
+        dernière année, où tous les réseaux le renseignent.</li>
+      <li><strong>Une carte.</strong> La chaleur d'un réseau ne se transporte pas au-delà de sa ville&nbsp;: une
+        moyenne par département mélangerait Paris et des chaufferies de lycée. La question utile est «&nbsp;mon
+        réseau&nbsp;», à laquelle répond le tableau.</li>
+      <li><strong>La chaleur hors réseaux.</strong> Les réseaux ne chauffent qu'une petite partie des logements et
+        des bureaux&nbsp;; les chaudières individuelles au gaz ou au fioul n'apparaissent pas ici.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création à partir de sept fichiers annuels du SDES servis par
+        l'API DiDo, sans adaptateur dédié. Le titre du cadrage tenait&nbsp;; c'est en triant les réseaux par taille
+        qu'est apparue la concentration qui l'explique&nbsp;: un réseau, Paris, pèse plus d'un quart du gaz.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Empiler sept années.</strong> <code>dsfr-data-concat</code> met bout à bout les sept
+              fichiers annuels&nbsp;; un seul <code>group-by="ANNEE"</code> en aval fait la série.</li>
+            <li><strong>Aligner les schémas au serveur.</strong> Le fichier 2018 n'a pas les mêmes colonnes que
+              2024&nbsp;: le même <code>columns=</code> dans chaque URL les rend identiques, et concat les accepte.</li>
+            <li><strong>Lire le premier réseau dans la donnée</strong>, par un tri et <code>limit="1"</code>, puis ses
+              parts par une jointure sur l'année&nbsp;: aucun nom de ville écrit en dur.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Sept sources pour trois connexions.</strong> DiDo refuse la quatrième requête simultanée.
+              Il faut répartir les sources en <code>lazy</code> sur deux cibles éloignées pour que les vagues ne se
+              chevauchent pas&nbsp;; un lecteur qui saute directement à l'évolution ne lance que la seconde vague, et
+              le graphique attend la première. Et l'écart ne tient qu'au rythme de lecture&nbsp;: sur un réseau lent,
+              un défilement rapide a déjà mis six requêtes en vol. Pas de file d'attente ni de nouvel essai côté
+              bibliothèque&nbsp;: une 429 laisse le graphique vide.</li>
+            <li><strong><code>null</code> contre 0.</strong> 2018 laisse vides les filières absentes, 2024 écrit 0.
+              Dans un <code>compute</code>, <code>null + x</code> vaut <code>null</code>&nbsp;: chaque terme d'une somme
+              de filières doit passer par <code>coalesce(…, 0)</code>.</li>
+            <li><strong>Des métadonnées fausses.</strong> Production déclarée en MW (2018-2020), puissance 2022
+              remplie de production&nbsp;: seule une somme par année l'a révélé.</li>
+            <li><strong>Un fichier par an</strong>, chacun avec son identifiant&nbsp;: l'année prochaine ne viendra
+              pas seule, il faudra ajouter une source.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger un fichier DiDo filtré et réduit</td><td><code>dsfr-data-source url=</code> (<code>FILIERE=eq:C&amp;columns=…</code>)</td><td>Natif</td></tr>
+            <tr><td>Une série à partir d'un fichier par année</td><td><code>dsfr-data-concat</code> + <code>query group-by</code></td><td>Natif</td></tr>
+            <tr><td>Rester sous trois requêtes simultanées</td><td><code>lazy lazy-target</code>, deux vagues</td><td>Natif, fragile au saut d'ancre</td></tr>
+            <tr><td>Familles de sources, parts par réseau</td><td><code>dsfr-data-normalize compute</code> avec <code>coalesce</code></td><td>Natif, verbeux</td></tr>
+            <tr><td>Moyenne de CO₂ pondérée par la production</td><td><code>compute</code> (produit) + somme + ratio</td><td>Natif</td></tr>
+            <tr><td>Part du premier réseau dans le total</td><td><code>query limit="1"</code> + <code>join</code> sur l'année</td><td>Natif</td></tr>
+            <tr><td>Une barre par filière depuis une ligne</td><td><code>dsfr-data-unpivot value-cols="col:Libellé"</code></td><td>Natif</td></tr>
+            <tr><td>Tableau de tous les réseaux</td><td><code>dsfr-data-list</code> (recherche, tri, CSV)</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Sept fichiers, une série, sans script.</strong> <code>dsfr-data-concat</code> fait de la
+          publication «&nbsp;un fichier par an&nbsp;» une série propre, à condition d'aligner les colonnes au serveur. Le
+          vrai coût est ailleurs&nbsp;: la limite de trois connexions de DiDo, qu'on contourne par l'ordre de
+          défilement, et des métadonnées qu'il faut vérifier par des sommes avant de s'y fier.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte sur cette page. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
