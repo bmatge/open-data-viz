@@ -4,7 +4,10 @@
 [data.economie.gouv.fr](https://data.economie.gouv.fr/pages/catalogue-visualisations/),
 [data.education.gouv.fr](https://data.education.gouv.fr/pages/dataviz-list/) et
 [data.sports.gouv.fr](https://data.sports.gouv.fr/pages/accueil/) —
-rejouées avec [`dsfr-data`](https://github.com/bmatge/dsfr-data) (ChartsBuilder).**
+rejouées avec [`dsfr-data`](https://github.com/bmatge/dsfr-data) (ChartsBuilder), puis recréées en récit —
+et des dataviz nouvelles créées sur deux portails sans dataviz à reproduire :
+[Culture](https://culture.data.gouv.fr) (API Tabular) et
+[Développement durable](https://www.statistiques.developpement-durable.gouv.fr/catalogue) (API DiDo du SDES).**
 
 Ce dépôt est un **banc d'essai**, pas un produit. Il répond à une question :
 
@@ -30,7 +33,7 @@ npm run dev        # idem, avec --watch
 ```
 
 Aucune dépendance : le serveur est un `node:http` de 80 lignes qui sert `public/`.
-DSFR, DSFR Chart et `dsfr-data@0.33.0` sont chargés depuis jsDelivr — c'est
+DSFR, DSFR Chart et `dsfr-data@0.42.0` sont chargés depuis jsDelivr — c'est
 volontaire, l'argument à démontrer étant « une balise, un CDN, et ça marche ».
 
 ## Structure

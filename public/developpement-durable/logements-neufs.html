@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Logements neufs, ventes et prix — open-data-viz</title>
+  <meta name="description" content="Appartements neufs vendus aux particuliers : deux fois moins de ventes qu'en 2019, des prix qui n'ont pas baissé et ont suivi l'inflation. Création avec dsfr-data à partir des enquêtes ECLN et Sitadel du SDES (DiDo) et de l'indice des prix de l'Insee.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://api.insee.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — D2 du cadrage docs/portail-developpement-durable/proposition.md.
+       Pas d'original : la page raconte trois fichiers du SDES (DiDo) et un de l'Insee.
+
+       LE CHAMP. ECLN = programmes de 5 logements ou plus, ventes AUX PARTICULIERS,
+       France métropolitaine. Toute la page porte sur le COLLECTIF (appartements) :
+       c'est 94 % des réservations et le seul type qui a un prix au m². Le fichier
+       national brut compte chaque logement trois fois (NATURE_PROJET : toutes
+       constructions / nouvelle / sur existant) : filtre serveur « Toutes
+       constructions », qui ne commence qu'en 2017-T1.
+
+       LE PRIX. Prix annuel = moyenne des prix trimestriels pondérée par les
+       réservations (jamais une moyenne simple des trimestres ni des départements).
+       Déflaté par l'indice des prix à la consommation annuel de l'Insee (Melodi,
+       base 2025 = 100) : prix × 100 / indice = euros de l'année de base.
+
+       DIDO n'a pas d'adaptateur : source en mode URL, filtre serveur dans l'URL
+       (TYPE_LGT n'accepte que in/nin), tout le reste côté client.
+
+       ANNÉES ÉCRITES. 2019 (dernière année pleine avant la crise sanitaire) est
+       l'année de référence éditoriale : écrite dans les `where` de référence et dans
+       l'URL départementale, avec 2025 (dernière année complète au 2026-09-26). Quand
+       2026 sera complète, l'URL départementale et les compute r25/pw25/w25/sec25
+       sont les seuls endroits à déplacer ; la série nationale, elle, suit seule.
+       ========================================================================== -->
+
+  <!-- ---------- ECLN national, collectif, par trimestre (38 lignes) ---------- -->
+  <dsfr-data-source id="ecln"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/6a038126-312a-4974-b5a6-c5a1394b4267/json?NATURE_PROJET=in:Toutes%20constructions&amp;TYPE_LGT=in:Collectif&amp;columns=TRIMESTRE,RESA,MEV,STOCK,DELAI_ECOUL,PRIX_M2">
+  </dsfr-data-source>
+  <!-- `an` : TRIMESTRE vaut « 2025-T3 », que year() ne lit pas (pas une date ISO). -->
+  <dsfr-data-normalize id="ecln-n" source="ecln"
+    compute="an = replace(replace(replace(replace(TRIMESTRE, '-T1', ''), '-T2', ''), '-T3', ''), '-T4', '');
+             stock_fin = when contains(TRIMESTRE, '-T4') then STOCK else 0;
+             pr = PRIX_M2 * RESA;
+             un = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ecln-an" source="ecln-n" group-by="an"
+    aggregate="RESA:sum:resa, MEV:sum:mev, pr:sum:pr, stock_fin:sum:stock, un:sum:nt" order-by="an:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="ecln-an-t" source="ecln-an" compute="prix = round(pr / resa, 0); k = 1"></dsfr-data-normalize>
+  <!-- Années complètes seulement ; l'année en cours est dite dans « ce qu'on ne montre pas ». -->
+  <dsfr-data-query id="annees" source="ecln-an-t" where="nt:eq:4"></dsfr-data-query>
+  <dsfr-data-query id="annee-partielle" source="ecln-an-t" where="nt:lt:4"></dsfr-data-query>
+
+  <!-- ---------- Indice des prix à la consommation, annuel, France (Insee Melodi) ---------- -->
+  <dsfr-data-source id="ipc" api-type="insee" dataset-id="DS_IPC_PRINC"
+    where="FREQ:eq:A, GEO:eq:2025-FRANCE-F, COICOP_2018:eq:00, IND_TYPE:eq:IX, IDX_TYPE:eq:CPI, TPH_CPI:eq:_T, SEASONAL_ADJUST:eq:N">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="ipc-n" source="ipc" rename="TIME_PERIOD:an | OBS_VALUE_INDICE_DE_PRIX:ipc"></dsfr-data-normalize>
+  <dsfr-data-join id="annees-ipc" left="annees" right="ipc-n" on="an" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="annees-r" source="annees-ipc"
+    compute="prix_cst = round(prix * 100 / ipc, 0)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : dernière année complète face à 2019, sur une ligne ---------- -->
+  <dsfr-data-query id="dern" source="annees-r" order-by="an:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="ref" source="annees-r" where="an:eq:2019"></dsfr-data-query>
+  <dsfr-data-join id="syn" left="dern" right="ref" on="k" prefix-right="ref_"></dsfr-data-join>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="baisse = (1 - resa / ref_resa) * 100;
+             hausse_prix = (prix / ref_prix - 1) * 100;
+             inflation = (ipc / ref_ipc - 1) * 100;
+             reel = ((prix / ipc) / (ref_prix / ref_ipc) - 1) * 100;
+             stock_var = (stock / ref_stock - 1) * 100;
+             mev_baisse = (1 - mev / ref_mev) * 100">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Sitadel : logements autorisés et commencés, tous types, par an ---------- -->
+  <!-- LOG_COM de la dernière année est null dans TOUS les départements (« en date réelle,
+       non estimé ») : un `sum` de nulls rend 0 (BUG-028). On compte les départements
+       renseignés et on remet null quand l'année n'est pas complète. -->
+  <dsfr-data-source id="sit"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/a0ae7112-5184-4ad7-842d-87b09fd27df1/json?TYPE_LGT=eq:Tous%20Logements&amp;columns=ANNEE,DEPARTEMENT_CODE,LOG_AUT,LOG_COM">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="sit-n" source="sit" compute="connu = when is_null(LOG_COM) then 0 else 1; un = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="sit-an" source="sit-n" group-by="ANNEE"
+    aggregate="LOG_AUT:sum:aut, LOG_COM:sum:com, connu:sum:nc, un:sum:nd" order-by="ANNEE:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="sit-an-t" source="sit-an"
+    compute="com_c = when nc < nd then null else com; k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="sit-aut-g" source="sit-an-t" rename="ANNEE:Année | aut:Autorisés"></dsfr-data-normalize>
+  <dsfr-data-query id="sit-com-all" source="sit-an-t" where="com_c:isnotnull"></dsfr-data-query>
+  <dsfr-data-normalize id="sit-com-g" source="sit-com-all" rename="ANNEE:Année | com_c:Commencés"></dsfr-data-normalize>
+  <dsfr-data-query id="sit-dern" source="sit-an-t" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="sit-min" source="sit-an-t" group-by="k" aggregate="aut:min:aut_min"></dsfr-data-query>
+  <dsfr-data-query id="sit-com" source="sit-an-t" where="com_c:isnotnull" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="sit-ref" source="sit-an-t" where="ANNEE:eq:2019"></dsfr-data-query>
+  <dsfr-data-join id="sit-j1" left="sit-dern" right="sit-min" on="k"></dsfr-data-join>
+  <dsfr-data-join id="sit-j2" left="sit-j1" right="sit-com" on="k" prefix-right="c_"></dsfr-data-join>
+  <dsfr-data-join id="sit-j3" left="sit-j2" right="sit-ref" on="k" prefix-right="ref_"></dsfr-data-join>
+  <dsfr-data-normalize id="sit-syn" source="sit-j3"
+    compute="rebond = (aut / aut_min - 1) * 100;
+             chute_com = (1 - c_com_c / ref_com_c) * 100;
+             an_com = c_ANNEE">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Logements neufs&nbsp;: ventes et prix</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Logements neufs&nbsp;: deux fois moins de ventes qu'en 2019, des prix qui n'ont pas baissé</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          En {{an}}, les promoteurs ont vendu {{resa:number}}&nbsp;appartements neufs à des particuliers,
+          contre {{ref_resa:number}} en 2019&nbsp;: <strong>{{baisse:number:0}}&nbsp;% de moins</strong>.
+          Le prix, lui, est passé de {{ref_prix:number}} à {{prix:number}}&nbsp;euros le mètre carré
+          (+{{hausse_prix:number:0}}&nbsp;%)&nbsp;— à peu près ce qu'ont pris tous les prix à la consommation
+          sur la période (+{{inflation:number:0}}&nbsp;%). Moins de ventes n'a donc pas fait baisser les prix&nbsp;:
+          en euros constants, ils n'ont presque pas bougé ({{reel:number:1}}&nbsp;%).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      SDES, enquête sur la commercialisation des logements neufs (ECLN) — programmes de cinq logements ou
+      plus, ventes aux particuliers, France métropolitaine, données brutes&nbsp;; Sitadel pour les logements
+      autorisés et commencés&nbsp;; Insee, indice des prix à la consommation annuel. Données lues à l'ouverture
+      de la page sur <a href="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/" target="_blank" rel="noopener external">l'API DiDo</a>
+      et <a href="https://portail-api.insee.fr/" target="_blank" rel="noopener external">l'API Melodi</a>.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="resa:max" format="nombre" span="4"
+        heading="Appartements neufs réservés" label="par des particuliers, dernière année complète"
+        lines='[{"value":"baisse:max","decimals":0,"prefix":"−","suffix":"depuis 2019"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="prix:max" format="nombre" unit="€/m²" span="4"
+        heading="Prix moyen au mètre carré" label="en euros courants, pondéré par les réservations"
+        lines='[{"value":"hausse_prix:max","decimals":0,"sign":true,"suffix":"depuis 2019"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="reel:max" format="decimal" decimals="1" unit="%" span="4"
+        heading="Le même prix, hors inflation" label="variation depuis 2019, en euros constants"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — la chute des ventes ======================= -->
+  <!-- highlight-index="[6]" = 2023, l'année de la cassure : la série commence en 2017
+       (première année du fichier « Toutes constructions »), l'index ne bouge pas quand
+       une année s'ajoute à droite. -->
+  <dsfr-data-normalize id="annees-g" source="annees-r" rename="an:Année | resa:Réservations"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ventes">
+    <h2 id="t-ventes" class="fr-h3">Les ventes ont cassé en 2023 et ne sont pas reparties</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          De 2017 à 2019, il se réservait autour de 130&nbsp;000&nbsp;appartements neufs par an. En 2023, le
+          nombre perd plus d'un tiers d'un coup, et il ne remonte pas&nbsp;: {{resa:number}} en {{an}}. Les promoteurs
+          ont suivi&nbsp;: {{mev:number}}&nbsp;logements mis en vente en {{an}}, {{mev_baisse:number:0}}&nbsp;% de moins
+          qu'en 2019.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Appartements neufs réservés par des particuliers, par an">
+      <dsfr-data-chart id="g-ventes" source="annees-g" type="bar"
+        label-field="Année" value-field="Réservations" name="Appartements réservés"
+        selected-palette="neutral" highlight-index="[6]" unit-tooltip="logements"
+        databox databox-title="Appartements neufs réservés par des particuliers, par an (programmes de 5 logements ou plus, France métropolitaine)"
+        databox-source="SDES — ECLN, données nationales brutes (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-ventes" source="annees-g" label-field="Année" value-field="Réservations"
+        description="Barres verticales, une par année complète depuis 2017 : le nombre d'appartements neufs réservés par des particuliers. Les barres restent entre 100 000 et 130 000 jusqu'en 2022 ; 2023, mise en évidence, marque la cassure, et les années suivantes restent au même niveau bas.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= LE PARADOXE — les prix ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-prix">
+    <h2 id="t-prix" class="fr-h3">Les prix n'ont pas baissé&nbsp;: ils ont suivi l'inflation</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Le prix moyen d'un appartement neuf passe de {{ref_prix:number}} à {{prix:number}}&nbsp;€/m² entre 2019
+          et {{an}}. Exprimé en euros constants, il ne varie que de quelques pour cent d'une année à l'autre et finit presque où il était en 2019. Les invendus n'y ont rien changé&nbsp;:
+          fin {{an}}, {{stock:number}}&nbsp;appartements attendaient preneur, {{stock_var:number:0}}&nbsp;% de plus
+          que fin 2019.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Prix moyen au mètre carré des appartements neufs, en euros courants et constants">
+      <dsfr-data-chart id="g-prix" source="annees-r" type="line"
+        label-field="an" value-field="prix:En euros courants" value-fields="prix_cst:En euros constants (base Insee)"
+        y-min="0" unit-tooltip="€/m²"
+        databox databox-title="Prix moyen au mètre carré des appartements neufs réservés, en euros courants et en euros constants"
+        databox-source="SDES — ECLN (DiDo) ; Insee — indice des prix à la consommation (Melodi)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-prix" source="annees-r" label-field="an" value-field="prix, prix_cst"
+        description="Deux courbes sur un axe partant de zéro, une par année complète depuis 2017. En euros courants, le prix au mètre carré monte régulièrement ; en euros constants (déflaté par l'indice des prix de l'Insee), il reste presque plat depuis 2019.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Prix annuel&nbsp;: moyenne des quatre prix trimestriels pondérée par les réservations. Euros constants&nbsp;:
+      prix × 100 / indice annuel des prix à la consommation (ensemble, France, base 100 l'année de base de l'Insee).
+    </p>
+  </section>
+
+  <!-- ======================= EN AMONT — les chantiers ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-chantiers">
+    <h2 id="t-chantiers" class="fr-h3">En amont, les chantiers ont décroché aussi&nbsp;; les permis repartent</h2>
+    <dsfr-data-repeat source="sit-syn">
+      <template>
+        <p class="odv-lecture">
+          Tous types de logements confondus, {{c_com_c:number}}&nbsp;logements ont été mis en chantier en {{an_com}},
+          <strong>{{chute_com:number:0}}&nbsp;% de moins qu'en 2019</strong>. Les autorisations, elles, remontent&nbsp;:
+          {{aut:number}} en {{ANNEE}}, {{rebond:number:0}}&nbsp;% au-dessus de leur plus bas. Les mises en chantier de
+          {{ANNEE}} ne sont pas encore publiées&nbsp;: elles n'ont pas de barre, ce n'est pas une chute.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <!-- Deux graphiques et pas une courbe double : dans un graphique à deux séries,
+         dsfr-data-chart convertit la valeur null des mises en chantier de la dernière
+         année en 0 (toNumber non strict, dsfr-data-chart.ts l. 728) — la courbe
+         plongeait à zéro. Chaque série a donc ses propres années ; même échelle (0 à 500 000) pour que
+         les deux se comparent à l'œil. -->
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="odv-chart-slot odv-viz" data-code="Logements autorisés par an">
+          <dsfr-data-chart id="g-aut" source="sit-aut-g" type="bar"
+            label-field="Année" value-field="Autorisés" name="Logements autorisés"
+            selected-palette="neutral" unit-tooltip="logements" y-min="0" y-max="500000"
+            databox databox-title="Logements autorisés par an, tous types (France entière)"
+            databox-source="SDES — Sitadel, séries annuelles en date réelle (DiDo)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-aut" source="sit-aut-g" label-field="Année" value-field="Autorisés"
+            description="Barres verticales, une par année depuis 2013 : les logements autorisés (permis), tous types, somme des départements. Autour de 420 000 à 450 000 en 2017-2022, ils tombent vers 310 000 en 2024 puis remontent la dernière année.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-6">
+        <div class="odv-chart-slot odv-viz" data-code="Logements commencés par an">
+          <dsfr-data-chart id="g-com" source="sit-com-g" type="bar"
+            label-field="Année" value-field="Commencés" name="Logements commencés"
+            selected-palette="neutral" unit-tooltip="logements" y-min="0" y-max="500000"
+            databox databox-title="Logements commencés par an, tous types (France entière), années publiées"
+            databox-source="SDES — Sitadel, séries annuelles en date réelle (DiDo)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-com" source="sit-com-g" label-field="Année" value-field="Commencés"
+            description="Barres verticales, une par année publiée depuis 2013 : les logements mis en chantier, tous types, somme des départements. Autour de 330 000 à 390 000 jusqu'en 2022, ils tombent à environ 210 000 en 2024. La dernière année n'est pas encore publiée et n'a pas de barre.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Sitadel compte tous les logements (maisons individuelles, logements sociaux, résidences), pas seulement
+      les ventes des promoteurs aux particuliers&nbsp;: c'est l'amont du marché, pas le même champ que l'ECLN.
+    </p>
+  </section>
+
+  <!-- ======================= OÙ — les départements ======================= -->
+  <!-- 768 lignes : 96 départements × 8 trimestres (2019 et 2025), collectif seulement.
+       PRIX_M2 vaut la chaîne « secret » quand trop peu de programmes sont en vente :
+       le produit PRIX_M2 × RESA devient null (compute), le trimestre sort du prix pondéré
+       et de son poids. Le secret est compté et affiché. -->
+  <dsfr-data-source id="dep"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/95e4190c-4d70-403f-9537-5b71fd005b1c/json?TYPE_LGT=in:Collectif&amp;TRIMESTRE=in:2019-T1,2019-T2,2019-T3,2019-T4,2025-T1,2025-T2,2025-T3,2025-T4&amp;columns=DEP_CODE,DEP_LIBELLE,TRIMESTRE,RESA,PRIX_M2">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="dep-n" source="dep"
+    compute="r19 = when contains(TRIMESTRE, '2019-') then RESA else 0;
+             r25 = when contains(TRIMESTRE, '2025-') then RESA else 0;
+             pw25 = when contains(TRIMESTRE, '2025-') then PRIX_M2 * RESA else null;
+             w25 = when is_null(pw25) then 0 else RESA;
+             sec25 = when contains(TRIMESTRE, '2025-') and PRIX_M2 = 'secret' then 1 else 0;
+             c25 = when contains(TRIMESTRE, '2025-') then 1 else 0;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-agg" source="dep-n" group-by="DEP_CODE, DEP_LIBELLE"
+    aggregate="r19:sum:r19, r25:sum:r25, pw25:sum:pw25, w25:sum:w25, sec25:sum:sec25">
+  </dsfr-data-query>
+  <!-- Seuil de 500 réservations en 2019 : en dessous, un rapport 2025/2019 se calcule
+       sur quelques programmes et n'a pas de sens (Lot-et-Garonne : 1 → 280). -->
+  <dsfr-data-normalize id="dep-t" source="dep-agg"
+    compute="evol = when r19 >= 500 then round((r25 / r19 - 1) * 100, 0) else null;
+             prix25 = when w25 > 0 then round(pw25 / w25, 0) else null;
+             recul = 0 - evol;
+             gros = when r19 >= 500 then 1 else 0;
+             moitie = when r19 >= 500 and r25 <= r19 / 2 then 1 else 0;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-carte" source="dep-t" where="evol:isnotnull"></dsfr-data-query>
+  <dsfr-data-query id="dep-top" source="dep-t" order-by="r19:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-query id="dep-top-tri" source="dep-top" order-by="evol:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="dep-top-g" source="dep-top-tri" rename="DEP_LIBELLE:Département | evol:Évolution"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-top-syn" source="dep-top" group-by="k" aggregate="r19:sum:t19, r25:sum:t25"></dsfr-data-query>
+  <dsfr-data-query id="dep-syn" source="dep-t" group-by="k"
+    aggregate="r19:sum:n19, r25:sum:n25, gros:sum:n_gros, moitie:sum:n_moitie"></dsfr-data-query>
+  <dsfr-data-join id="dep-syn-j" left="dep-syn" right="dep-top-syn" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="dep-syn-t" source="dep-syn-j"
+    compute="top_evol = (1 - t25 / t19) * 100;
+             reste_evol = (1 - (n25 - t25) / (n19 - t19)) * 100;
+             top_part = t19 / n19 * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-sec" source="dep-n" group-by="k" aggregate="sec25:sum:sec25, c25:sum:c25"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dep">
+    <h2 id="t-dep" class="fr-h3">Les grands marchés ont perdu davantage, mais presque aucun n'y échappe</h2>
+    <dsfr-data-repeat source="dep-syn-t">
+      <template>
+        <p class="odv-lecture">
+          Les dix départements qui vendaient le plus d'appartements neufs en 2019 faisaient
+          {{top_part:number:0}}&nbsp;% du marché. Ils ont perdu <strong>{{top_evol:number:0}}&nbsp;%</strong> de leurs
+          ventes en 2025, le reste du pays {{reste_evol:number:0}}&nbsp;%. Sur les {{n_gros:number}}&nbsp;départements
+          qui dépassaient 500&nbsp;réservations en 2019, {{n_moitie:number}} ont vu leurs ventes divisées par deux ou plus.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Évolution des réservations 2019-2025 dans les dix plus gros marchés de 2019">
+      <dsfr-data-chart id="g-top" source="dep-top-g" type="bar" horizontal
+        label-field="Département" value-field="Évolution" name="Évolution 2019-2025 (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Évolution des réservations d'appartements neufs entre 2019 et 2025, dans les dix départements qui en vendaient le plus en 2019 (%)"
+        databox-source="SDES — ECLN, données départementales brutes (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-top" source="dep-top-g" label-field="Département" value-field="Évolution"
+        description="Barres horizontales triées de la plus forte baisse à la plus faible : la variation des réservations d'appartements neufs entre 2019 et 2025 dans les dix plus gros marchés de 2019. Toutes sont négatives ; la plus forte baisse, mise en évidence, dépasse 70 %.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: et dans votre département&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Plus le département est foncé, plus ses ventes ont reculé. La carte n'a de valeur que pour les
+      départements qui dépassaient 500&nbsp;réservations en 2019&nbsp;: les autres, et l'outre-mer (hors enquête),
+      apparaissent dans un bleu uni qui n'appartient pas à la légende — ils sont sans donnée. Le tableau donne
+      les 96&nbsp;départements métropolitains, avec leurs volumes.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Carte de l'évolution des réservations 2019-2025 par département">
+      <dsfr-data-chart id="g-carte" source="dep-carte" type="map"
+        code-field="DEP_CODE" value-field="recul" name="Recul des réservations 2019-2025 (%)"
+        unit-tooltip="%" map-summary="none" selected-palette="sequentialAscending"
+        databox databox-title="Recul des réservations d'appartements neufs entre 2019 et 2025, par département (en % ; négatif = hausse)"
+        databox-source="SDES — ECLN, données départementales brutes (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="dep-carte" label-field="DEP_LIBELLE" value-field="recul"
+        description="Carte des départements métropolitains colorés selon le recul de leurs réservations d'appartements neufs entre 2019 et 2025, du plus clair (hausse ou faible recul) au plus foncé (plus fort recul). Seuls les départements ayant dépassé 500 réservations en 2019 sont colorés. Le tableau ci-dessous donne les valeurs de tous les départements.">
+      </dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">Tous les départements</h3>
+    <dsfr-data-list source="dep-t"
+      columns="DEP_LIBELLE:Département, r19:Réservations 2019, r25:Réservations 2025, evol:Évolution (%), prix25:Prix 2025 (€/m²), sec25:Trimestres 2025 sous secret"
+      sort="r19:desc" search pagination="15" count-label="département|départements" export="csv"
+      caption="Appartements neufs réservés par des particuliers en 2019 et 2025, prix moyen 2025, par département">
+    </dsfr-data-list>
+    <dsfr-data-repeat source="dep-sec">
+      <template>
+        <p class="fr-text--xs fr-hint-text fr-mt-2w">
+          Prix 2025&nbsp;: moyenne des trimestres pondérée par les réservations. {{sec25:number}}&nbsp;trimestres-départements
+          sur {{c25:number}} ont un prix couvert par le secret statistique (trop peu de programmes)&nbsp;: ils sortent de la
+          moyenne, et un département dont les quatre trimestres sont secrets n'a pas de prix. Les réservations, elles,
+          ne sont jamais secrètes.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm fr-mb-0">
+      <li><strong>Les maisons.</strong> Les maisons vendues par des promoteurs (une petite part des réservations de l'ECLN) n'ont
+        pas de prix au mètre carré, et les maisons bâties par un constructeur pour un particulier n'entrent pas dans
+        l'enquête. Toute la partie ventes et prix porte sur les appartements.</li>
+      <li><strong>Les ventes en bloc</strong> (aux bailleurs sociaux, aux investisseurs institutionnels)&nbsp;: l'ECLN ne
+        compte que les ventes aux particuliers.</li>
+      <li><strong>L'outre-mer</strong>&nbsp;: l'ECLN ne couvre que la France métropolitaine. Sitadel, lui, couvre la France
+        entière.</li>
+      <li><strong>Les annulations</strong>, publiées dans une colonne à part&nbsp;: la page ne les déduit pas des
+        réservations.</li>
+    </ul>
+    <dsfr-data-repeat source="annee-partielle">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>L'année {{an}}, incomplète</strong>&nbsp;: {{nt:number}}&nbsp;trimestre(s) publié(s), {{resa:number}}&nbsp;appartements
+            réservés, {{prix:number}}&nbsp;€/m². Elle est écartée des séries annuelles pour ne pas lire une demi-année comme
+            une chute.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Les séries corrigées des variations saisonnières</strong>&nbsp;: sur une année entière, les données
+        brutes suffisent et correspondent aux publications annuelles.</li>
+      <li><strong>Les causes.</strong> Aucun de ces jeux ne mesure le crédit ni les aides à l'achat&nbsp;: la page
+        constate la cassure de 2023, elle ne l'explique pas.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir de trois fichiers du SDES servis par DiDo (ECLN national,
+        ECLN départemental, Sitadel départemental) et de l'indice des prix de l'Insee servi par Melodi. Le titre
+        provisoire du cadrage parlait de «&nbsp;prix qui montent&nbsp;»&nbsp;; la déflation l'a corrigé.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>DiDo sans adaptateur.</strong> Le mode URL de <code>dsfr-data-source</code> lit le JSON brut, et
+              les filtres serveur (<code>in:</code>, <code>columns=</code>) s'écrivent dans l'URL&nbsp;: 38, 1&nbsp;313 et
+              768&nbsp;lignes au lieu de 606, 6&nbsp;565 et 24&nbsp;667.</li>
+            <li><strong>Deux producteurs joints par l'année.</strong> <code>api-type="insee"</code> sur Melodi,
+              <code>dsfr-data-join</code> sur <code>an</code>&nbsp;: les euros constants sont calculés dans la page.</li>
+            <li><strong>Le secret compté.</strong> <code>PRIX_M2 × RESA</code> devient null sur une cellule
+              «&nbsp;secret&nbsp;» (<code>compute</code>), et un compteur par <code>when</code> le dit en page.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Une année non publiée devient zéro, deux fois.</strong> Un <code>sum</code> de nulls rend 0
+              (BUG-028)&nbsp;: contourné en comptant les départements renseignés pour remettre null. Mais un
+              graphique à deux séries (<code>value-fields</code>) retransforme ce null en 0 et la courbe des mises
+              en chantier plongeait à zéro&nbsp;: autorisations et mises en chantier ont dû être séparées en deux graphiques.</li>
+            <li><strong>Les territoires sans valeur ont une couleur.</strong> Sur la carte, un département absent des
+              données est peint d'un bleu uni hors légende (DSFR Chart)&nbsp;; il faut le dire en légende de texte.</li>
+            <li><strong>Comparer deux années demande des jointures.</strong> «&nbsp;Dernière année face à 2019&nbsp;» passe
+              par deux requêtes d'une ligne et un <code>dsfr-data-join</code> sur une clé constante&nbsp;; trois jointures en
+              chaîne pour la phrase sur les chantiers.</li>
+            <li><strong>Le trimestre n'est pas une date.</strong> «&nbsp;2025-T3&nbsp;» échappe à <code>year()</code>&nbsp;:
+              quatre <code>replace()</code> imbriqués pour en tirer l'année.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Lire DiDo filtré</td><td><code>dsfr-data-source url=".../json?COL=in:v&amp;columns=…"</code></td><td>Natif (mode URL)</td></tr>
+            <tr><td>Annuel depuis le trimestriel, prix pondéré</td><td><code>normalize compute</code> + <code>query group-by</code></td><td>Natif</td></tr>
+            <tr><td>Euros constants</td><td>source <code>insee</code> + <code>dsfr-data-join</code> sur l'année</td><td>Natif</td></tr>
+            <tr><td>Année non publiée ≠ zéro</td><td>compteur de renseignés + <code>when … then null</code></td><td>Contournement (BUG-028)</td></tr>
+            <tr><td>Dernière année face à 2019</td><td>deux <code>query limit</code> + <code>join</code> sur clé constante</td><td>Natif, verbeux</td></tr>
+            <tr><td>Carte départementale</td><td><code>type="map"</code> + <code>where evol:isnotnull</code></td><td>Natif ; territoires sans valeur peints d'un bleu hors légende (DSFR Chart)</td></tr>
+            <tr><td>Deux séries d'années différentes</td><td>deux graphiques d'une série</td><td>Contournement (null → 0 dans le graphique)</td></tr>
+            <tr><td>Tableau exportable</td><td><code>dsfr-data-list</code> (recherche, tri, CSV)</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Le paradoxe tenait à une mesure.</strong> En euros courants, les prix du neuf montent pendant que les
+          ventes s'effondrent&nbsp;; en euros constants, ils sont à plat. <code>dsfr-data</code> établit les deux en
+          croisant deux producteurs sans script, et le piège de la page — une année non publiée qui se lit comme
+          zéro — se paie deux fois, à l'agrégat puis au graphique.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; la carte départementale est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

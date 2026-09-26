@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fréquentation des musées de France — open-data-viz</title>
+  <meta name="description" content="Musées de France : le Louvre et Versailles font un quart des entrées, quinze musées la moitié ; la fréquentation dépasse 2019, mais pas au Louvre. Création avec dsfr-data sur l'API Tabular de data.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 2 de docs/portail-culture/proposition.md.
+
+       UN JEU, UNE REQUÊTE : « Fréquentation des Musées de France » (ministère de la
+       Culture, Patrimostat), ressource Tabular 7708e380. 12 292 lignes = un site
+       × une année, 2014-2024. Chargé en entier par fetch-mode="export" : l'export
+       Parquet de data.gouv (≈ 200 Ko lus par plages), sans where ni group-by sur la source,
+       condition pour que l'export soit lu. Tout le reste est calculé dans la page.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué sur l'export complet le 2026-09-26) :
+       - La part « à rejouer » vaut 23,9 % : 17,04 M d'entrées sur 71,19 M en 2024.
+       - Une ligne n'est pas un musée : c'est un SITE (IDPatrimostat). Carnavalet a
+         trois lignes (874 743 + 607 730 + 142 103), le musée de la Marine six, dans
+         cinq villes. Le musée de France est l'identifiant Muséofile : 1 040 lignes
+         en 2024 pour 1 029 musées. Les classements se font par musée.
+       - Deux sites n'ont NI nom NI identifiant Muséofile (Metz, 308 438 entrées ;
+         Lens, 400 509) : clé et libellé de repli par coalesce(), dit en page.
+       - `ferme` est l'état ACTUEL du musée, constant sur ses onze années : 448 lignes
+         « OUI » portent des entrées. Il ne sert donc pas à dire qui était fermé une
+         année donnée ; on compte les musées sans entrée, sans en inventer la cause.
+       - Le sens de l'histoire se complète : 2024 dépasse 2019 de 8 %, et ce n'est pas
+         le Louvre (−9 %) : ce sont les autres musées (+12 %).
+       ========================================================================== -->
+
+  <!-- ---------- Le jeu entier, par son export Parquet ---------- -->
+  <dsfr-data-source id="mus" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="7708e380-e7f8-4b56-936a-5d2a262d852d"
+    fetch-mode="export"
+    select="IDPatrimostat, IDMuseofile, nom_du_musee, ville, departement, region, annee, total, gratuit">
+  </dsfr-data-source>
+
+  <!-- Clé de musée = identifiant Muséofile, ou à défaut celui du site (deux sites
+       sans Muséofile). Le Louvre (M5031) et Versailles (M5077) sont nommés par leur
+       identifiant : c'est le sujet de la page, pas un choix de rang. -->
+  <dsfr-data-normalize id="mn" source="mus"
+    compute="k = 'fr';
+             cle = coalesce(IDMuseofile, IDPatrimostat);
+             nom = coalesce(nom_du_musee, concat('nom non publié (', ville, ')'));
+             lv = when IDMuseofile = 'M5031' then total else 0;
+             vs = when IDMuseofile = 'M5077' then total else 0;
+             decl = when total > 0 then 1 else 0;
+             sansmuseo = when is_null(IDMuseofile) then 1 else 0;
+             paris = when departement = 'Paris' then 1 else 0;
+             un = 1">
+  </dsfr-data-normalize>
+
+  <!-- Série annuelle nationale, et sa base 2019 -->
+  <dsfr-data-query id="an" source="mn" group-by="annee, k"
+    aggregate="total:sum:tot, lv:sum:lv, vs:sum:vs, gratuit:sum:gr, decl:sum:ndecl, un:sum:nlig"
+    order-by="annee:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="an-a" source="an" compute="aut = tot - lv - vs"></dsfr-data-normalize>
+  <dsfr-data-query id="an-19" source="an-a" where="annee:eq:2019"></dsfr-data-query>
+  <dsfr-data-join id="an-j" left="an-a" right="an-19" on="k" type="inner" prefix-right="r_"></dsfr-data-join>
+  <dsfr-data-normalize id="an-t" source="an-j"
+    compute="Annee = concat(annee, '');
+             i_lv = round(lv / r_lv * 100, 1);
+             i_vs = round(vs / r_vs * 100, 1);
+             i_aut = round(aut / r_aut * 100, 1);
+             i_tot = round(tot / r_tot * 100, 1);
+             tot_m = round(tot / 1000000, 1);
+             tot_mm = tot / 1000000;
+             r_tot_mm = r_tot / 1000000;
+             v_tot = (tot / r_tot - 1) * 100;
+             v_lv = (lv / r_lv - 1) * 100;
+             v_vs = (vs / r_vs - 1) * 100;
+             v_aut = (aut / r_aut - 1) * 100;
+             lv_m = lv / 1000000;
+             r_lv_m = r_lv / 1000000;
+             p_gr = gr / tot * 100">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="an-der" source="an-t" order-by="annee:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="an-bas" source="an-t" order-by="tot:asc" limit="1"></dsfr-data-query>
+
+  <!-- Lignes de la dernière année, par jointure interne sur l'année de an-der :
+       aucun millésime écrit en dur. Chaque ligne y reçoit le total national (tot :
+       prefix-right ne s'applique qu'aux champs en collision, comme k, lv, vs, un). -->
+  <dsfr-data-join id="der" left="mn" right="an-der" on="annee" type="inner" prefix-right="n_"></dsfr-data-join>
+
+  <!-- Un musée = une clé Muséofile ; ses sites sont additionnés. -->
+  <dsfr-data-query id="mu" source="der" group-by="cle, nom"
+    aggregate="total:sum:entrees, tot:max:ntot, un:sum:sites, paris:max:paris">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="mu-t" source="mu"
+    compute="k = 'fr';
+             part = entrees / ntot * 100;
+             entrees_m = round(entrees / 1000000, 2);
+             zero = when entrees > 0 then 0 else 1;
+             avec = when entrees > 0 then 1 else 0;
+             tranche = when entrees >= 1000000 then '1 million et plus'
+                       when entrees >= 100000 then '100 000 à 1 million'
+                       when entrees >= 10000 then '10 000 à 100 000'
+                       else 'Moins de 10 000';
+             ordre = when entrees >= 1000000 then 1 when entrees >= 100000 then 2 when entrees >= 10000 then 3 else 4;
+             un = 1">
+  </dsfr-data-normalize>
+
+  <!-- Rang et part cumulée : tri décroissant, puis cumul des parts -->
+  <dsfr-data-query id="mu-rang" source="mu-t" where="entrees:gt:0" order-by="entrees:desc"
+    aggregate="part:running_sum:cumul">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="mu-rang-t" source="mu-rang" compute="avant = cumul - part"></dsfr-data-normalize>
+  <dsfr-data-query id="mu-top2" source="mu-rang-t" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="mu-2e" source="mu-top2" order-by="cumul:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="mu-10e" source="mu-rang-t" limit="10" ></dsfr-data-query>
+  <dsfr-data-query id="mu-10" source="mu-10e" group-by="k" aggregate="cumul:max:cumul, paris:sum:paris"></dsfr-data-query>
+  <dsfr-data-query id="mu-3e" source="mu-rang-t" limit="3"></dsfr-data-query>
+  <dsfr-data-query id="mu-3" source="mu-3e" order-by="cumul:desc" limit="1"></dsfr-data-query>
+  <!-- Musées nécessaires pour atteindre la moitié : ceux dont la part cumulée AVANT eux est < 50 % -->
+  <dsfr-data-query id="mu-moitie" source="mu-rang-t" where="avant:lt:50"></dsfr-data-query>
+  <dsfr-data-query id="mu-moitie-n" source="mu-moitie" group-by="k" aggregate="un:sum:n"></dsfr-data-query>
+  <dsfr-data-query id="mu-syn" source="mu-t" group-by="k"
+    aggregate="un:sum:musees, avec:sum:avec, zero:sum:zero, sites:sum:sites">
+  </dsfr-data-query>
+  <dsfr-data-join id="syn" left="mu-syn" right="mu-moitie-n" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="syn2" left="syn" right="mu-2e" on="k" type="inner" prefix-right="d_"></dsfr-data-join>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Fréquentation des musées de France</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Musées de France en 2024&nbsp;: le Louvre et Versailles font un quart des entrées, quinze musées la moitié</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="an-der">
+        <template>
+          En {{annee}}, les musées de France ont déclaré {{tot_mm:number:1}}&nbsp;millions d'entrées.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="syn2">
+        <template>
+          <strong>Les deux premiers en font {{cumul:number:1}}&nbsp;%</strong>, et il suffit de {{n:number:0}}&nbsp;musées
+          pour atteindre la moitié&nbsp;; les {{avec:number:0}} musées qui déclarent des entrées se partagent le reste.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-der">
+        <template>
+          La fréquentation dépasse de {{v_tot:number:0}}&nbsp;% celle de 2019 — mais pas au Louvre, qui n'en
+          retrouve que {{i_lv:number:0}}&nbsp;%.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, «&nbsp;Fréquentation des Musées de France&nbsp;» (enquête Patrimostat), servi par
+      l'API Tabular de data.gouv.fr. Entrées déclarées par chaque musée, payantes et gratuites, 2014 à la dernière
+      année du fichier. Un musée de France peut compter plusieurs sites&nbsp;: ils sont additionnés.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="an-der" value="tot:max" format="compact" decimals="1" span="3"
+        heading="Entrées" label="dernière année du fichier, tous musées"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn2" value="cumul:max" decimals="1" unit="%" span="3"
+        heading="Louvre et Versailles" label="part des entrées de la dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn2" value="n:max" decimals="0" span="3"
+        heading="Musées pour la moitié" label="des entrées, les plus fréquentés d'abord"></dsfr-data-kpi>
+      <dsfr-data-kpi source="an-der" value="v_tot:max" decimals="0" unit="%" span="3"
+        heading="Par rapport à 2019" label="évolution des entrées, périmètre de chaque année"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — deux musées loin devant ======================= -->
+  <dsfr-data-query id="mu-15" source="mu-rang-t" limit="15"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-top">
+    <h2 id="t-top" class="fr-h3">Le Louvre et Versailles, loin devant tous les autres</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="mu-3">
+        <template>
+          Le troisième, le {{nom}}, n'en reçoit que {{entrees_m:number:1}}&nbsp;millions.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="mu-10">
+        <template>
+          Les dix premiers musées font <strong>{{cumul:number:1}}&nbsp;% des entrées</strong>&nbsp;; {{paris:number:0}}
+          d'entre eux sont à Paris.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Les quinze musées de France les plus fréquentés">
+      <dsfr-data-chart id="g-top" source="mu-15" type="bar" horizontal
+        label-field="nom" value-field="entrees_m" name="Entrées (millions)"
+        selected-palette="neutral" highlight-index="[0, 1]" unit-tooltip="M"
+        databox databox-title="Les quinze musées de France les plus fréquentés, dernière année du fichier (millions d'entrées)"
+        databox-source="Ministère de la Culture — Fréquentation des Musées de France (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-top" source="mu-15" label-field="nom" value-field="entrees_m"
+        description="Barres horizontales triées, une par musée, des quinze musées de France les plus fréquentés la dernière année du fichier, en millions d'entrées. Le Louvre et le château de Versailles, mis en évidence, dépassent chacun 8 millions ; le musée d'Orsay, troisième, en compte moins de 4 ; à partir du onzième, les musées sont sous le million.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Un musée de France peut déclarer plusieurs sites, additionnés ici&nbsp;: Carnavalet compte trois lignes
+      dans le fichier, le musée national de la Marine six, dans cinq villes.
+    </p>
+  </section>
+
+  <!-- ======================= CONCENTRATION — la longue traîne ======================= -->
+  <dsfr-data-query id="tr" source="mu-t" where="entrees:gt:0" group-by="ordre, tranche"
+    aggregate="un:sum, entrees:sum, un__sum:share_percent:pm, entrees__sum:share_percent:pe"
+    order-by="ordre:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tr-t" source="tr"
+    compute="p_musees = round(pm, 1); p_entrees = round(pe, 1); n = un__sum"></dsfr-data-normalize>
+  <dsfr-data-query id="tr-grand" source="tr-t" where="ordre:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="tr-petit" source="tr-t" where="ordre:eq:4"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-traine">
+    <h2 id="t-traine" class="fr-h3">Quatre musées sur dix reçoivent moins de 10&nbsp;000 visiteurs, et 2&nbsp;% des entrées</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="tr-grand">
+        <template>
+          {{n:number:0}}&nbsp;musées dépassent le million d'entrées&nbsp;: {{p_musees:number:1}}&nbsp;% des musées,
+          <strong>{{p_entrees:number:1}}&nbsp;% des entrées</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="tr-petit">
+        <template>
+          À l'autre bout, {{n:number:0}}&nbsp;musées en reçoivent moins de 10&nbsp;000 chacun&nbsp;:
+          {{p_musees:number:1}}&nbsp;% des musées, <strong>{{p_entrees:number:1}}&nbsp;% des entrées</strong>.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des musées et part des entrées par tranche de fréquentation">
+      <dsfr-data-chart id="g-traine" source="tr-t" type="bar"
+        label-field="tranche" value-field="p_musees:Part des musées" value-fields="p_entrees:Part des entrées"
+        unit-tooltip="%" y-min="0"
+        databox databox-title="Part des musées et part des entrées selon la fréquentation annuelle du musée, dernière année du fichier (%)"
+        databox-source="Ministère de la Culture — Fréquentation des Musées de France (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-traine" source="tr-t" label-field="tranche" value-field="p_musees,p_entrees"
+        description="Barres groupées pour quatre tranches de fréquentation annuelle, du million d'entrées et plus à moins de 10 000 : pour chacune, la part des musées et la part des entrées. Les deux barres se croisent : la tranche du million pèse très peu en musées et presque la moitié des entrées ; celle des moins de 10 000 pèse quatre musées sur dix et à peine 2 % des entrées.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Musées ayant déclaré au moins une entrée la dernière année. Les musées à zéro entrée ou sans chiffre sont
+      comptés à part, en fin de page.
+    </p>
+  </section>
+
+  <!-- ======================= GÉOGRAPHIE — l'Île-de-France ======================= -->
+  <dsfr-data-query id="reg" source="der" where="total:gt:0" group-by="region"
+    aggregate="total:sum, un:sum:sites, total__sum:share_percent:pe"
+    order-by="total__sum:desc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="reg-t" source="reg" compute="Part = round(pe, 1)" rename="region:Région"></dsfr-data-normalize>
+  <dsfr-data-query id="reg-1" source="reg-t" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-2e" source="reg-t" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="reg-2" source="reg-2e" order-by="Part:asc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-region">
+    <h2 id="t-region" class="fr-h3">Six entrées sur dix sont franciliennes</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="reg-1">
+        <template>
+          L'{{Région}} reçoit <strong>{{Part:number:1}}&nbsp;% des entrées</strong> des musées de France, dans
+          {{sites:number:0}}&nbsp;sites qui déclarent des entrées.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-2">
+        <template>
+          La deuxième région, {{Région}}, en reçoit {{Part:number:1}}&nbsp;%.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des entrées des musées de France par région">
+      <dsfr-data-chart id="g-region" source="reg-t" type="bar" horizontal
+        label-field="Région" value-field="Part" name="Part des entrées (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Part des entrées des musées de France par région, dernière année du fichier (%)"
+        databox-source="Ministère de la Culture — Fréquentation des Musées de France (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-region" source="reg-t" label-field="Région" value-field="Part"
+        description="Barres horizontales triées : part de chaque région dans les entrées des musées de France, la dernière année du fichier. L'Île-de-France, mise en évidence, en reçoit près de six sur dix ; toutes les autres régions sont sous 6 %, les régions d'outre-mer sous 0,5 %.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Région du site qui déclare les entrées. Les parts sont celles de l'ensemble des entrées, pas rapportées à la
+      population&nbsp;: une grande partie des visiteurs parisiens ne sont pas franciliens, ni même résidents.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — 2019 dépassé, pas par le Louvre ======================= -->
+  <!-- Périmètre constant : les sites qui déclarent des entrées en 2019 ET la dernière année -->
+  <dsfr-data-query id="s19" source="mn" where="annee:eq:2019, total:gt:0"></dsfr-data-query>
+  <dsfr-data-query id="sder" source="der" where="total:gt:0"></dsfr-data-query>
+  <dsfr-data-join id="pc" left="sder" right="s19" on="IDPatrimostat" type="inner" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-query id="pc-a" source="pc" group-by="k" aggregate="total:sum:t_der, p_total:sum:t_19, un:sum:n"></dsfr-data-query>
+  <dsfr-data-normalize id="pc-t" source="pc-a" compute="v = (t_der / t_19 - 1) * 100"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-2019">
+    <h2 id="t-2019" class="fr-h3">2019 est dépassé, mais pas au Louvre&nbsp;: la reprise vient des autres musées</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="an-bas">
+        <template>
+          Au plus bas, en {{annee}}, les musées de France n'ont déclaré que {{tot_mm:number:1}}&nbsp;millions
+          d'entrées.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="an-der">
+        <template>
+          En {{annee}}, les musées de France dépassent de {{v_tot:number:0}}&nbsp;% leur niveau de 2019
+          ({{tot_mm:number:1}} millions contre {{r_tot_mm:number:1}}). Versailles le retrouve à peine
+          (indice {{i_vs:number:0}}, base 100 en 2019)&nbsp;; <strong>le Louvre reste à l'indice {{i_lv:number:0}}</strong>
+          ({{lv_m:number:1}} millions d'entrées contre {{r_lv_m:number:1}})&nbsp;; ce sont les autres musées, pris
+          ensemble, qui font la reprise&nbsp;: <strong>indice {{i_aut:number:0}}</strong>.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Entrées des musées de France en indice base 100 en 2019">
+      <dsfr-data-chart id="g-2019" source="an-t" type="line"
+        label-field="Annee" value-field="i_lv:Louvre" value-fields="i_vs:Versailles, i_aut:Tous les autres musées"
+        y-min="0" unit-tooltip="(base 100 en 2019)"
+        reference-lines='[{"axis":"y","value":100,"label":"Niveau de 2019","dash":true}]'
+        databox databox-title="Entrées des musées de France par année, indice base 100 en 2019"
+        databox-source="Ministère de la Culture — Fréquentation des Musées de France (data.gouv.fr, Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-2019" source="an-t" label-field="Annee" value-field="i_lv,i_vs,i_aut,tot_m"
+        description="Trois courbes annuelles depuis 2014, en indice base 100 en 2019 : le Louvre, Versailles et l'ensemble des autres musées de France. Toutes s'effondrent en 2020 et 2021, sous 55. Les autres musées repassent au-dessus de 100 dès 2023 et montent à 112 ; Versailles revient à 102 ; le Louvre plafonne autour de 92. Le tableau ajoute le total national en millions d'entrées.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="pc-t">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Chaque année a son propre périmètre&nbsp;: des musées entrent, d'autres cessent de déclarer. À périmètre
+          constant — les {{n:number:0}}&nbsp;sites qui déclarent des entrées les deux années —, la hausse depuis 2019
+          est de {{v:number:1}}&nbsp;%&nbsp;: la conclusion ne tient pas au périmètre.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <h3 class="fr-h5 fr-mt-6w">Quatre entrées sur dix sont gratuites</h3>
+    <dsfr-data-repeat source="an-der">
+      <template>
+        <p class="odv-lecture">
+          En {{annee}}, {{p_gr:number:1}}&nbsp;% des entrées des musées de France sont gratuites. La part varie d'un musée à l'autre&nbsp;:
+          le tableau ci-dessous la donne pour chacun.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION — mon musée ======================= -->
+  <!-- Sites de la dernière année, joints à leur ligne de 2019 (gauche : un site
+       nouveau garde sa ligne, variation vide). IDPatrimostat unique par année en
+       2019 (vérifié : les deux doublons du fichier sont en 2021). -->
+  <dsfr-data-query id="e19" source="mn" where="annee:eq:2019"></dsfr-data-query>
+  <dsfr-data-join id="ex-j" left="der" right="e19" on="IDPatrimostat" type="left" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-normalize id="ex" source="ex-j"
+    compute="var19 = round((total / p_total - 1) * 100, 0);
+             p_grat = round(gratuit / total * 100, 0)"
+    rename="region:Région | departement:Département">
+  </dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: tous les sites, dernière année</h2>
+    <p class="fr-text--sm">
+      Une ligne par site déclarant, avec ses entrées de la dernière année, la part gratuite et l'évolution depuis
+      2019 quand le site déclarait déjà. Cherchez un musée, une ville, ou filtrez par région.
+    </p>
+    <p class="fr-text--xs fr-hint-text">
+      Une évolution de plusieurs centaines de pour cent compare à une année 2019 où le site était peu ouvert ou
+      déclarait autrement&nbsp;: le site principal de Carnavalet déclare moins de 9&nbsp;000 entrées par an de 2017 à
+      2020, puis 606&nbsp;383 en 2021 (relevé le 26&nbsp;septembre 2026). La colonne se lit avec cette réserve.
+    </p>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="ex-f" source="ex"
+          fields="Région, Département" display="Région:multiselect | Département:multiselect" hide-counts>
+        </dsfr-data-facets>
+      </details>
+
+      <div>
+        <dsfr-data-list source="ex-f"
+          columns="nom:Musée, ville:Ville, Département:Département, total:Entrées, p_grat:Gratuites (%), var19:Depuis 2019 (%)"
+          sort="total:desc" search pagination="20" count-label="site|sites" export="csv" decimals="0"
+          caption="Entrées des sites des musées de France, dernière année du fichier">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <dsfr-data-query id="sans-nom" source="der" where="nom_du_musee:isnull" group-by="k"
+    aggregate="un:sum:n, total:sum:t, sansmuseo:sum:m"></dsfr-data-query>
+  <dsfr-data-normalize id="sans-nom-t" source="sans-nom" compute="t_k = t / 1000"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn2">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Les musées sans entrée déclarée.</strong> La dernière année, {{zero:number:0}}&nbsp;musées sur
+            {{musees:number:0}} déclarent zéro entrée ou aucun chiffre. Le fichier ne dit pas pourquoi&nbsp;: sa
+            colonne «&nbsp;fermé&nbsp;» décrit l'état <em>actuel</em> du musée, identique sur ses onze années, et
+            des musées marqués fermés y déclarent des entrées. Ils sont écartés des classements et des tranches,
+            sans être supposés fermés.</li>
+          <li><strong>Les sites un par un dans les classements.</strong> {{sites:number:0}}&nbsp;lignes pour
+            {{musees:number:0}}&nbsp;musées&nbsp;: les annexes d'un même musée de France (même identifiant Muséofile)
+            sont additionnées. Le tableau d'exploration, lui, garde les sites.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="sans-nom-t">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Des noms manquants.</strong> La dernière année, {{n:number:0}}&nbsp;sites n'ont pas de nom dans le
+            fichier ({{t_k:number:0}}&nbsp;milliers d'entrées au total), dont {{m:number:0}} sans identifiant Muséofile
+            non plus&nbsp;: ceux-là sont classés comme un musée à part entière. Tous apparaissent sous
+            «&nbsp;nom non publié&nbsp;» suivi de leur ville, sans qu'on leur prête une identité.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>L'âge des visiteurs.</strong> Le fichier publie des colonnes «&nbsp;moins de 18&nbsp;ans&nbsp;» et
+        «&nbsp;18-25&nbsp;ans&nbsp;», mais elles sont vides pour 46&nbsp;% et 64&nbsp;% des sites en 2024 (relevé le
+        26&nbsp;septembre 2026)&nbsp;: une part calculée dessus décrirait les musées qui les remplissent, pas les
+        visiteurs. Les colonnes «&nbsp;scolaires&nbsp;» et «&nbsp;individuels&nbsp;», mieux remplies (une sur neuf
+        vide), sortent du propos de la page.</li>
+      <li><strong>Les visiteurs.</strong> Une entrée n'est pas une personne&nbsp;: un visiteur qui revient compte
+        plusieurs fois, et rien ne dit d'où il vient.</li>
+      <li><strong>Deux doublons.</strong> Relevé le 26&nbsp;septembre 2026&nbsp;: deux sites ont deux lignes pour
+        2021 (moins de 10&nbsp;000 entrées à eux deux, hors dernière année)&nbsp;; ils sont laissés tels quels
+        dans la série.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création sur un seul fichier du ministère de la Culture,
+        servi par l'API Tabular de data.gouv.fr. Le cadrage annonçait «&nbsp;deux établissements, 17&nbsp;millions
+        d'entrées&nbsp;»&nbsp;; rejoué, le chiffre tient (23,9&nbsp;% en 2024), et la donnée ajoute une nuance que le
+        cadrage n'avait pas vue&nbsp;: le retour au-dessus de 2019 ne doit rien au Louvre.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Charger 12&nbsp;292 lignes sans paginer.</strong> <code>fetch-mode="export"</code> lit
+              l'export Parquet de data.gouv au lieu de 62 pages de 200 lignes. Mesuré au navigateur le
+              26&nbsp;septembre 2026&nbsp;: trois allers-retours (métadonnées de la ressource, pied du fichier,
+              puis les neuf colonnes du <code>select</code> lues en parallèle par plages), ≈&nbsp;200&nbsp;Ko,
+              0,6&nbsp;s. La condition est de ne rien déléguer, ce que la page respecte&nbsp;: tout est calculé en
+              aval.</li>
+            <li><strong>La concentration en trois attributs.</strong> <code>running_sum</code> sur une part
+              (<code>share_percent</code> n'est pas nécessaire&nbsp;: la part est une colonne), puis un
+              <code>where="avant:lt:50"</code> compte les musées qui font la moitié.</li>
+            <li><strong>Aucune année en dur</strong> hors la référence 2019&nbsp;: la dernière année est lue dans la
+              donnée, et une jointure interne sur elle donne ses lignes.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>L'unité du fichier n'est pas le musée.</strong> Une ligne est un site&nbsp;; classer les
+              lignes aurait montré Carnavalet deux fois dans le top&nbsp;15. Rien ne le signale&nbsp;: seul un
+              <code>group-by</code> sur l'identifiant Muséofile, comparé au nombre de lignes, l'a montré.</li>
+            <li><strong>Une colonne qui ne dit pas ce que son nom dit.</strong> «&nbsp;fermé&nbsp;» est un état
+              actuel recopié sur toutes les années&nbsp;; l'utiliser comme filtre annuel aurait écarté des entrées
+              réelles.</li>
+            <li><strong>La mise en évidence dépend du tri.</strong> <code>highlight-index="[0, 1]"</code> désigne
+              les deux premiers rangs&nbsp;: c'est exactement le propos ici, mais le titre qui nomme le Louvre et
+              Versailles, lui, est écrit en dur.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger tout le jeu Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export"</code></td><td>Natif, un fichier Parquet lu par plages</td></tr>
+            <tr><td>Clé et nom de repli (sites sans Muséofile)</td><td><code>dsfr-data-normalize compute="coalesce(…)"</code></td><td>Natif</td></tr>
+            <tr><td>Part cumulée, musées pour la moitié</td><td><code>dsfr-data-query aggregate="part:running_sum"</code> + <code>where</code></td><td>Natif</td></tr>
+            <tr><td>Part des musées et des entrées par tranche</td><td><code>compute</code> (tranche) + <code>aggregate="…:share_percent"</code></td><td>Natif</td></tr>
+            <tr><td>Indice base 100 en 2019</td><td><code>dsfr-data-join</code> sur une clé constante + <code>compute</code></td><td>Faisable, deux balises</td></tr>
+            <tr><td>Périmètre constant 2019 / dernière année</td><td><code>dsfr-data-join type="inner" on="IDPatrimostat"</code></td><td>Natif</td></tr>
+            <tr><td>« Mon musée »</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-list search</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un fichier, une source, et toute l'histoire se calcule dans la page.</strong> Ce qui a coûté,
+          c'est de comprendre la donnée&nbsp;: une ligne qui est un site et non un musée, une colonne «&nbsp;fermé&nbsp;»
+          qui n'est pas annuelle, deux sites sans nom. L'outil n'a posé aucune limite&nbsp;; la concentration est
+          réelle — un quart pour deux musées, la moitié pour quinze.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

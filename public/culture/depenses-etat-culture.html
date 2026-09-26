@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Les dépenses de l'État pour la culture — open-data-viz</title>
+  <meta name="description" content="Plus d'un euro sur deux que le ministère de la Culture dépense dans les départements l'est à Paris : 801 € par habitant en 2019, contre 21 € ailleurs. Création avec dsfr-data sur deux jeux du ministère de la Culture servis par l'API Tabular de data.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 3 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte le jeu « Dépenses du ministère de la Culture
+       par département » (2019, 100 lignes, hors dépenses de personnel), servi par
+       l'API Tabular, et le croise avec « Dépenses culturelles des départements »
+       (2023, 95 lignes) pour la seule question « l'État compense-t-il ? ».
+
+       LE CHAMP. 2019, une seule année : le jeu est ponctuel (« punctual »), il
+       n'y a pas de série. Les euros par habitant sont PUBLIÉS par le producteur,
+       arrondis à l'euro. La population n'est pas dans le jeu : elle est dérivée
+       ligne à ligne (total ÷ euros par habitant). L'arrondi y introduit une erreur
+       qui reste sous 0,1 % pour Paris et atteint ±10 % pour un département à 5 €
+       (Corse, Landes) : elle ne sert qu'aux RATIOS DE SOMMES (part de la
+       population, euros par habitant hors Paris), jamais à un classement.
+
+       LE FICHIER RÉGIONAL n'est pas utilisé : ses 18 lignes somment 3,81 Md€ contre
+       3,10 Md€ pour les 100 départements, et sa notice cite en plus le service des
+       ressources humaines. Les deux fichiers ne mesurent pas la même chose.
+
+       Tabular : 100 et 95 lignes, une requête chacune (200 lignes par page). Tout
+       calcul se fait après un `normalize compute` : le schéma change, donc aucune
+       query aval ne délègue au serveur (PG-033 sans objet).
+       ========================================================================== -->
+
+  <!-- ---------- Dépenses du ministère par département, 2019 (100 lignes) ---------- -->
+  <dsfr-data-source id="etat" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="f6883692-2aa6-4c04-820e-f0186e29a884">
+  </dsfr-data-source>
+  <!-- Les colonnes « … en % » sont du texte (« 84% ») : on ne les lit pas, on
+       recalcule la part d'investissement depuis les euros. -->
+  <dsfr-data-normalize id="etat-n" source="etat"
+    rename="libelle_geographique:departement | Région:region | Total (€):total | Fonctionnement (€):fonc | Investissement (€):inv | Total euros par habitant:hab | Fonctionnement euros par habitant:hab_fonc | Investissement euros par habitant:hab_inv"
+    compute="pop = total / hab;
+             meur = round(total / 1000000, 1);
+             inv_part = round(inv / total * 100, 0);
+             paris = when code_insee = '75' then total else 0;
+             paris_pop = when code_insee = '75' then pop else 0;
+             paris_hab = when code_insee = '75' then hab else 0;
+             paris_fonc = when code_insee = '75' then hab_fonc else 0;
+             paris_inv = when code_insee = '75' then inv else 0;
+             idf = when region = 'Ile-de-France' then total else 0;
+             moins20 = when hab &lt; 20 then 1 else 0;
+             un = 1;
+             k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="hors-paris" source="etat-n" where="code_insee:neq:75"></dsfr-data-query>
+
+  <!-- ---------- La synthèse, sur une ligne ---------- -->
+  <dsfr-data-query id="syn-agg" source="etat-n" group-by="k"
+    aggregate="total:sum:total, pop:sum:pop, inv:sum:inv, paris:sum:paris, paris_pop:sum:paris_pop, paris_hab:sum:paris_hab, paris_fonc:sum:paris_fonc, paris_inv:sum:paris_inv, idf:sum:idf, moins20:sum:moins20, un:sum:n, hab:min:hab_min">
+  </dsfr-data-query>
+  <!-- Le deuxième département en euros : le plus petit des deux premiers. -->
+  <dsfr-data-query id="top2" source="etat-n" order-by="total:desc" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="second" source="top2" group-by="k" aggregate="total:min:second"></dsfr-data-query>
+  <dsfr-data-join id="syn-j" left="syn-agg" right="second" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="syn" source="syn-j"
+    compute="part_paris = paris / total * 100;
+             part_pop = paris_pop / pop * 100;
+             part_idf = idf / total * 100;
+             part_paris_inv = paris_inv / inv * 100;
+             fois_second = paris / second;
+             hab_nat = total / pop;
+             hab_hors = (total - paris) / (pop - paris_pop);
+             total_md = total / 1000000000;
+             paris_md = paris / 1000000000;
+             fois_hors = paris_hab / ((total - paris) / (pop - paris_pop))">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Les dépenses de l'État pour la culture</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Plus d'un euro sur deux que le ministère de la Culture dépense dans les départements l'est à Paris</h1>
+
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="fr-text--lead">
+          En 2019, hors salaires de ses agents, le ministère de la Culture a dépensé {{total_md:number:2}}&nbsp;milliards
+          d'euros répartis par département. <strong>{{part_paris:number:0}}&nbsp;% sont allés à Paris</strong>, où vivent
+          {{part_pop:number:1}}&nbsp;% des habitants&nbsp;: {{paris_hab:number}}&nbsp;€ par Parisien, contre
+          {{hab_hors:number:0}}&nbsp;€ en moyenne dans le reste de la France. Dans {{moins20:number}}&nbsp;départements sur
+          {{n:number}}, l'État a dépensé moins de 20&nbsp;€ par habitant, et {{hab_min:number}}&nbsp;€ dans les derniers.
+          Dépensé à Paris ne veut pas dire dépensé pour les Parisiens&nbsp;: une dépense est comptée là où elle est
+          faite, et Paris accueille la plupart des grands établissements nationaux, qui servent tout le pays.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, département de l'analyse budgétaire et de la synthèse, traitement Deps-Doc (2022)&nbsp;:
+      <a href="https://www.data.gouv.fr/datasets/depenses-du-ministere-de-la-culture-par-departement/" target="_blank" rel="noopener external">dépenses
+      du ministère de la Culture par département en 2019</a>, hors dépenses de personnel. Données lues à l'ouverture de
+      la page sur l'API Tabular de data.gouv.fr.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn" value="part_paris:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Part de Paris" label="des dépenses de l'État réparties par département, 2019"
+        lines='[{"value":"part_pop:max","decimals":1,"prefix":"pour","suffix":"des habitants"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="paris_hab:max" format="nombre" unit="€" span="4"
+        heading="Par Parisien" label="dépenses de l'État à Paris par habitant, 2019"
+        lines='[{"value":"paris_fonc:max","format":"nombre","decimals":0,"prefix":"dont","suffix":"€ de fonctionnement"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn" value="hab_hors:max" format="nombre" unit="€" span="4"
+        heading="Par habitant, hors Paris" label="moyenne pondérée des 99 autres départements, 2019"
+        lines='[{"value":"hab_nat:max","format":"nombre","decimals":0,"prefix":"France entière :","suffix":"€"}]'></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — la concentration en euros ======================= -->
+  <dsfr-data-query id="top10" source="etat-n" order-by="total:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-normalize id="top10-g" source="top10" rename="departement:Département | meur:Millions d'euros"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-euros">
+    <h2 id="t-euros" class="fr-h3">En euros, Paris reçoit vingt fois plus que le deuxième département</h2>
+    <dsfr-data-repeat source="syn">
+      <template>
+        <p class="odv-lecture">
+          {{paris_md:number:2}}&nbsp;milliards d'euros pour Paris&nbsp;: <strong>{{fois_second:number:0}}&nbsp;fois</strong>
+          la somme dépensée dans le deuxième département. Avec les sept autres départements franciliens, l'Île-de-France
+          reçoit {{part_idf:number:0}}&nbsp;% du total. La concentration touche aussi l'investissement&nbsp;: Paris en
+          absorbe {{part_paris_inv:number:0}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les dix départements où le ministère de la Culture dépense le plus, en millions d'euros">
+      <dsfr-data-chart id="g-euros" source="top10-g" type="bar" horizontal
+        label-field="Département" value-field="Millions d'euros" name="Dépenses de l'État (M€)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="M€"
+        databox databox-title="Les dix départements où le ministère de la Culture a le plus dépensé en 2019, hors personnel (millions d'euros)"
+        databox-source="Ministère de la Culture — DABS, Deps-Doc (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-euros" source="top10-g" label-field="Département" value-field="Millions d'euros"
+        description="Barres horizontales triées : les dix départements où le ministère de la Culture a le plus dépensé en 2019, en millions d'euros. Paris, mis en évidence, dépasse 1 700 millions ; toutes les autres barres restent sous 90 millions et paraissent minuscules à côté.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — hors Paris, par habitant ======================= -->
+  <!-- Les euros par habitant sont ceux du producteur, arrondis à l'euro : la somme
+       fonctionnement + investissement peut différer d'un euro du total (Meuse : 11 + 100 = 111
+       pour 110 publiés). -->
+  <dsfr-data-query id="top15" source="hors-paris" order-by="hab:desc" limit="15"></dsfr-data-query>
+  <dsfr-data-normalize id="top15-g" source="top15" rename="departement:Département"></dsfr-data-normalize>
+  <dsfr-data-query id="premier" source="hors-paris" order-by="hab:desc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-hab">
+    <h2 id="t-hab" class="fr-h3">Hors Paris, le premier département par habitant le doit presque entièrement à l'investissement</h2>
+    <dsfr-data-repeat source="premier">
+      <template>
+        <p class="odv-lecture">
+          Sans Paris, le classement par habitant s'étale de {{hab:number}}&nbsp;€ à quelques euros. En tête, la
+          {{departement}}&nbsp;: {{hab:number}}&nbsp;€ par habitant, dont <strong>{{inv_part:number}}&nbsp;%
+          d'investissement</strong>. Le jeu ne dit pas quelle opération&nbsp;; et comme le ministère n'a publié qu'une
+          année, rien ne dit qu'elle se répète&nbsp;: une grosse dépense d'équipement suffit à faire un premier du
+          classement. Ailleurs, le fonctionnement domine.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut odv-viz" data-code="Les quinze départements (hors Paris) où l'État dépense le plus par habitant, fonctionnement et investissement">
+      <dsfr-data-chart id="g-hab" source="top15-g" type="bar" horizontal stacked
+        label-field="Département" value-field="hab_fonc:Fonctionnement" value-fields="hab_inv:Investissement"
+        unit-tooltip="€/hab."
+        color-map="Fonctionnement:#000091,Investissement:#E4794A"
+        databox databox-title="Les quinze départements (hors Paris) où le ministère de la Culture a le plus dépensé par habitant en 2019 (euros par habitant)"
+        databox-source="Ministère de la Culture — DABS, Deps-Doc (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-hab" source="top15-g" label-field="Département" value-field="hab_fonc, hab_inv"
+        description="Barres horizontales empilées, triées par dépense totale par habitant : les quinze départements hors Paris où l'État dépense le plus pour la culture, en séparant fonctionnement et investissement. La Meuse, en tête avec 110 euros, est presque entièrement de l'investissement ; tous les autres restent sous 80 euros et sont surtout du fonctionnement.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Euros par habitant publiés par le ministère, arrondis à l'euro&nbsp;: fonctionnement et investissement peuvent
+      différer d'un euro du total.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — l'État compense-t-il les départements ? ======================= -->
+  <!-- Croisement avec les dépenses culturelles des conseils départementaux 2023
+       (95 lignes). Clé code_insee, côté droit UNIQUE (95 codes distincts sur 95 lignes,
+       vérifié à l'API). Jointure interne : tombent Paris (absent du fichier 2023),
+       la Corse (« 20 » côté État, pas de ligne 2023), la Martinique et la Guyane
+       (collectivités uniques) et le Bas-Rhin / Haut-Rhin (une ligne « 67,68 » pour la
+       Collectivité européenne d'Alsace). Années différentes (2019 / 2023) : on compare
+       des niveaux par tranche, jamais un ratio ligne à ligne.
+       Tranches de l'État : bornes éditoriales (12 et 20 €), qui coupent les 94
+       départements comparables en trois groupes proches des tiers (21 / 36 / 37). -->
+  <dsfr-data-source id="cd" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="6126f348-eb0b-49e6-8850-5fe1e1a350e3">
+  </dsfr-data-source>
+  <dsfr-data-join id="croise" left="hors-paris" right="cd" on="code_insee" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="croise-n" source="croise"
+    compute="tranche = when hab &lt; 12 then 'L’État dépense moins de 12 €' when hab &lt; 20 then 'L’État dépense de 12 à 19 €' else 'L’État dépense 20 € ou plus';
+             ordre = when hab &lt; 12 then 1 when hab &lt; 20 then 2 else 3;
+             cd_total = depenses_culturelles_totales_k_eur * 1000">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="tranches" source="croise-n" group-by="ordre, tranche"
+    aggregate="total:sum:total, pop:sum:pop, cd_total:sum:cd_total, population_annee:sum:cd_pop, un:sum:n"
+    order-by="ordre:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tranches-t" source="tranches"
+    compute="etat_hab = round(total / pop, 1); cd_hab = round(cd_total / cd_pop, 1); k = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="tranches-g" source="tranches-t"
+    rename="tranche:Tranche | etat_hab:État (2019) | cd_hab:Conseil départemental (2023)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="tranches-syn" source="tranches-t" group-by="k"
+    aggregate="etat_hab:min:e_min, etat_hab:max:e_max, cd_hab:min:c_min, cd_hab:max:c_max, n:sum:n">
+  </dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-compense">
+    <h2 id="t-compense" class="fr-h3">L'État ne compense pas les départements, et ne les double pas non plus</h2>
+    <dsfr-data-repeat source="tranches-syn">
+      <template>
+        <p class="odv-lecture">
+          Rangeons les {{n:number}}&nbsp;départements comparables selon ce que l'État y dépense&nbsp;: de
+          {{e_min:number:1}} à {{e_max:number:1}}&nbsp;€ par habitant en moyenne d'un groupe à l'autre. Ce que dépense le
+          conseil départemental, lui, ne bouge presque pas&nbsp;: <strong>entre {{c_min:number:1}} et
+          {{c_max:number:1}}&nbsp;€</strong> dans les trois groupes. Là où l'État dépense peu, le département ne
+          rattrape pas&nbsp;; là où il dépense beaucoup, le département ne s'y ajoute pas davantage. Les deux budgets
+          suivent chacun leur logique.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Dépense culturelle par habitant de l'État et du conseil départemental, selon le niveau de dépense de l'État">
+      <dsfr-data-chart id="g-compense" source="tranches-g" type="bar"
+        label-field="Tranche" value-field="État (2019)" value-fields="Conseil départemental (2023)"
+        unit-tooltip="€/hab." y-min="0"
+        color-map="État (2019):#000091,Conseil départemental (2023):#E4794A"
+        databox databox-title="Dépense culturelle par habitant de l'État (2019) et du conseil départemental (2023), selon ce que l'État dépense dans le département (moyennes pondérées par la population)"
+        databox-source="Ministère de la Culture — DABS, Deps-Doc ; DEPS, dépenses culturelles des collectivités 2023 (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-compense" source="tranches-g" label-field="Tranche" value-field="État (2019), Conseil départemental (2023)"
+        description="Barres groupées, trois groupes de départements rangés selon ce que l'État y dépense par habitant pour la culture (moins de 12 euros, 12 à 19 euros, 20 euros ou plus). La barre de l'État monte d'un groupe à l'autre, d'environ 8 à 30 euros ; celle du conseil départemental reste à peu près au même niveau, entre 16 et 19 euros, dans les trois groupes.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Deux années différentes&nbsp;: 2019 pour l'État (seule année publiée), 2023 pour les départements. On compare des
+      niveaux par groupe, pas un département à lui-même. Moyennes pondérées par la population&nbsp;: somme des dépenses
+      sur somme des habitants de chaque groupe. Hors Paris, Corse, Martinique, Guyane et Alsace, qui n'ont pas de ligne
+      départementale en 2023. Les dépenses des départements par territoire sont détaillées dans
+      <a href="/culture/depenses-culturelles-collectivites">la page consacrée aux collectivités</a>.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <!-- Carte sans Paris : à 801 €, il écraserait l'échelle de tous les autres (5 à 110 €).
+       La Corse est publiée sous le code « 20 », que la carte départementale ne connaît
+       pas : sa ligne est dupliquée en 2A et 2B (même valeur par habitant, population
+       divisée par deux pour que le résumé pondéré ne la compte pas deux fois). -->
+  <dsfr-data-query id="carte-base" source="hors-paris" where="code_insee:neq:20"></dsfr-data-query>
+  <dsfr-data-query id="corse" source="etat-n" where="code_insee:eq:20"></dsfr-data-query>
+  <dsfr-data-normalize id="corse-a" source="corse" compute="code_insee = '2A'; departement = 'Corse-du-Sud (Corse)'; pop = pop / 2"></dsfr-data-normalize>
+  <dsfr-data-normalize id="corse-b" source="corse" compute="code_insee = '2B'; departement = 'Haute-Corse (Corse)'; pop = pop / 2"></dsfr-data-normalize>
+  <dsfr-data-concat id="carte" sources="carte-base, corse-a, corse-b"></dsfr-data-concat>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: et dans votre département&nbsp;?</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Plus le département est foncé, plus l'État y a dépensé par habitant en 2019. Paris n'est pas sur la carte&nbsp;: à
+      801&nbsp;€, il écraserait l'échelle de tous les autres. La Corse, publiée d'un seul chiffre pour l'île, colore ses
+      deux départements. Le chiffre affiché à côté de la carte est la moyenne pondérée par la population des
+      départements dessinés, donc hors Paris. Le tableau donne les 100&nbsp;lignes du jeu, Paris compris.
+    </p>
+    <div class="odv-chart-slot odv-viz" data-code="Carte des dépenses du ministère de la Culture par habitant et par département, hors Paris">
+      <dsfr-data-chart id="g-carte" source="carte" type="map"
+        code-field="code_insee" value-field="hab" name="Dépenses de l'État par habitant (€)"
+        unit-tooltip="€/hab." selected-palette="sequentialAscending"
+        map-summary="weighted" map-summary-weight="pop"
+        databox databox-title="Dépenses du ministère de la Culture par habitant en 2019, hors personnel, par département (hors Paris)"
+        databox-source="Ministère de la Culture — DABS, Deps-Doc (data.gouv.fr, API Tabular)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="carte" label-field="departement" value-field="hab"
+        description="Carte des départements colorés selon la dépense du ministère de la Culture par habitant en 2019, du plus clair (5 euros) au plus foncé (110 euros, la Meuse). Paris n'est pas représenté. Le résumé sous le titre donne la moyenne pondérée par la population des départements dessinés. Le tableau ci-dessous donne toutes les valeurs.">
+      </dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">Les 100 départements</h3>
+    <dsfr-data-list source="etat-n"
+      columns="departement:Département, region:Région, hab:Total (€/hab.), hab_fonc:Fonctionnement (€/hab.), hab_inv:Investissement (€/hab.), meur:Total (M€), inv_part:Part d'investissement (%)"
+      sort="hab:desc" search pagination="15" count-label="département|départements" export="csv"
+      caption="Dépenses du ministère de la Culture par département en 2019, hors personnel">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>Les salaires.</strong> Le jeu exclut les dépenses de personnel du ministère&nbsp;: la rémunération de
+        ses agents n'est comptée nulle part, ni à Paris ni ailleurs.</li>
+      <li><strong>Une évolution.</strong> Le ministère n'a publié qu'une année, 2019&nbsp;; un département porté par une
+        grosse dépense d'investissement cette année-là (la Meuse) peut n'avoir rien de tel l'année suivante.</li>
+      <li><strong>Le fichier régional.</strong> Le même producteur publie les dépenses par région, mais ses 18&nbsp;lignes
+        somment 3,81&nbsp;milliards d'euros, 0,7&nbsp;milliard de plus que les 100&nbsp;départements, et sa notice cite en
+        plus le service des ressources humaines. Faute de savoir ce que couvre l'écart, la page ne le mélange pas aux
+        départements.</li>
+      <li><strong>Qui profite de la dépense.</strong> Une dépense est rattachée au lieu où elle est faite. Les euros par
+        habitant d'un établissement national sont une convention de calcul, pas un service rendu aux seuls habitants du
+        département.</li>
+      <li><strong>Une population exacte.</strong> Le jeu ne donne pas la population&nbsp;: la page la déduit de chaque ligne
+        (total ÷ euros par habitant, arrondis à l'euro par le producteur). L'erreur est négligeable pour Paris et les
+        grands totaux, sensible pour les départements à quelques euros&nbsp;; elle ne sert qu'aux moyennes pondérées.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir de deux jeux du ministère de la Culture servis par l'API
+        Tabular de data.gouv.fr (100 et 95&nbsp;lignes). Le titre provisoire du cadrage opposait Paris (801&nbsp;€) aux
+        Landes (5&nbsp;€)&nbsp;; les chiffres sont confirmés, mais l'histoire que la donnée porte le mieux est la
+        concentration (56&nbsp;% des euros à Paris), et le croisement avec les départements a ajouté un constat que le
+        cadrage laissait en question.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Tabular en une requête.</strong> <code>api-type="tabular"</code> + <code>resource</code>&nbsp;: 100
+              lignes, une page de 200, rien à régler.</li>
+            <li><strong>Les colonnes à symboles.</strong> <code>Total (€)</code> ou <code>Région</code> se renomment dans
+              <code>rename</code> sans échappement.</li>
+            <li><strong>La jointure État × départements.</strong> <code>dsfr-data-join type="inner"</code> sur
+              <code>code_insee</code>, côté droit unique, puis moyennes pondérées par <code>group-by</code> et
+              <code>compute</code>&nbsp;: aucune moyenne de taux.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>La Corse sous un seul code.</strong> Le jeu publie «&nbsp;20&nbsp;», que la carte départementale ne
+              connaît pas&nbsp;: la ligne est dupliquée en 2A et 2B par deux <code>normalize compute</code> et un
+              <code>dsfr-data-concat</code>.</li>
+            <li><strong>Pas de médiane.</strong> Aucun agrégat <code>median</code> dans <code>dsfr-data-query</code>&nbsp;:
+              le chapô compte les départements sous 20&nbsp;€ au lieu de donner la médiane (17&nbsp;€).</li>
+            <li><strong>Le deuxième du classement.</strong> «&nbsp;Vingt fois le deuxième&nbsp;» demande une query
+              <code>limit="2"</code>, un <code>min</code> et une jointure sur clé constante.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Lire un jeu data.gouv</td><td><code>dsfr-data-source api-type="tabular" resource="…"</code></td><td>Natif</td></tr>
+            <tr><td>Part de Paris, euros par habitant pondérés</td><td><code>normalize compute</code> + <code>query group-by</code> (ratio de sommes)</td><td>Natif</td></tr>
+            <tr><td>Un département mis en évidence</td><td><code>selected-palette="neutral"</code> + <code>highlight-index</code></td><td>Natif</td></tr>
+            <tr><td>Fonctionnement / investissement</td><td><code>type="bar" horizontal stacked</code> + <code>color-map</code></td><td>Natif</td></tr>
+            <tr><td>Croiser État et départements</td><td><code>dsfr-data-join type="inner"</code> + tranches par <code>when</code></td><td>Natif</td></tr>
+            <tr><td>Corse « 20 » sur la carte</td><td>deux <code>compute</code> + <code>dsfr-data-concat</code></td><td>Contournement</td></tr>
+            <tr><td>Médiane</td><td>—</td><td>Absent (compte sous un seuil à la place)</td></tr>
+            <tr><td>Tableau exportable</td><td><code>dsfr-data-list</code> (recherche, tri, CSV)</td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un petit jeu, une grande concentration.</strong> Cent lignes suffisent à établir que Paris reçoit plus
+          de la moitié des euros du ministère localisés en département, et que les conseils départementaux ne compensent
+          pas l'écart. <code>dsfr-data</code> fait tout depuis la balise&nbsp;; ce qui coûte tient aux conventions du jeu
+          (Corse d'un seul code, population absente) plus qu'à la bibliothèque.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; la carte départementale est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

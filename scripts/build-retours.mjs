@@ -118,8 +118,9 @@ projects: [open-data-viz, dsfr-data]
 > ⚠️ **Note générée.** Ne pas éditer ici : la source est \`public/data/retours.json\` dans
 > [[open-data-viz]]. Après modification, relancer \`node scripts/build-retours.mjs\`.
 
-Registre tenu au fil de la reproduction du catalogue de visualisations de data.economie.gouv.fr
-avec [[dsfr-data]]. Chaque entrée naît d'une reproduction réelle, et porte la preuve de sa
+Registre tenu au fil du banc d'essai [[dsfr-data]] : reproduction des catalogues de visualisations
+de data.economie.gouv.fr, data.education.gouv.fr et data.sports.gouv.fr, recréation de pages en
+récit, puis création de dataviz nouvelles sur les données Culture et Développement durable. Chaque entrée naît d'une reproduction réelle, et porte la preuve de sa
 vérification. Voir la fiche [[open-data-viz]] pour l'avancement.
 
 ## Où en est le registre
@@ -145,7 +146,7 @@ vérifié n'entre pas au registre.
 Et surtout : avant de classer quelque chose en limite, se demander si l'obstacle ne vient pas
 d'avoir voulu **reproduire à l'identique** ce que fait Opendatasoft. ChartsBuilder propose
 souvent une autre architecture pour le même besoin. C'est ce que consigne la catégorie
-« faux problème » — et elle s'est déjà remplie deux fois.
+« faux problème » — ${compte('faux-probleme')} entrées à ce jour.
 
 ${TYPES.map(
   (t) => `## ${PICTOS[t.cle]} ${t.titre}
@@ -264,14 +265,17 @@ const exportIssues = `# Demandes à déposer sur bmatge/dsfr-data — rapport de
 
 Chaque demande naît d'une confrontation réelle au banc d'essai
 [open-data-viz](https://github.com/bmatge/open-data-viz) et porte la trace de sa vérification.
-Le banc couvre désormais **deux portails Opendatasoft de l'État** :
+Le banc couvre **trois portails Opendatasoft de l'État** reproduits, et deux portails de création :
 
-- **data.economie.gouv.fr** — 30 entrées du catalogue de visualisations, 24 reproduites (lots 1 à 11) ;
-- **data.education.gouv.fr** — 36 entrées du catalogue de data-visualisations, auditées et transposées
-  sur le papier (lot 12, fiches dans \`docs/portail-education/\`), y compris les cibles hébergées sur
-  \`equipements.sports.gouv.fr\`, \`dataeducation.opendatasoft.com\` et la forge des communs numériques.
+- **data.economie.gouv.fr** — le catalogue de visualisations (lots 1 à 11) ;
+- **data.education.gouv.fr** — le catalogue de data-visualisations (à partir du lot 12, fiches dans
+  \`docs/portail-education/\`), y compris les cibles hébergées sur \`equipements.sports.gouv.fr\`,
+  \`dataeducation.opendatasoft.com\` et la forge des communs numériques ;
+- **data.sports.gouv.fr** — les portraits de territoire et de fédération (lot 19) ;
+- **Culture** et **Développement durable** — pas de dataviz d'origine : des dataviz nouvelles, créées
+  en récit sur les jeux de ces ministères.
 
-Le second portail n'a pas redemandé les fonctions du premier : il a fait apparaître des **asymétries**
+Le portail Éducation n'a pas redemandé les fonctions du premier : il a fait apparaître des **asymétries**
 (une capacité présente sur un composant et absente de son voisin), des **silences** (un attribut qui
 ne produit rien sans le dire) et deux écarts de terrain que Bercy ne pouvait pas montrer — l'unité de
 temps du domaine est l'**année scolaire**, et une partie de ses jeux sont des **tables de mesures**
@@ -306,10 +310,11 @@ il faut donc chercher l'attribut dans le source, **puis vérifier dans quelle ve
 apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux constats antérieurs
 (AM-017, AM-039) en sont sortis.
 
-Le dépôt est désormais monté en \`dsfr-data@0.28.0\`, et le registre en tire les conséquences :
-les jalons 0.21.1 à 0.28.0 ont comblé ${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length} des constats déposés,
-passés au statut \`corrige\` et sortis de ce rapport. Chaque constat restant a été **rejoué contre
-la 0.28.0** avant d'entrer ici : ce qui suit n'est ni livré ni planifié à la date de ce rapport.
+Le dépôt charge aujourd'hui \`dsfr-data@0.42.0\`. Les montées successives ont comblé
+${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length} des constats déposés,
+passés au statut \`corrige\` et sortis de ce rapport. Chaque constat restant porte dans son champ
+*Vérifié* la date et la version contre lesquelles il a été rejoué : c'est cette preuve, et non la
+version du dépôt, qui établit qu'il tient encore.
 
 ## Priorisation
 

@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>La culture des collectivités — open-data-viz</title>
+  <meta name="description" content="Dépenses culturelles des collectivités en 2023 : de 4 à 69 € par habitant selon le département, mais six euros sur dix viennent des communes. Création avec dsfr-data sur quatre jeux du ministère de la Culture (API Tabular de data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://tabular-api.data.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 1 de docs/portail-culture/proposition.md.
+
+       QUATRE JEUX du ministère de la Culture (Deps-Doc, comptes de gestion 2023 de
+       la DGFiP), lus par l'adaptateur Tabular : départements (95 lignes), régions
+       (17), EPCI (879), communes de 3 500 habitants et plus (3 255).
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué le 2026-09-26 sur les jeux
+       complets) :
+       - « de 4 à 69 € » tient (Meurthe-et-Moselle 4,0 ; Hautes-Alpes 69,2), mais
+         ce n'est pas l'histoire principale : les départements ne pèsent que 10 %
+         des 10,96 Md€ déclarés par les quatre échelons ; les communes de 3 500
+         habitants et plus en pèsent 59,7 %. Titre élargi en conséquence.
+       - Le fichier des départements n'a pas 101 lignes mais 95 : Paris (Ville de
+         Paris, dans le fichier des communes), Corse, Martinique, Guyane
+         (collectivités uniques, dans le fichier des régions) n'y sont pas ;
+         l'Alsace est UNE ligne « 67,68 » (Collectivité européenne d'Alsace).
+       - Le Rhône est publié avec la population du Rhône ET de la Métropole de
+         Lyon (1 926 989), alors que la Métropole exerce elle-même les compétences
+         départementales : ses 8 € par habitant sont dilués. Recalculé en page.
+       - La population des EPCI compte deux fois la petite couronne (Métropole du
+         Grand Paris ET ses établissements publics territoriaux) : aucun euro par
+         habitant n'est calculé par échelon, seulement des euros.
+       - Les colonnes part_..._pct sont du texte (« 2% », « 5,2% ») : non tracées.
+       ========================================================================== -->
+
+  <!-- ---------------- Départements 2023 (95 lignes, une page Tabular) ---------------- -->
+  <dsfr-data-source id="dep" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="6126f348-eb0b-49e6-8850-5fe1e1a350e3"
+    select="annee, code_insee, libelle_departement, population_annee, depenses_culturelles_totales_k_eur, depenses_culturelles_fonctionnement_k_eur, depenses_culturelles_investissement_k_eur, depenses_culturelles_totales_eur_par_habitant">
+  </dsfr-data-source>
+  <!-- f_hab / i_hab recalculés depuis les milliers d'euros : les colonnes publiées en
+       euros par habitant sont arrondies à l'unité et ne somment pas toujours au total
+       (Hautes-Alpes : 15 + 55 = 70 pour 69). -->
+  <dsfr-data-normalize id="dep-n" source="dep"
+    compute="k = 'fr';
+             echelon = 'Départements';
+             eur = depenses_culturelles_totales_k_eur * 1000;
+             hab = depenses_culturelles_totales_eur_par_habitant;
+             hab_x = eur / population_annee;
+             f_hab = round(depenses_culturelles_fonctionnement_k_eur * 1000 / population_annee, 1);
+             i_hab = round(depenses_culturelles_investissement_k_eur * 1000 / population_annee, 1);
+             m_eur = round(depenses_culturelles_totales_k_eur / 1000, 1);
+             inv_maj = when depenses_culturelles_investissement_k_eur > depenses_culturelles_fonctionnement_k_eur then 1 else 0;
+             un = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-max" source="dep-n" order-by="hab_x:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-min" source="dep-n" order-by="hab_x:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="dep-ext" left="dep-max" right="dep-min" on="k" type="inner" prefix-right="min_"></dsfr-data-join>
+  <dsfr-data-normalize id="dep-ext-t" source="dep-ext" compute="ecart = hab_x / min_hab_x"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-inv" source="dep-n" group-by="k" aggregate="inv_maj:sum:n_all, un:sum:tot_all"></dsfr-data-query>
+
+  <!-- ---------------- Régions 2023 (17 lignes) ---------------- -->
+  <dsfr-data-source id="reg" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="4dfccc0d-962c-4800-8599-b47730823a33"
+    select="annee, code_insee, libelle_region, population_annee, depenses_culturelles_totales_k_eur, depenses_culturelles_fonctionnement_k_eur, depenses_culturelles_investissement_k_eur, depenses_culturelles_totales_eur_par_habitant">
+  </dsfr-data-source>
+  <!-- Corse (94), Martinique (02), Guyane (03) : collectivités uniques, qui exercent
+       aussi les compétences d'un département. Guadeloupe (01) et La Réunion (04) ont
+       une région ET un département distincts. -->
+  <dsfr-data-normalize id="reg-n" source="reg"
+    compute="k = 'fr';
+             echelon = 'Régions et collectivités uniques';
+             eur = depenses_culturelles_totales_k_eur * 1000;
+             hab = depenses_culturelles_totales_eur_par_habitant;
+             groupe = when code_insee = '94' or code_insee = '02' or code_insee = '03' then 'cu'
+                      when code_insee = '01' or code_insee = '04' then 'om' else 'metro';
+             v_cu = when groupe = 'cu' then hab else null;
+             v_om = when groupe = 'om' then hab else null;
+             v_met = when groupe = 'metro' then hab else null">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="reg-tri" source="reg-n" order-by="hab:desc"></dsfr-data-query>
+  <dsfr-data-query id="reg-cu" source="reg-n" where="groupe:eq:cu" group-by="k" aggregate="hab:min:mini, hab:max:maxi"></dsfr-data-query>
+  <dsfr-data-query id="reg-met-max" source="reg-n" where="groupe:eq:metro" order-by="hab:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-met-min" source="reg-n" where="groupe:eq:metro" order-by="hab:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="reg-met" left="reg-met-min" right="reg-met-max" on="k" type="inner" prefix-right="max_"></dsfr-data-join>
+
+  <!-- ---------------- EPCI 2023 (879 lignes, export Parquet) ---------------- -->
+  <dsfr-data-source id="epci" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="c7328fc7-eef9-485e-b5f6-6d93495a1f09" fetch-mode="export"
+    select="code_insee, libelle_epci, population_annee, depenses_culturelles_totales_k_eur, depenses_culturelles_fonctionnement_k_eur, depenses_culturelles_investissement_k_eur, depenses_culturelles_totales_eur_par_habitant">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="epci-n" source="epci"
+    compute="k = 'fr';
+             echelon = 'Intercommunalités';
+             eur = depenses_culturelles_totales_k_eur * 1000;
+             hab = depenses_culturelles_totales_eur_par_habitant;
+             m_eur = round(depenses_culturelles_totales_k_eur / 1000, 1)">
+  </dsfr-data-normalize>
+
+  <!-- ---------------- Communes de 3 500 hab. et plus, 2023 (3 255 lignes, export Parquet) ---------------- -->
+  <dsfr-data-source id="com" api-type="tabular" base-url="https://tabular-api.data.gouv.fr"
+    resource="f27f0329-1a0c-487c-9186-cc6f387fe155" fetch-mode="export"
+    select="code_insee, nom_commune, population_annee, depenses_culturelles_totales_k_eur, depenses_culturelles_fonctionnement_k_eur, depenses_culturelles_investissement_k_eur, depenses_culturelles_totales_eur_par_habitant">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="com-n" source="com"
+    compute="k = 'fr';
+             echelon = 'Communes de 3 500 habitants et plus';
+             eur = depenses_culturelles_totales_k_eur * 1000;
+             hab = depenses_culturelles_totales_eur_par_habitant;
+             m_eur = round(depenses_culturelles_totales_k_eur / 1000, 2);
+             zero = when depenses_culturelles_totales_k_eur = 0 then 1 else 0;
+             un = 1;
+             ord = when population_annee < 10000 then 1 when population_annee < 50000 then 2
+                   when population_annee < 100000 then 3 else 4;
+             classe = when ord = 1 then '3 500 à 9 999 habitants' when ord = 2 then '10 000 à 49 999 habitants'
+                      when ord = 3 then '50 000 à 99 999 habitants' else '100 000 habitants et plus';
+             tranche = when depenses_culturelles_totales_k_eur = 0 then '0 € déclaré'
+                       when hab < 50 then 'moins de 50 €' when hab < 100 then '50 à 99 €'
+                       when hab < 200 then '100 à 199 €' when hab < 500 then '200 à 499 €' else '500 € et plus'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="com-zero" source="com-n" group-by="k" aggregate="zero:sum:n, un:sum:tot"></dsfr-data-query>
+  <dsfr-data-query id="com-taille-g" source="com-n" group-by="k, ord, classe"
+    aggregate="eur:sum:eur, population_annee:sum:pop, un:sum:n" order-by="ord:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="com-taille" source="com-taille-g"
+    compute="Taille = classe; hab = round(eur / pop, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="com-petites" source="com-taille" where="ord:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="com-grandes" source="com-taille" where="ord:eq:4"></dsfr-data-query>
+  <dsfr-data-join id="com-pg" left="com-petites" right="com-grandes" on="k" type="inner" prefix-right="g_"></dsfr-data-join>
+
+  <!-- ---------------- Les quatre échelons empilés (en euros, jamais en €/hab) ---------------- -->
+  <dsfr-data-query id="t-com" source="com-n" group-by="echelon" aggregate="eur:sum:eur"></dsfr-data-query>
+  <dsfr-data-query id="t-epci" source="epci-n" group-by="echelon" aggregate="eur:sum:eur"></dsfr-data-query>
+  <dsfr-data-query id="t-dep" source="dep-n" group-by="echelon" aggregate="eur:sum:eur"></dsfr-data-query>
+  <dsfr-data-query id="t-reg" source="reg-n" group-by="echelon" aggregate="eur:sum:eur"></dsfr-data-query>
+  <dsfr-data-concat id="ech-c" sources="t-com, t-epci, t-dep, t-reg"></dsfr-data-concat>
+  <dsfr-data-query id="ech-p" source="ech-c" group-by="echelon"
+    aggregate="eur:sum, eur__sum:share_percent:part" order-by="eur__sum:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="ech" source="ech-p"
+    compute="k = 'fr'; Echelon = echelon; md = round(eur__sum / 1000000000, 2); part_r = round(part, 1)"></dsfr-data-normalize>
+  <dsfr-data-query id="ech-com" source="ech" where="Echelon:contains:Communes"></dsfr-data-query>
+  <!-- Une ligne de synthèse pour le chapô : une phrase = un seul dsfr-data-repeat. -->
+  <dsfr-data-normalize id="ech-i" source="ech"
+    compute="p_com = when contains(Echelon, 'Communes') then part else 0;
+             p_dep = when Echelon = 'Départements' then part else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="ech-syn-g" source="ech-i" group-by="k" aggregate="eur__sum:sum:eur, p_com:sum:p_com, p_dep:sum:p_dep"></dsfr-data-query>
+  <dsfr-data-normalize id="ech-syn" source="ech-syn-g" compute="md = eur / 1000000000"></dsfr-data-normalize>
+
+  <!-- ---------------- Le Rhône, recalculé hors Métropole de Lyon ---------------- -->
+  <dsfr-data-query id="rhone" source="dep-n" where="code_insee:eq:69"></dsfr-data-query>
+  <dsfr-data-query id="lyon" source="epci-n" where="code_insee:eq:200046977"></dsfr-data-query>
+  <dsfr-data-join id="rhone-j" left="rhone" right="lyon" on="k" type="inner" prefix-right="ml_"></dsfr-data-join>
+  <dsfr-data-normalize id="rhone-t" source="rhone-j"
+    compute="pop_hors = population_annee - ml_population_annee; hab_corr = eur / pop_hors"></dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">La culture des collectivités</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Culture&nbsp;: de 4 à 69&nbsp;€ par habitant selon le département, mais six euros sur dix viennent des communes</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="dep-ext-t">
+        <template>
+          En {{annee}}, le département qui a le plus dépensé pour la culture par habitant — {{libelle_departement}} — y a
+          consacré {{hab_x:number:0}}&nbsp;€&nbsp;; le moins dépensier — {{min_libelle_departement}} —
+          {{min_hab_x:number:0}}&nbsp;€&nbsp;: <strong>{{ecart:number:0}}&nbsp;fois moins</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="ech-syn">
+        <template>
+          Mais le département est un petit financeur&nbsp;: sur {{md:number:1}}&nbsp;milliards d'euros déclarés par les
+          quatre échelons de collectivités, <strong>{{p_com:number:0}}&nbsp;% viennent des communes</strong> et
+          {{p_dep:number:0}}&nbsp;% des départements.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture (Deps-Doc), d'après les comptes de gestion 2023 des collectivités (DGFiP)&nbsp;:
+      dépenses culturelles des départements, des régions, des intercommunalités et des communes de 3&nbsp;500 habitants
+      et plus, publiées sur data.gouv.fr et lues par l'API Tabular au chargement de la page. Fonctionnement et
+      investissement réunis, euros courants.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="ech-com" value="part:max" decimals="0" unit="%" span="4"
+        heading="Part des communes" label="dans la dépense culturelle des quatre échelons de collectivités"></dsfr-data-kpi>
+      <dsfr-data-kpi source="com-n" value="eur:sum / population_annee:sum" decimals="0" unit="€" span="4"
+        heading="Par habitant, communes" label="dépense des communes de 3 500 habitants et plus, rapportée à leur population"></dsfr-data-kpi>
+      <dsfr-data-kpi source="dep-n" value="eur:sum / population_annee:sum" decimals="0" unit="€" span="4"
+        heading="Par habitant, départements" label="dépense des 95 lignes du fichier, rapportée à leur population publiée"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — qui paie ======================= -->
+  <!-- Tri décroissant : les communes arrivent en tête (vérifié au navigateur), d'où
+       highlight-index [0]. Graphique mono-série : pas de color-map. -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-echelons">
+    <h2 id="t-echelons" class="fr-h3">Six euros sur dix viennent des communes, un sur dix des départements</h2>
+    <dsfr-data-repeat source="ech-com">
+      <template>
+        <p class="odv-lecture">
+          Les communes de 3&nbsp;500 habitants et plus ont dépensé {{md:number:2}}&nbsp;milliards d'euros pour la culture
+          — bibliothèques, conservatoires, musées, salles, subventions aux associations —, soit {{part_r:number:1}}&nbsp;%
+          du total des quatre échelons. Et c'est un minimum&nbsp;: les communes plus petites ne sont pas dans le fichier.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Dépense culturelle par échelon de collectivité">
+      <dsfr-data-chart id="g-echelons" source="ech" type="bar" horizontal
+        label-field="Echelon" value-field="md" name="Dépenses culturelles (Md€)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="Md€"
+        databox databox-title="Dépenses culturelles des collectivités par échelon, 2023 (milliards d'euros)"
+        databox-source="Ministère de la Culture (Deps-Doc), comptes de gestion DGFiP — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-echelons" source="ech" label-field="Echelon" value-field="md,part_r"
+        description="Barres horizontales, une par échelon de collectivité, triées de la plus forte à la plus faible dépense culturelle en 2023, en milliards d'euros. Les communes de 3 500 habitants et plus, mises en évidence, dépassent à elles seules le total des trois autres échelons ; viennent ensuite les intercommunalités, les départements, puis les régions et collectivités uniques. Le tableau donne aussi la part de chaque échelon.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Sommes des fichiers publiés, sans correction des doubles comptes&nbsp;: une subvention d'un département à une
+      commune peut figurer dans les dépenses des deux, et le jeu ne permet pas de l'isoler. Aucun montant par habitant
+      n'est calculé par échelon&nbsp;: les populations des intercommunalités se chevauchent (Métropole du Grand Paris
+      et ses territoires).
+    </p>
+  </section>
+
+  <!-- ======================= LA CARTE — de 4 à 69 € ======================= -->
+  <!-- L'Alsace est UNE ligne « 67,68 » : split + explode la dessinent sur ses deux
+       départements, avec le même montant par habitant. map-summary="none" : un
+       résumé pondéré compterait la population alsacienne deux fois. -->
+  <dsfr-data-normalize id="dep-s" source="dep-n" split="code_insee"></dsfr-data-normalize>
+  <dsfr-data-query id="dep-carte" source="dep-s" group-by="code_insee, libelle_departement" explode="code_insee"
+    aggregate="hab:max:hab"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-carte">
+    <h2 id="t-carte" class="fr-h3">D'un département à l'autre, la dépense culturelle varie de un à dix-sept</h2>
+    <dsfr-data-repeat source="dep-ext-t">
+      <template>
+        <p class="odv-lecture">
+          {{libelle_departement}} en tête avec {{hab_x:number:0}}&nbsp;€ par habitant, {{min_libelle_departement}} en queue
+          avec {{min_hab_x:number:0}}&nbsp;€. La carte ne dessine pas un nord et un sud&nbsp;: les départements
+          ruraux et montagneux des Alpes du Sud, des Pyrénées et du Massif central côtoient en haut les Hauts-de-Seine&nbsp;;
+          des départements très peuplés — Gironde, Rhône, Seine-et-Marne — sont en bas.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Carte des dépenses culturelles des départements par habitant">
+      <dsfr-data-chart id="g-carte" source="dep-carte" type="map"
+        code-field="code_insee" value-field="hab" name="Dépense culturelle (€ par habitant)" unit-tooltip="€"
+        selected-palette="sequentialAscending" map-summary="none"
+        databox databox-title="Dépenses culturelles des départements par habitant, 2023 (euros)"
+        databox-source="Ministère de la Culture (Deps-Doc), comptes de gestion DGFiP — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="dep-carte" label-field="libelle_departement" value-field="hab"
+        description="Carte des départements colorés selon leur dépense culturelle par habitant en 2023. Les plus foncés sont les Hautes-Alpes, les Alpes-de-Haute-Provence, les Hauts-de-Seine, les Hautes-Pyrénées, la Creuse et le Lot ; les plus clairs, la Meurthe-et-Moselle, Mayotte, la Côte-d'Or et La Réunion. Paris, la Corse, la Martinique et la Guyane n'ont pas de valeur. Le tableau donne le montant de chaque département.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Sans valeur sur la carte, et peints d'un bleu vif qui n'appartient pas à l'échelle&nbsp;: Paris, dont la Ville exerce les compétences du département et figure parmi les
+      communes, la Corse, la Martinique et la Guyane, où une collectivité unique réunit région et département (voir
+      les régions plus bas). L'Alsace est publiée comme une seule collectivité&nbsp;: Bas-Rhin et Haut-Rhin portent
+      le même montant.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — une année de travaux ======================= -->
+  <dsfr-data-query id="dep-top" source="dep-n" order-by="hab_x:desc" limit="10"></dsfr-data-query>
+  <dsfr-data-query id="dep-top-inv" source="dep-top" group-by="k" aggregate="inv_maj:sum:n"></dsfr-data-query>
+  <dsfr-data-join id="dep-inv-j" left="dep-top-inv" right="dep-inv" on="k" type="inner"></dsfr-data-join>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-inv">
+    <h2 id="t-inv" class="fr-h3">En tête du classement, une année de travaux compte autant qu'un budget</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="dep-max">
+        <template>
+          <p class="fr-mb-1w">Premier département du classement ({{libelle_departement}})&nbsp;: {{i_hab:number:0}}&nbsp;€ sur
+          {{hab_x:number:0}} sont de l'investissement — construction, rénovation, achat d'équipement —, contre
+          {{f_hab:number:0}}&nbsp;€ de fonctionnement.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="dep-inv-j">
+        <template>
+          <p class="fr-mb-0">Parmi les dix départements les plus dépensiers, {{n:number:0}} investissent plus qu'ils ne
+          dépensent en fonctionnement&nbsp;; sur l'ensemble du fichier, {{n_all:number:0}} sur {{tot_all:number:0}}. Un seul
+          millésime ne dit pas si c'est une politique ou un chantier&nbsp;: ce classement peut changer d'une année sur
+          l'autre.</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Fonctionnement et investissement des dix départements les plus dépensiers">
+      <dsfr-data-chart id="g-inv" source="dep-top" type="bar" horizontal stacked
+        label-field="libelle_departement" value-field="f_hab:Fonctionnement" value-fields="i_hab:Investissement"
+        unit-tooltip="€"
+        databox databox-title="Dépenses culturelles par habitant des dix départements les plus dépensiers, fonctionnement et investissement, 2023 (euros)"
+        databox-source="Ministère de la Culture (Deps-Doc), comptes de gestion DGFiP — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-inv" source="dep-top" label-field="libelle_departement" value-field="f_hab,i_hab"
+        description="Barres horizontales empilées pour les dix départements qui dépensent le plus pour la culture par habitant en 2023, du premier au dixième : fonctionnement puis investissement. Dans les Hautes-Alpes et les Hautes-Pyrénées, l'investissement fait l'essentiel de la barre ; dans la Creuse, le Gers ou la Guadeloupe, c'est le fonctionnement.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Fonctionnement et investissement recalculés en euros par habitant à partir des milliers d'euros publiés&nbsp;:
+      leur somme peut différer d'un euro du total arrondi que publie le fichier.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — les régions ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-reg">
+    <h2 id="t-reg" class="fr-h3">Là où une seule collectivité porte région et département, la culture régionale pèse bien plus</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="reg-cu">
+        <template>
+          <p class="fr-mb-1w">La Corse, la Martinique et la Guyane dépensent de {{mini:number:0}} à {{maxi:number:0}}&nbsp;€ par habitant&nbsp;:
+          ce ne sont pas des régions plus généreuses, mais des collectivités uniques qui exercent aussi les compétences
+          d'un département.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-met">
+        <template>
+          <p class="fr-mb-0">Les régions métropolitaines vont de {{hab:number:0}}&nbsp;€ ({{libelle_region}}) à
+          {{max_hab:number:0}}&nbsp;€ ({{max_libelle_region}}).</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Dépenses culturelles des régions par habitant">
+      <dsfr-data-chart id="g-reg" source="reg-tri" type="bar" horizontal stacked
+        label-field="libelle_region" value-field="v_cu:Collectivité unique (région et département)"
+        value-fields="v_om:Région d'outre-mer, v_met:Région métropolitaine" unit-tooltip="€"
+        databox databox-title="Dépenses culturelles des régions et collectivités uniques par habitant, 2023 (euros)"
+        databox-source="Ministère de la Culture (Deps-Doc), comptes de gestion DGFiP — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-reg" source="reg-tri" label-field="libelle_region" value-field="hab,groupe"
+        description="Barres horizontales, une par région ou collectivité unique, triées de la plus forte à la plus faible dépense culturelle par habitant en 2023, colorées selon le statut : collectivité unique, région d'outre-mer, région métropolitaine. Les trois collectivités uniques (Corse, Guyane, Martinique) arrivent en tête, puis La Réunion et la Guadeloupe ; les régions métropolitaines ferment le classement, l'Île-de-France en dernier. Dans le tableau, la colonne groupe vaut cu pour une collectivité unique, om pour une région d'outre-mer, metro pour une région métropolitaine.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — la taille des communes ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-taille">
+    <h2 id="t-taille" class="fr-h3">Plus la commune est grande, plus elle dépense par habitant</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="com-pg">
+        <template>
+          <p class="fr-mb-1w">Les {{n:number:0}}&nbsp;communes de 3&nbsp;500 à 9&nbsp;999 habitants dépensent
+          {{hab:number:0}}&nbsp;€ par habitant pour la culture&nbsp;; les {{g_n:number:0}} villes de 100&nbsp;000 habitants
+          et plus, <strong>{{g_hab:number:0}}&nbsp;€</strong>.</p>
+        </template>
+      </dsfr-data-repeat>
+      <p class="fr-mb-0">Une ville-centre finance des équipements — conservatoire, théâtre, musée — dont profitent aussi les
+      habitants des communes voisines, qui ne sont pas dans son dénominateur.</p>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Dépense culturelle des communes par habitant selon leur taille">
+      <dsfr-data-chart id="g-taille" source="com-taille" type="bar"
+        label-field="Taille" value-field="hab" name="Dépense culturelle (€ par habitant)" unit-tooltip="€"
+        databox databox-title="Dépenses culturelles des communes par habitant selon leur taille, 2023 (euros)"
+        databox-source="Ministère de la Culture (Deps-Doc), comptes de gestion DGFiP — data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-taille" source="com-taille" label-field="Taille" value-field="hab,n"
+        description="Barres verticales, une par taille de commune, de 3 500 à 9 999 habitants jusqu'à 100 000 habitants et plus : la dépense culturelle par habitant, calculée comme la somme des dépenses de la classe divisée par la somme de ses habitants. Elle monte avec la taille, et fait plus que doubler de la première à la dernière classe. Le tableau donne aussi le nombre de communes de chaque classe.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Montant par habitant d'une classe = total de ses dépenses ÷ total de ses habitants, et non la moyenne des
+      montants par habitant des communes, qui donnerait à une commune de 3&nbsp;500 habitants le même poids que Lyon.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: votre commune, votre intercommunalité, votre département</h2>
+    <dsfr-data-repeat source="com-zero">
+      <template>
+        <p class="odv-lecture">
+          {{n:number:0}}&nbsp;communes sur {{tot:number:0}} déclarent 0&nbsp;€ de dépense culturelle. C'est une écriture
+          comptable — la fonction «&nbsp;culture&nbsp;» n'est pas renseignée dans leurs comptes, la dépense a pu être
+          imputée ailleurs ou portée par l'intercommunalité —, pas la preuve qu'il ne s'y passe rien.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <h3 class="fr-h5 fr-mt-4w">Les communes de 3&nbsp;500 habitants et plus</h3>
+    <div class="fr-mb-2w">
+      <dsfr-data-facets id="com-ff" source="com-n" fields="classe, tranche"
+        labels="classe:Taille de la commune | tranche:Dépense culturelle par habitant"
+        display="classe:select | tranche:select" hide-counts></dsfr-data-facets>
+    </div>
+    <dsfr-data-list source="com-ff"
+      columns="nom_commune:Commune, code_insee:Code INSEE, population_annee:Habitants, m_eur:Dépense (M€), hab:€ par habitant, classe:Taille"
+      sort="hab:desc" search pagination="15" count-label="commune" export="csv"
+      caption="Dépenses culturelles 2023 des communes de 3 500 habitants et plus">
+    </dsfr-data-list>
+
+    <h3 class="fr-h5 fr-mt-6w">Les intercommunalités</h3>
+    <dsfr-data-list source="epci-n"
+      columns="libelle_epci:Intercommunalité, code_insee:SIREN, population_annee:Habitants, m_eur:Dépense (M€), hab:€ par habitant"
+      sort="hab:desc" search pagination="15" count-label="intercommunalité" export="csv"
+      caption="Dépenses culturelles 2023 des intercommunalités">
+    </dsfr-data-list>
+
+    <h3 class="fr-h5 fr-mt-6w">Les départements</h3>
+    <dsfr-data-list source="dep-n"
+      columns="libelle_departement:Département, code_insee:Code, population_annee:Habitants, m_eur:Dépense (M€), hab:€ par habitant, f_hab:dont fonctionnement (€/hab.), i_hab:dont investissement (€/hab.)"
+      sort="hab:desc" search pagination="20" count-label="département" export="csv"
+      caption="Dépenses culturelles 2023 des départements">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm fr-mb-0">
+      <li><strong>Les communes de moins de 3&nbsp;500 habitants.</strong> Elles ne sont pas publiées&nbsp;: la part des
+        communes dans le total est un plancher, et leur dépense par habitant ne vaut que pour les communes du fichier.</li>
+      <li><strong>Plus d'une année.</strong> Les quatre fichiers ne portent que 2023&nbsp;: aucune évolution, et un
+        investissement ponctuel pèse de tout son poids.</li>
+      <li><strong>La part de la culture dans le budget de chaque collectivité.</strong> Le fichier la publie, mais en
+        texte («&nbsp;2%&nbsp;», «&nbsp;5,2%&nbsp;»), arrondie différemment d'une ligne à l'autre, et sans le budget total qui
+        permettrait de la recalculer&nbsp;: elle n'est ni tracée ni classée.</li>
+      <li><strong>Les dépenses de l'État.</strong> Le ministère et ses opérateurs financent aussi la culture en région&nbsp;:
+        ce sont d'autres fichiers.</li>
+    </ul>
+    <dsfr-data-repeat source="rhone-t">
+      <template>
+        <ul class="fr-text--sm fr-mb-0">
+          <li><strong>Le Rhône est sous-estimé par le fichier.</strong> Sa population publiée,
+            {{population_annee:number:0}}&nbsp;habitants, inclut les {{ml_population_annee:number:0}} de la Métropole de Lyon,
+            qui exerce elle-même les compétences du département et figure parmi les intercommunalités. Ses
+            {{hab:number:0}}&nbsp;€ par habitant deviennent <strong>{{hab_corr:number:0}}&nbsp;€</strong> rapportés aux
+            {{pop_hors:number:0}}&nbsp;habitants hors Métropole. La carte et le tableau gardent le chiffre publié.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Deux codes en double parmi les communes.</strong> Oullins et Pierre-Bénite, fusionnées depuis, sont
+        publiées sur deux lignes sous le même code 69149 ; Sainte-Rose de La Réunion porte le code de Sainte-Rose de
+        Guadeloupe (97129) — son SIREN, 219740198, est réunionnais. Relevé le 26&nbsp;septembre 2026&nbsp;; sans effet sur
+        les totaux, les deux lignes restent dans le tableau.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création à partir de quatre fichiers du ministère de la Culture
+        servis par l'API Tabular de data.gouv.fr. Le cadrage titrait sur l'écart entre départements&nbsp;; rejoué, il
+        tient, mais la donnée raconte d'abord autre chose&nbsp;: le département pèse un dixième de la dépense culturelle
+        des collectivités.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Quatre jeux, quatre balises.</strong> <code>api-type="tabular"</code> + <code>resource</code>,
+              <code>select</code> pour ne lire que les colonnes utiles, <code>fetch-mode="export"</code> sur les deux
+              jeux qui ont un export Parquet.</li>
+            <li><strong>Additionner des échelons.</strong> Un <code>group-by</code> par jeu, puis
+              <code>dsfr-data-concat</code> et <code>share_percent</code>&nbsp;: la part de chaque échelon sans
+              jointure ni calcul en dur.</li>
+            <li><strong>Une ligne pour deux départements.</strong> L'Alsace «&nbsp;67,68&nbsp;» se dessine sur la carte par
+              <code>split</code> puis <code>explode</code>.</li>
+            <li><strong>Un chiffre publié corrigé en page.</strong> Le Rhône hors Métropole de Lyon se recalcule par une
+              jointure entre le fichier des départements et celui des intercommunalités.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Pas de médiane.</strong> Le KPI et la query n'ont pas d'agrégat médian&nbsp;: le montant
+              «&nbsp;typique&nbsp;» d'un département est remplacé par le ratio des sommes, qui n'est pas la même question.</li>
+            <li><strong>Pas de sous-chaîne dans <code>compute</code>.</strong> Le département d'une commune se lit dans les
+              deux premiers caractères de son code INSEE, mais aucune fonction ne les extrait&nbsp;: pas de filtre des
+              communes par département.</li>
+            <li><strong>La donnée, surtout.</strong> Quatre découpages institutionnels différents (Paris, Lyon, Alsace,
+              collectivités uniques), des populations qui se chevauchent, des parts publiées en texte&nbsp;: rien ne le
+              signale dans les fichiers, tout s'est lu en comparant les lignes.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger un jeu data.gouv.fr</td><td><code>dsfr-data-source api-type="tabular"</code> (+ <code>fetch-mode="export"</code>)</td><td>Natif</td></tr>
+            <tr><td>Total et part de chaque échelon</td><td><code>dsfr-data-query group-by</code> + <code>dsfr-data-concat</code> + <code>share_percent</code></td><td>Natif</td></tr>
+            <tr><td>Carte départementale avec une ligne « 67,68 »</td><td><code>dsfr-data-normalize split</code> + <code>query explode</code> + <code>type="map"</code></td><td>Natif</td></tr>
+            <tr><td>Montant par habitant d'un groupe</td><td><code>dsfr-data-kpi value="a:sum / b:sum"</code>, ou <code>group-by</code> + <code>compute</code></td><td>Natif</td></tr>
+            <tr><td>Les extrêmes nommés dans le chapô</td><td><code>query limit="1"</code> + <code>dsfr-data-join</code> + <code>dsfr-data-repeat</code></td><td>Natif, sans nom en dur</td></tr>
+            <tr><td>Médiane des départements</td><td>—</td><td>Absent : ratio des sommes à la place</td></tr>
+            <tr><td>Filtrer les communes par département</td><td><code>compute</code> sans sous-chaîne</td><td>Non fait</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Quatre fichiers Tabular se lisent, s'additionnent et se croisent sans une ligne de script.</strong> Ce
+          qui a coûté, c'est la carte administrative&nbsp;: Paris, Lyon, l'Alsace, la Corse et deux collectivités
+          d'outre-mer ne rentrent pas dans la case «&nbsp;département&nbsp;», et un classement brut les aurait mal placés
+          sans rien dire.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; type="map" est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

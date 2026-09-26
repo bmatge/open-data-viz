@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le gaz des ménages — open-data-viz</title>
+  <meta name="description" content="Le gaz des logements : un quart de consommation en moins depuis 2021, un prix presque doublé. Création avec dsfr-data sur cinq fichiers du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — D1 de docs/portail-developpement-durable/proposition.md.
+
+       CINQ FICHIERS DiDo, en mode URL (pas d'adaptateur DiDo) : chaque source lit
+       /datafiles/{rid}/json, dernier millésime, filtres DiDo dans l'URL.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-26) :
+       - −25,5 % entre 2021 et 2024 est exact, mais 2021 est un hiver FROID
+         (1 572 degrés-jours, le plus haut depuis 2016 ; 1 250 en 2024). La page
+         compare donc aussi à 2019 (1 409 degrés-jours) : −25,5 % aussi. La baisse
+         tient avec les deux références ; seul l'argument change.
+       - « prix ×2,07 » compare le semestre le plus bas (S1 2021) au plus haut
+         (S2 2025). Les moyennes annuelles 2021 → 2025 donnent ×1,84 : c'est ce
+         chiffre qui est affiché (« presque doublé »). Semestriel : l'enquête
+         « Transparence des prix » est semestrielle, la valeur est répétée
+         chaque mois du semestre dans le fichier.
+       - La facture énergétique : le chiffre pertinent est celle du GAZ
+         (solde importateur), 14,6 Md€ (2021) → 47,4 (2022) → 15,3 (2025), qui
+         est retombée quand le prix payé par les ménages continuait de monter.
+         C'est le paradoxe de la page, absent du cadrage.
+       - La rupture de champ industrie/tertiaire est en 2020, pas 2021 (industrie
+         69,7 → 15,3 TWh). Le résidentiel ne la subit pas : la page n'utilise
+         que lui.
+       ========================================================================== -->
+
+  <!-- ---------- Gaz résidentiel par région (jeu 33) ----------
+       CODE_GRAND_SECTEUR=R : 282 lignes (opérateur × région × année), 31 Ko.
+       Toutes les lignes R sont des lignes agrégées (CODE_SECTEUR_NAF2_CODE vide) ;
+       l'indicatrice « agr » le garantit si un millésime futur en ajoutait. -->
+  <dsfr-data-source id="gaz"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/f42f0a8f-36bf-413b-b404-5fd8a4c8da36/json?CODE_GRAND_SECTEUR=eq:R&amp;columns=ANNEE,CONSO,PDL,CODE_REGION_CODE,CODE_REGION_LIBELLE,CODE_SECTEUR_NAF2_CODE">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="gaz-n" source="gaz"
+    compute="k = 'fr';
+             agr = when len(CODE_SECTEUR_NAF2_CODE) = 0 then 1 else 0;
+             c19 = when ANNEE = '2019' then CONSO else 0;
+             c21 = when ANNEE = '2021' then CONSO else 0;
+             p19 = when ANNEE = '2019' then PDL else 0;
+             p21 = when ANNEE = '2021' then PDL else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="gaz-a" source="gaz-n" where="agr:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="gaz-an" source="gaz-a" group-by="ANNEE, k"
+    aggregate="CONSO:sum:conso, PDL:sum:pdl" order-by="ANNEE:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="gaz-ref" source="gaz-a" group-by="k"
+    aggregate="c19:sum:c19, c21:sum:c21, p19:sum:p19, p21:sum:p21">
+  </dsfr-data-query>
+  <dsfr-data-query id="gaz-der" source="gaz-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="gaz-syn" left="gaz-der" right="gaz-ref" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="gaz-syn-t" source="gaz-syn"
+    compute="twh = conso / 1000000;
+             twh21 = c21 / 1000000;
+             twh19 = c19 / 1000000;
+             v21 = (conso / c21 - 1) * 100;
+             v19 = (conso / c19 - 1) * 100;
+             kwh = conso * 1000 / pdl;
+             kwh21 = c21 * 1000 / p21;
+             vk21 = (kwh / kwh21 - 1) * 100;
+             pdl_m = pdl / 1000000;
+             pdl21_m = p21 / 1000000;
+             vp21 = (pdl / p21 - 1) * 100">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Électricité résidentielle par région (jeu 33), pour contraste ----------
+       975 lignes, 70 Ko. 23 cellules « secret » (CONSO et PDL), toutes avant 2023 :
+       comptées ici, dites en page.
+       LAZY : DiDo répond 429 (sans en-tête CORS, donc « Failed to fetch ») au-delà de
+       trois requêtes simultanées depuis une même IP — mesuré le 2026-09-26, 6 requêtes
+       parallèles → 3 × 200, 3 × 429 ; 8 requêtes successives → 8 × 200. Deux sources
+       partent au chargement (gaz, prix du gaz), les trois autres quand leur bloc
+       approche : jamais plus de trois en vol. -->
+  <dsfr-data-source id="ele" lazy lazy-target="#t-froid, #t-hors"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/e841c15d-03e0-4289-b336-8c97b2d3a594/json?CODE_GRAND_SECTEUR=eq:R&amp;columns=ANNEE,CONSO,PDL,CODE_REGION_CODE">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="ele-n" source="ele"
+    compute="k = 'fr'; sec = when CONSO = 'secret' then 1 else 0; cell = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ele-an" source="ele-n" group-by="ANNEE"
+    aggregate="CONSO:sum:e_conso, PDL:sum:e_pdl" order-by="ANNEE:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="ele-sec" source="ele-n" group-by="k"
+    aggregate="sec:sum:sec, cell:sum:cell">
+  </dsfr-data-query>
+
+  <!-- ---------- Degrés-jours unifiés et facture gazière (conjoncture, jeu 1) ----------
+       Fichier « 7. Ensemble des séries » : les deux colonnes en une requête (5,7 Ko),
+       valeurs identiques aux fichiers « Synthèse gaz naturel » et « Facture
+       énergétique » (103 mois comparés le 2026-09-26). Les prix ménages n'y sont pas.
+       Sommes des 12 mois de l'année civile ; les années incomplètes sont écartées. -->
+  <dsfr-data-source id="ens" lazy lazy-target="#t-froid, #t-facture"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/200d0c6e-d9de-4056-aee7-90518178a655/json?PERIODE=gte:2018-01&amp;columns=PERIODE,DJU,VSOLI_GAZ">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="ens-n" source="ens" compute="an = concat('', year(PERIODE)); un = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="dju-an" source="ens-n" where="DJU:isnotnull" group-by="an"
+    aggregate="DJU:sum:dju, un:sum:nm">
+  </dsfr-data-query>
+  <dsfr-data-query id="dju-plein" source="dju-an" where="nm:eq:12"></dsfr-data-query>
+
+  <!-- ---------- Base 100 en 2019 : gaz et électricité par point de livraison, degrés-jours ---------- -->
+  <dsfr-data-join id="b1" left="gaz-an" right="ele-an" on="ANNEE" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="b2" left="b1" right="dju-plein" on="ANNEE=an" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="b-n" source="b2"
+    compute="kg = conso * 1000 / pdl;
+             ke = e_conso * 1000 / e_pdl;
+             r_kg = when ANNEE = '2019' then kg else 0;
+             r_ke = when ANNEE = '2019' then ke else 0;
+             r_d = when ANNEE = '2019' then dju else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="b-ref" source="b-n" group-by="k"
+    aggregate="r_kg:sum:kg19, r_ke:sum:ke19, r_d:sum:d19">
+  </dsfr-data-query>
+  <dsfr-data-join id="b-j" left="b-n" right="b-ref" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="b-t" source="b-j"
+    compute="Gaz = round(kg / kg19 * 100, 1);
+             Elec = round(ke / ke19 * 100, 1);
+             Froid = round(dju / d19 * 100, 1);
+             part = (100 - Froid) / (100 - Gaz) * 100;
+             Annee = ANNEE">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="b-der" source="b-t" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="b-2021" source="b-t" where="ANNEE:eq:2021"></dsfr-data-query>
+
+  <!-- ---------- Prix ménages (conjoncture, jeu 1) : gaz et électricité ----------
+       € TTC pour 100 kWh (PCS pour le gaz, PCI pour l'électricité — liste des
+       variables du jeu). Semestriels : on garde janvier (S1) et juillet (S2). -->
+  <dsfr-data-source id="pg"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/9bb3b4e5-91e7-4ee5-95d9-aef38471ee75/json?PERIODE=gte:2018-01&amp;columns=PERIODE,PX_GAZ_D_TTES_TRANCHES">
+  </dsfr-data-source>
+  <dsfr-data-source id="pe" lazy lazy-target="#t-prix, #t-facture"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/cd28227c-bc1e-401b-8d42-3073497c2973/json?PERIODE=gte:2018-01&amp;columns=PERIODE,PX_ELE_D_TTES_TRANCHES">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="pg-n" source="pg"
+    compute="Gaz = PX_GAZ_D_TTES_TRANCHES;
+             s = when month(PERIODE) = 1 then 1 when month(PERIODE) = 7 then 1 else 0;
+             Semestre = concat(year(PERIODE), when month(PERIODE) = 1 then ' S1' else ' S2');
+             an = concat('', year(PERIODE)); un = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-normalize id="pe-n" source="pe"
+    compute="Elec = PX_ELE_D_TTES_TRANCHES;
+             s = when month(PERIODE) = 1 then 1 when month(PERIODE) = 7 then 1 else 0;
+             an = concat('', year(PERIODE)); un = 1">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="pg-s" source="pg-n" where="s:eq:1, Gaz:isnotnull" order-by="PERIODE:asc"></dsfr-data-query>
+  <dsfr-data-query id="pe-s" source="pe-n" where="s:eq:1, Elec:isnotnull"></dsfr-data-query>
+  <dsfr-data-join id="prix-s" left="pg-s" right="pe-s" on="PERIODE" type="inner" prefix-right="e_"></dsfr-data-join>
+  <dsfr-data-query id="prix-s-t" source="prix-s" order-by="PERIODE:asc"></dsfr-data-query>
+  <dsfr-data-query id="prix-der" source="prix-s-t" order-by="PERIODE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="prix-bas" source="prix-s-t" where="an:gte:2021" order-by="Gaz:asc" limit="1"></dsfr-data-query>
+
+  <!-- Moyennes annuelles, années complètes seulement (12 mois renseignés) -->
+  <dsfr-data-query id="pg-y" source="pg-n" where="Gaz:isnotnull" group-by="an"
+    aggregate="Gaz:avg:pgaz, un:sum:nm"></dsfr-data-query>
+  <dsfr-data-query id="pg-yp" source="pg-y" where="nm:eq:12"></dsfr-data-query>
+  <!-- Rapport du prix du gaz, dernière année complète / 2021 : depuis le seul fichier
+       du gaz, pour que le chapô ne dépende que de deux requêtes. -->
+  <dsfr-data-normalize id="pg-yn" source="pg-yp"
+    compute="k = 'fr'; r_g = when an = '2021' then pgaz else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="pg-ref" source="pg-yn" group-by="k" aggregate="r_g:sum:g21"></dsfr-data-query>
+  <dsfr-data-query id="pg-der" source="pg-yn" order-by="an:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="pg-syn" left="pg-der" right="pg-ref" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="pg-syn-t" source="pg-syn" compute="xg = pgaz / g21"></dsfr-data-normalize>
+
+  <dsfr-data-query id="pe-y" source="pe-n" where="Elec:isnotnull" group-by="an"
+    aggregate="Elec:avg:pele, un:sum:nm"></dsfr-data-query>
+  <dsfr-data-query id="pe-yp" source="pe-y" where="nm:eq:12"></dsfr-data-query>
+
+  <!-- Facture gazière : solde importateur de gaz (VSOLI_GAZ), même source ens -->
+  <dsfr-data-query id="fa-y" source="ens-n" where="VSOLI_GAZ:isnotnull" group-by="an"
+    aggregate="VSOLI_GAZ:sum:fact, un:sum:nm"></dsfr-data-query>
+  <dsfr-data-query id="fa-yp" source="fa-y" where="nm:eq:12"></dsfr-data-query>
+
+  <!-- Base 100 en 2021 : prix ménages et facture gazière, années complètes des trois séries -->
+  <dsfr-data-join id="par1" left="pg-yp" right="pe-yp" on="an" type="inner" prefix-right="e_"></dsfr-data-join>
+  <dsfr-data-join id="par2" left="par1" right="fa-yp" on="an" type="inner" prefix-right="f_"></dsfr-data-join>
+  <dsfr-data-normalize id="par-n" source="par2"
+    compute="k = 'fr';
+             r_g = when an = '2021' then pgaz else 0;
+             r_e = when an = '2021' then pele else 0;
+             r_f = when an = '2021' then fact else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="par-ref" source="par-n" group-by="k"
+    aggregate="r_g:sum:g21, r_e:sum:e21, r_f:sum:f21"></dsfr-data-query>
+  <dsfr-data-join id="par-j" left="par-n" right="par-ref" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="par-t" source="par-j"
+    compute="PrixGaz = round(pgaz / g21 * 100, 0);
+             PrixElec = round(pele / e21 * 100, 0);
+             Facture = round(fact / f21 * 100, 0);
+             xg = pgaz / g21;
+             vg = (pgaz / g21 - 1) * 100;
+             ve = (pele / e21 - 1) * 100;
+             fact_md = fact / 1000;
+             f21_md = f21 / 1000;
+             Annee = an">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="par-t-o" source="par-t" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-query id="par-der" source="par-t" order-by="an:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="par-pic" source="par-t" order-by="fact:desc" limit="1"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Le gaz des ménages</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Le gaz des ménages&nbsp;: un quart de consommation en moins depuis 2021, un prix presque doublé</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="gaz-syn-t">
+        <template>
+          En {{ANNEE}}, les logements raccordés au gaz naturel en ont consommé {{twh:number:1}}&nbsp;TWh,
+          contre {{twh21:number:1}} en 2021&nbsp;: <strong>{{v21:number:1}}&nbsp;%</strong>. Ce n'est pas
+          seulement l'hiver doux&nbsp;: face à 2019, une année ordinaire, la baisse est la même
+          ({{v19:number:1}}&nbsp;%).
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="pg-syn-t">
+        <template>
+          Dans le même temps, le prix moyen payé par les ménages a été <strong>multiplié par
+          {{xg:number:2}}</strong> entre 2021 et {{an}}.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: données locales de consommation
+      d'électricité et de gaz (maille région, secteur résidentiel) et conjoncture mensuelle de l'énergie (prix
+      ménages, synthèse gaz naturel, facture énergétique). Dernier millésime de chaque fichier au chargement
+      de la page. France métropolitaine hors Corse pour le gaz&nbsp;: la Corse n'a pas de réseau de gaz naturel.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="gaz-syn-t" value="twh:max" decimals="1" unit="TWh" span="3"
+        heading="Gaz consommé par les logements" label="dernière année publiée"></dsfr-data-kpi>
+      <dsfr-data-kpi source="gaz-syn-t" value="v21:max" decimals="1" unit="%" span="3"
+        heading="Depuis 2021" label="variation de la consommation résidentielle"></dsfr-data-kpi>
+      <dsfr-data-kpi source="gaz-syn-t" value="kwh:max" decimals="0" unit="kWh" span="3"
+        heading="Par point de livraison" label="consommation moyenne d'un compteur, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="pg-syn-t" value="xg:max" decimals="2" unit="fois" span="3"
+        heading="Prix du gaz pour les ménages" label="moyenne de la dernière année complète rapportée à 2021"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — la marche de 2022 ======================= -->
+  <dsfr-data-normalize id="gaz-an-t" source="gaz-an"
+    compute="twh = round(conso / 1000000, 1); Annee = ANNEE"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-conso">
+    <h2 id="t-conso" class="fr-h3">En 2022, les logements ont décroché d'un cran, et ne sont pas remontés</h2>
+    <dsfr-data-repeat source="gaz-syn-t">
+      <template>
+        <p class="odv-lecture">
+          De 2018 à 2021, la consommation résidentielle de gaz tourne autour de 125 à 140&nbsp;TWh selon la
+          rigueur de l'hiver. Elle tombe en 2022, première année de la crise, et reste depuis sous 110&nbsp;TWh&nbsp;:
+          {{twh:number:1}}&nbsp;TWh en {{ANNEE}}. Le nombre de compteurs, lui, bouge à peine&nbsp;:
+          {{pdl21_m:number:2}}&nbsp;millions en 2021, {{pdl_m:number:2}} en {{ANNEE}} ({{vp21:number:1}}&nbsp;%).
+          Ce sont les mêmes logements qui consomment moins.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Consommation résidentielle de gaz naturel par année">
+      <dsfr-data-chart id="g-conso" source="gaz-an-t" type="bar"
+        label-field="Annee" value-field="twh" name="Gaz résidentiel (TWh)" unit-tooltip="TWh"
+        reference-lines='[{"axis":"x","value":"2022","label":"Crise de 2022","dash":true}]'
+        databox databox-title="Consommation de gaz naturel du secteur résidentiel, France métropolitaine hors Corse (TWh, non corrigée du climat)"
+        databox-source="SDES — données locales de consommation d'électricité et de gaz, maille région (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-conso" source="gaz-an-t" label-field="Annee" value-field="twh"
+        description="Barres verticales, une par année depuis 2018 : la consommation de gaz naturel des logements, en térawattheures, non corrigée du climat. Entre 125 et 140 TWh de 2018 à 2021 (le creux de 2020 est un hiver doux), puis une marche en 2022, année de crise signalée par une ligne pointillée, et un palier un peu au-dessus de 100 TWh ensuite.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Consommation réelle, <strong>non corrigée du climat</strong>&nbsp;: un hiver froid gonfle la barre, un hiver doux
+      la réduit. Le bloc suivant sépare les deux effets.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — le froid n'explique pas tout ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-froid">
+    <h2 id="t-froid" class="fr-h3">Les hivers plus doux n'expliquent pas tout&nbsp;: par compteur, le gaz baisse deux fois plus que le froid</h2>
+    <dsfr-data-repeat source="b-der">
+      <template>
+        <p class="odv-lecture">
+          Base 100 en 2019. En {{ANNEE}}, l'hiver a compté {{Froid:number:0}} degrés-jours pour 100 en 2019&nbsp;: il
+          a fait moins froid. Mais <strong>la consommation d'un compteur de gaz est descendue à {{Gaz:number:0}}</strong>,
+          quand celle d'un compteur d'électricité, qui chauffe aussi une partie des logements, est restée à
+          {{Elec:number:0}}. Même si toute la consommation de gaz suivait le thermomètre — ce qui n'est pas le cas&nbsp;:
+          l'eau chaude et la cuisson n'en dépendent pas —, le climat n'expliquerait au plus que {{part:number:0}}&nbsp;% de
+          la baisse.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Consommation par point de livraison et degrés-jours, base 100 en 2019">
+      <dsfr-data-chart id="g-froid" source="b-t" type="line"
+        label-field="Annee" value-field="Gaz:Gaz par compteur" value-fields="Froid:Degrés-jours de l'hiver, Elec:Électricité par compteur"
+        unit-tooltip="(base 100 en 2019)"
+        reference-lines='[{"axis":"y","value":100,"label":"2019","dash":true}]'
+        databox databox-title="Consommation résidentielle par point de livraison et rigueur de l'hiver, indice base 100 en 2019"
+        databox-source="SDES — données locales de consommation (maille région) ; conjoncture mensuelle de l'énergie, synthèse gaz naturel (degrés-jours unifiés) — DiDo" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-froid" source="b-t" label-field="Annee" value-field="Gaz,Froid,Elec"
+        description="Trois courbes, indice 100 en 2019, une valeur par année depuis 2018 : la consommation de gaz par point de livraison résidentiel, les degrés-jours unifiés de l'année (la rigueur de l'hiver) et la consommation d'électricité par point de livraison résidentiel. Les trois évoluent ensemble jusqu'en 2021 ; à partir de 2022 la courbe du gaz passe nettement sous celle des degrés-jours, tandis que l'électricité reste proche de 100.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Point de livraison = un compteur, pas un ménage&nbsp;: un immeuble chauffé par une chaufferie collective peut
+      n'en compter qu'un. Les degrés-jours unifiés mesurent la rigueur de l'hiver (plus il fait froid, plus il y en a)&nbsp;; ce
+      sont ceux que publie le SDES pour la France métropolitaine, sommés sur l'année civile. Le fichier régional ne fournit pas de
+      consommation corrigée du climat pour le gaz (le champ de thermosensibilité y est vide)&nbsp;: la comparaison
+      à l'indice des degrés-jours en tient lieu, et c'est une borne, pas une correction.
+    </p>
+  </section>
+
+  <!-- ======================= LE PRIX ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-prix">
+    <h2 id="t-prix" class="fr-h3">Le prix du gaz a presque doublé, celui de l'électricité a pris un tiers</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="prix-bas">
+        <template>
+          Au plus bas depuis 2021 ({{Semestre}}), 100&nbsp;kWh de gaz coûtaient {{Gaz:number:2}}&nbsp;€ TTC à un ménage.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="prix-der">
+        <template>
+          <strong>Dernier semestre publié ({{Semestre}})&nbsp;: {{Gaz:number:2}}&nbsp;€.</strong> L'électricité est passée
+          dans le même temps à {{Elec:number:2}}&nbsp;€.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="par-der">
+        <template>
+          En moyenne annuelle, le gaz de {{an}} coûte {{xg:number:2}} fois celui de 2021&nbsp;; l'électricité
+          {{ve:number:0}}&nbsp;% de plus.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Prix du gaz et de l'électricité pour les ménages par semestre">
+      <dsfr-data-chart id="g-prix" source="prix-s-t" type="line"
+        label-field="Semestre" value-field="Gaz:Gaz naturel" value-fields="Elec:Électricité"
+        unit-tooltip="€ / 100 kWh" y-min="0"
+        databox databox-title="Prix TTC au détail pour les ménages, toutes tranches de consommation, par semestre (euros courants pour 100 kWh)"
+        databox-source="SDES — conjoncture mensuelle de l'énergie, prix ménages gaz et électricité (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-prix" source="prix-s-t" label-field="Semestre" value-field="Gaz,Elec"
+        description="Deux courbes, une valeur par semestre depuis 2018 : le prix TTC de 100 kWh pour les ménages, gaz naturel et électricité, en euros courants. Le gaz oscille entre 7 et 9 euros jusqu'en 2021, puis monte sans interruption jusqu'à environ 15 euros. L'électricité passe d'environ 17 à 28 euros fin 2024, puis redescend vers 25 euros.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Prix moyens toutes tranches, pondérés par les consommations&nbsp;: ce n'est pas un tarif, ni la facture d'un
+      ménage donné. Euros courants, sans correction de l'inflation. Le kWh de gaz est compté en pouvoir calorifique
+      supérieur (PCS), celui de l'électricité en PCI&nbsp;: les deux prix se comparent en évolution, pas au centime.
+    </p>
+  </section>
+
+  <!-- ======================= LE PARADOXE — la facture du pays est retombée ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-facture">
+    <h2 id="t-facture" class="fr-h3">La facture gazière de la France est retombée&nbsp;; le prix payé par les ménages, non</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="par-pic">
+        <template>
+          En {{an}}, le solde de ses importations de gaz a coûté à la France {{fact_md:number:1}}&nbsp;milliards
+          d'euros, contre {{f21_md:number:1}} en 2021. Cette année-là, le prix moyen du gaz payé par les ménages
+          n'avait augmenté que de {{vg:number:0}}&nbsp;%.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="par-der">
+        <template>
+          <strong>En {{an}}, la facture est retombée à {{fact_md:number:1}}&nbsp;milliards&nbsp;; le prix payé par les
+          ménages, lui, a continué de monter&nbsp;: +{{vg:number:0}}&nbsp;% sur 2021.</strong>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Facture gazière et prix ménages, base 100 en 2021">
+      <dsfr-data-chart id="g-facture" source="par-t-o" type="line"
+        label-field="Annee" value-field="Facture:Facture gazière de la France" value-fields="PrixGaz:Prix du gaz pour les ménages, PrixElec:Prix de l'électricité pour les ménages"
+        unit-tooltip="(base 100 en 2021)"
+        reference-lines='[{"axis":"y","value":100,"label":"2021","dash":true}]'
+        databox databox-title="Solde importateur de gaz et prix ménages du gaz et de l'électricité, moyennes annuelles, indice base 100 en 2021"
+        databox-source="SDES — conjoncture mensuelle de l'énergie : facture énergétique, prix ménages (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-facture" source="par-t-o" label-field="Annee" value-field="Facture,PrixGaz,PrixElec"
+        description="Trois courbes, indice 100 en 2021, une valeur par année complète depuis 2018 : la facture gazière de la France (importations moins exportations de gaz, en euros), le prix moyen du gaz et celui de l'électricité pour les ménages. La facture bondit à plus de 300 en 2022 puis redescend vers 100 ; le prix du gaz monte régulièrement jusqu'à plus de 180 ; l'électricité monte plus doucement.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      La facture gazière mesure ce que le pays paie à l'étranger, prix et volumes mêlés&nbsp;; elle recule aussi parce
+      qu'on importe moins. Le prix aux ménages dépend en outre des tarifs, des taxes et des mesures de protection
+      (le bouclier tarifaire de 2022-2023)&nbsp;: la donnée montre le décalage, elle n'en mesure pas les causes.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — par région ======================= -->
+  <!-- Lignes régionales de la dernière année par jointure INTERNE sur l'année de
+       gaz-der (aucune année écrite en dur), puis jointure avec 2021 sur le code. -->
+  <dsfr-data-query id="reg-an" source="gaz-a" group-by="CODE_REGION_CODE, CODE_REGION_LIBELLE, ANNEE"
+    aggregate="CONSO:sum:conso, PDL:sum:pdl"></dsfr-data-query>
+  <dsfr-data-join id="reg-der" left="reg-an" right="gaz-der" on="ANNEE" type="inner" prefix-right="nat_"></dsfr-data-join>
+  <dsfr-data-query id="reg-21" source="reg-an" where="ANNEE:eq:2021"></dsfr-data-query>
+  <dsfr-data-join id="reg-j" left="reg-der" right="reg-21" on="CODE_REGION_CODE" type="left" prefix-right="r21_"></dsfr-data-join>
+  <dsfr-data-normalize id="reg-t" source="reg-j"
+    compute="var = (conso / r21_conso - 1) * 100;
+             var_aff = round(var, 1);
+             vk = round(((conso / pdl) / (r21_conso / r21_pdl) - 1) * 100, 1);
+             twh = round(conso / 1000000, 2);
+             twh21 = round(r21_conso / 1000000, 2);
+             kwh = round(conso * 1000 / pdl, 0)"
+    rename="CODE_REGION_LIBELLE:Région">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="reg-min" source="reg-t" order-by="var:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="reg-max" source="reg-t" order-by="var:desc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-regions">
+    <h2 id="t-regions" class="fr-h3">Explorer&nbsp;: aucune région n'y échappe</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="reg-max">
+        <template>
+          Entre 2021 et {{ANNEE}}, même la région qui a le moins réduit sa consommation, {{Région}}, affiche
+          {{var_aff:number:1}}&nbsp;%.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="reg-min">
+        <template>
+          La plus forte baisse, <strong>{{Région}}, atteint {{var_aff:number:1}}&nbsp;%</strong>.
+        </template>
+      </dsfr-data-repeat>
+      Le mouvement est national&nbsp;; les écarts entre régions tiennent aussi à des hivers qui n'ont pas été doux
+      partout de la même façon, ce que le fichier ne permet pas de corriger.
+    </div>
+
+    <div class="odv-chart-slot odv-viz" data-code="Carte de la variation de la consommation résidentielle de gaz depuis 2021">
+      <dsfr-data-chart id="g-carte" source="reg-t" type="map-reg"
+        code-field="CODE_REGION_CODE" value-field="var_aff" name="Variation depuis 2021 (%)" unit-tooltip="%"
+        selected-palette="sequentialDescending"
+        map-summary="weighted" map-summary-weight="r21_conso" map-summary-field="var"
+        databox databox-title="Variation de la consommation résidentielle de gaz entre 2021 et la dernière année publiée, par région (%)"
+        databox-source="SDES — données locales de consommation d'électricité et de gaz, maille région (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-carte" source="reg-t" label-field="Région" value-field="var_aff"
+        description="Carte des régions métropolitaines colorées selon la variation, en pourcentage, de la consommation résidentielle de gaz depuis 2021. Toutes baissent, d'un cinquième à près d'un tiers ; le résumé sous le titre est la variation nationale, moyenne des régions pondérée par leur consommation de 2021. Le tableau ci-dessous donne les valeurs, triables.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Le fond de carte dessine la Corse et les régions d'outre-mer&nbsp;: elles n'ont pas de réseau de gaz naturel dans
+      ce fichier. Leur bleu uni, hors de l'échelle de la légende, ne porte aucune valeur.
+    </p>
+
+    <h3 class="fr-h5 fr-mt-6w">Toutes les régions</h3>
+    <dsfr-data-list source="reg-t"
+      columns="Région:Région, twh21:2021 (TWh), twh:Dernière année (TWh), var_aff:Variation (%), vk:Variation par compteur (%), kwh:kWh par compteur (dernière année)"
+      sort="var_aff:asc" count-label="région|régions" export="csv"
+      caption="Consommation résidentielle de gaz naturel par région, 2021 et dernière année publiée">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm fr-mb-0">
+      <li><strong>Une consommation corrigée du climat par région.</strong> Le SDES la publie pour le gaz de la France
+        entière, tous usages confondus, mais pas pour les seuls logements ni par région. La page compare donc à
+        l'indice des degrés-jours et à une seconde année de référence (2019), sans prétendre corriger.</li>
+      <li><strong>Les ménages.</strong> Le fichier compte des points de livraison (compteurs), pas des ménages&nbsp;; il
+        ne dit ni combien de ménages se chauffent au gaz, ni combien ont changé de chauffage.</li>
+      <li><strong>L'industrie et le tertiaire.</strong> Leur consommation de gaz est divisée par trois à cinq en 2020
+        dans ce fichier (industrie&nbsp;: 69,7 TWh en 2019, 15,3 en 2020, relevé à l'API le 26&nbsp;septembre 2026)&nbsp;:
+        c'est un changement de classement des compteurs, pas une désindustrialisation. Le résidentiel n'en est pas
+        affecté&nbsp;; les autres secteurs sont écartés.</li>
+      <li><strong>Les années après le dernier millésime.</strong> Les consommations régionales s'arrêtent un an
+        avant les prix&nbsp;: les deux ne se comparent qu'en tendance.</li>
+    </ul>
+    <dsfr-data-repeat source="ele-sec">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Le secret statistique.</strong> Dans le fichier de l'électricité résidentielle, {{sec:number:0}}&nbsp;lignes
+            sur {{cell:number:0}} (opérateur × région × année) portent «&nbsp;secret&nbsp;» à la place de la consommation et
+            du nombre de compteurs. Elles sont écartées des sommes&nbsp;; ce sont de petites régies locales, et une ligne
+            «&nbsp;région fictive&nbsp;» en 2018. Le fichier du gaz résidentiel n'en compte aucune.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création à partir de cinq fichiers du SDES servis par l'API DiDo,
+        sans adaptateur dédié. Les chiffres du cadrage étaient justes, mais deux choisissaient leur point de départ au
+        mieux de l'histoire&nbsp;: un hiver 2021 froid pour la consommation, le semestre le plus bas pour le prix.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Cinq fichiers, cinq requêtes, environ 120environ 130&nbsp;Konbsp;Ko.</strong> Le filtre
+              <code>CODE_GRAND_SECTEUR=eq:R</code> et <code>columns=</code> dans l'URL réduisent le fichier régional
+              du gaz de 3,9&nbsp;Mo à 31&nbsp;Ko.</li>
+            <li><strong>Deux indices base 100</strong> par la même mécanique&nbsp;: une ligne de référence construite
+              par <code>when … then … else 0</code> puis <code>group-by</code>, jointe à toutes les années.</li>
+            <li><strong>Le résumé juste de la carte.</strong> <code>map-summary="weighted"</code> pondéré par la
+              consommation 2021 rend exactement la variation nationale, là où la moyenne des régions s'en écarterait.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Des jointures en cascade pour un indice.</strong> Trois fichiers à croiser par année
+              (gaz, électricité, degrés-jours) puis une ligne de référence&nbsp;: quatre jointures et trois
+              <code>normalize</code> pour trois courbes. Faisable, verbeux.</li>
+            <li><strong>Les années incomplètes.</strong> Les séries mensuelles s'arrêtent en cours d'année (facture,
+              degrés-jours) ou plus tôt (prix)&nbsp;: sans compter les mois (<code>un:sum</code> puis
+              <code>nm:eq:12</code>), la dernière année serait une demi-année présentée comme une année.</li>
+            <li><strong>DiDo refuse plus de trois requêtes simultanées.</strong> Au-delà, il répond 429 sans en-tête
+              CORS&nbsp;: le navigateur ne voit qu'un «&nbsp;Failed to fetch&nbsp;», et la source affiche une erreur de
+              chargement, différente à chaque rechargement. Réponse native&nbsp;: <code>lazy</code> et
+              <code>lazy-target</code> sur les sources des blocs du bas, et le fichier «&nbsp;Ensemble des séries&nbsp;»
+              pour lire deux colonnes en une requête.</li>
+            <li><strong>Deux pièges de grammaire et d'affichage.</strong> Une virgule dans un libellé de
+              <code>value-fields</code> («&nbsp;Électricité, par compteur&nbsp;») ouvre une série fantôme à zéro, sans
+              erreur&nbsp;; même effet dans <code>columns</code> d'une liste. Et l'infobulle des courbes annuelles
+              affiche «&nbsp;2,022&nbsp;» (défaut de DSFR Chart déjà connu)&nbsp;: le tableau équivalent porte l'année juste.</li>
+            <li><strong>Une série semestrielle publiée en mensuel.</strong> Chaque prix est répété six fois&nbsp;;
+              c'est la donnée, pas l'outil, mais rien ne le signale.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger un fichier DiDo filtré</td><td><code>dsfr-data-source url=</code> (mode URL, filtres dans l'URL)</td><td>Natif, une requête par fichier</td></tr>
+            <tr><td>Chapô et KPI calculés (dernière année vs 2021 et 2019)</td><td><code>dsfr-data-query limit</code> + <code>dsfr-data-join</code> + <code>dsfr-data-repeat</code></td><td>Natif, sans millésime en dur</td></tr>
+            <tr><td>Indice base 100</td><td><code>dsfr-data-normalize compute</code> + <code>query group-by</code> + <code>join</code></td><td>Faisable, verbeux</td></tr>
+            <tr><td>Écarter les années incomplètes</td><td>compte des mois par <code>group-by</code>, puis <code>where="nm:eq:12"</code></td><td>Natif</td></tr>
+            <tr><td>Rester sous la limite de requêtes simultanées de DiDo</td><td><code>dsfr-data-source lazy lazy-target</code></td><td>Natif</td></tr>
+            <tr><td>Marquer 2022 et la base 100</td><td><code>reference-lines</code> (axe x et axe y)</td><td>Natif</td></tr>
+            <tr><td>Carte régionale d'un taux</td><td><code>type="map-reg"</code> + <code>map-summary="weighted"</code> + <code>map-summary-field</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Le récit tient en cinq requêtes et aucun script.</strong> Ce qui a coûté, c'est l'honnêteté
+          des références&nbsp;: choisir 2019 à côté de 2021, les moyennes annuelles plutôt que les extrêmes, et
+          confronter le gaz aux degrés-jours. Le gaz des logements a bien baissé d'un quart, et pas seulement parce
+          qu'il a fait doux&nbsp;; son prix a presque doublé, alors que la facture gazière du pays est retombée.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; type="map-reg" est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

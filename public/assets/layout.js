@@ -3,7 +3,7 @@
    (differe), qui trouve donc un DOM complet a instrumenter. */
 (() => {
   const TITRE = 'open-data-viz';
-  const BASELINE = 'Reproduire les visualisations de data.economie.gouv.fr, data.education.gouv.fr et data.sports.gouv.fr avec dsfr-data';
+  const BASELINE = 'Reproduire, recréer et créer des dataviz de données publiques avec dsfr-data';
 
   const LIENS = [
     { href: '/', libelle: 'Accueil' },

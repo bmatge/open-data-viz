@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bibliothèques publiques, maillage et activité — open-data-viz</title>
+  <meta name="description" content="Près de six bibliothèques publiques sur dix sont dans des communes de moins de 2 000 habitants ; elles font moins d'un prêt sur dix et la plupart n'ont aucun salarié. Création avec dsfr-data à partir de l'enquête du Service du livre et de la lecture (ministère de la Culture), servie par l'API Tabular de data.gouv.fr.">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 4 de docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte le fichier « Bibliothèques des collectivités
+       territoriales » du ministère de la Culture (Service du livre et de la lecture),
+       adresses au 05/06/2025, chiffres d'activité de l'année 2023.
+
+       CHARGEMENT. 15 704 lignes : `fetch-mode="export"` lit l'export Parquet de la
+       ressource en UNE requête (lecteur chargé à la demande), `select` ne garde que
+       les colonnes lues en aval. Aucun where / group-by / order-by sur la source :
+       sinon repli sur la pagination (79 requêtes de 200 lignes).
+
+       LA TRANCHE. `Population commune` est la population de la commune où se trouve
+       la bibliothèque, répétée sur chaque bibliothèque de la commune : elle sert à
+       CLASSER une bibliothèque, jamais à être sommée (Paris compte 69 lignes).
+
+       LES VIDES. Prêts, salariés, dimanche, gratuité sont vides pour une part des
+       lieux (réseaux urbains déclarés au niveau du réseau : Lyon renseigne ses prêts
+       sur 1 bibliothèque sur 17, Paris ses salariés sur 0 sur 69). Tout taux se
+       calcule sur les lignes RENSEIGNÉES, dont l'effectif est affiché.
+       ========================================================================== -->
+
+  <dsfr-data-source id="bib" api-type="tabular"
+    resource="806a8aa1-952f-404d-9857-3f27b7c0ca86"
+    fetch-mode="export" max-records="25000"
+    select="Code_bib, nom_de_l_etablissement, Ville, Département, Population commune, Statut, type_adresse, Latitude, Longitude, ouverture_le_dimanche, gratuite_des_services, nombre_de_prets, Nombre de salariés, Nombre de bénévoles">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="bib-n" source="bib"
+    rename="Population commune:pop | Nombre de salariés:salaries | Nombre de bénévoles:benevoles | nombre_de_prets:prets | nom_de_l_etablissement:nom"
+    compute="rang = when is_null(pop) then 6 when pop < 500 then 1 when pop < 2000 then 2 when pop < 10000 then 3 when pop < 50000 then 4 else 5;
+             tranche = when rang = 1 then 'Moins de 500 hab.' when rang = 2 then '500 à 1 999 hab.' when rang = 3 then '2 000 à 9 999 hab.' when rang = 4 then '10 000 à 49 999 hab.' when rang = 5 then '50 000 hab. et plus' else 'Population non renseignée';
+             petite = when rang <= 2 then 1 else 0;
+             un = 1;
+             pc = when is_null(prets) then 0 else 1;
+             prets_p = when rang <= 2 then prets else 0;
+             sc = when is_null(salaries) then 0 else 1;
+             s0 = when salaries = 0 then 1 else 0;
+             sc_p = when rang <= 2 then sc else 0;
+             s0_p = when rang <= 2 then s0 else 0;
+             bv_p = when rang <= 2 then benevoles else 0;
+             dimc = when is_null(ouverture_le_dimanche) then 0 else 1;
+             dim = when ouverture_le_dimanche = true then 1 else 0;
+             grc = when is_null(gratuite_des_services) then 0 else 1;
+             gr = when gratuite_des_services = true then 1 else 0;
+             gr_p = when rang <= 2 then gr else 0;
+             grc_p = when rang <= 2 then grc else 0;
+             gr_g = when rang = 5 then gr else 0;
+             grc_g = when rang = 5 then grc else 0;
+             dimanche = when dim = 1 then 'Oui' when dimc = 1 then 'Non' else 'Non renseigné';
+             gratuit = when gr = 1 then 'Oui' when grc = 1 then 'Non' else 'Non renseigné';
+             om = when Latitude < 35 then 1 else 0;
+             nogeo = when is_null(Latitude) or is_null(Longitude) then 1 else 0;
+             grande = when rang = 4 or rang = 5 then 1 else 0;
+             prets_g = when rang = 4 or rang = 5 then prets else 0;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse, une ligne ---------- -->
+  <dsfr-data-query id="syn" source="bib-n" group-by="k"
+    aggregate="un:sum:n, petite:sum:np, grande:sum:ng, om:sum:nom, nogeo:sum:nogeo, prets_g:sum:prets_g, pc:sum:pc, prets:sum:prets, prets_p:sum:prets_p, sc:sum:sc, s0:sum:s0, sc_p:sum:sc_p, s0_p:sum:s0_p, benevoles:sum:bv, bv_p:sum:bv_p, dim:sum:dim, dimc:sum:dimc, gr_p:sum:gr_p, grc_p:sum:grc_p, gr_g:sum:gr_g, grc_g:sum:grc_g">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="part_lieux = np / n * 100;
+             part_prets = prets_p / prets * 100;
+             part_s0_p = s0_p / sc_p * 100;
+             part_s0 = s0 / sc * 100;
+             part_bv = bv_p / bv * 100;
+             part_dim = dim / dimc * 100;
+             part_gr_p = gr_p / grc_p * 100;
+             part_gr_g = gr_g / grc_g * 100;
+             part_lieux_g = ng / n * 100;
+             part_prets_g = prets_g / prets * 100">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Par tranche de population de la commune ---------- -->
+  <dsfr-data-query id="tr" source="bib-n" group-by="rang, tranche"
+    aggregate="un:sum, un__sum:share_percent:part_lieux, prets:sum, prets__sum:share_percent:part_prets, pc:sum:pc, sc:sum:sc, s0:sum:s0, benevoles:sum:bv"
+    order-by="rang:asc">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="tr-n" source="tr"
+    compute="lieux = round(part_lieux, 1);
+             prets_pct = round(part_prets, 1);
+             sans_sal = round(s0 / sc * 100, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="tr-sal" source="tr-n" where="rang:lte:5"></dsfr-data-query>
+  <!-- Tableaux accessibles : mêmes lignes, colonnes nommées pour le lecteur. -->
+  <dsfr-data-normalize id="tr-t" source="tr-n"
+    rename="tranche:Population de la commune | un__sum:Bibliothèques | lieux:Part des bibliothèques (%) | pc:Bibliothèques déclarant leurs prêts | prets_pct:Part des prêts 2023 (%)"></dsfr-data-normalize>
+  <dsfr-data-normalize id="tr-sal-t" source="tr-sal"
+    rename="tranche:Population de la commune | sans_sal:Sans aucun salarié (%) | sc:Bibliothèques déclarant leur personnel | bv:Bénévoles"></dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Bibliothèques publiques</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Bibliothèques&nbsp;: six sur dix dans des communes de moins de 2&nbsp;000 habitants, moins d'un prêt sur dix</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          Sur les {{n:number}}&nbsp;bibliothèques des collectivités recensées par le ministère de la Culture,
+          <strong>{{np:number}} ({{part_lieux:number:0}}&nbsp;%) se trouvent dans une commune de moins de 2&nbsp;000&nbsp;habitants</strong>.
+          C'est le maillage de la lecture publique&nbsp;: une bibliothèque au plus près des villages. Mais ces lieux ne font
+          que {{part_prets:number:1}}&nbsp;% des prêts de 2023, et {{part_s0_p:number:0}}&nbsp;% de ceux qui déclarent leur personnel
+          n'ont aucun salarié&nbsp;: ils tiennent par {{bv_p:number}}&nbsp;bénévoles.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, Service du livre et de la lecture — «&nbsp;Les bibliothèques des collectivités
+      territoriales&nbsp;: adresses et données d'activité&nbsp;», adresses au 5&nbsp;juin 2025, chiffres d'activité de
+      l'année 2023. Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/adresses-des-bibliotheques-publiques-2/" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="np:max" format="nombre" span="4"
+        heading="Bibliothèques dans une commune de moins de 2 000 habitants"
+        lines='[{"value":"part_lieux:max","decimals":0,"suffix":"des bibliothèques"}]'></dsfr-data-kpi>
+      <dsfr-data-kpi source="bib-n" value="prets_p:sum / prets:sum" format="pourcentage" decimals="1" span="4"
+        heading="Part des prêts qu'elles réalisent" label="prêts de 2023, bibliothèques qui les déclarent"></dsfr-data-kpi>
+      <dsfr-data-kpi source="bib-n" value="s0_p:sum / sc_p:sum" format="pourcentage" decimals="0" span="4"
+        heading="Sans aucun salarié" label="parmi celles qui déclarent leur personnel"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les lieux contre les prêts ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-prets">
+    <h2 id="t-prets" class="fr-h3">Beaucoup de lieux, peu de prêts&nbsp;: l'activité se concentre dans les villes</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Les bibliothèques des communes de moins de 2&nbsp;000&nbsp;habitants sont {{part_lieux:number:0}}&nbsp;% des lieux
+          et réalisent {{part_prets:number:1}}&nbsp;% des {{prets:number}}&nbsp;prêts déclarés pour 2023. À l'autre bout, les
+          communes de 10&nbsp;000&nbsp;habitants et plus n'abritent que {{part_lieux_g:number:0}}&nbsp;% des bibliothèques, mais
+          réalisent {{part_prets_g:number:0}}&nbsp;% des prêts.
+          Une petite bibliothèque n'est pas une grande en moins bien&nbsp;: c'est un autre équipement, qui sert d'abord la
+          proximité.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Part des bibliothèques et part des prêts, par taille de la commune">
+      <dsfr-data-chart id="g-prets" source="tr-n" type="bar"
+        label-field="tranche" value-field="lieux:Part des bibliothèques (%)" value-fields="prets_pct:Part des prêts 2023 (%)"
+        unit-tooltip="%" y-min="0"
+        databox databox-title="Part des bibliothèques et part des prêts de 2023, selon la population de la commune où se trouve la bibliothèque (%)"
+        databox-source="Ministère de la Culture (SLL) — bibliothèques des collectivités, via data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-prets" source="tr-t" table download filename="bibliotheques-lieux-prets.csv" label-field="Population de la commune" value-field="Bibliothèques, Part des bibliothèques (%), Bibliothèques déclarant leurs prêts, Part des prêts 2023 (%)"
+        description="Barres groupées, deux par tranche de population de la commune : la part des bibliothèques et la part des prêts de 2023. Dans les deux premières tranches (moins de 500 et 500 à 1 999 habitants), la barre des bibliothèques dépasse largement celle des prêts ; à partir de 2 000 habitants, c'est l'inverse. Une dernière tranche regroupe les bibliothèques dont la population de la commune n'est pas renseignée.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Part des prêts calculée sur les bibliothèques qui déclarent leurs prêts (voir «&nbsp;ce que cette page ne montre
+      pas&nbsp;»). La tranche est celle de la commune où se trouve le lieu&nbsp;: une bibliothèque intercommunale installée
+      dans un bourg sert aussi les communes voisines.
+    </p>
+  </section>
+
+  <!-- ======================= NUANCE — qui les fait vivre ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-benevoles">
+    <h2 id="t-benevoles" class="fr-h3">Sous 2&nbsp;000 habitants, la plupart des bibliothèques n'ont aucun salarié</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          Dans les communes de moins de 2&nbsp;000&nbsp;habitants, {{s0_p:number}}&nbsp;bibliothèques sur les {{sc_p:number}} qui
+          déclarent leur personnel n'ont aucun salarié ({{part_s0_p:number:0}}&nbsp;%). Elles réunissent {{bv_p:number}} des
+          {{bv:number}}&nbsp;bénévoles déclarés, soit {{part_bv:number:0}}&nbsp;%. Le réseau rural de la lecture publique est
+          d'abord un réseau de bénévoles.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <!-- highlight-index="[0,1]" : les deux tranches de moins de 2 000 habitants, qui
+         restent en tête puisque la série est triée par rang de tranche. -->
+    <div class="odv-chart-slot odv-viz" data-code="Part des bibliothèques sans aucun salarié, par taille de la commune">
+      <dsfr-data-chart id="g-sal" source="tr-sal" type="bar"
+        label-field="tranche" value-field="sans_sal:Sans aucun salarié (%)"
+        selected-palette="neutral" highlight-index="[0,1]" unit-tooltip="%" y-min="0" y-max="100"
+        databox databox-title="Part des bibliothèques qui n'ont aucun salarié, selon la population de la commune (%, parmi celles qui déclarent leur personnel)"
+        databox-source="Ministère de la Culture (SLL) — bibliothèques des collectivités, via data.gouv.fr" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-sal" source="tr-sal-t" table download filename="bibliotheques-sans-salarie.csv" label-field="Population de la commune" value-field="Sans aucun salarié (%), Bibliothèques déclarant leur personnel, Bénévoles"
+        description="Barres verticales, une par tranche de population de la commune, sur une échelle de 0 à 100 % : la part des bibliothèques sans aucun salarié. Elle est de trois sur quatre sous 500 habitants, plus de la moitié entre 500 et 1 999 habitants, puis tombe sous un cinquième à partir de 2 000 habitants. Le tableau donne aussi, par tranche, le nombre de bibliothèques qui déclarent leur personnel et le nombre de bénévoles.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--sm">
+          Autre différence, à contre-pied de l'intuition&nbsp;: les petites bibliothèques sont plus souvent gratuites.
+          {{part_gr_p:number:0}}&nbsp;% le sont dans les communes de moins de 2&nbsp;000&nbsp;habitants, contre
+          {{part_gr_g:number:0}}&nbsp;% dans celles de 50&nbsp;000&nbsp;habitants et plus. Et l'ouverture le dimanche reste
+          rare partout&nbsp;: {{dim:number}}&nbsp;bibliothèques sur {{dimc:number}} qui répondent ({{part_dim:number:1}}&nbsp;%).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <div class="fr-container">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: les bibliothèques près de chez vous</h2>
+    <p class="fr-text--sm">Chaque bibliothèque du fichier, colorée selon la population de sa commune&nbsp;: en bleu, les
+      communes de moins de 2&nbsp;000&nbsp;habitants. La recherche et les filtres pilotent les compteurs, la carte et le
+      tableau&nbsp;; ils ne touchent pas les graphiques ci-dessus, qui portent sur la France entière.</p>
+  </div>
+  <section class="odv-bandeau" aria-label="Recherche">
+    <div class="fr-container">
+      <div class="odv-bandeau__recherche">
+        <dsfr-data-search id="bib-q" source="bib-n"
+          fields="nom, Ville"
+          label="Rechercher une bibliothèque" placeholder="Nom de la bibliothèque, commune…"
+          operator="words" count count-label="bibliothèque|bibliothèques">
+        </dsfr-data-search>
+      </div>
+    </div>
+  </section>
+
+  <div class="fr-container fr-mb-8w">
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="bib-f" value="count" format="nombre"
+        heading="Bibliothèques" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="bib-f" value="petite:sum / count" format="pourcentage"
+        heading="Dans une commune de moins de 2 000 habitants" label="part de la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="bib-f" value="prets:sum" format="compact"
+        heading="Prêts en 2023" label="bibliothèques qui les déclarent"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- Facettes CLIENT (Tabular n'a pas de facettes serveur) sur le jeu chargé
+             entier. `display` : `|` sépare les entrées (PG-022). -->
+        <dsfr-data-facets id="bib-f" source="bib-q"
+          fields="tranche, Statut, dimanche, gratuit, Département"
+          labels="tranche:Population de la commune | Statut:Statut | dimanche:Ouverte le dimanche | gratuit:Services gratuits | Département:Département"
+          display="tranche:checkbox | Statut:select | dimanche:radio-inline | gratuit:radio-inline | Département:select">
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des bibliothèques colorée par taille de la commune">
+          <!-- 15 538 lieux géolocalisés : `max-items` relevé au-dessus du total (PG-013),
+               sinon la couche s'arrête à 5 000 et demande de zoomer.
+               PAS D'ENCARTS : avec `insets="drom"`, des encarts dessinent la couche deux fois
+               et, au filtrage, gardent l'ancienne copie (points filtrés toujours visibles) ;
+               rejoué sur une page minimale de quatre points, dsfr-data 0.42.0. Et six fois
+               15 538 cercles SVG figeaient la page 7 s à chaque clic de facette (0,5 s sans).
+               Le fit est clippé à la métropole pour que l'outre-mer ne dézoome pas la vue. -->
+          <dsfr-data-map id="carte-bib"
+            name="Bibliothèques des collectivités territoriales, selon la population de leur commune"
+            height="620px" tiles="ign-plan" tiles-style="muted"
+            fit-bounds fit-zone="41,-5.5,51.5,10" fit-max-zoom="13">
+            <dsfr-data-map-layer id="couche-bib" source="bib-f" type="circle"
+              lat-field="Latitude" lon-field="Longitude" radius="3" fill-opacity="0.85"
+              color-field="tranche"
+              color-map="Moins de 500 hab.:#000091,500 à 1 999 hab.:#6a6af4,2 000 à 9 999 hab.:#b7b7b7,10 000 à 49 999 hab.:#929292,50 000 hab. et plus:#3a3a3a,Population non renseignée:#e1000f"
+              tooltip-field="nom"
+              max-items="20000">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-legend for="couche-bib" label="Population de la commune"></dsfr-data-map-legend>
+            <dsfr-data-map-popup mode="panel-right" title-field="nom" width="360px">
+              <template>
+                <p class="fr-badge fr-badge--sm fr-mb-2v">{{Statut|statut non renseigné}}</p>
+                <p class="fr-text--sm fr-mb-1v"><strong>{{Ville}}</strong> — {{Département}}<br>
+                  Commune de {{pop:number|population non renseignée}} habitants</p>
+                <ul class="fr-text--sm fr-mb-1v">
+                  <li>Prêts en 2023&nbsp;: {{prets:number|non déclaré}}</li>
+                  <li>Salariés&nbsp;: {{salaries:number|non déclaré}} — bénévoles&nbsp;: {{benevoles:number|non déclaré}}</li>
+                  <li>Ouverte le dimanche&nbsp;: {{dimanche}} — services gratuits&nbsp;: {{gratuit}}</li>
+                </ul>
+                <p class="fr-text--xs fr-mb-0">{{type_adresse}} — code {{Code_bib}}</p>
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
+          <dsfr-data-repeat source="syn-t">
+            <template>
+              <p class="fr-text--xs fr-hint-text fr-mt-1w">
+                La carte s'ouvre sur la métropole. Les {{nom:number}}&nbsp;bibliothèques d'outre-mer géolocalisées y sont
+                aussi, hors du cadre&nbsp;: faire glisser la carte pour les voir. Un filtre sur un département d'outre-mer ne
+                recentre pas la vue&nbsp;; le tableau, lui, les liste.
+              </p>
+            </template>
+          </dsfr-data-repeat>
+          <dsfr-data-a11y for="carte-bib" source="bib-f" download
+            filename="bibliotheques-selection.csv"
+            label="Données de la carte"
+            description="Carte de France, un point par bibliothèque géolocalisée de la sélection, coloré selon la population de sa commune : bleu foncé sous 500 habitants, bleu clair de 500 à 1 999, gris au-delà, rouge si la population n'est pas renseignée. Sans filtre, les points bleus couvrent l'essentiel du territoire rural, les gris se concentrent dans les villes. Le tableau sous la carte donne les mêmes bibliothèques, avec leur activité.">
+          </dsfr-data-a11y>
+        </div>
+
+        <h3 class="fr-h5 fr-mt-6w">Les bibliothèques de la sélection</h3>
+        <dsfr-data-list source="bib-f"
+          columns="nom:Bibliothèque, Ville:Commune, Département:Département, pop:Population de la commune, Statut:Statut, prets:Prêts 2023, salaries:Salariés, benevoles:Bénévoles, dimanche:Dimanche"
+          sort="prets:desc" pagination="15" count-label="bibliothèque|bibliothèques" export="csv"
+          caption="Bibliothèques des collectivités de la sélection : commune, population, statut, prêts de 2023, salariés, bénévoles, ouverture le dimanche">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Les lieux qui ne déclarent pas leur activité.</strong> {{pc:number}}&nbsp;bibliothèques sur {{n:number}}
+            déclarent leurs prêts, {{sc:number}} leur personnel, {{dimc:number}} leur ouverture le dimanche. Les parts de la
+            page se calculent sur les lieux qui répondent. Une partie des vides vient des grandes villes, qui ne déclarent pas
+            bibliothèque par bibliothèque&nbsp;: à Lyon, une seule des dix-sept bibliothèques porte des prêts&nbsp;; aucune des
+            soixante-neuf bibliothèques parisiennes ne porte de nombre de salariés, et le personnel de Paris manque donc aux
+            comptes de personnel.</li>
+          <li><strong>Les lieux sans coordonnées</strong>&nbsp;: {{nogeo:number}}&nbsp;bibliothèques n'ont pas de position et
+            manquent sur la carte&nbsp;; elles restent dans les comptes et le tableau.</li>
+          <li><strong>Les bibliothèques sans population de commune</strong> (pour l'essentiel les bibliothèques
+            départementales et leurs annexes, qui servent tout un département et non une commune)&nbsp;: elles forment la dernière barre du premier graphique et la
+            couleur rouge de la carte, et sortent du second graphique.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+    <ul class="fr-text--sm">
+      <li><strong>Tous les lieux ne sont pas des salles de lecture.</strong> Le fichier compte aussi des bibliobus, des
+        réserves et des lieux uniquement administratifs (quelques centaines)&nbsp;: ils restent dans les comptes, comme le
+        fait le ministère, et se repèrent dans la fiche de chaque point.</li>
+      <li><strong>La population desservie.</strong> La population du fichier est celle de la commune d'implantation, répétée
+        sur chaque bibliothèque de la commune&nbsp;: la sommer compterait Paris soixante-neuf fois. Elle ne sert ici qu'à
+        classer les lieux. Faute de population des intercommunalités, la page ne calcule pas de prêts par habitant.</li>
+      <li><strong>Les heures d'ouverture.</strong> L'amplitude horaire hebdomadaire contient des valeurs impossibles (onze
+        au-delà de 80&nbsp;heures, jusqu'à 1&nbsp;630)&nbsp;: une moyenne en serait tirée, et la bibliothèque ne calcule pas de
+        médiane. La page ne l'utilise pas.</li>
+      <li><strong>Les causes.</strong> Le fichier ne dit ni le budget des communes pour leur bibliothèque, ni la distance à
+        la bibliothèque la plus proche&nbsp;: la page décrit un maillage, elle ne l'évalue pas.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'un seul fichier du ministère de la Culture servi par
+        l'API Tabular de data.gouv.fr (15&nbsp;704&nbsp;lignes, 46&nbsp;colonnes). Le titre provisoire du cadrage
+        («&nbsp;9&nbsp;130 des 15&nbsp;704&nbsp;; 584 ouvrent le dimanche&nbsp;») tient pour le premier chiffre&nbsp;; le second
+        rapportait le dimanche à toutes les bibliothèques (3,7&nbsp;%) alors que près d'une sur quatre ne répond pas&nbsp;:
+        la page le rapporte aux répondantes.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Le jeu entier en trois allers-retours.</strong> <code>fetch-mode="export"</code> lit l'export
+              Parquet au lieu de 79&nbsp;pages de 200&nbsp;lignes&nbsp;: une requête de métadonnées, une pour le pied du
+              fichier, puis quatorze lectures partielles <em>en parallèle</em>, une par colonne du <code>select</code>
+              (environ 0,8&nbsp;Mo sur 1,7). Mesuré&nbsp;: données complètes en 1,2&nbsp;s environ.</li>
+            <li><strong>Les tranches en une ligne.</strong> <code>compute</code> avec <code>when … then … else</code>
+              classe chaque lieu, et le rang de tranche trie les barres sans table de correspondance.</li>
+            <li><strong>Les parts sans jointure.</strong> <code>share_percent</code> donne la part des lieux et la part
+              des prêts par tranche dans la même <code>dsfr-data-query</code>.</li>
+            <li><strong>Carte, facettes, tableau</strong> sur un seul jeu chargé&nbsp;: facettes client, 15&nbsp;538 points,
+              aucune requête de plus au filtrage.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Un taux se calcule sur les répondants, à la main.</strong> Pour chaque indicateur il faut
+              un compteur de lignes renseignées (<code>when is_null(x) then 0 else 1</code>) et un rapport en aval&nbsp;:
+              quatre paires de colonnes pour quatre taux.</li>
+            <li><strong>Une part d'un sous-ensemble demande des colonnes conditionnelles.</strong> «&nbsp;Part des prêts
+              faits dans les petites communes&nbsp;» passe par <code>prets_p = when rang &lt;= 2 then prets else 0</code>
+              puis une somme&nbsp;: il n'y a pas de somme filtrée dans <code>aggregate</code>.</li>
+            <li><strong>Les encarts ultramarins mentent au filtrage.</strong> Avec <code>insets="drom"</code>, des
+              encarts dessinent la couche deux fois et, après un filtre, gardent l'ancienne copie&nbsp;: des points filtrés
+              restent visibles (rejoué sur une page minimale de quatre points). Six fois 15&nbsp;538&nbsp;cercles figeaient
+              aussi la page 7&nbsp;s par clic (0,5&nbsp;s sans encarts). Encarts retirés&nbsp;; en contrepartie, un filtre sur un
+              département d'outre-mer ne recentre pas la carte.</li>
+            <li><strong><code>format="pourcentage"</code> ne met pas à l'échelle une colonne.</strong> Une fraction
+              calculée en amont (0,087) s'affichait «&nbsp;0,1&nbsp;%&nbsp;»&nbsp;; seul un ratio écrit dans le KPI
+              (<code>prets_p:sum / prets:sum</code>) est multiplié par cent.</li>
+            <li><strong>Pas de médiane.</strong> L'amplitude horaire, polluée de valeurs aberrantes, aurait demandé une
+              médiane&nbsp;; <code>aggregate</code> refuse toute autre fonction que les siennes. L'indicateur est écarté.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 15&nbsp;704 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif, trois allers-retours (Parquet, lectures par colonne en parallèle)</td></tr>
+            <tr><td>Classer par tranche de population</td><td><code>dsfr-data-normalize compute="… when …"</code></td><td>Natif</td></tr>
+            <tr><td>Part des lieux et des prêts par tranche</td><td><code>dsfr-data-query aggregate="…:share_percent"</code></td><td>Natif</td></tr>
+            <tr><td>Taux sur les seuls répondants</td><td>compteurs <code>is_null</code> + rapport en <code>compute</code></td><td>Natif, verbeux</td></tr>
+            <tr><td>Phrases de lecture calculées</td><td><code>dsfr-data-repeat</code> sur une ligne de synthèse</td><td>Natif</td></tr>
+            <tr><td>Carte de 15&nbsp;538 points colorés</td><td><code>dsfr-data-map-layer type="circle" color-map max-items</code></td><td>Natif (<code>max-items</code> à relever)</td></tr>
+            <tr><td>Filtres et tableau</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code> (client) + <code>dsfr-data-list</code></td><td>Natif</td></tr>
+            <tr><td>Encarts outre-mer sur une carte filtrée</td><td><code>insets="drom"</code></td><td>Retiré&nbsp;: copies périmées au filtrage</td></tr>
+            <tr><td>Médiane des heures d'ouverture</td><td>—</td><td>Absent&nbsp;: indicateur écarté</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Un fichier, un chargement, une histoire.</strong> L'export Parquet rend un jeu de quinze mille lignes aussi
+          simple à charger qu'un petit fichier, et tout le reste — tranches, parts, carte, filtres — se fait dans la page
+          sans script. Le coût est ailleurs&nbsp;: dans l'honnêteté des dénominateurs. Chaque taux doit porter son
+          effectif de répondants, et la bibliothèque ne le fait pas pour vous.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la carte Leaflet (dsfr-data-map) n'est pas dans `core`. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
