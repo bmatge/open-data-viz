@@ -1,7 +1,7 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 9 demandes cadrées — 2 bugs,
+> 12 demandes cadrées — 5 bugs,
 > 4 améliorations,
 > 3 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
@@ -39,7 +39,7 @@ Les entrées de type *piège* ne sont pas des bugs : le composant fait ce qu'il 
 ici parce qu'un avertissement ou un défaut plus sûr dans la bibliothèque coûterait moins que la
 vigilance qu'elles exigent de chaque auteur de page.
 
-24 critiques ont été **retirées** au fil du
+32 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
 `faux-probleme` du registre), et 109
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
@@ -65,8 +65,10 @@ la 0.28.0** avant d'entrer ici : ce qui suit n'est ni livré ni planifié à la 
 |---|---|---|---|---|---|
 | PG-033 | API Tabular : un tri serveur combiné à la pagination **perd des lignes en silence** — 177 distinctes sur 180 rendues, et une courbe qui plonge à zéro | piege | S | 1 | Déposer chez dsfr-data |
 | BUG-026 | Une source groupée perd son `group_by` quand un `dsfr-data-normalize` s'intercale devant une `dsfr-data-query group-by` seule lectrice | bug | S | 1 | Déposer chez dsfr-data |
+| BUG-027 | Un `where` de `dsfr-data-query` sur un alias d'agrégat est délégué au portail (HTTP 400), et l'échec de l'export fait passer les autres sources du même jeu en pagination | bug | S | 1 | Déposer chez dsfr-data |
+| BUG-028 | `dsfr-data-query` : `avg`, `sum`, `min` et `max` rendent 0 pour un groupe dont toutes les valeurs sont nulles, au lieu de null | bug | S | 2 | Déposer chez dsfr-data |
 
-_2 demandes — S 2, M 0, L 0._
+_4 demandes — S 4, M 0, L 0._
 
 ### P2 — prochain cycle : gain net, effort mesuré
 
@@ -76,9 +78,10 @@ _2 demandes — S 2, M 0, L 0._
 | PG-034 | API Tabular : `__in` **ignore toute valeur contenant une parenthèse**, avec un HTTP 200 et zéro ligne — là où `__exact` accepte la même valeur | piege | S | 1 | Déposer chez dsfr-data et signaler à data.gouv.fr |
 | BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 1 | Déposer chez dsfr-data |
 | AM-089 | `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro | amelioration | S | 1 | Déposer chez dsfr-data |
+| BUG-029 | `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul | bug | S | 3 | Déposer chez dsfr-data |
 | AM-087 | La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-_5 demandes — S 4, M 0, L 0._
+_6 demandes — S 5, M 0, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -186,6 +189,90 @@ Ne pas déléguer `group-by` à travers un transformateur (`normalize`, `pivot`�
 - [ ] La chaîne source groupée → `normalize replace-fields` → `query group-by` seule lectrice envoie `group_by=procedure` ou calcule côté client, et le KPI rend 966 672.
 - [ ] La même chaîne sans `normalize` garde son comportement.
 - [ ] Un test couvre la délégation à travers un transformateur.
+
+---
+
+## BUG-027 — Un `where` de `dsfr-data-query` sur un alias d'agrégat est délégué au portail (HTTP 400), et l'échec de l'export fait passer les autres sources du même jeu en pagination
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-query`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : edu/dataviz-ips-ecoles
+
+### Constat
+
+Une `dsfr-data-query where="n:gte:40"`, seule lectrice d'une source Opendatasoft groupée (`count(ips) as n`), ajoute `AND n >= 40` au `where` de l'export. Le portail répond 400 (« Aggregation functions are only available in a select or an order by clause »), la console annonce « l'export ne sera plus retenté », et une autre source sur le même jeu (`paire`), qui n'avait rien demandé d'illégal, part directement en pagination `/records` et finit elle aussi en 400. Même famille que BUG-025 (un `order-by` sur un alias client délégué, corrigé en 0.36.0) : le correctif a couvert `order-by`, pas `where`.
+
+### Impact de l'erreur ou du manque
+
+Une page entière tombe en 400 dès qu'on filtre un agrégat (« communes d'au moins 40 écoles »), et l'échec s'étend aux autres sources du même jeu.
+
+### Objectif métier de la correction
+
+Qu'un filtre sur un alias d'agrégat reste côté client, comme le fait `order-by` depuis 0.36.0.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : filtrer un agrégat par un seuil d'effectif est le geste qu'impose toute moyenne honnête.
+
+### Comment ça a été vérifié
+
+Agent de recréation, /education/dataviz-ips-ecoles, dsfr-data 0.42.0, 2026-09-26 : requête d'export relevée au réseau avec `…AND n >= 40`, HTTP 400, message console « l'export ne sera plus retenté », source `paire` en `/records` puis 400. Seuil déplacé derrière un `dsfr-data-normalize` : les deux exports répondent 200 (835 ms et 2 757 ms). Non rejoué sur une page minimale.
+
+### Contournement actuel
+
+Intercaler un `dsfr-data-normalize` (ou donner un second lecteur à la source) pour que le filtre reste côté client.
+
+### Demande
+
+Ne pas déléguer un `where` qui porte sur un alias d'agrégat ; et ne pas étendre à tout un jeu l'abandon de l'export décidé pour une requête invalide.
+
+### Critères d'acceptation
+
+- [ ] Une query seule lectrice `where="n:gte:40"` sur une source ODS groupée n'envoie pas `n >= 40` au portail et rend les lignes attendues.
+- [ ] L'échec d'un export n'interdit pas l'export aux autres sources du même jeu.
+- [ ] Un test couvre `where` sur alias, à côté de celui d'`order-by` (#1045).
+
+---
+
+## BUG-028 — `dsfr-data-query` : `avg`, `sum`, `min` et `max` rendent 0 pour un groupe dont toutes les valeurs sont nulles, au lieu de null
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-query`
+**Rencontré sur** 2 page(s) : edu/dataviz-ips-lycees, edu/capytale-usages
+
+### Constat
+
+Un groupe sans aucune valeur numérique sort à 0 : « voie professionnelle 0,0 » pour les lycées à voie générale seule ; sur Capytale, l'AEFE, sans correspondance dans la jointure gauche, sort avec `eleves: 0`, reste en queue du classement et verse ses visites dans la moyenne nationale. Un 0 plausible là où il fallait un vide : exactement ce que la règle #301 interdit ailleurs (`pivot`, `compute`). Un groupe partiellement nul, lui, donne la bonne moyenne.
+
+### Impact de l'erreur ou du manque
+
+Un 0 plausible entre dans un classement et dans une moyenne nationale (AEFE sur Capytale) ou s'affiche comme valeur (« voie professionnelle 0,0 »), sans avertissement.
+
+### Objectif métier de la correction
+
+Qu'un groupe sans valeur numérique rende null, conformément à #301.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : les jointures gauches et les champs optionnels produisent ces groupes à chaque page.
+
+### Comment ça a été vérifié
+
+Page minimale 0.42.0 (agent IPS lycées, 2026-09-26) : groupe `b` à `v: null, null` → `m: 0, s: 0, mi: 0` ; groupe mixte → moyenne 10, juste. Capytale : `aggregate="eleves:max"` → AEFE `eleves: 0`, relevé dans le pipeline le même jour. **Lu au source à la consignation** (`dsfr-data` main, `packages/core/src/components/dsfr-data-query.ts` l. 1851-1858) : `sum` réduit depuis 0, et `avg`, `min`, `max` rendent `0` quand `values.length === 0`.
+
+### Contournement actuel
+
+Un `where="champ:isnotnull"` (ou `:gt:0`) sur chaque query concernée.
+
+### Demande
+
+Rendre `null` pour `avg`, `min`, `max` (et `sum`, à trancher) quand le groupe n'a aucune valeur numérique, comme `pivot` le fait pour une cellule sans observation.
+
+### Critères d'acceptation
+
+- [ ] `avg`, `min`, `max` d'un groupe entièrement nul rendent null.
+- [ ] Un groupe partiellement nul garde sa moyenne sur les valeurs présentes.
+- [ ] Le comportement de `sum` est tranché et documenté.
 
 ---
 
@@ -365,6 +452,48 @@ Remplir par `null` (que Chart.js interrompt) au lieu de 0, ou un attribut `missi
 - [ ] Une cellule (label, série) absente rend `null` dans `y`, et la courbe s'interrompt.
 - [ ] Un 0 présent dans les données reste 0.
 - [ ] Si DSFR Chart refuse `null`, le constat est remonté chez `GouvernementFR/dsfr-chart` et le comportement documenté.
+
+---
+
+## BUG-029 — `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-chart`
+**Rencontré sur** 3 page(s) : edu/gar-ressources-numeriques, tourisme-et-handicap, edu/capytale-usages
+
+### Constat
+
+En format long (`series-field`), le graphique pivote lui-même les lignes en séries, et toute cellule (libellé, série) absente vaut 0. Sur GAR, l'infobulle de Nancy-Metz affiche « 12,7 accès par accédant / 0 accès par accédant ». Sur Tourisme & Handicap, « 0 établissements » pour la série absente d'une région, que la valeur calculée soit 0 ou `null`. **Règle 4 tranchée** : l'agent se demandait si c'était DSFR Chart ; c'est `dsfr-data`, le `bar-chart` reçoit déjà `y=[[12.7,11.6,10.9,0,0,…],[0,0,0,8.4,…]]`. Contraire à la règle #301 que `dsfr-data-pivot` applique (« une cellule sans observation vaut `null`, jamais 0 »). Même symptôme sur une courbe en format large (Capytale) : un mois sorti de la fenêtre glissante tracé à 0 — observé à la capture, cause non isolée.
+
+### Impact de l'erreur ou du manque
+
+L'infobulle affiche « 0 » pour une série qui n'existe pas à ce libellé ; en courbe, un trou devient une chute à zéro.
+
+### Objectif métier de la correction
+
+Même règle dans `series-field` que dans `dsfr-data-pivot` : une cellule sans observation vaut null.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : `series-field` est la voie documentée du format long.
+
+### Comment ça a été vérifié
+
+GAR, `#g-aca`, 0.42.0, 2026-09-26 : attribut `y` relevé au DOM sur `<bar-chart>`, infobulle au survol. Tourisme, `#g-reg`, survol d'Auvergne-Rhône-Alpes avec `else 0` puis `else null` : même rendu. **Lu au source à la consignation** : `dsfr-data-chart.ts` l. 649-675, `_processTidyData` — « Missing (label, series) cells are 0 », `new Array(labels.length).fill(0)`. Capytale : capture du 2026-09-26, septembre 2023 à 0.
+
+### Contournement actuel
+
+Pré-pivoter avec `dsfr-data-pivot` (cellules nulles) et passer en `value-fields` ; ou écarter la série incomplète.
+
+### Demande
+
+Remplir de `null` dans `_processTidyData`, comme `dsfr-data-pivot`.
+
+### Critères d'acceptation
+
+- [ ] `_processTidyData` remplit de null les cellules absentes.
+- [ ] L'infobulle n'affiche pas de ligne pour une série absente (ou l'affiche vide).
+- [ ] Un test aligne `series-field` sur `dsfr-data-pivot`.
 
 ---
 

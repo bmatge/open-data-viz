@@ -50,7 +50,7 @@ const STATUTS = {
   'IPS Collèges': ['reproduite', '/education/dataviz-ips-colleges',
     'Recréée en récit (2026-09-26) : l’écart public-privé se creuse à chaque rentrée, 20,0 points en 2024 ; mesuré dans chaque méthode DEPP (PG-043)', 'angular'],
   'IPS Ecoles': ['reproduite', '/education/dataviz-ips-ecoles',
-    '279 318 points : require-where + fetch-mode=export, aucune requête tant qu’aucun filtre', 'angular'],
+    'Recréée en récit (2026-09-26) : les écarts se jouent au quartier, 67 points entre déciles à Strasbourg pour 31 entre départements ; écoles sans IPS sorties de « 125 et plus » (PG-045)', 'angular'],
   'Etablissements labellisés Euroscol': ['reproduite', '/education/etablissements-euroscol',
     'Vue de jeu héritée ; les six drapeaux 0/1 repliés en un multivalué par fold', 'vue'],
   'Annuaire des internats': ['reproduite', '/education/annuaire-des-internats',
@@ -63,7 +63,7 @@ const STATUTS = {
   // --- Lot 15 : les deux dernieres pages IPS (le gabarit etait deja ecrit) et
   // trois cartographies AngularJS.
   'IPS Lycées': ['reproduite', '/education/dataviz-ips-lycees',
-    'Deux IPS par lycée, sur deux échelles séparées de 24,8 points ; la colonne de synthèse est vide', 'angular'],
+    'Recréée en récit (2026-09-26) : 24,8 points entre voie générale et voie pro, plus que privé/public ; les deux IPS se comparent (FP-027), la synthèse est dans ips_etab (FP-028)', 'angular'],
   'IPS EREA': ['reproduite', '/education/dataviz-ips-erea',
     'Quatrième emploi du gabarit IPS, écrit d’un trait ; les trois références enfin affichées', 'angular'],
   'Cartographie des labellisations Egalité fille-garçon': ['reproduite', '/education/label-egalite-fille-garcon',
@@ -75,7 +75,7 @@ const STATUTS = {
 
   // --- Lot 16 : premiere page ecrite APRES la montee en 0.27.0.
   'Offre de langues dans les collèges et lycées': ['reproduite', '/education/offre-formation-langues',
-    '39 858 offres en format long ; require-where + weight-field, livré le jour même par la bibliothèque', 'angular'],
+    'Recréée en récit (2026-09-26) : anglais partout, l’allemand dépend du territoire (100 % à Strasbourg) ; 9 743 établissements, pas 9 759 (FP-026)', 'angular'],
 
   'Génération 2024': ['reproduite', '/education/generation-2024',
     '44 colonnes vides sur 79 ; six dispositifs repliés par fold, {{#each}} dans l’infobulle', 'angular'],
@@ -100,9 +100,9 @@ const STATUTS = {
 
   // --- Lot 18 : les cinq assets et les huit cibles hors portail.
   'GAR - les données sur les ressources numériques éducatives accessibles via le GAR': ['reproduite', '/education/gar-ressources-numeriques',
-    'Cinq jeux chaînés par deux jointures : dsfr-data-join est binaire', 'asset'],
+    'Recréée en récit (2026-09-26) : usage ×30 entre académies, le Grand Est en tête (5,0 accès par accédant en France) ; mise en évidence par rang (AM-096)', 'asset'],
   'Capytale Analyse des usages': ['reproduite', '/education/capytale-usages',
-    '31 Mo transférés pour 23 Ko utiles ; clé map-aca et libellé ne peuvent pas être le même champ', 'asset'],
+    'Recréée en récit (2026-09-26) : visites pour 100 élèves, de 20 à 221 ; le classement en volume mesurait la taille des académies (FP-025)', 'asset'],
   'DNMA Les usages numériques constatés via les ENT': ['reproduite', '/education/dnma-usages-ent',
     '12,35 M de lignes, zéro chargée ; year-start-month reproduit l’année scolaire au jour près', 'asset'],
   'Ted-i : Déploiement des robots de téléprésence': ['reproduite', '/education/tedi-robots-telepresence',
@@ -110,7 +110,7 @@ const STATUTS = {
   'France Éducation international - Sélection de projets européens portant sur les données': ['reproduite', '/education/fei-projets-europeens-donnees',
     'Maître-détail natif par refine-on-click ; 4 colonnes de suivi éditorial interne publiées', 'asset'],
   'Les personnels dans les collèges français': ['reproduite', '/education/personnels-colleges',
-    'Le jeu est sur le portail officiel, en anonyme : le .com du prestataire n’était qu’un alias', 'externe'],
+    'Recréée en récit (2026-09-26) : moins de 35 ans, de 6,2 % (Finistère) à 49,7 % (Seine-Saint-Denis) ; le privé ne déclare que ses enseignants (FP-030)', 'externe'],
   'Les personnels dans les lycées français': ['reproduite', '/education/personnels-lycees',
     'Même jeu, même portail officiel ; 77 EREA entrent dans « les lycées » par une recherche plein texte', 'externe'],
   'Les personnels dans les écoles primaires et maternelles': ['reproduite', '/education/personnels-ecoles-primaires',
@@ -120,7 +120,7 @@ const STATUTS = {
   'Équipements sportifs en milieu scolaire': ['reproduite', '/education/equipements-sportifs-milieu-scolaire',
     'equipements.sports.gouv.fr : API ouverte sans clé ; « 13 036 UAI uniques » en vaut 12 214', 'externe'],
   'Accessibilité des équipements sportifs': ['reproduite', '/education/accessibilite-equipements-sportifs',
-    'Quinze jauges d’accessibilité ; quatre composants par indicateur faute de ratio sur source agrégée', 'externe'],
+    'Recréée en récit (2026-09-26) : le recensement ne sait dire que « oui », 42,1 % de fiches vides en moteur (FP-029)', 'externe'],
   'Portrait de territoire': ['reproduite', '/education/portrait-de-territoire-sports',
     '40 indicateurs sur 4 jeux ; les ratios inter-jeux restent hors de portée', 'externe'],
   'Vue cartographique d’un établissement produite par la forge des communs numériques éducatifs': ['reproduite', '/education/educajou-ecolemap',
