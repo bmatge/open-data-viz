@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>L'air des villes — open-data-viz</title>
+  <meta name="description" content="En vingt-cinq ans, le dioxyde d'azote, les particules et le dioxyde de soufre ont reculé de moitié ou plus dans les villes ; l'ozone est resté au niveau de 2000. Création avec dsfr-data sur les indicateurs de qualité de l'air du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — D3 de docs/portail-developpement-durable/proposition.md.
+
+       SEPT FICHIERS DiDo (jeux 24 et 25), en mode URL, chargés entiers (voie C) :
+       de 20 à 1 672 lignes, dernier millésime (2025-10) au chargement.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-26) :
+       - le titre tient, et il est plus net que prévu : le fichier « indice base 100 »
+         (b10a6294, non retenu au cadrage) suit AUSSI l'ozone. En 2024 : SO2 13,
+         NO2 43, PM2,5 45, PM10 50, O3 99. C'est la preuve la plus directe de
+         « sauf l'ozone » ; elle devient le premier graphique (petits multiples).
+       - les fichiers d'agglomérations ne nomment pas le polluant de la même façon :
+         « PM2_5 » dans les indicateurs nationaux, « PM25 » dans le nombre d'années
+         de dépassement par agglomération. Recodés tous deux en « PM2,5 ».
+       - le fichier territorial annuel (375acfcb) ne porte que NO2 et PM10 : les
+         exceptions « de la dernière année » ne peuvent pas inclure l'ozone.
+       - l'indicateur d'exposition PM2,5 porte des lignes vides jusqu'à 2028-2030 :
+         ce sont les porte-objectifs 2025 et 2030, pas des mesures manquantes.
+
+       DiDo REFUSE PLUS DE TROIS CONNEXIONS SIMULTANÉES PAR CLIENT (mesuré le
+       2026-09-26 : HTTP 429 « max connections reached: 3 », SANS en-tête CORS, que
+       le navigateur rapporte en « Failed to fetch »). Sept sources au montage =
+       quatre échecs, à chaque chargement. D'où : trois sources chargées d'emblée
+       (chapô, indicateurs, premiers graphiques), les quatre autres en `lazy`,
+       déclenchées par l'arrivée de leur section à l'écran.
+       ========================================================================== -->
+
+  <!-- ---------- Concentrations annuelles moyennes (µg/m³) ---------- -->
+  <dsfr-data-source id="conc"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/9db8c875-10d8-49b3-ac30-1e6f358ab6b0/json">
+  </dsfr-data-source>
+  <!-- 2000 est écrit en dur : première année du fichier, et le « vingt-cinq ans »
+       du titre. La dernière année est lue dans la donnée (conc-der). -->
+  <dsfr-data-normalize id="conc-n" source="conc"
+    compute="k = 'fr';
+             no2f = when POLLUANT = 'NO2' and TYPOLOGIE = 'fond_urbain_periurbain' then MOYENNE_ANNUELLE else null;
+             no2t = when POLLUANT = 'NO2' and TYPOLOGIE = 'proximite_trafic_urbain' then MOYENNE_ANNUELLE else null;
+             so2f = when POLLUANT = 'SO2' and TYPOLOGIE = 'fond_urbain_periurbain' then MOYENNE_ANNUELLE else null">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="conc-an" source="conc-n" group-by="ANNEE, k"
+    aggregate="no2f:sum:no2f, no2t:sum:no2t, so2f:sum:so2f" order-by="ANNEE:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="conc-der" source="conc-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="conc-00" source="conc-an" where="ANNEE:eq:2000"></dsfr-data-query>
+  <dsfr-data-join id="conc-j" left="conc-der" right="conc-00" on="k" type="inner" prefix-right="r_"></dsfr-data-join>
+  <dsfr-data-normalize id="conc-syn" source="conc-j"
+    compute="v_no2f = round((no2f / r_no2f - 1) * 100, 0);
+             v_no2t = round((no2t / r_no2t - 1) * 100, 0);
+             v_so2f = round((so2f / r_so2f - 1) * 100, 0)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Indice base 100 en 2000, fond urbain, cinq polluants ---------- -->
+  <dsfr-data-source id="idx"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/b10a6294-7f55-47be-b2e7-2ea2a856e564/json">
+  </dsfr-data-source>
+  <!-- PM2,5 n'est mesuré qu'à partir de 2009 : les années antérieures sont null
+       et écartées ici, son petit multiple commence donc en 2009. -->
+  <dsfr-data-query id="idx-t" source="idx" where="INDICE:isnotnull" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-query id="idx-an" source="idx-t" group-by="ANNEE" aggregate="INDICE:count:n"
+    order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <!-- Les cinq lignes de la dernière année : une par polluant, dans l'ordre de l'argument. -->
+  <dsfr-data-join id="idx-der-j" left="idx-t" right="idx-an" on="ANNEE" type="inner" prefix-right="d_"></dsfr-data-join>
+  <dsfr-data-normalize id="idx-der-n" source="idx-der-j"
+    compute="ordre = when POLLUANT = 'NO2' then 1 when POLLUANT = 'PM10' then 2 when POLLUANT = 'PM2_5' then 3 when POLLUANT = 'SO2' then 4 else 5;
+             lib = when POLLUANT = 'NO2' then 'Dioxyde d’azote (NO₂)' when POLLUANT = 'PM10' then 'Particules PM10'
+                   when POLLUANT = 'PM2_5' then 'Particules fines PM2,5' when POLLUANT = 'SO2' then 'Dioxyde de soufre (SO₂)' else 'Ozone (O₃)';
+             pal = when POLLUANT = 'O3' then 'categorical' else 'neutral';
+             depuis = when POLLUANT = 'PM2_5' then 'mesuré depuis 2009' else 'mesuré depuis 2000';
+             ind = round(INDICE, 0)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="idx-der" source="idx-der-n" order-by="ordre:asc"></dsfr-data-query>
+  <dsfr-data-query id="idx-o3" source="idx-der-n" where="POLLUANT:eq:O3"></dsfr-data-query>
+  <dsfr-data-query id="idx-o3-max" source="idx-t" where="POLLUANT:eq:O3" order-by="INDICE:desc" limit="1"></dsfr-data-query>
+
+  <!-- ---------- Part des agglomérations en dépassement (%) ---------- -->
+  <dsfr-data-source id="agg"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/a956734e-0f63-4629-821e-669f477d5f53/json">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="agg-n" source="agg"
+    compute="Polluant = when POLLUANT = 'NO2' then 'NO₂' when POLLUANT = 'O3' then 'O₃' when POLLUANT = 'PM2_5' then 'PM2,5' else POLLUANT;
+             Part = round(POURC_AGGLOMERATIONS, 1);
+             Annee = ANNEE">
+  </dsfr-data-normalize>
+  <!-- Deux séries seulement, NO2 et ozone, suivies toutes deux depuis 2000.
+       PM10 (suivi depuis 2007) et PM2,5 (depuis 2009) sont écartés du graphique et
+       dits en phrase : dsfr-data-chart trace une valeur null à 0 (toNumber non
+       strict, vérifié au navigateur : attribut y du line-chart = [0,0,0,…,27.3]),
+       en format long (series-field) comme en format large (pivot + value-fields).
+       Les sept années sans mesure PM10 auraient été lues « 0 % d'agglomérations ». -->
+  <dsfr-data-query id="agg-g" source="agg-n" where="POLLUANT:in:NO2|O3" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-query id="agg-no2-00" source="agg-n" where="POLLUANT:eq:NO2, ANNEE:eq:2000"></dsfr-data-query>
+  <dsfr-data-query id="agg-no2-der" source="agg-n" where="POLLUANT:eq:NO2" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="agg-o3-00" source="agg-n" where="POLLUANT:eq:O3, ANNEE:eq:2000"></dsfr-data-query>
+  <dsfr-data-query id="agg-o3-der" source="agg-n" where="POLLUANT:eq:O3" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="agg-o3-max" source="agg-n" where="POLLUANT:eq:O3" order-by="Part:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="agg-o3-rec-n" source="agg-n" compute="rec = when ANNEE >= '2015' then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="agg-o3-rec" source="agg-o3-rec-n" where="POLLUANT:eq:O3, rec:eq:1" order-by="Part:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="agg-pm10-01" source="agg-n" where="POLLUANT:eq:PM10, Part:isnotnull" order-by="ANNEE:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="agg-pm10-der" source="agg-n" where="POLLUANT:eq:PM10" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="agg-pm25-der" source="agg-n" where="POLLUANT:eq:PM2_5" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+
+  <!-- ---------- Ozone : stations de fond en dépassement, périodes de trois ans ---------- -->
+  <dsfr-data-source id="o3s" lazy lazy-target="#t-o3"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/b2e6208a-43db-47ce-a908-4d6b71548248/json">
+  </dsfr-data-source>
+  <!-- Les trois premières lignes (« 2000 », « 2000-2001 », « 2000-2002 ») ne sont pas
+       des périodes de trois ans : écartées pour que chaque barre compte pareil. -->
+  <dsfr-data-normalize id="o3s-n" source="o3s"
+    compute="Part = round(POURC_STATION_DEP, 1); rec = when PERIODE >= '2010' then 1 else 0; Periode = PERIODE"></dsfr-data-normalize>
+  <dsfr-data-query id="o3s-t" source="o3s-n" where="PERIODE:notin:2000|2000-2001|2000-2002" order-by="PERIODE:asc"></dsfr-data-query>
+  <dsfr-data-query id="o3s-max" source="o3s-t" order-by="Part:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="o3s-rec-max" source="o3s-t" where="rec:eq:1" order-by="Part:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="o3s-der" source="o3s-t" order-by="PERIODE:desc" limit="1"></dsfr-data-query>
+
+  <!-- ---------- Exposition moyenne aux PM2,5 (triennale) et objectifs ---------- -->
+  <dsfr-data-source id="pm" lazy lazy-target="#t-hors"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/d237b4e4-c1ce-431f-8716-4297be69f261/json">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="pm-n" source="pm" compute="k = 'fr'; vide = when is_null(INDICATEUR_EXPO_MOY) then 1 else 0; un = 1"></dsfr-data-normalize>
+  <dsfr-data-query id="pm-der" source="pm-n" where="INDICATEUR_EXPO_MOY:isnotnull" order-by="PERIODE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="pm-obj" source="pm-n" where="OBJECTIF_2030:isnotnull"></dsfr-data-query>
+  <dsfr-data-join id="pm-j" left="pm-der" right="pm-obj" on="k" type="inner" prefix-right="o_"></dsfr-data-join>
+  <dsfr-data-query id="pm-vides" source="pm-n" group-by="k" aggregate="vide:sum:n, un:sum:tot"></dsfr-data-query>
+
+  <!-- ---------- Par agglomération : années de dépassement depuis 2000 ---------- -->
+  <dsfr-data-source id="nb" lazy lazy-target="#t-explorer"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/ec071f19-2e4f-4481-8ee7-26b43ed88825/json">
+  </dsfr-data-source>
+  <!-- « PM25 » ici, « PM2_5 » dans les fichiers nationaux : même polluant. -->
+  <dsfr-data-normalize id="nb-n" source="nb"
+    compute="Polluant = when POLLUANT = 'NO2' then 'NO₂' when POLLUANT = 'O3' then 'O₃' when POLLUANT = 'PM25' then 'PM2,5' else POLLUANT;
+             ordre = when POLLUANT = 'O3' then 1 when POLLUANT = 'NO2' then 2 when POLLUANT = 'PM10' then 3 else 4;
+             hors = when NB_ANNEE_DEP > 0 then 1 else 0;
+             un = 1;
+             Part = round(NB_ANNEE_DEP / NB_ANNEE_MESURE * 100, 0)"
+    rename="NOM_AGGLOMERATION:Agglomération"></dsfr-data-normalize>
+  <dsfr-data-query id="nb-pol" source="nb-n" group-by="Polluant, ordre" aggregate="hors:sum:n, un:sum:tot"></dsfr-data-query>
+  <dsfr-data-normalize id="nb-pol-t" source="nb-pol" compute="pct = round(n / tot * 100, 0)"></dsfr-data-normalize>
+  <dsfr-data-query id="nb-pol-o" source="nb-pol-t" order-by="ordre:asc"></dsfr-data-query>
+  <dsfr-data-query id="nb-o3" source="nb-pol-t" where="Polluant:eq:O₃"></dsfr-data-query>
+  <dsfr-data-query id="nb-no2" source="nb-pol-t" where="Polluant:eq:NO₂"></dsfr-data-query>
+  <dsfr-data-query id="nb-paris" source="nb-n" where="Agglomération:eq:Paris, POLLUANT:eq:NO2"></dsfr-data-query>
+  <dsfr-data-query id="nb-lyon" source="nb-n" where="Agglomération:eq:Lyon, POLLUANT:eq:NO2"></dsfr-data-query>
+  <dsfr-data-query id="nb-o3-plein" source="nb-n" group-by="POLLUANT" aggregate="un:sum:n"
+    where="POLLUANT:eq:O3, Part:eq:100"></dsfr-data-query>
+
+  <!-- ---------- Situation par agglomération et par année (NO2 et PM10) ---------- -->
+  <dsfr-data-source id="terr" lazy lazy-target="#t-explorer"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/375acfcb-c07f-4f74-8a41-09a1b6561cb1/json">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="terr-n" source="terr"
+    compute="Polluant = when POLLUANT = 'NO2' then 'NO₂' else POLLUANT; k = 'fr'; dep = when SITUATION_REGLEMENTATION = 'Dépassement' then 1 else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="terr-an" source="terr-n" group-by="ANNEE" aggregate="CODE_AGGLOMERATION:distinct:nagg"
+    order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="terr-der" left="terr-n" right="terr-an" on="ANNEE" type="inner" prefix-right="a_"></dsfr-data-join>
+  <dsfr-data-query id="terr-dep" source="terr-der" where="dep:eq:1" order-by="POLLUANT:asc"></dsfr-data-query>
+  <dsfr-data-query id="terr-dep-n" source="terr-der" group-by="ANNEE" aggregate="dep:sum:n, CODE_AGGLOMERATION:distinct:nagg"></dsfr-data-query>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">L'air des villes</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>L'air des villes s'est assaini en vingt-cinq ans, sauf l'ozone</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="conc-syn">
+        <template>
+          En {{ANNEE}}, le dioxyde d'azote mesuré en ville était retombé à {{no2f:number:1}}&nbsp;µg/m³ en
+          moyenne, contre {{r_no2f:number:1}} en 2000&nbsp;: <strong>{{v_no2f:number:0}}&nbsp;%</strong>. Les
+          particules et le dioxyde de soufre ont suivi.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="idx-o3">
+        <template>
+          <strong>L'ozone, lui, n'a pas bougé&nbsp;:</strong> son indice vaut {{ind:number:0}} en {{ANNEE}}, pour
+          100 en 2000, et c'est désormais le polluant qui met le plus de villes hors norme.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: indicateurs nationaux et
+      territoriaux de qualité de l'air extérieur, calculés sur les mesures des stations de surveillance.
+      Dernier millésime de chaque fichier au chargement de la page.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="conc-syn" value="v_no2f:max" decimals="0" unit="%" span="3"
+        heading="Dioxyde d'azote en ville" label="concentration moyenne de fond, depuis 2000"></dsfr-data-kpi>
+      <dsfr-data-kpi source="agg-no2-der" value="Part:max" decimals="1" unit="%" span="3"
+        heading="Agglomérations hors norme, NO₂" label="part des agglomérations suivies, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="agg-o3-der" value="Part:max" decimals="1" unit="%" span="3"
+        heading="Agglomérations hors norme, ozone" label="part des agglomérations suivies, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="idx-o3" value="ind:max" decimals="0" span="3"
+        heading="Ozone en ville" label="indice de concentration, base 100 en 2000, dernière année"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — quatre polluants divisés, un immobile ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-indice">
+    <h2 id="t-indice" class="fr-h3">Quatre polluants ont perdu la moitié ou plus&nbsp;; l'ozone est resté au niveau de 2000</h2>
+    <p class="odv-lecture">
+      Un petit graphique par polluant, sur la même échelle&nbsp;: l'indice vaut 100 en 2000, la ligne
+      pointillée rappelle ce niveau. Une courbe qui finit à 50 signifie une concentration moyenne divisée par
+      deux. Seul l'ozone, en couleur, oscille autour de 100 depuis vingt-cinq ans.
+    </p>
+    <!-- Petits multiples : un graphique par ligne de idx-der (un par polluant), la
+         série de chaque polluant par partition de idx-t (scopes). La palette vient
+         de la donnée : « categorical » pour l'ozone, « neutral » pour les autres. -->
+    <dsfr-data-repeat source="idx-der" key-field="POLLUANT" per-row="1 md:2 lg:3" scopes="idx-t:POLLUANT:si">
+      <template>
+        <div class="odv-chart-slot odv-viz" data-code="Indice base 100 en 2000 — {{lib}}">
+          <h3 id="t-idx-{{$uid}}" class="fr-h6 fr-mb-1v">{{lib}}&nbsp;: {{ind:number:0}} en {{ANNEE}}</h3>
+          <dsfr-data-chart id="g-idx-{{$uid}}" source="{{$scope.si}}" type="line"
+            label-field="ANNEE" value-field="INDICE" name="{{lib}}, indice base 100 en 2000"
+            selected-palette="{{pal}}" y-min="0" y-max="130"
+            reference-lines='[{"axis":"y","value":100,"label":"niveau 2000","dash":true}]'>
+          </dsfr-data-chart>
+          <p class="fr-text--xs fr-hint-text fr-mb-1v">Fond urbain, indice base 100 en 2000, {{depuis}}.</p>
+          <dsfr-data-a11y for="g-idx-{{$uid}}" source="{{$scope.si}}" label-field="ANNEE" value-field="INDICE"
+            description="Courbe annuelle de l'indice de concentration de {{lib}} en fond urbain, base 100 en 2000, {{depuis}}. Dernière valeur : {{ind}} en {{ANNEE}}.">
+          </dsfr-data-a11y>
+        </div>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="idx-o3-max">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Moyennes des stations de fond urbain et périurbain, calculées par le SDES. Le plus haut de l'ozone,
+          {{INDICE:number:0}}, date de {{ANNEE}}. Les particules fines PM2,5 ne sont mesurées qu'à partir de 2009&nbsp;:
+          leur indice démarre sous 100, le fichier ne dit pas comment la base 2000 a été établie.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= NUANCE — la moyenne sous la norme, pas partout ======================= -->
+  <dsfr-data-query id="no2-g" source="conc-n" where="POLLUANT:eq:NO2" order-by="ANNEE:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="no2-t" source="no2-g"
+    compute="Site = when TYPOLOGIE = 'fond_urbain_periurbain' then 'Fond urbain' else 'Proximité du trafic';
+             Conc = round(MOYENNE_ANNUELLE, 1)"
+    rename="ANNEE:Année"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-no2">
+    <h2 id="t-no2" class="fr-h3">Même au bord des routes, le dioxyde d'azote est passé sous la valeur limite… en moyenne</h2>
+    <dsfr-data-repeat source="conc-syn">
+      <template>
+        <p class="odv-lecture">
+          Près du trafic, la moyenne des stations passe de {{r_no2t:number:1}}&nbsp;µg/m³ en 2000 à
+          {{no2t:number:1}} en {{ANNEE}} ({{v_no2t:number:0}}&nbsp;%), sous la valeur limite annuelle de
+          40&nbsp;µg/m³. <strong>Mais la directive européenne de 2024 abaisse cette limite à 20&nbsp;µg/m³ en
+          2030</strong>&nbsp;: la moyenne des sites de trafic ne la respecte pas encore. Et une moyenne sous la
+          norme n'empêche pas des stations au-dessus.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Concentration moyenne de NO2, fond urbain et proximité du trafic">
+      <dsfr-data-chart id="g-no2" source="no2-t" type="line" series-field="Site"
+        label-field="Année" value-field="Conc" unit-tooltip="µg/m³" y-min="0" y-max="60"
+        reference-lines='[{"axis":"y","value":40,"label":"valeur limite actuelle","dash":true},{"axis":"y","value":20,"label":"valeur limite 2030","dash":true}]'
+        databox databox-title="Concentration moyenne annuelle de dioxyde d'azote selon le type de station (µg/m³)"
+        databox-source="SDES — qualité de l'air extérieur, indicateurs nationaux (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-no2" source="no2-t" label-field="Année" value-field="Conc" series-field="Site"
+        description="Deux courbes annuelles depuis 2000 : la concentration moyenne de dioxyde d'azote dans les stations proches du trafic et dans les stations de fond urbain. Les deux baissent régulièrement, avec une marche en 2020. Deux lignes pointillées marquent la valeur limite actuelle, 40 µg/m³, que les sites de trafic franchissent vers le bas au milieu des années 2010, et la valeur limite de 2030, 20 µg/m³, qu'ils dépassent encore.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Valeurs limites&nbsp;: directive 2008/50/CE (40&nbsp;µg/m³ en moyenne annuelle) et directive (UE) 2024/2881
+      (20&nbsp;µg/m³ à partir de 2030). La recommandation de l'Organisation mondiale de la santé (2021) est de
+      10&nbsp;µg/m³. Le nombre de stations change d'une année à l'autre et le fichier ne le publie pas&nbsp;: la
+      moyenne peut bouger parce que le réseau change. Le creux de 2020 coïncide avec les confinements.
+    </p>
+  </section>
+
+  <!-- ======================= LA RUPTURE — le NO2 sort des villes, pas l'ozone ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-agglo">
+    <h2 id="t-agglo" class="fr-h3">Presque plus d'agglomérations hors norme pour le dioxyde d'azote, encore une sur dix pour l'ozone</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="agg-no2-00">
+        <template>Dioxyde d'azote&nbsp;: en 2000, {{Part:number:0}}&nbsp;% des agglomérations suivies dépassaient la norme.</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="agg-no2-der">
+        <template>En {{ANNEE}}, {{Part:number:1}}&nbsp;%.</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="agg-o3-00">
+        <template>Ozone&nbsp;: {{Part:number:0}}&nbsp;% en 2000.</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="agg-o3-max">
+        <template>Record en {{ANNEE}}&nbsp;: {{Part:number:0}}&nbsp;%.</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="agg-o3-rec">
+        <template>Encore {{Part:number:0}}&nbsp;% en {{ANNEE}}.</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="agg-o3-der">
+        <template><strong>{{Part:number:1}}&nbsp;% en {{ANNEE}}</strong>&nbsp;: la courbe baisse, mais par à-coups, au gré des étés.</template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Part des agglomérations en dépassement par polluant">
+      <!-- Pas de color-map : sur un graphique en ligne, il recolore le trait et la
+           légende mais pas les points, qui gardent la palette (vérifié au navigateur). -->
+      <dsfr-data-chart id="g-agglo" source="agg-g" type="line" series-field="Polluant"
+        label-field="Annee" value-field="Part" unit-tooltip="%" y-min="0"
+        databox databox-title="Part des agglomérations où la norme de protection de la santé n'est pas respectée, par polluant (%)"
+        databox-source="SDES — qualité de l'air extérieur, indicateurs nationaux (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-agglo" source="agg-g" label-field="Annee" value-field="Part" series-field="Polluant"
+        description="Deux courbes annuelles depuis 2000 : part des agglomérations en dépassement de la norme de santé pour le dioxyde d'azote et pour l'ozone. Le dioxyde d'azote descend d'environ un cinquième à un peu plus de 1 %. L'ozone culmine aux deux tiers en 2003, remonte à près d'un tiers en 2020, et finit autour d'une sur dix.">
+      </dsfr-data-a11y>
+    </div>
+    <div class="fr-text--xs fr-hint-text">
+      <dsfr-data-repeat source="agg-pm10-01">
+        <template>Particules PM10, suivies à partir de {{ANNEE}}&nbsp;: {{Part:number:0}}&nbsp;% des agglomérations en dépassement cette année-là,</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="agg-pm10-der">
+        <template>{{Part:number:1}}&nbsp;% en {{ANNEE}}.</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="agg-pm25-der">
+        <template>Particules fines PM2,5&nbsp;: {{Part:number:0}}&nbsp;% en {{ANNEE}}, comme chaque année depuis 2015.</template>
+      </dsfr-data-repeat>
+      Ces deux séries commencent plus tard&nbsp;: tracées ici, leurs années sans mesure apparaîtraient comme des
+      zéros. Le nombre d'agglomérations suivies n'est pas publié dans ce fichier.
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — l'ozone suit les étés ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-o3">
+    <h2 id="t-o3" class="fr-h3">L'ozone ne recule pas d'une année sur l'autre&nbsp;: il remonte avec les étés chauds</h2>
+    <div class="odv-lecture">
+      L'ozone n'est pas émis&nbsp;: il se forme au soleil, à partir d'autres polluants, et culmine l'été.
+      Sa norme se juge sur trois ans, si bien qu'un été exceptionnel pèse sur trois périodes.
+      <dsfr-data-repeat source="o3s-max">
+        <template>
+          <strong>Sur {{Periode}}, {{Part:number:0}}&nbsp;% des stations de fond urbain la dépassaient</strong>, la
+          canicule d'août 2003 comprise.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="o3s-rec-max">
+        <template>Après la décrue, la part remonte à {{Part:number:0}}&nbsp;% sur {{Periode}},</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="o3s-der">
+        <template>et vaut {{Part:number:0}}&nbsp;% sur {{Periode}}.</template>
+      </dsfr-data-repeat>
+    </div>
+    <div class="odv-chart-slot odv-viz" data-code="Stations de fond urbain en dépassement de la norme ozone, par période de trois ans">
+      <dsfr-data-chart id="g-o3" source="o3s-t" type="bar"
+        label-field="Periode" value-field="Part" name="Stations en dépassement (%)" unit-tooltip="%"
+        reference-lines='[{"axis":"x","value":"2001-2003","label":"été 2003","dash":true}]'
+        databox databox-title="Part des stations de fond urbain où la valeur cible ozone pour la santé n'est pas respectée, par période de trois ans (%)"
+        databox-source="SDES — qualité de l'air extérieur, indicateurs nationaux (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-o3" source="o3s-t" label-field="Periode" value-field="Part"
+        description="Barres verticales, une par période glissante de trois ans depuis 2001-2003 : part des stations de fond urbain qui dépassent la norme ozone pour la santé. Les trois périodes qui contiennent 2003 dépassent la moitié des stations ; la part descend ensuite autour de 10 à 15 %, remonte à près d'un tiers sur 2018-2020, puis retombe autour de 10 %.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Le lien avec les étés chauds est une lecture, pas une mesure&nbsp;: ce fichier ne contient pas de
+      températures. Les trois premières lignes publiées («&nbsp;2000&nbsp;», «&nbsp;2000-2001&nbsp;»,
+      «&nbsp;2000-2002&nbsp;») couvrent moins de trois ans et ne sont pas tracées.
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION — par agglomération ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: l'ozone a touché deux agglomérations sur trois, le dioxyde d'azote une sur quatre</h2>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="nb-o3">
+        <template>
+          Depuis 2000, {{n:number:0}}&nbsp;agglomérations sur {{tot:number:0}} suivies pour l'ozone ({{pct:number:0}}&nbsp;%)
+          ont dépassé sa norme au moins une année&nbsp;;
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="nb-o3-plein">
+        <template>{{n:number:0}} l'ont dépassée <strong>chaque année mesurée</strong>.</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="nb-no2">
+        <template>Pour le dioxyde d'azote, {{n:number:0}} sur {{tot:number:0}} ({{pct:number:0}}&nbsp;%),</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="nb-paris">
+        <template>dont Paris, {{NB_ANNEE_DEP}}&nbsp;années sur {{NB_ANNEE_MESURE}},</template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="nb-lyon">
+        <template>et Lyon, {{NB_ANNEE_DEP}} sur {{NB_ANNEE_MESURE}}.</template>
+      </dsfr-data-repeat>
+    </div>
+
+    <div class="odv-chart-slot odv-viz" data-code="Part des agglomérations ayant dépassé la norme au moins une année, par polluant">
+      <dsfr-data-chart id="g-pol" source="nb-pol-o" type="bar" horizontal
+        label-field="Polluant" value-field="pct" name="Agglomérations ayant dépassé au moins une année (%)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="%"
+        databox databox-title="Part des agglomérations suivies ayant dépassé la norme de santé au moins une année depuis 2000, par polluant (%)"
+        databox-source="SDES — qualité de l'air extérieur, indicateurs territoriaux (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-pol" source="nb-pol-o" label-field="Polluant" value-field="pct,n,tot"
+        description="Barres horizontales, une par polluant : part des agglomérations suivies qui ont dépassé la norme de protection de la santé au moins une année depuis 2000. L'ozone, mis en évidence, arrive en tête avec près des deux tiers ; le dioxyde d'azote et les PM10 environ un quart ; les PM2,5 quelques pour cent.">
+      </dsfr-data-a11y>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">La dernière année, les exceptions se comptent sur une main</h3>
+    <dsfr-data-repeat source="terr-dep-n">
+      <template>
+        <p class="odv-lecture">
+          En {{ANNEE}}, {{n:number:0}}&nbsp;situations de dépassement pour {{nagg:number:0}} agglomérations
+          suivies en dioxyde d'azote ou en particules PM10&nbsp;:
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-list source="terr-dep"
+      columns="NOM_AGGLOMERATION:Agglomération, Polluant:Polluant"
+      caption="Agglomérations en dépassement de la norme de santé la dernière année publiée">
+    </dsfr-data-list>
+    <p class="fr-text--xs fr-hint-text">
+      Le fichier annuel par agglomération ne suit que le dioxyde d'azote et les PM10, pas l'ozone. Les
+      dépassements de PM10 outre-mer (Martinique, Guyane, Mayotte) sont habituellement attribués aux brumes de
+      sable venues du Sahara&nbsp;: le fichier ne distingue pas les sources.
+    </p>
+
+    <h3 class="fr-h5 fr-mt-6w">Toutes les agglomérations</h3>
+    <div class="odv-dashboard">
+      <details class="odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h4 class="fr-h6">Filtrer</h4>
+        <dsfr-data-facets id="nb-f" source="nb-n"
+          fields="Polluant" display="Polluant:radio-inline" hide-counts>
+        </dsfr-data-facets>
+      </details>
+      <div>
+        <dsfr-data-list source="nb-f"
+          columns="Agglomération:Agglomération, Polluant:Polluant, NB_ANNEE_DEP:Années en dépassement, NB_ANNEE_MESURE:Années mesurées, Part:Part des années (%)"
+          sort="NB_ANNEE_DEP:desc" search pagination="15" count-label="ligne|lignes" export="csv"
+          caption="Nombre d'années de dépassement de la norme de santé par agglomération et par polluant, depuis 2000">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm fr-mb-0">
+      <li><strong>« En dépassement » n'est pas « pollué ».</strong> Les normes sont réglementaires, et plus
+        tolérantes que les recommandations de l'OMS&nbsp;: une agglomération «&nbsp;dans la norme&nbsp;» peut rester
+        au-dessus de ce que l'OMS juge sans risque.</li>
+      <li><strong>Le nombre de stations.</strong> Les moyennes nationales portent sur les stations en service
+        chaque année&nbsp;; le fichier ne dit pas combien. Une partie de l'évolution peut venir du réseau lui-même.</li>
+      <li><strong>Les autres polluants et la végétation.</strong> Benzène, métaux, ammoniac ne sont pas dans ces
+        fichiers&nbsp;; la norme ozone de protection de la végétation, publiée à part, n'est pas reprise.</li>
+      <li><strong>Deux noms pour un polluant.</strong> Les particules fines s'appellent «&nbsp;PM2_5&nbsp;» dans
+        les fichiers nationaux et «&nbsp;PM25&nbsp;» dans le fichier par agglomération&nbsp;; la page les réunit.
+        Le fichier par agglomération compte aussi plus d'agglomérations que le fichier annuel&nbsp;: il couvre
+        vingt-cinq ans, pendant lesquels le réseau a changé.</li>
+    </ul>
+    <dsfr-data-repeat source="pm-j">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>L'exposition aux particules fines.</strong> L'indicateur national d'exposition moyenne aux PM2,5
+            vaut {{INDICATEUR_EXPO_MOY:number:1}}&nbsp;µg/m³ sur {{PERIODE}}, déjà sous l'objectif fixé pour 2030
+            ({{o_OBJECTIF_2030:number:0}}&nbsp;µg/m³). Les lignes suivantes du fichier sont vides&nbsp;: elles ne
+            portent que les objectifs à venir, pas des mesures manquantes.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création à partir de sept petits fichiers du SDES servis par
+        l'API DiDo, chargés entiers. Le titre du cadrage a tenu&nbsp;; un fichier qu'il n'avait pas retenu,
+        l'indice base 100, le prouve mieux que tous les autres, parce qu'il suit aussi l'ozone.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Des petits multiples pilotés par la donnée.</strong> Un <code>dsfr-data-repeat</code> sur
+              les lignes de la dernière année, <code>scopes</code> pour donner à chaque graphique la série de son
+              polluant, et une palette calculée par <code>compute</code> puis interpolée dans
+              <code>selected-palette</code>&nbsp;: l'ozone en couleur, le reste en gris, sans une ligne de script.</li>
+            <li><strong>Sept fichiers, sept balises.</strong> Moins de 400&nbsp;Ko en tout&nbsp;; le chargement complet
+              évite toute question de pagination.</li>
+            <li><strong>Étaler les chargements.</strong> <code>lazy lazy-target="#section"</code> sur quatre
+              sources&nbsp;: elles partent quand leur section approche de l'écran.</li>
+            <li><strong>Des phrases de lecture qui suivent le millésime.</strong> Dernière année, maximum, année
+              de pointe&nbsp;: une <code>dsfr-data-query limit="1"</code> triée chacune.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>La donnée plus que l'outil.</strong> Deux codes pour le même polluant, des périodes
+              triennales qui n'en sont pas au début du fichier, des lignes vides qui portent des objectifs&nbsp;: à
+              chaque fois un <code>compute</code> ou un <code>where</code>, et une phrase en page.</li>
+            <li><strong>DiDo refuse plus de trois connexions simultanées.</strong> Sept sources au montage&nbsp;: quatre
+              échecs à chaque chargement, en «&nbsp;Failed to fetch&nbsp;». La réponse est un HTTP 429 «&nbsp;max
+              connections reached: 3&nbsp;» sans en-tête CORS, que le navigateur maquille en erreur réseau. Seule la
+              ligne de commande l'a montré.</li>
+            <li><strong>Une année sans mesure est tracée à zéro.</strong> <code>dsfr-data-chart</code> convertit
+              une valeur <code>null</code> en 0, en format long comme en format large&nbsp;: les PM10, suivies depuis
+              2007, auraient affiché «&nbsp;0&nbsp;%&nbsp;» de 2000 à 2006. Elles sortent du graphique et passent en
+              phrase.</li>
+            <li><strong><code>color-map</code> ne recolore pas les points d'une courbe.</strong> Trait et légende
+              changent, les points gardent la palette&nbsp;: la mise en évidence par couleur a été retirée des
+              graphiques en ligne.</li>
+            <li><strong>La mise en évidence du classement dépend du tri.</strong> <code>highlight-index</code>
+              désigne un rang&nbsp;: l'ozone est mis en avant parce qu'il est placé premier par un ordre calculé,
+              pas parce qu'il est nommé.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger un fichier DiDo complet</td><td><code>dsfr-data-source url=</code> (mode URL)</td><td>Natif, une requête par fichier</td></tr>
+            <tr><td>Un graphique par polluant, même échelle</td><td><code>dsfr-data-repeat scopes</code> + <code>y-min</code>/<code>y-max</code></td><td>Natif</td></tr>
+            <tr><td>Un polluant en couleur, les autres grisés</td><td><code>selected-palette</code> interpolé (petits multiples)&nbsp;; <code>color-map</code> sur une courbe</td><td>Natif en petits multiples&nbsp;; sur une courbe, points non recolorés</td></tr>
+            <tr><td>Une série qui commence plus tard que les autres</td><td><code>series-field</code> ou <code>value-fields</code></td><td>Bloquant&nbsp;: <code>null</code> tracé à 0</td></tr>
+            <tr><td>Charger sept fichiers d'un portail limité à trois connexions</td><td><code>lazy lazy-target</code></td><td>Contournement&nbsp;: dépend du défilement</td></tr>
+            <tr><td>Valeurs limites sur le graphique</td><td><code>reference-lines</code></td><td>Natif</td></tr>
+            <tr><td>Séries depuis le format long</td><td><code>series-field</code> sur le graphique et sur <code>dsfr-data-a11y</code></td><td>Natif</td></tr>
+            <tr><td>Recoder « PM25 » et « PM2_5 »</td><td><code>dsfr-data-normalize compute</code></td><td>Natif</td></tr>
+            <tr><td>Liste des exceptions de la dernière année</td><td><code>dsfr-data-join</code> interne sur l'année + <code>dsfr-data-repeat</code></td><td>Natif, sans année en dur</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>Une page de récit complète sur de petits fichiers, sans script — mais deux défauts de
+          graphique et un portail qui rationne les connexions.</strong> Le répéteur fait des petits multiples une
+          affaire de gabarit, et la palette peut venir de la donnée. En face&nbsp;: une mesure absente tracée à zéro,
+          qui a coûté deux séries au graphique principal, des points qui ne suivent pas <code>color-map</code>, et
+          DiDo qui refuse la quatrième requête simultanée sans le dire au navigateur.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune carte sur cette page. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

@@ -88,6 +88,8 @@ const pages = [
   ...html('public/viz', '/viz/'),
   ...html('public/education', '/education/'),
   ...html('public/sports', '/sports/'),
+  ...html('public/culture', '/culture/'),
+  ...html('public/developpement-durable', '/developpement-durable/'),
   ...html('public/demo', '/demo/'),
 ]
   .filter((p) => !motifs.length || motifs.some((m) => p.includes(m)))
@@ -102,7 +104,7 @@ if (bundle) console.log(`Bundle dsfr-data servi depuis ${bundle}\n`);
 
 const sortie = process.argv[2] || 'recette.json';
 const navigateur = await chromium.launch(
-  process.env.RECETTE_PROXY ? { proxy: { server: process.env.RECETTE_PROXY } } : {},
+  process.env.RECETTE_PROXY ? { proxy: { server: process.env.RECETTE_PROXY, bypass: 'localhost,127.0.0.1' } } : {},
 );
 const etat = {};
 

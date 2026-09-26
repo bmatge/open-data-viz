@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Festivals, un paysage jeune — open-data-viz</title>
+  <meta name="description" content="Près d'un festival sur deux actifs en 2019 était né depuis 2010 ; 44 % sont de musique, et l'été en concentre deux fois plus par semaine que le reste de l'année. Création avec dsfr-data à partir de la liste des festivals du ministère de la Culture (API Tabular, data.gouv.fr).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://www.data.gouv.fr" crossorigin>
+  <link rel="preconnect" href="https://hydra.s3.rbx.io.cloud.ovh.net" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — fiche 5 du cadrage docs/portail-culture/proposition.md.
+       Pas d'original : la page raconte la « Liste des festivals en France » du
+       ministère de la Culture (Deps-doc / France festivals / Cepel), servie par Tabular.
+
+       LE CHAMP. Le recensement ne retient que les festivals qui ont EU LIEU EN 2019
+       (au moins deux éditions, plus d'une journée, au moins cinq spectacles). C'est
+       une photographie des festivals vivants en 2019, pas un registre des naissances :
+       toute la page le dit, et le titre parle d'âge en 2019, pas de « boom ».
+
+       LE CHARGEMENT. 7 283 lignes : `fetch-mode="export"` lit l'export Parquet de la
+       ressource en UNE requête (pas de where/group-by sur la source, sinon repli sur
+       37 pages de 200). `select` projette les douze colonnes utiles (le jeu en a 30).
+       `max-records` relevé à 10 000 pour ne rien tronquer si le jeu grossit.
+
+       LES MODALITÉS. La décennie et la période sont saisies à la main : « 2010 et
+       après » (3 358) mais aussi « de 2000 à 2009 » en minuscule (11), et la période
+       mêle trois saisons normalisées, leurs variantes en minuscule et des noms de mois.
+       `compute` harmonise la casse ; les mois isolés vont en « Autre ou non
+       renseignée », compté et dit en page.
+       ========================================================================== -->
+
+  <dsfr-data-source id="fest" api-type="tabular"
+    base-url="https://tabular-api.data.gouv.fr"
+    resource="47ac11c2-8a00-46a7-9fa8-9b802643f975"
+    fetch-mode="export" max-records="10000"
+    select="Identifiant, Nom du festival, Discipline dominante, Décennie de création du festival, Année de création du festival, Période principale de déroulement du festival, Envergure territoriale, Région principale de déroulement, Département principal de déroulement, Commune principale de déroulement, Géocodage xy, Site internet du festival">
+  </dsfr-data-source>
+
+  <!-- « Géocodage xy » vaut « 49.20, -0.33 » (lat, lon) : `split` en fait un tableau
+       [lat, lon], que `geo-field` de la carte lit tel quel. -->
+  <dsfr-data-normalize id="f-n" source="fest" trim split="Géocodage xy"
+    rename="Nom du festival:nom | Discipline dominante:discipline | Décennie de création du festival:dec_brute | Année de création du festival:annee_brute | Période principale de déroulement du festival:per_brute | Envergure territoriale:envergure | Région principale de déroulement:region | Département principal de déroulement:departement | Commune principale de déroulement:commune | Géocodage xy:geo | Site internet du festival:site"
+    compute="decennie = when lower(dec_brute) = 'avant 1980' then 'Avant 1980'
+                        when lower(dec_brute) = 'de 1980 à 1989' then 'Années 1980'
+                        when lower(dec_brute) = 'de 1990 à 1999' then 'Années 1990'
+                        when lower(dec_brute) = 'de 2000 à 2009' then 'Années 2000'
+                        when lower(dec_brute) = '2010 et après' then '2010 et après'
+                        else 'Non renseignée';
+             ordre_dec = when decennie = 'Avant 1980' then 1 when decennie = 'Années 1980' then 2
+                         when decennie = 'Années 1990' then 3 when decennie = 'Années 2000' then 4
+                         when decennie = '2010 et après' then 5 else 6;
+             ordre_per = when contains(per_brute, '1er janvier') then 1
+                         when contains(per_brute, '21 juin') then 2
+                         when contains(per_brute, '6 septembre') then 3 else 4;
+             periode = when ordre_per = 1 then 'Avant-saison (1er janvier – 20 juin)'
+                       when ordre_per = 2 then 'Saison (21 juin – 5 septembre)'
+                       when ordre_per = 3 then 'Après-saison (6 septembre – 31 décembre)'
+                       else 'Autre ou non renseignée';
+             jours = when ordre_per = 1 then 171 when ordre_per = 2 then 77 when ordre_per = 3 then 117 else null;
+             un = 1;
+             connu = when ordre_dec < 6 then 1 else 0;
+             jeune = when ordre_dec = 5 then 1 else 0;
+             d2000 = when ordre_dec = 4 then 1 else 0;
+             d1990 = when ordre_dec = 3 then 1 else 0;
+             ete = when ordre_per = 2 then 1 else 0;
+             avant = when ordre_per = 1 then 1 else 0;
+             apres = when ordre_per = 3 then 1 else 0;
+             per_autre = when ordre_per = 4 then 1 else 0;
+             musique = when discipline = 'Musique' then 1 else 0;
+             spectacle = when discipline = 'Spectacle vivant' then 1 else 0;
+             musique_ete = when discipline = 'Musique' and ordre_per = 2 then 1 else 0;
+             env_vide = when is_empty(envergure) then 1 else 0;
+             geo_vide = when is_empty(geo) then 1 else 0;
+             hors_encart = when not is_empty(geo) and (region = 'Nouvelle-Calédonie' or region = 'Polynésie française' or region = 'Saint-Pierre-et-Miquelon' or region = 'Saint-Barthélemy') then 1 else 0;
+             tardif = when annee_brute = '2020' or annee_brute = '2021' or annee_brute = '2022' then 1 else 0;
+             k = 1">
+  </dsfr-data-normalize>
+
+  <!-- ---------- La synthèse : une ligne, toutes les sommes ---------- -->
+  <dsfr-data-query id="syn" source="f-n" group-by="k"
+    aggregate="un:sum:n, connu:sum:connu, jeune:sum:jeune, d2000:sum:d2000, d1990:sum:d1990,
+               ete:sum:ete, avant:sum:avant, apres:sum:apres, per_autre:sum:per_autre,
+               musique:sum:musique, spectacle:sum:spectacle, musique_ete:sum:musique_ete,
+               env_vide:sum:env_vide, geo_vide:sum:geo_vide, hors_encart:sum:hors_encart, tardif:sum:tardif">
+  </dsfr-data-query>
+  <!-- Semaines : avant-saison 171 jours, saison 77, après-saison 117 (année non bissextile). -->
+  <dsfr-data-normalize id="syn-t" source="syn"
+    compute="inconnu = n - connu;
+             part_jeune = jeune / connu * 100;
+             part_jeune_tot = jeune / n * 100;
+             anciennes = d2000 + d1990;
+             part_musique = musique / n * 100;
+             part_duo = (musique + spectacle) / n * 100;
+             part_ete = ete / n * 100;
+             part_musique_ete = musique_ete / musique * 100;
+             sem_ete = ete / 11;
+             sem_reste = (avant + apres) / (288 / 7);
+             ratio_ete = (ete / 77) / ((avant + apres) / 288)">
+  </dsfr-data-normalize>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/culture">Portail Culture</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">Festivals</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Festivals&nbsp;: en 2019, près d'un sur deux avait moins de dix ans</h1>
+
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="fr-text--lead">
+          Sur les {{n:number}}&nbsp;festivals qui ont eu lieu en 2019, {{jeune:number}} étaient nés en 2010 ou
+          après&nbsp;: <strong>{{part_jeune:number:0}}&nbsp;%</strong> de ceux dont on connaît la date de création.
+          C'est plus que les années 1990 et 2000 réunies ({{anciennes:number}}). Ce paysage jeune est d'abord
+          musical ({{part_musique:number:0}}&nbsp;% des festivals) et estival&nbsp;: en onze semaines d'été, il se
+          tient {{ratio_ete:number:1}}&nbsp;fois plus de festivals par semaine que le reste de l'année.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère de la Culture, Deps-doc / France festivals / Cepel — <em>Liste des festivals en France</em>,
+      recensement des festivals ayant eu lieu en 2019 (au moins deux éditions, plus d'une journée, au moins cinq
+      spectacles, représentations, concerts ou projections). Données lues à l'ouverture de la page sur
+      <a href="https://www.data.gouv.fr/datasets/liste-des-festivals-en-france/" target="_blank" rel="noopener external">data.gouv.fr</a>
+      (export Parquet de l'API Tabular).
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="syn-t" value="n:max" format="nombre" span="4"
+        heading="Festivals recensés" label="ayant eu lieu en 2019"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_jeune:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Nés en 2010 ou après" label="parmi ceux dont la décennie de création est connue"></dsfr-data-kpi>
+      <dsfr-data-kpi source="syn-t" value="part_ete:max" format="decimal" decimals="0" unit="%" span="4"
+        heading="Tenus l'été" label="du 21 juin au 5 septembre, soit onze semaines"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les décennies ======================= -->
+  <!-- highlight-index="[4]" = « 2010 et après » : ordre fixé par ordre_dec (1 à 6). -->
+  <dsfr-data-query id="dec" source="f-n" group-by="decennie, ordre_dec" aggregate="un:sum:n" order-by="ordre_dec:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="dec-g" source="dec" rename="decennie:Décennie de création | n:Festivals"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-dec">
+    <h2 id="t-dec" class="fr-h3">Les festivals nés depuis 2010 sont plus nombreux que ceux des deux décennies précédentes réunies</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{jeune:number}}&nbsp;festivals actifs en 2019 avaient été créés en 2010 ou après, {{d2000:number}} dans les
+          années 2000, {{d1990:number}} dans les années 1990. Chaque décennie plus récente pèse plus que la précédente, et
+          la dernière n'a duré que dix ans au moment du recensement. {{inconnu:number}}&nbsp;festivals n'ont pas de décennie
+          de création renseignée&nbsp;: ils ont leur barre, en dernier.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Festivals ayant eu lieu en 2019, par décennie de création">
+      <dsfr-data-chart id="g-dec" source="dec-g" type="bar"
+        label-field="Décennie de création" value-field="Festivals" name="Festivals"
+        selected-palette="neutral" highlight-index="[4]" unit-tooltip="festivals"
+        databox databox-title="Festivals ayant eu lieu en 2019, selon la décennie de leur création"
+        databox-source="Ministère de la Culture — Liste des festivals en France (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-dec" source="dec-g" label-field="Décennie de création" value-field="Festivals"
+        description="Barres verticales, une par décennie de création, de « Avant 1980 » à « 2010 et après », puis les festivals sans décennie renseignée. Les barres montent à chaque décennie ; celle de 2010 et après, mise en évidence, est la plus haute, au-dessus de 3 000 festivals.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= NUANCE — les survivants ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-survivants">
+    <h2 id="t-survivants" class="fr-h3">Mais c'est un inventaire des festivals vivants, pas un registre des naissances</h2>
+    <div class="fr-callout fr-icon-information-line">
+      <p class="fr-callout__text">
+        Le recensement ne garde que les festivals qui ont eu lieu en 2019. Un festival créé en 1995 et disparu en
+        2005 n'y figure pas. Les décennies anciennes sont donc comptées après vingt ou trente ans de disparitions, la
+        plus récente après quelques années seulement. Ces barres ne disent pas qu'on crée plus de festivals
+        qu'autrefois&nbsp;: elles disent que le paysage de 2019 est jeune, ce qui peut venir de beaucoup de créations,
+        de beaucoup de disparitions, ou des deux. Ce fichier ne permet pas de les départager.
+      </p>
+    </div>
+  </section>
+
+  <!-- ======================= QUOI — les disciplines ======================= -->
+  <dsfr-data-query id="disc" source="f-n" group-by="discipline" aggregate="un:sum:n" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="disc-g" source="disc" rename="discipline:Discipline dominante | n:Festivals"></dsfr-data-normalize>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-disc">
+    <h2 id="t-disc" class="fr-h3">Un festival sur deux, ou presque, est un festival de musique</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{musique:number}}&nbsp;festivals ont la musique pour discipline dominante, {{part_musique:number:0}}&nbsp;% du
+          total. Avec le spectacle vivant ({{spectacle:number}}), c'est {{part_duo:number:0}}&nbsp;% des festivals. Le livre,
+          le cinéma et les arts visuels se partagent le reste, avec les festivals pluridisciplinaires.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Festivals ayant eu lieu en 2019, par discipline dominante">
+      <dsfr-data-chart id="g-disc" source="disc-g" type="bar" horizontal
+        label-field="Discipline dominante" value-field="Festivals" name="Festivals"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="festivals"
+        databox databox-title="Festivals ayant eu lieu en 2019, par discipline dominante"
+        databox-source="Ministère de la Culture — Liste des festivals en France (data.gouv.fr)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-disc" source="disc-g" label-field="Discipline dominante" value-field="Festivals"
+        description="Barres horizontales triées de la plus longue à la plus courte : le nombre de festivals par discipline dominante. La musique, mise en évidence, dépasse 3 000 festivals, deux fois le spectacle vivant ; les quatre autres disciplines sont chacune sous 900.">
+      </dsfr-data-a11y>
+    </div>
+  </section>
+
+  <!-- ======================= QUAND — les saisons ======================= -->
+  <!-- Un TAUX par semaine, pas un volume : les trois périodes du jeu n'ont pas la même
+       longueur (171, 77 et 117 jours). Les périodes « autres » (mois isolés, vide) n'ont
+       pas de durée : écartées du graphique, comptées dans « ce qu'on ne montre pas ». -->
+  <dsfr-data-query id="per" source="f-n" where="ordre_per:lt:4" group-by="periode, ordre_per, jours" aggregate="un:sum:n" order-by="ordre_per:asc"></dsfr-data-query>
+  <dsfr-data-normalize id="per-t" source="per"
+    compute="sem = round(n / (jours / 7), 0);
+             court = when ordre_per = 1 then 'Avant-saison' when ordre_per = 2 then 'Saison d’été' else 'Après-saison'"></dsfr-data-normalize>
+  <dsfr-data-normalize id="per-g" source="per-t" rename="court:Période principale | sem:Festivals par semaine | n:Festivals"></dsfr-data-normalize>
+
+  <!-- Discipline × période : part de chaque période dans les festivals de la discipline
+       (dénominateur : tous les festivals de la discipline, périodes « autres » comprises). -->
+  <dsfr-data-query id="disc-per" source="f-n" group-by="discipline"
+    aggregate="un:sum:n, ete:sum:ete, avant:sum:avant, apres:sum:apres"></dsfr-data-query>
+  <dsfr-data-normalize id="disc-per-t" source="disc-per"
+    compute="p_ete = round(ete / n * 100, 1); p_avant = round(avant / n * 100, 1); p_apres = round(apres / n * 100, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="disc-per-tri" source="disc-per-t" order-by="p_ete:desc"></dsfr-data-query>
+  <dsfr-data-query id="cine" source="disc-per-t" where="discipline:eq:Cinéma%2C audiovisuel"></dsfr-data-query>
+  <dsfr-data-query id="livre" source="disc-per-t" where="discipline:eq:Livre%2C littérature"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-ete">
+    <h2 id="t-ete" class="fr-h3">L'été compte deux fois plus de festivals par semaine que le reste de l'année, surtout grâce à la musique</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <p class="odv-lecture">
+          {{ete:number}}&nbsp;festivals se tiennent principalement entre le 21 juin et le 5 septembre, soit environ
+          {{sem_ete:number:0}} par semaine. Le reste de l'année en compte {{sem_reste:number:0}} par semaine&nbsp;:
+          l'été est {{ratio_ete:number:1}}&nbsp;fois plus dense. La musique y est pour beaucoup&nbsp;:
+          {{part_musique_ete:number:0}}&nbsp;% des festivals de musique sont des festivals d'été.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="fr-grid-row fr-grid-row--gutters">
+      <div class="fr-col-12 fr-col-md-5">
+        <div class="odv-chart-slot odv-viz" data-code="Festivals par semaine selon la période principale">
+          <dsfr-data-chart id="g-per" source="per-g" type="bar"
+            label-field="Période principale" value-field="Festivals par semaine" name="Festivals par semaine"
+            selected-palette="neutral" highlight-index="[1]" unit-tooltip="festivals par semaine" y-min="0"
+            databox databox-title="Festivals par semaine de chaque période de l'année"
+            databox-source="Ministère de la Culture — Liste des festivals en France (data.gouv.fr)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-per" source="per-g" label-field="Période principale" value-field="Festivals par semaine, Festivals"
+            description="Trois barres verticales dans l'ordre de l'année : avant-saison (1er janvier – 20 juin), saison (21 juin – 5 septembre), après-saison (6 septembre – 31 décembre). Chacune donne le nombre de festivals de la période divisé par sa durée en semaines. La saison d'été, mise en évidence, dépasse 200 festivals par semaine ; les deux autres restent autour de 100.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+      <div class="fr-col-12 fr-col-md-7">
+        <div class="odv-chart-slot odv-viz" data-code="Répartition de chaque discipline entre les périodes de l'année">
+          <dsfr-data-chart id="g-disc-per" source="disc-per-tri" type="bar" horizontal stacked
+            label-field="discipline"
+            value-field="p_ete:Saison (21 juin – 5 sept.)"
+            value-fields="p_avant:Avant-saison (1er janv. – 20 juin), p_apres:Après-saison (6 sept. – 31 déc.)"
+            unit-tooltip="%" x-max="100"
+            databox databox-title="Part de chaque période dans les festivals de chaque discipline (%), triée par part de l'été"
+            databox-source="Ministère de la Culture — Liste des festivals en France (data.gouv.fr)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-disc-per" source="disc-per-tri" label-field="discipline" value-field="p_ete, p_avant, p_apres, n"
+            description="Barres horizontales empilées, une par discipline, triées de la plus estivale à la moins estivale : part des festivals tenus en saison d'été, en avant-saison et en après-saison. La musique est en tête, avec environ la moitié de ses festivals l'été ; le cinéma et le livre sont en bas, avec moins d'un festival sur six l'été et le reste partagé entre avant-saison et après-saison. Le reste jusqu'à 100 % correspond aux festivals dont la période est un mois isolé ou n'est pas renseignée.">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+    <dsfr-data-repeat source="cine">
+      <template>
+        <p class="odv-lecture fr-mt-2w">
+          À l'autre bout, le cinéma évite l'été&nbsp;: {{p_ete:number:0}}&nbsp;% seulement de ses festivals s'y tiennent,
+          contre {{p_avant:number:0}}&nbsp;% avant le 21 juin et {{p_apres:number:0}}&nbsp;% après le 5 septembre.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="livre">
+      <template>
+        <p class="odv-lecture">
+          Le livre de même&nbsp;: {{p_ete:number:0}}&nbsp;% en saison, {{p_avant:number:0}}&nbsp;% en avant-saison,
+          {{p_apres:number:0}}&nbsp;% en après-saison.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--xs fr-hint-text">
+      Période principale déclarée par le festival, dans les trois tranches du recensement. Festivals par semaine&nbsp;:
+      nombre de festivals de la période divisé par sa durée (171, 77 et 117&nbsp;jours).
+    </p>
+  </section>
+
+  <!-- ======================= EXPLORATION ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Explorer&nbsp;: les festivals près de chez vous</h2>
+    <p class="fr-text--sm fr-hint-text">
+      Un point par festival, coloré selon sa discipline. Les filtres agissent sur la carte, les chiffres et la liste.
+      La carte montre des volumes&nbsp;: une région peuplée compte mécaniquement plus de festivals.
+    </p>
+
+    <dsfr-data-kpi-group per-row="1 md:3" gap="md" class="fr-mb-4w" aria-label="La sélection en chiffres">
+      <dsfr-data-kpi source="f-fac" value="count" format="nombre"
+        heading="Festivals" label="dans la sélection"></dsfr-data-kpi>
+      <dsfr-data-kpi source="f-fac" value="jeune:sum / connu:sum" format="pourcentage" decimals="0"
+        heading="Nés en 2010 ou après" label="parmi ceux dont la décennie est connue"></dsfr-data-kpi>
+      <dsfr-data-kpi source="f-fac" value="ete:sum / un:sum" format="pourcentage" decimals="0"
+        heading="Tenus l'été" label="du 21 juin au 5 septembre"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+          Filtrer<span class="odv-filtres__compte"></span>
+        </summary>
+        <h3 class="fr-h6">Filtrer</h3>
+        <dsfr-data-facets id="f-fac" source="f-n"
+          fields="discipline, periode, decennie, region, departement"
+          labels="discipline:Discipline dominante | periode:Période principale | decennie:Création | region:Région | departement:Département"
+          display="discipline:checkbox | periode:checkbox | decennie:checkbox | region:multiselect | departement:multiselect"
+          disjunctive="discipline, periode, decennie, region, departement"
+          searchable="region, departement"
+          sort="region:alpha:asc | departement:alpha:asc"
+          max-values="7" url-sync url-params>
+        </dsfr-data-facets>
+      </details>
+
+      <div class="fr-col-12 fr-col-lg-9">
+        <div class="odv-viz" data-code="Carte des festivals ayant eu lieu en 2019, par discipline">
+          <!-- Encarts limités aux cinq DROM : chaque encart redessine TOUTE la couche
+               (7 250 cercles SVG par encart). Mesuré le 2026-09-26 : avec neuf encarts
+               (DROM + Nouvelle-Calédonie, Polynésie, Saint-Pierre, Saint-Barthélemy), un
+               clic de facette mettait 2,4 s à rafraîchir la liste ; avec les cinq DROM,
+               0,7 à 1,4 s. Les festivals des autres territoires sont comptés en page. -->
+          <dsfr-data-map id="carte-fest"
+            name="Festivals ayant eu lieu en 2019, selon leur discipline dominante"
+            height="620px" tiles="ign-plan" tiles-style="muted"
+            insets="drom"
+            fit-bounds fit-max-zoom="12">
+            <dsfr-data-map-layer id="couche-fest" source="f-fac" type="circle"
+              geo-field="geo" radius="4" fill-opacity="0.85"
+              color-field="discipline"
+              color-map="Musique:#000091,Spectacle vivant:#e4794a,Livre%2C littérature:#009081,Cinéma%2C audiovisuel:#a558a0,Pluridisciplinaire:#c3992a,Arts visuels%2C arts numériques:#929292"
+              tooltip-field="nom"
+              max-items="8000">
+            </dsfr-data-map-layer>
+            <dsfr-data-map-legend for="couche-fest" label="Discipline dominante"></dsfr-data-map-legend>
+            <dsfr-data-map-popup mode="panel-right" title-field="nom" width="360px">
+              <template>
+                <p class="fr-badge fr-badge--sm fr-badge--info fr-mb-3v">{{discipline}}</p>
+                <p class="fr-text--sm fr-mb-1v"><strong>{{commune}}</strong> — {{departement}}<br>{{region}}</p>
+                <p class="fr-text--sm fr-mb-1v">Période&nbsp;: {{periode}}</p>
+                <p class="fr-text--sm fr-mb-3v">Création&nbsp;: {{decennie}}</p>
+                {{#if site}}<p class="fr-text--sm fr-mb-0">
+                  <a href="{{site:url}}" target="_blank" rel="noopener external">Site du festival</a></p>{{/if}}
+              </template>
+            </dsfr-data-map-popup>
+          </dsfr-data-map>
+
+          <dsfr-data-normalize id="f-tableau" source="f-fac"
+            rename="nom:Festival | discipline:Discipline | commune:Commune | departement:Département | region:Région | periode:Période | decennie:Création"></dsfr-data-normalize>
+          <dsfr-data-a11y source="f-tableau" for="carte-fest" table download
+            filename="festivals-2019.csv"
+            label="Données de la carte"
+            description="Un festival par ligne pour la sélection courante : nom, discipline dominante, commune, département, région, période principale et décennie de création."
+            label-field="Festival"
+            value-field="Discipline, Commune, Département, Région, Période, Création">
+          </dsfr-data-a11y>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="fr-h5 fr-mt-6w">La liste</h3>
+    <dsfr-data-list source="f-fac"
+      columns="nom:Festival, discipline:Discipline, commune:Commune, departement:Département, periode:Période, decennie:Création"
+      search sort="nom:asc" pagination="20" count-label="festival|festivals" export="csv"
+      caption="Festivals ayant eu lieu en 2019 (sélection courante)">
+    </dsfr-data-list>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <dsfr-data-repeat source="syn-t">
+      <template>
+        <ul class="fr-text--sm">
+          <li><strong>Les festivals disparus avant 2019, et ceux créés depuis.</strong> Le fichier est un état des
+            lieux de 2019, l'année-repère d'avant la pandémie. Il a été complété depuis&nbsp;: {{tardif:number}}&nbsp;festivals
+            y déclarent une année de création 2020, 2021 ou 2022, hors du critère annoncé. La page les garde, sans
+            pouvoir dire lesquels ont réellement eu lieu en 2019.</li>
+          <li><strong>L'année exacte de création.</strong> Elle est saisie librement («&nbsp;2015&nbsp;», «&nbsp;01/01/2015
+            00:00&nbsp;», «&nbsp;18ème&nbsp;», vide…)&nbsp;: la page s'en tient à la décennie, renseignée proprement. Sans
+            décennie&nbsp;: {{inconnu:number}}&nbsp;festivals, exclus des pourcentages de création mais comptés partout ailleurs.</li>
+          <li><strong>{{per_autre:number}}&nbsp;festivals dont la période est un mois isolé ou vide.</strong> Ils n'entrent
+            pas dans le calcul par semaine&nbsp;; ils restent dans le total et sur la carte.</li>
+          <li><strong>L'envergure du festival</strong> (locale, régionale, internationale)&nbsp;: la colonne est vide pour
+            {{env_vide:number}}&nbsp;festivals sur {{n:number}}, et saisie librement ailleurs. Aucun chiffre n'en est tiré.</li>
+          <li><strong>La fréquentation, le budget, les financements.</strong> Le recensement ne les publie pas&nbsp;: un
+            festival de trois jours dans un village y pèse autant qu'Avignon.</li>
+          <li><strong>La densité par habitant.</strong> La carte montre des volumes, pas des taux.</li>
+          <li><strong>{{geo_vide:number}}&nbsp;festivals sans coordonnées</strong>, et {{hors_encart:number}} autres
+            situés en Nouvelle-Calédonie, en Polynésie française, à Saint-Pierre-et-Miquelon ou à Saint-Barthélemy, hors des
+            encarts de la carte (qui ne montre que les cinq départements d'outre-mer)&nbsp;: absents de la carte, présents dans la
+            liste et dans les chiffres.</li>
+        </ul>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: une création à partir d'un seul fichier du ministère de la Culture servi par l'API
+        Tabular de data.gouv.fr. Le titre provisoire du cadrage («&nbsp;près d'un sur deux est né après 2010&nbsp;»)
+        tient en chiffres, mais pas dans sa lecture&nbsp;: le fichier ne compte que les festivals vivants en 2019, et
+        le titre parle désormais d'âge, pas de naissances.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Tout le jeu en une requête.</strong> <code>fetch-mode="export"</code> lit l'export Parquet de
+              la ressource&nbsp;: 7&nbsp;283 lignes au lieu de 37 pages de 200, et <code>select</code> ne garde que douze
+              colonnes sur trente.</li>
+            <li><strong>Un fetch, toutes les vues.</strong> Synthèse, décennies, disciplines, saisons, carte, liste&nbsp;:
+              des <code>dsfr-data-query</code> côté client sur la même source.</li>
+            <li><strong>Des coordonnées en texte.</strong> «&nbsp;49.2, -0.33&nbsp;» devient un tableau par
+              <code>split</code>, que <code>geo-field</code> lit comme [lat, lon].</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Des modalités saisies à la main.</strong> «&nbsp;de 2000 à 2009&nbsp;» à côté de
+              «&nbsp;De 2000 à 2009&nbsp;», des noms de mois dans la période&nbsp;: <code>compute</code> avec
+              <code>lower()</code> et <code>contains()</code> les harmonise, mais il faut les avoir vus avant.
+              Et <code>contains()</code> ignore la casse&nbsp;: «&nbsp;Avant-saison (&nbsp;» contient «&nbsp;saison (&nbsp;»,
+              et la première version rangeait les trois périodes en été (ratio 6,9 au lieu de 2,3).</li>
+            <li><strong>Une année de création inexploitable.</strong> Sans extraction de sous-chaîne ni conversion
+              de date au format «&nbsp;jj/mm/aaaa&nbsp;», la colonne libre n'est pas récupérable dans la page.</li>
+            <li><strong>Des noms de modalité à virgule.</strong> «&nbsp;Livre, littérature&nbsp;» doit s'échapper
+              (<code>%2C</code>) dans le <code>color-map</code> de la carte.</li>
+            <li><strong>Chaque encart redessine toute la couche.</strong> Avec neuf encarts ultramarins, dix cartes
+              portaient chacune 7&nbsp;250 cercles et un clic de filtre prenait 2,4&nbsp;s&nbsp;; limitée aux cinq DROM,
+              la carte répond en 0,7 à 1,4&nbsp;s, au prix de quelques festivals hors encart, comptés en page.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger 7&nbsp;283 lignes Tabular</td><td><code>dsfr-data-source api-type="tabular" fetch-mode="export" select</code></td><td>Natif (Parquet, une requête)</td></tr>
+            <tr><td>Harmoniser la casse des modalités</td><td><code>normalize compute</code> (<code>lower</code>, <code>contains</code>, <code>when</code>)</td><td>Natif</td></tr>
+            <tr><td>Toutes les sommes sur une ligne</td><td><code>query group-by</code> sur une clé constante</td><td>Natif</td></tr>
+            <tr><td>Festivals par semaine</td><td><code>query group-by</code> + <code>compute</code> sur la durée</td><td>Natif</td></tr>
+            <tr><td>Répartition discipline × période</td><td>graphique <code>stacked horizontal</code> à trois séries</td><td>Natif</td></tr>
+            <tr><td>Carte de 7&nbsp;250 points</td><td><code>dsfr-data-map-layer geo-field</code> après <code>split</code>, <code>max-items="8000"</code></td><td>Natif</td></tr>
+            <tr><td>Filtres, chiffres et liste liés</td><td><code>dsfr-data-facets</code> (mode client) + KPI + <code>dsfr-data-list</code></td><td>Natif</td></tr>
+            <tr><td>Année de création libre</td><td>—</td><td>Non traité (saisie hétérogène)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>La difficulté était dans la lecture, pas dans l'outil.</strong> Le jeu se charge en une requête et
+          toutes les vues en dérivent côté client. Ce qui a demandé du soin, c'est le sens&nbsp;: un recensement des
+          festivals vivants en 2019 ne dit rien du rythme des créations, et des durées de période inégales
+          demandent un taux par semaine plutôt qu'un volume.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle complet : la carte des festivals est une dsfr-data-map (Leaflet). -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>

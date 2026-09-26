@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="fr" data-fr-scheme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>D'où viennent les déchets — open-data-viz</title>
+  <meta name="description" content="Sept déchets sur dix viennent du bâtiment, moins d'un sur dix des ménages, et la moitié de tous les déchets est de la terre de chantier. Création avec dsfr-data sur deux jeux du SDES (DiDo).">
+  <link rel="icon" href="/assets/vignette-vide.svg">
+
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://data.statistiques.developpement-durable.gouv.fr" crossorigin>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<div id="site-header"></div>
+
+<main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       CRÉATION (2026-09-26) — D7 de docs/portail-developpement-durable/proposition.md.
+
+       DEUX JEUX DiDo en mode URL (pas d'adaptateur DiDo) :
+       - jeu 38 « Production et traitement des déchets » (déclaration Eurostat,
+         biennale 2016-2022) : deux fichiers de 216 lignes, chargés en entier,
+         LARGES par secteur NACE (production) ou par mode de traitement ;
+       - jeu 23 ITDD, fichier départemental, filtré au serveur sur deux
+         indicateurs (dma_qhab, taux_val_dechets) : 202 lignes, LARGES par année.
+       Aucune cellule « secret » ni « na » dans ces trois fichiers (compté sur
+       l'export complet le 2026-09-26) ; les absences sont des null.
+
+       CE QUI A CHANGÉ PAR RAPPORT AU CADRAGE (rejoué à l'API le 2026-09-26) :
+       - Les chiffres du cadrage sont justes (343,2 Mt ; bâtiment 72,1 % ;
+         ménages 9,1 %), mais 9,1 % est « un sur onze », pas « un sur dix » :
+         le titre dit « moins d'un sur dix ».
+       - Une histoire plus forte était dans le jeu : la catégorie « Terres »
+         pèse 170,1 Mt, 49,6 % de TOUS les déchets, dont 166,7 Mt produits par
+         la construction. La moitié des déchets français, en masse, est de la
+         terre de chantier : c'est elle qui fait la place du bâtiment.
+       - Traitement : la décharge recule (82,1 → 59,0 Mt de 2016 à 2022), mais
+         le remblayage monte d'autant (31,5 → 56,6 Mt). La moitié du recul de la
+         décharge vient des terres (43,4 → 29,0 Mt).
+       - « Ménages » (31,3 Mt, colonne NACE HH) n'est ni les « déchets ménagers
+         et similaires » (20,8 Mt, une catégorie de déchet, tous secteurs) ni
+         les « DMA » de l'ITDD (collecte du service public, qui inclut des
+         déchets d'entreprises assimilés). Trois notions, dites en page.
+       ========================================================================== -->
+
+  <!-- ---------- Production par secteur (jeu 38, fichier « Production ») ---------- -->
+  <dsfr-data-source id="prod"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/4ffeb0da-dec8-45c8-aab6-363738a997dc/json">
+  </dsfr-data-source>
+
+  <!-- Indicatrices par catégorie de déchet : une somme par année les rend lisibles. -->
+  <dsfr-data-normalize id="prod-n" source="prod"
+    compute="ter = when DECHET = 'Terres' then NACE_REV2_TOTAL else 0;
+             ter_bat = when DECHET = 'Terres' then NACE_REV2_41_43 else 0;
+             mincd = when DECHET = 'Déchets minéraux de construction et de démolition' then NACE_REV2_TOTAL else 0;
+             dma_cat = when DECHET = 'Déchets ménagers et similaires' then NACE_REV2_TOTAL else 0;
+             dma_hh = when DECHET = 'Déchets ménagers et similaires' then NACE_REV2_HH else 0;
+             dang = when DECHET = 'Déchets totaux dangereux' then NACE_REV2_TOTAL else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="prod-cat" source="prod-n" group-by="ANNEE"
+    aggregate="ter:sum:ter, ter_bat:sum:ter_bat, mincd:sum:mincd, dma_cat:sum:dma_cat, dma_hh:sum:dma_hh, dang:sum:dang">
+  </dsfr-data-query>
+
+  <!-- La ligne « Déchets totaux » (une par année) porte la répartition par secteur. -->
+  <dsfr-data-query id="prod-tot" source="prod" where="DECHET:eq:Déchets totaux"></dsfr-data-query>
+  <dsfr-data-join id="prod-j" left="prod-tot" right="prod-cat" on="ANNEE" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="prod-an" source="prod-j"
+    compute="tot = NACE_REV2_TOTAL / 1000000;
+             bat = NACE_REV2_41_43 / 1000000;
+             men = NACE_REV2_HH / 1000000;
+             gest = (NACE_REV2_38 + NACE_REV2_36ET37ET39 + NACE_REV2_4677) / 1000000;
+             serv = NACE_REV2_GUSAUF4677 / 1000000;
+             indu = (NACE_REV2_10_12 + NACE_REV2_13_15 + NACE_REV2_16 + NACE_REV2_17_18 + NACE_REV2_19 + NACE_REV2_20_22 + NACE_REV2_23 + NACE_REV2_24_25 + NACE_REV2_26_30 + NACE_REV2_31_33) / 1000000;
+             agri = NACE_REV2_01_03 / 1000000;
+             ener = NACE_REV2_34_35 / 1000000;
+             extr = NACE_REV2_04_09 / 1000000;
+             autres = tot - bat - men;
+             p_bat = NACE_REV2_41_43 / NACE_REV2_TOTAL * 100;
+             p_men = NACE_REV2_HH / NACE_REV2_TOTAL * 100;
+             ratio_bat_men = NACE_REV2_41_43 / NACE_REV2_HH;
+             ter_mt = ter / 1000000;
+             p_ter = ter / NACE_REV2_TOTAL * 100;
+             ter_bat_mt = ter_bat / 1000000;
+             p_ter_bat = ter_bat / NACE_REV2_41_43 * 100;
+             p_ter_mincd = (ter + mincd) / NACE_REV2_TOTAL * 100;
+             mincd_mt = mincd / 1000000;
+             dma_cat_mt = dma_cat / 1000000;
+             dma_hh_mt = dma_hh / 1000000;
+             p_dma_hh = dma_hh / NACE_REV2_HH * 100;
+             dang_mt = dang / 1000000;
+             p_dang = dang / NACE_REV2_TOTAL * 100;
+             bat_r = round(bat, 1);
+             men_r = round(men, 1);
+             autres_r = round(autres, 1);
+             Annee = ANNEE">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="prod-der" source="prod-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="prod-prem" source="prod-an" order-by="ANNEE:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="prod-min" source="prod-an" order-by="tot:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="prod-tri" source="prod-an" order-by="ANNEE:asc"></dsfr-data-query>
+
+  <!-- ---------- Traitement final (jeu 38, fichier « Traitement ») ---------- -->
+  <dsfr-data-source id="trait"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/fda380ad-4bf0-4fae-bddb-6671deeb610b/json">
+  </dsfr-data-source>
+  <dsfr-data-normalize id="trait-n" source="trait"
+    compute="dter = when DECHET = 'Terres' then DECHARGE else 0">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="trait-cat" source="trait-n" group-by="ANNEE" aggregate="dter:sum:dter"></dsfr-data-query>
+  <dsfr-data-query id="trait-tot" source="trait" where="DECHET:eq:Déchets totaux"></dsfr-data-query>
+  <dsfr-data-join id="trait-j" left="trait-tot" right="trait-cat" on="ANNEE" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="trait-an" source="trait-j"
+    compute="t_tot = TOTAL / 1000000;
+             Recyclage = round(RECYCLAGE / 1000000, 1);
+             Remblayage = round(REMBLAYAGE / 1000000, 1);
+             Energie = round(VALORISATION / 1000000, 1);
+             Decharge = round(DECHARGE / 1000000, 1);
+             Autres = round((INCINERATION + AUTRE_ELIMINATION) / 1000000, 1);
+             p_rec = RECYCLAGE / TOTAL * 100;
+             p_remb = REMBLAYAGE / TOTAL * 100;
+             p_dech = DECHARGE / TOTAL * 100;
+             dter_mt = dter / 1000000;
+             k = 'fr';
+             Annee = ANNEE">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="trait-der" source="trait-an" order-by="ANNEE:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="trait-prem" source="trait-an" order-by="ANNEE:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="trait-evo" left="trait-der" right="trait-prem" on="k" type="inner" prefix-right="p_"></dsfr-data-join>
+
+  <div class="fr-container fr-mt-6w">
+    <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
+      <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
+      <div class="fr-collapse" id="fil-ariane">
+        <ol class="fr-breadcrumb__list">
+          <li><a class="fr-breadcrumb__link" href="/">Accueil</a></li>
+          <li><a class="fr-breadcrumb__link" href="/developpement-durable">Portail Développement durable</a></li>
+          <li><a class="fr-breadcrumb__link" aria-current="page">D'où viennent les déchets</a></li>
+        </ol>
+      </div>
+    </nav>
+
+    <h1>Sept déchets sur dix viennent du bâtiment, moins d'un sur dix des ménages</h1>
+
+    <div class="fr-text--lead">
+      <dsfr-data-repeat source="prod-der">
+        <template>
+          En {{ANNEE}}, la France a produit <strong>{{tot:number:0}}&nbsp;millions de tonnes de déchets</strong>.
+          Le bâtiment et les travaux publics en ont produit {{p_bat:number:1}}&nbsp;%, les ménages
+          {{p_men:number:1}}&nbsp;%&nbsp;: {{ratio_bat_men:number:0}}&nbsp;fois moins.
+          Et <strong>la moitié de tous ces déchets, {{p_ter:number:1}}&nbsp;%, est de la terre</strong>, presque
+          entièrement sortie des chantiers.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Service des données et études statistiques (SDES), plateforme DiDo&nbsp;: production et traitement des
+      déchets déclarés à Eurostat (tous les deux ans), et indicateurs territoriaux de développement durable
+      (ITDD) pour les départements. Dernier millésime de chaque fichier au chargement de la page. Tonnes de
+      poids humide, sauf les boues, comptées en matière sèche.
+    </p>
+
+    <dsfr-data-kpi-group class="fr-mb-6w">
+      <dsfr-data-kpi source="prod-der" value="tot:max" decimals="1" unit="Mt" span="3"
+        heading="Déchets produits" label="dernière année publiée, France entière"></dsfr-data-kpi>
+      <dsfr-data-kpi source="prod-der" value="p_bat:max" decimals="1" unit="%" span="3"
+        heading="Viennent de la construction" label="part des tonnes, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="prod-der" value="p_men:max" decimals="1" unit="%" span="3"
+        heading="Viennent des ménages" label="part des tonnes, dernière année"></dsfr-data-kpi>
+      <dsfr-data-kpi source="prod-der" value="p_ter:max" decimals="1" unit="%" span="3"
+        heading="Sont de la terre" label="part des tonnes, tous secteurs, dernière année"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+  </div>
+
+  <!-- ======================= PREUVE — les secteurs ======================= -->
+  <!-- Une barre par secteur, par dépliage de la ligne de la dernière année. Les 19
+       colonnes NACE sont regroupées en 8 familles (compute ci-dessus) ; le regroupement
+       est une décision éditoriale, écrite sous le graphique. Tri décroissant : la
+       construction et les ménages arrivent en tête (vérifié au navigateur), d'où
+       highlight-index [0, 1]. Mono-série : pas de color-map. -->
+  <dsfr-data-normalize id="prod-der-r" source="prod-der"
+    compute="bat = round(bat, 1); men = round(men, 1); gest = round(gest, 1); serv = round(serv, 1);
+             indu = round(indu, 1); agri = round(agri, 1); ener = round(ener, 1); extr = round(extr, 1)">
+  </dsfr-data-normalize>
+  <dsfr-data-unpivot id="sect" source="prod-der-r"
+    value-cols="bat:Construction, men:Ménages, gest:Gestion des déchets et de l'eau, indu:Industrie manufacturière, serv:Services et commerce, agri:Agriculture et pêche, ener:Énergie, extr:Industries extractives"
+    var-name="Secteur" value-name="Mt">
+  </dsfr-data-unpivot>
+  <dsfr-data-query id="sect-tri" source="sect" order-by="Mt:desc"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-secteurs">
+    <h2 id="t-secteurs" class="fr-h3">Le bâtiment produit huit fois plus de déchets que les ménages</h2>
+    <dsfr-data-repeat source="prod-der">
+      <template>
+        <p class="odv-lecture">
+          En {{ANNEE}}, les chantiers de construction et de travaux publics ont produit {{bat:number:1}}&nbsp;millions
+          de tonnes de déchets&nbsp;; les ménages, {{men:number:1}}&nbsp;millions. Tous les autres secteurs réunis —
+          industrie, services, agriculture, énergie, et la filière des déchets elle-même — n'en produisent
+          que {{autres:number:1}}&nbsp;millions.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Déchets produits par secteur, dernière année">
+      <dsfr-data-chart id="g-secteurs" source="sect-tri" type="bar" horizontal
+        label-field="Secteur" value-field="Mt" name="Déchets produits (Mt)"
+        selected-palette="neutral" highlight-index="[0, 1]" unit-tooltip="Mt"
+        databox databox-title="Déchets produits par secteur d'activité, dernière année publiée (millions de tonnes)"
+        databox-source="SDES — production et traitement des déchets (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-secteurs" source="sect-tri" label-field="Secteur" value-field="Mt"
+        description="Barres horizontales triées de la plus grande à la plus petite : tonnes de déchets produites par huit familles de secteurs la dernière année publiée. La construction, mise en évidence, dépasse de très loin toutes les autres, environ huit fois les ménages, mis en évidence en deuxième position ; la gestion des déchets et de l'eau, l'industrie et les services suivent, puis l'agriculture, l'énergie et les industries extractives, presque invisibles à cette échelle.">
+      </dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-hint-text">
+      Regroupement des 19 postes publiés&nbsp;: «&nbsp;industrie manufacturière&nbsp;» réunit les postes NACE 10 à 33
+      (dont la cokéfaction-raffinage)&nbsp;; «&nbsp;gestion des déchets et de l'eau&nbsp;» réunit l'eau et
+      l'assainissement (36, 37, 39), la collecte et le traitement des déchets (38) et le commerce de gros de
+      déchets (46.77). Ce dernier ensemble produit surtout des <em>résidus</em> de déchets déjà comptés
+      ailleurs (refus de tri, mâchefers)&nbsp;: la convention Eurostat les recompte.
+    </p>
+  </section>
+
+  <!-- ======================= LA RÉVÉLATION — la terre ======================= -->
+  <!-- Lignes de la dernière année par jointure INTERNE sur l'année de prod-der (aucune
+       année écrite en dur). Dangereux et non dangereux d'une même catégorie sont deux
+       lignes : le group-by DECHET les réunit. -->
+  <dsfr-data-join id="cat-der" left="prod" right="prod-der" on="ANNEE" type="inner" prefix-right="an_"></dsfr-data-join>
+  <dsfr-data-query id="cat" source="cat-der" where="DECHET:notcontains:Déchets totaux" group-by="DECHET"
+    aggregate="NACE_REV2_TOTAL:sum:t, NACE_REV2_HH:sum:h">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="cat-t" source="cat" compute="Mt = round(t / 1000000, 1); Mt_men = round(h / 1000000, 2)"
+    rename="DECHET:Catégorie"></dsfr-data-normalize>
+  <dsfr-data-query id="cat-top" source="cat-t" order-by="Mt:desc" limit="8"></dsfr-data-query>
+  <dsfr-data-query id="men-top" source="cat-t" order-by="Mt_men:desc" limit="8"></dsfr-data-query>
+  <dsfr-data-query id="cat-n" source="cat-t" group-by="k" aggregate="t:count:n"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-terres">
+    <h2 id="t-terres" class="fr-h3">La moitié des déchets français est de la terre de chantier</h2>
+    <dsfr-data-repeat source="prod-der">
+      <template>
+        <p class="odv-lecture">
+          Si le bâtiment pèse si lourd, c'est d'abord parce qu'il déplace de la terre. En {{ANNEE}}, les terres
+          excavées représentent <strong>{{ter_mt:number:1}}&nbsp;millions de tonnes, {{p_ter:number:1}}&nbsp;% de
+          tous les déchets</strong>, dont {{ter_bat_mt:number:1}}&nbsp;millions sortis des chantiers&nbsp;:
+          {{p_ter_bat:number:0}}&nbsp;% des déchets du bâtiment. Avec les gravats de construction et de démolition
+          ({{mincd_mt:number:1}}&nbsp;millions), on atteint {{p_ter_mincd:number:0}}&nbsp;% du total.
+          Les déchets dangereux, eux, pèsent {{dang_mt:number:1}}&nbsp;millions de tonnes, {{p_dang:number:1}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Les huit catégories de déchets les plus lourdes">
+      <dsfr-data-chart id="g-cat" source="cat-top" type="bar" horizontal
+        label-field="Catégorie" value-field="Mt" name="Déchets produits (Mt)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="Mt"
+        databox databox-title="Les huit catégories de déchets les plus lourdes, tous secteurs, dernière année publiée (millions de tonnes)"
+        databox-source="SDES — production et traitement des déchets (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-cat" source="cat-top" label-field="Catégorie" value-field="Mt"
+        description="Barres horizontales triées : les huit catégories de déchets qui pèsent le plus, tous secteurs confondus, la dernière année publiée. Les terres, mises en évidence, représentent à elles seules plus du double de la catégorie suivante, les déchets minéraux de construction et de démolition ; les autres catégories restent chacune sous 25 millions de tonnes.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="cat-n">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Huit catégories sur les {{n}} de la nomenclature européenne des déchets. Les terres non polluées réutilisées
+          sur leur chantier d'origine ne sont pas des déchets et ne sont pas comptées&nbsp;: ce sont celles qui
+          sortent du chantier.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= NUANCE — ce que jettent les ménages ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-menages">
+    <h2 id="t-menages" class="fr-h3">Chez les ménages, la poubelle d'ordures fait la moitié, les déchets verts un sixième</h2>
+    <dsfr-data-repeat source="prod-der">
+      <template>
+        <p class="odv-lecture">
+          Sur les {{men:number:1}}&nbsp;millions de tonnes produites par les ménages en {{ANNEE}},
+          {{dma_hh_mt:number:1}}&nbsp;millions ({{p_dma_hh:number:0}}&nbsp;%) sont des «&nbsp;déchets ménagers et
+          similaires&nbsp;» — le contenu de la poubelle d'ordures et des collectes en mélange. Le reste, ce sont
+          surtout les apports en déchetterie&nbsp;: déchets verts, gravats de travaux, verre, papiers.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Déchets des ménages par catégorie">
+      <dsfr-data-chart id="g-men" source="men-top" type="bar" horizontal
+        label-field="Catégorie" value-field="Mt_men" name="Déchets des ménages (Mt)"
+        selected-palette="neutral" highlight-index="[0]" unit-tooltip="Mt"
+        databox databox-title="Les huit catégories de déchets les plus lourdes chez les ménages, dernière année publiée (millions de tonnes)"
+        databox-source="SDES — production et traitement des déchets (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-men" source="men-top" label-field="Catégorie" value-field="Mt_men"
+        description="Barres horizontales triées : les huit catégories de déchets qui pèsent le plus dans la production des ménages. Les déchets ménagers et similaires, mis en évidence, font environ la moitié ; viennent ensuite les déchets végétaux, les gravats de construction et de démolition, le verre, les papiers et cartons, le bois.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="prod-der">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          Trois notions voisines, trois chiffres différents&nbsp;: les <strong>déchets des ménages</strong>
+          ({{men:number:1}}&nbsp;Mt, le secteur qui les produit)&nbsp;; les <strong>déchets ménagers et
+          similaires</strong> ({{dma_cat_mt:number:1}}&nbsp;Mt, une catégorie de déchet, que produisent aussi les
+          bureaux, commerces et cantines)&nbsp;; et les <strong>déchets ménagers et assimilés</strong> de la carte
+          ci-dessous, collectés par le service public, qui incluent une part de déchets d'entreprises.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= OÙ ILS VONT — le traitement ======================= -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-traitement">
+    <h2 id="t-traitement" class="fr-h3">La décharge recule, le remblayage prend sa place</h2>
+    <dsfr-data-repeat source="trait-evo">
+      <template>
+        <p class="odv-lecture">
+          En {{p_ANNEE}}, {{p_Decharge:number:1}}&nbsp;millions de tonnes de déchets finissaient en décharge
+          ({{p_p_dech:number:0}}&nbsp;% des déchets traités)&nbsp;; <strong>en {{ANNEE}}, {{Decharge:number:1}}&nbsp;millions
+          ({{p_dech:number:0}}&nbsp;%)</strong>. Dans le même temps, le remblayage — combler des carrières, niveler
+          des terrains avec des déchets inertes — passe de {{p_Remblayage:number:1}} à {{Remblayage:number:1}}&nbsp;millions
+          de tonnes. La moitié du recul de la décharge vient des seules terres&nbsp;: {{p_dter_mt:number:1}} puis
+          {{dter_mt:number:1}}&nbsp;millions de tonnes enfouies. Le recyclage, lui, reste autour de la moitié
+          ({{p_p_rec:number:0}}&nbsp;% puis {{p_rec:number:0}}&nbsp;%).
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-viz" data-code="Traitement final des déchets par année">
+      <dsfr-data-chart id="g-trait" source="trait-an" type="bar" stacked
+        label-field="Annee"
+        value-field="Recyclage:Recyclage"
+        value-fields="Remblayage:Remblayage, Energie:Valorisation énergétique, Decharge:Décharge, Autres:Incinération et autres éliminations"
+        unit-tooltip="Mt"
+        databox databox-title="Déchets traités en France selon le traitement final, par année (millions de tonnes)"
+        databox-source="SDES — production et traitement des déchets (DiDo)" databox-download>
+      </dsfr-data-chart>
+      <dsfr-data-a11y for="g-trait" source="trait-an" label-field="Annee"
+        value-field="Recyclage,Remblayage,Energie,Decharge,Autres"
+        description="Barres empilées, une par année publiée (tous les deux ans depuis 2016), découpées selon le traitement final. Le recyclage fait toujours un peu plus de la moitié. La décharge passe d'environ 82 millions de tonnes en 2016 et 87 en 2018 à 57 en 2020 et 59 en 2022, pendant que le remblayage monte de 32 à 57 millions ; la valorisation énergétique et l'incinération restent faibles. Le creux de 2020, année des confinements, touche surtout le recyclage.">
+      </dsfr-data-a11y>
+    </div>
+    <dsfr-data-repeat source="trait-der">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          On traite moins qu'on ne produit&nbsp;: {{t_tot:number:1}}&nbsp;millions de tonnes traitées en {{ANNEE}}.
+          L'écart tient aux exportations et importations de déchets, aux stocks, et aux déchets qui passent par un
+          tri ou un prétraitement avant leur traitement final. «&nbsp;Recyclage&nbsp;» couvre ici toutes les
+          opérations R2 à R11&nbsp;: pour les déchets minéraux, c'est surtout du concassage de gravats réemployés en
+          sous-couche routière.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="prod-min">
+      <template>
+        <p class="fr-text--xs fr-hint-text">
+          La production elle-même ne baisse pas&nbsp;: son point bas, {{tot:number:1}}&nbsp;millions de tonnes en
+          {{ANNEE}}, est l'année des confinements, où les chantiers se sont arrêtés.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+  </section>
+
+  <!-- ======================= EXPLORATION — par département ======================= -->
+  <!-- ITDD départemental, large par année (A2025…A1954) : dépliage avec drop-empty,
+       puis dernière année renseignée de dma_qhab lue dans la donnée (itdd-der), et
+       jointure interne sur cette année. Les deux indicateurs sont ensuite remis côte à
+       côte par une jointure sur le code (unique par indicateur et par année). -->
+  <dsfr-data-source id="itdd"
+    url="https://data.statistiques.developpement-durable.gouv.fr/dido/api/v1/datafiles/aa011e5d-e888-469d-8e72-a8af4f73d123/json?VARIABLE=in:dma_qhab,taux_val_dechets">
+  </dsfr-data-source>
+  <dsfr-data-unpivot id="itdd-l" source="itdd"
+    id-cols="CODGEO_CODE, CODGEO_LIBELLE, VARIABLE"
+    value-cols-pattern="A{YYYY}" var-name="annee" var-format="{YYYY}" value-name="v" drop-empty>
+  </dsfr-data-unpivot>
+  <dsfr-data-query id="itdd-der" source="itdd-l" where="VARIABLE:eq:dma_qhab" order-by="annee:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="itdd-j" left="itdd-l" right="itdd-der" on="annee" type="inner" prefix-right="der_"></dsfr-data-join>
+  <dsfr-data-query id="dma" source="itdd-j" where="VARIABLE:eq:dma_qhab"></dsfr-data-query>
+  <dsfr-data-query id="tval" source="itdd-j" where="VARIABLE:eq:taux_val_dechets"></dsfr-data-query>
+  <dsfr-data-join id="dep-j" left="dma" right="tval" on="CODGEO_CODE" type="left" prefix-right="t_"></dsfr-data-join>
+  <dsfr-data-normalize id="dep" source="dep-j"
+    compute="kg = round(v, 0); taux = round(t_v, 1); k = 'fr'"
+    rename="CODGEO_LIBELLE:Département">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="dep-max" source="dep" order-by="kg:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-min" source="dep" order-by="kg:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="dep-n" source="dep" group-by="k" aggregate="kg:count:n"></dsfr-data-query>
+  <dsfr-data-query id="dep-tot" source="itdd" where="VARIABLE:eq:dma_qhab" group-by="VARIABLE" aggregate="CODGEO_CODE:count:n"></dsfr-data-query>
+  <dsfr-data-query id="tval-max" source="dep" order-by="taux:desc" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="tval-min" source="dep" where="taux:isnotnull" order-by="taux:asc" limit="1"></dsfr-data-query>
+
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-explorer">
+    <h2 id="t-explorer" class="fr-h3">Et dans mon département&nbsp;? Les ratios les plus hauts sont ceux des départements touristiques</h2>
+    <p class="fr-text--sm">
+      Quantité de déchets ménagers et assimilés collectés par le service public, en kilos par habitant.
+      <strong>À lire avec prudence</strong>&nbsp;: les tonnes sont rapportées à la population <em>résidente</em>.
+      Un département qui accueille des touristes ou compte beaucoup de résidences secondaires collecte les
+      déchets de gens qu'il ne compte pas comme habitants, et ses déchetteries reçoivent aussi des déchets
+      de petites entreprises. Un ratio élevé ne dit donc pas que ses habitants jettent plus. Ce n'est pas
+      non plus la même année que ci-dessus&nbsp;: l'indicateur départemental a son propre millésime.
+    </p>
+    <div class="odv-lecture">
+      <dsfr-data-repeat source="dep-max">
+        <template>
+          En {{annee}}, le ratio le plus élevé est celui des {{Département}}&nbsp;: <strong>{{kg:number:0}}&nbsp;kg par
+          habitant</strong>.
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="dep-min">
+        <template>
+          Le plus bas, les {{Département}}&nbsp;: {{kg:number:0}}&nbsp;kg. Les départements très urbains, sans
+          jardins ni afflux saisonnier, ferment la marche.
+        </template>
+      </dsfr-data-repeat>
+    </div>
+    <div>
+      <div>
+        <div class="odv-chart-slot odv-viz" data-code="Carte des déchets ménagers et assimilés par habitant">
+          <dsfr-data-chart id="g-carte" source="dep" type="map"
+            code-field="CODGEO_CODE" value-field="kg" name="Déchets ménagers et assimilés (kg/hab)" unit-tooltip="kg/hab"
+            selected-palette="sequentialAscending" map-summary="none"
+            databox databox-title="Déchets ménagers et assimilés collectés par habitant, par département, dernière année de l'indicateur (kg par habitant)"
+            databox-source="SDES / Insee — indicateurs territoriaux de développement durable (DiDo)" databox-download>
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-carte" source="dep" label-field="Département" value-field="kg"
+            description="Carte des départements colorés selon les kilos de déchets ménagers et assimilés collectés par habitant. Les valeurs les plus fortes se trouvent sur le littoral atlantique et breton, dans le Var, les Alpes-de-Haute-Provence et en Corse ; les plus faibles à Paris et dans la petite couronne et le Rhône. La Guyane et Mayotte, sans valeur publiée, apparaissent dans un bleu uni hors échelle. Le tableau ci-dessous donne toutes les valeurs, triables.">
+          </dsfr-data-a11y>
+        </div>
+        <dsfr-data-repeat source="dep-n">
+          <template>
+            <p class="fr-text--xs fr-hint-text">
+              {{n}}&nbsp;départements renseignés pour cette année. La Guyane et Mayotte n'ont pas de valeur publiée&nbsp;:
+              la carte les peint pourtant d'un bleu uni qui n'appartient pas à l'échelle — ce bleu ne porte aucune valeur. Aucun résumé national n'est affiché&nbsp;: une moyenne des ratios
+              départementaux ne serait pas le ratio national.
+            </p>
+          </template>
+        </dsfr-data-repeat>
+
+        <h3 class="fr-h5 fr-mt-6w">Ce qui est trié et valorisé&nbsp;: de moins d'un quart à presque tout</h3>
+        <div class="odv-lecture">
+          Part des déchets ménagers et assimilés valorisés en matière ou en compost, les deux plus hautes&nbsp;:
+          <dsfr-data-repeat source="tval-max">
+            <template>
+              {{Département}}, {{taux:number:1}}&nbsp;%&nbsp;;
+            </template>
+          </dsfr-data-repeat>
+          <dsfr-data-repeat source="tval-min">
+            <template>
+              la plus basse, {{Département}}, {{taux:number:1}}&nbsp;%.
+            </template>
+          </dsfr-data-repeat>
+          Une valeur proche de 100&nbsp;% est publiée telle quelle par le SDES&nbsp;; elle tient sans doute à la
+          manière de compter un département qui envoie ses déchets se faire traiter ailleurs, ce que le jeu ne
+          permet pas de vérifier.
+        </div>
+        <dsfr-data-list source="dep"
+          columns="Département:Département, CODGEO_CODE:Code, kg:Déchets ménagers et assimilés (kg/hab), taux:Taux de valorisation matière et organique (%), annee:Année"
+          sort="kg:desc" search pagination="15" count-label="département|départements" export="csv"
+          caption="Déchets ménagers et assimilés par département : quantité par habitant et taux de valorisation">
+        </dsfr-data-list>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CE QU'ON NE MONTRE PAS ======================= -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors">
+    <h2 id="t-hors" class="fr-h3">Ce que cette page ne montre pas</h2>
+    <ul class="fr-text--sm">
+      <li><strong>La nocivité.</strong> Tout est compté en tonnes&nbsp;: une tonne de terre inerte pèse autant
+        qu'une tonne de solvants usés. Le poids dit l'encombrement, pas le danger. Les déchets dangereux
+        font quelques pour cent du total.</li>
+      <li><strong>Les régions et les départements pour la production.</strong> Le jeu national n'a pas de
+        déclinaison territoriale&nbsp;: la carte change de source, de notion (la collecte du service public)
+        et d'année.</li>
+      <li><strong>Les années impaires.</strong> Le règlement européen impose une déclaration tous les deux ans&nbsp;:
+        quatre points, de 2016 au dernier millésime. Ce n'est pas assez pour parler de tendance sur la
+        production, qui monte et descend avec l'activité du bâtiment.</li>
+      <li><strong>Les doubles comptes.</strong> Les résidus produits par les centres de tri et de traitement
+        sont recomptés comme déchets de la filière. Le total en contient donc une part deux fois, que le
+        fichier ne permet pas d'isoler.</li>
+      <li><strong>Les boues.</strong> Les quatre catégories de boues sont en tonnes de matière sèche, les autres en
+        poids humide&nbsp;: elles s'additionnent dans le total publié, comme le fait le SDES, mais ne pèsent pas
+        la même chose.</li>
+      <li><strong>Aucun secret statistique</strong>, pour une fois&nbsp;: aucune cellule de ces trois fichiers
+        n'est remplacée par «&nbsp;secret&nbsp;» ou «&nbsp;na&nbsp;» (relevé le 26&nbsp;septembre 2026). Les
+        seules absences sont les années non publiées de l'indicateur départemental.</li>
+    </ul>
+  </section>
+
+  <!-- ====================== Analyse ====================== -->
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — ce que la création a coûté</summary>
+
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: cette page est une création à partir de trois fichiers du SDES servis par
+        l'API DiDo, sans adaptateur dédié. Les chiffres du cadrage étaient justes&nbsp;; c'est en les rejouant
+        catégorie par catégorie qu'est apparue l'histoire qui les explique&nbsp;: la moitié des déchets est de
+        la terre.
+      </p>
+
+      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <ul>
+            <li><strong>Trois fichiers, trois requêtes, moins de 450&nbsp;Ko.</strong> Les deux fichiers
+              nationaux sont chargés en entier&nbsp;; l'ITDD est filtré au serveur par
+              <code>VARIABLE=in:…</code> dans l'URL.</li>
+            <li><strong>Déplier un jeu large par année.</strong> <code>dsfr-data-unpivot
+              value-cols-pattern="A{YYYY}" drop-empty</code> transforme les 72 colonnes-années de l'ITDD en
+              lignes, sans écrire une seule année&nbsp;; la dernière année renseignée se lit ensuite par un
+              tri.</li>
+            <li><strong>Regrouper des colonnes en familles</strong> avant de les déplier en barres&nbsp;:
+              un <code>compute</code> puis <code>value-cols="col:Libellé"</code>.</li>
+          </ul>
+        </div>
+        <div class="fr-col-12 fr-col-md-6">
+          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <ul>
+            <li><strong>Un jeu large dans deux sens.</strong> La production est large par secteur (colonnes) et
+              longue par catégorie (lignes, dangereux et non dangereux séparés, plus trois lignes de totaux).
+              Il faut savoir quelle ligne sommer&nbsp;: sommer toutes les lignes compterait le total trois fois.</li>
+            <li><strong>Un indicateur par catégorie coûte une colonne indicatrice</strong>
+              (<code>when DECHET = 'Terres' then … else 0</code>) puis une somme par année&nbsp;: verbeux pour
+              lire une cellule.</li>
+            <li><strong>La mise en évidence dépend du tri.</strong> <code>highlight-index</code> désigne un
+              rang&nbsp;: si les ménages passaient derrière la filière des déchets, la mauvaise barre serait
+              mise en avant.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fr-table fr-table--bordered">
+        <table>
+          <caption>Besoin → composant dsfr-data</caption>
+          <thead>
+            <tr><th scope="col">Besoin</th><th scope="col">Composant</th><th scope="col">Verdict</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Charger un fichier DiDo</td><td><code>dsfr-data-source url=</code> (mode URL, filtre dans l'URL)</td><td>Natif</td></tr>
+            <tr><td>Chiffres du chapô, dernière année</td><td><code>dsfr-data-query limit="1"</code> + <code>dsfr-data-repeat</code></td><td>Natif, sans millésime en dur</td></tr>
+            <tr><td>Part d'une catégorie de déchet</td><td><code>dsfr-data-normalize compute</code> (indicatrice) + <code>query group-by</code> + <code>join</code></td><td>Faisable, verbeux</td></tr>
+            <tr><td>Une barre par secteur depuis une ligne</td><td><code>dsfr-data-unpivot value-cols="col:Libellé"</code></td><td>Natif</td></tr>
+            <tr><td>Indicateur départemental large par année</td><td><code>dsfr-data-unpivot value-cols-pattern drop-empty</code> + <code>join</code> sur la dernière année</td><td>Natif</td></tr>
+            <tr><td>Carte départementale avec outre-mer</td><td><code>type="map"</code>, <code>map-summary="none"</code></td><td>Natif</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="odv-verdict fr-mt-4w">
+        <p class="fr-text--lead fr-mb-1v">Verdict</p>
+        <p><strong>DiDo se lit sans adaptateur, et les jeux larges se déplient natifs.</strong> Le coût est
+          dans la forme du jeu&nbsp;: des totaux mêlés aux détails, des catégories à isoler par indicatrices.
+          Le récit, lui, était dans la donnée et pas dans le cadrage&nbsp;: ce n'est pas le bâtiment qui
+          «&nbsp;jette&nbsp;», c'est la terre de ses chantiers qui pèse.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<div id="site-footer"></div>
+
+<script src="/assets/layout.js"></script>
+<script src="/assets/odv-code.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
+<!-- Bundle `core` : aucune dsfr-data-map Leaflet ; type="map" est un map-chart DSFR Chart. -->
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
+</body>
+</html>
