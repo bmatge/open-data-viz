@@ -52,13 +52,13 @@ const STATUTS = {
   'IPS Ecoles': ['reproduite', '/education/dataviz-ips-ecoles',
     'Recréée en récit (2026-09-26) : les écarts se jouent au quartier, 67 points entre déciles à Strasbourg pour 31 entre départements ; écoles sans IPS sorties de « 125 et plus » (PG-045)', 'angular'],
   'Etablissements labellisés Euroscol': ['reproduite', '/education/etablissements-euroscol',
-    'Vue de jeu héritée ; les six drapeaux 0/1 repliés en un multivalué par fold', 'vue'],
+    'Recréée en récit (2026-09-26) : un label de lycée, 15,4 % des lycées contre 0,9 % des écoles ; « Lille 149 » classait la taille des académies (FP-035), « 34 % de sections européennes » en fait 73 % des lycées (FP-036)', 'vue'],
   'Annuaire des internats': ['reproduite', '/education/annuaire-des-internats',
     'Gabarit annuaire éprouvé chez Bercy, rejoué sur un jeu à 44 colonnes vides sur 79', 'vue'],
   'Données ouvertes de France Éducation international': ['reproduite', '/education/fei-chiffres-cles',
-    'Page Studio à neuf jeux : la config Studio lue comme spécification', 'studio'],
+    'Recréée en récit (2026-09-26) : +54 % d’inscriptions au TCF, 86 % de la hausse par les tests canadiens — l’histoire tient dans `declinaison` ; la carte du monde écarte 749 dossiers ENIC, pas 85 (FP-040)', 'studio'],
   'Territoires numériques éducatifs': ['reproduite', '/education/tne-dashboard',
-    'Tableau de bord multi-sources : pivot natif, et le cumul qui reste au résidu', 'angular'],
+    'Recréée en récit (2026-09-26) : l’Aisne, 5,8 % des élèves, 25,8 % des participants ; le « 80 % de premier degré » ne portait que sur 38,9 % de profils renseignés (FP-038)', 'angular'],
 
   // --- Lot 15 : les deux dernieres pages IPS (le gabarit etait deja ecrit) et
   // trois cartographies AngularJS.
@@ -67,7 +67,7 @@ const STATUTS = {
   'IPS EREA': ['reproduite', '/education/dataviz-ips-erea',
     'Recréée en récit (2026-09-26) : 19,3 points sous les collèges publics, écart stable à méthode constante ; « référence départementale » = moyenne des EREA (FP-033)', 'angular'],
   'Cartographie des labellisations Egalité fille-garçon': ['reproduite', '/education/label-egalite-fille-garcon',
-    '1 678 labellisations, trois niveaux ; une campagne existait en deux graphies', 'angular'],
+    'Recréée en récit (2026-09-26) : 18,7 % des établissements publics, de 61,8 % (La Réunion) à 6,5 % (Strasbourg) ; 1 502 établissements, pas 1 529 — UAI en minuscule (FP-041)', 'angular'],
   'Cartographie de l’accompagnement de la déficience sensorielle': ['reproduite', '/education/accompagnement-deficience-sensorielle',
     'Trois drapeaux repliés par fold ; la moitié du jeu ne dit pas quel accompagnement il propose', 'angular'],
   'Cartographie des ULIS-TFV': ['reproduite', '/education/implantation-ulis-tfv',
@@ -78,9 +78,9 @@ const STATUTS = {
     'Recréée en récit (2026-09-26) : anglais partout, l’allemand dépend du territoire (100 % à Strasbourg) ; 9 743 établissements, pas 9 759 (FP-026)', 'angular'],
 
   'Génération 2024': ['reproduite', '/education/generation-2024',
-    '44 colonnes vides sur 79 ; six dispositifs repliés par fold, {{#each}} dans l’infobulle', 'angular'],
+    'Recréée en récit (2026-09-26) : 30,8 % des collèges, 15,3 % des écoles ; « 7 413 écoles, le label déborde le second degré » mesurait la taille du parc (FP-035)', 'angular'],
   'Cartographie Conseil National de la Refondation - CNR Education': ['reproduite', '/education/cnr-education',
-    '178 thèmes mais 1 814 combinaisons : premier emploi d’explode ; un champ email qui contient des académies', 'angular'],
+    'Recréée en récit (2026-09-26) : 19,3 % des collèges publics engagés, 7,5 % des écoles publiques ; « les écoles portent 61 % des projets » décrivait le parc (FP-035)', 'angular'],
 
   // --- Lot 17 : les trois vues de jeu heritees.
   'Hybridation de l’enseignement en lycée': ['reproduite', '/education/hybridation-enseignement-lycee',
@@ -91,7 +91,7 @@ const STATUTS = {
     'Jumeau de l’hybridation à la maille communale : le même taux, coloré par un autre chemin', 'vue'],
 
   'Cartographie PIX fiche établissement': ['reproduite', '/education/carto-pix-fiche-etablissement',
-    'Les 43 479 lignes de la carte d’origine ont UNE seule position : reproduite en changeant de source', 'angular'],
+    'Recréée en récit (2026-09-26) : +60 % de parcours pour +12 % d’élèves, 2,32 parcours par élève ; une tranche « 1,5 à 2 » perdue au rechargement d’URL (BUG-031)', 'angular'],
 
   'Suivi d\'impact de l\'Opération de Sensibilisation au risque de l\'hameçonnage "Cactus"': ['reproduite', '/education/cactus-hameconnage',
     '904 réponses ; fold suppose des booléens, un questionnaire produit des ternaires', 'studio'],
@@ -104,11 +104,11 @@ const STATUTS = {
   'Capytale Analyse des usages': ['reproduite', '/education/capytale-usages',
     'Recréée en récit (2026-09-26) : visites pour 100 élèves, de 20 à 221 ; le classement en volume mesurait la taille des académies (FP-025)', 'asset'],
   'DNMA Les usages numériques constatés via les ENT': ['reproduite', '/education/dnma-usages-ent',
-    '12,35 M de lignes, zéro chargée ; year-start-month reproduit l’année scolaire au jour près', 'asset'],
+    'Recréée en récit (2026-09-26) : ×4 établissements mesurés, −21 % de visites ; la « rupture de méthode » était un changement de périmètre (FP-037), le 81,7 % au smartphone une part sur 51 % des visites (FP-038)', 'asset'],
   'Ted-i : Déploiement des robots de téléprésence': ['reproduite', '/education/tedi-robots-telepresence',
-    'running_sum et distinct lèvent les deux manques de la fiche ; 175 lignes entièrement vides', 'asset'],
+    'Recréée en récit (2026-09-26) : le parc suit l’année scolaire, 62 % des restitutions en mai-juin ; les 184 lignes vides portent des UAI hors annuaire (FP-039), stock reconstitué par running_sum (AV-041)', 'asset'],
   'France Éducation international - Sélection de projets européens portant sur les données': ['reproduite', '/education/fei-projets-europeens-donnees',
-    'Maître-détail natif par refine-on-click ; 4 colonnes de suivi éditorial interne publiées', 'asset'],
+    'Recréée en récit (2026-09-26) : la France, 7 initiatives nationales pour 4 projets européens, 35 % des initiatives nationales recensées ; 24 pays sur 33 seulement en consortium', 'asset'],
   'Les personnels dans les collèges français': ['reproduite', '/education/personnels-colleges',
     'Recréée en récit (2026-09-26) : moins de 35 ans, de 6,2 % (Finistère) à 49,7 % (Seine-Saint-Denis) ; le privé ne déclare que ses enseignants (FP-030)', 'externe'],
   'Les personnels dans les lycées français': ['reproduite', '/education/personnels-lycees',
