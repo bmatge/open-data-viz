@@ -4,7 +4,81 @@
 > **Ce fichier n'est jamais écrasé par un script.** Les sorties du modèle
 > multimodal arrivent dans `constats/` ; ce qui est retenu se réécrit ici, à la main.
 
-Relecture du 2026-09-26, **niveau avancé** (une page entière, famille C « corpus documentaire »).
+## Recréation du 2026-09-27 — la page en récit (dsfr-data 0.42.0)
+
+Niveau **avancé** (une page). Chaque chiffre rejoué le 27 septembre 2026 à l'API de
+`data.economie.gouv.fr` (`rappelconso-v2-gtin-espaces`, modifié le 26/09 à 23:05 UTC, 18 699 fiches),
+puis relu au navigateur.
+
+### L'histoire trouvée
+
+**La hausse de 2026 vient des alertes européennes, pas des fiches nationales.** Du 1er janvier au
+27 septembre : 2 520 fiches en 2026 contre 2 202 en 2025 (+318, +14 %). Les fiches reprises du réseau
+européen **Safety Gate** (ex-RAPEX) passent de 156 à 437 (×2,8) et font 88 % de la hausse ; les fiches
+nationales vont de 2 046 à 2 083 (+1,8 %).
+
+- **Comment on les reconnaît** : aucun champ ne porte l'origine. Le lien de la fiche finit par
+  `/rapex` (`rappel.conso.gouv.fr/fiche-rappel/49513/rapex`). Ce critère isole **2 001 fiches, exactement
+  les 2 001 fiches sans nature juridique ni compensation** (et sans distributeur : 2 001 aussi). Le
+  « groupe null » que les deux relectures précédentes proposaient d'écarter ou de nommer (PG-015)
+  **était une population** : les alertes européennes. C'est la trouvaille, et elle renverse la
+  lecture de la page précédente (« 2026 dépasse 2025 à date égale » était vrai, mais ne disait pas
+  pourquoi).
+- **Deux circuits** : les véhicules y passent depuis toujours (numérotation `a12/…`, 1 663 des 1 756
+  fiches véhicules ; les 228 fiches 2018-2020 sont toutes des alertes véhicules). Ce qui est
+  nouveau depuis 2025, ce sont les produits courants (numérotation `sr/…/25`, `sr/…/26`, et `or/…`) :
+  jouets, électroménager, vêtements — hors véhicules, 12 fiches à date en 2025, 228 en 2026. Aucune
+  n'est alimentaire (Safety Gate ne couvre pas l'alimentation).
+- **La nuance qui peut défaire l'histoire** : la dernière alerte européenne date du **7 août 2026** ;
+  les fiches nationales continuent (dernière le 25 septembre). Flux mensuel européen : 65, 55, 59, 83,
+  62, 66 de janvier à juin, 36 en juillet, 11 en août, 0 en septembre. Pause ou fin de rattrapage : le
+  jeu ne le dit pas. Si le flux ne reprend pas, l'avance de 2026 fondra — la page le dit.
+
+Angles écartés : la part de l'alimentation (73,8 %, stable, ne raconte rien de neuf) ; le motif
+(listeria, oxyde d'éthylène : c'est l'angle de la page sœur `/viz/rappel-conso-tableau-de-bord`) ; les
+marques (aucune concentration : la première marque de jouets 2026 pèse 5 fiches) ; les places de marché
+dans `distributeurs` (texte libre, vide sur toutes les alertes européennes).
+
+### La forme
+
+1. **Titre-message + chapeau calculé** (`dsfr-data-repeat` sur une ligne jointe année en cours /
+   année précédente) : écart, part de la hausse, variation nationale — aucun chiffre écrit.
+2. **Preuve** : barres empilées nationales / européennes, **à date égale**, six années (fenêtres
+   `now(years=-k, month=1, day=1)` / `now(years=-k)` en `OR`). L'année en cours devient comparable au
+   lieu d'être écartée ou lue comme une baisse.
+3. **Nuance** : barres empilées par mois depuis janvier 2025 (l'arrêt du flux européen se voit), puis
+   part des familles de produits dans les alertes européennes (barres horizontales triées, top 6, part
+   calculée avant `limit`).
+4. **Exploration** : le corpus précédent, conservé (recherche serveur, facettes `/facets`, cartes paginées,
+   plus récentes d'abord) + un badge « Alerte européenne » calculé (`compute` + `{{#if}}`).
+5. **Ce qu'on ne montre pas**, en liste, puis `#analyse` courte.
+
+### Honnêteté
+
+- Axe à zéro (barres). Pas de moyenne de taux ; parts = ratio de sommes (`eu / n`), `share_percent`.
+- L'année en cours n'est jamais comparée à une année pleine : uniquement à date égale.
+- Le dernier mois du graphique mensuel est incomplet : dit sous le titre.
+- La règle d'origine (`/rapex`) est une inférence de la page : dite dans l'encadré du jeu et en fin de page,
+  avec la coïncidence 2 001 = 2 001 datée.
+- On ne tranche pas le « pourquoi » (plus de produits dangereux, ou plus d'alertes reprises).
+
+### Phrase de lecture (calculée en page)
+
+> Depuis le 1er janvier 2026, RappelConso a publié 2 520 fiches de rappel, contre 2 202 à la même date en
+> 2025 : 318 de plus (14 %). Presque toute la différence tient aux alertes du réseau européen Safety Gate,
+> que le site republie : 437 fiches contre 156, soit 88 % de la hausse. Les fiches nationales, elles,
+> passent de 2 046 à 2 083 : une variation de 1,8 %.
+
+### Ce qu'on ne montre pas
+
+- L'origine déclarée (inexistante) : déduite du lien.
+- Les fiches 2018-2020 (228, toutes des alertes véhicules) hors de la comparaison à six ans.
+- Le produit ou le code-barre : l'unité est la fiche (le jeu `-gtin-trie` reste écarté, voir plus bas).
+- Les combinaisons de risques (`blessures|brûlures`) comptées telles quelles par le portail.
+
+---
+
+## Historique — Relecture du 2026-09-26, **niveau avancé** (une page entière, famille C « corpus documentaire »).
 Chaque chiffre ci-dessous a été rejoué le jour même à l'API de `data.economie.gouv.fr` (jeu `rappelconso-v2-gtin-trie`, modifié à 13:05 UTC ; jeu voisin `rappelconso-v2-gtin-espaces`) et la page relue au navigateur (Playwright, `dsfr-data` 0.33.0 depuis le CDN). Les recommandations R1 à R6 sont détaillées dans la sortie structurée ; ce fichier dit pourquoi elles comptent.
 
 ## La question posée, et pour quel lecteur

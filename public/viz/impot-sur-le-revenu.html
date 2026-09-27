@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Impôt sur le revenu, déclarations nationales — open-data-viz</title>
-  <meta name="description" content="Exploration avec dsfr-data des déclarations nationales d'impôt sur le revenu (DGFiP, 2006-2024), jeu de données de data.economie.gouv.fr.">
+  <meta name="description" content="Déclarations d'impôt sur le revenu (DGFiP, revenus 2006 à 2024) : les pensions déclarées ont progressé bien plus vite que les salaires jusqu'en 2020, et le foyer fiscal est de moins en moins un couple. Puis chaque case de la déclaration, année par année.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,107 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-27 — ce que la page raconte, et pourquoi.
+
+       Il n'y a pas de page d'origine : le catalogue renvoie à la fiche du jeu,
+       dont l'onglet « Analyse » laisse choisir une case. La version précédente
+       de cette page reproduisait cet outil (une case, dix-neuf ans) et ne disait
+       rien avant qu'on ait choisi. L'exploration du jeu à l'API a trouvé deux
+       histoires que 2 253 cases prises une à une ne montrent pas :
+
+       1. Les pensions déclarées (cases 1AS + 1BS) ont été multipliées par 1,8
+          entre les revenus 2006 et 2024, les salaires (1AJ + 1BJ) par 1,5 : pour
+          100 € de salaires, 39 € de pensions en 2006, 47 € en 2024. Mais l'écart
+          s'est creusé jusqu'en 2020 (48 €) et plus depuis.
+       2. Le foyer fiscal est de moins en moins un couple : 36,0 % des foyers
+          sont mariés ou pacsés en 2006, 31,4 % en 2024 ; les pacsés ont été
+          multipliés par 9, les mariés ont perdu 1,4 million de foyers.
+
+       Ces deux histoires reposent sur des cases PÉRENNES (même code, même sens
+       sur 19 ans, vérifié libellé par libellé) : le piège du jeu — un code
+       réattribué à une autre case, un « montant » qui compte des foyers — est
+       évité par construction, puis rendu visible dans l'explorateur.
+       ========================================================================== -->
+
+  <!-- ─── 1. Salaires et pensions : 6 cases, 19 ans, UNE requête ────────────
+       1AJ/1BJ salaires (déclarants 1 et 2), 1AS/1BS pensions et retraites,
+       heures supplémentaires exonérées déclarées à part : 1AU/1BU (2007-2013,
+       loi TEPA ; le code 1AU est réattribué en 2018, d'où le filtre sur l'année
+       dans `compute`), 1GH/1HH (depuis 2019). Les personnes à charge (1CJ…)
+       sont écartées : moins de 0,5 % des salaires. -->
+  <dsfr-data-source id="rev" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
+    api-key-ref="ods-mef" fetch-mode="export"
+    select="annee, nom, montant"
+    where='nom in ("1AJ","1BJ","1AS","1BS","1AU","1BU","1GH","1HH")'>
+  </dsfr-data-source>
+  <dsfr-data-normalize id="rev-f" source="rev"
+    compute="famille = when nom = '1AS' or nom = '1BS' then 'pen' when nom = '1AJ' or nom = '1BJ' then 'sal' when (nom = '1AU' or nom = '1BU') and annee <= 2013 then 'hs' when nom = '1GH' or nom = '1HH' then 'hs' else 'hors'">
+  </dsfr-data-normalize>
+  <!-- Une ligne par année : m_sal, m_pen, m_hs (null les années sans case d'heures supplémentaires) -->
+  <dsfr-data-pivot id="rev-an" source="rev-f"
+    row="annee" column="famille" value="montant" column-format="m_{value}"></dsfr-data-pivot>
+  <dsfr-data-normalize id="rev-r" source="rev-an"
+    compute="pour100 = round(m_pen * 100 / m_sal, 1);
+             pour100_hs = round(m_pen * 100 / (m_sal + coalesce(m_hs, 0)), 1);
+             sal_md = round(m_sal / 1000000000, 0);
+             pen_md = round(m_pen / 1000000000, 0);
+             hs_md = round(coalesce(m_hs, 0) / 1000000000, 1);
+             pays = 'France'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="rev-ord" source="rev-r" order-by="annee:asc"></dsfr-data-query>
+  <!-- La première année publiée, rejointe sur chaque ligne : la base 100 -->
+  <dsfr-data-query id="rev-base" source="rev-r" order-by="annee:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="rev-j" left="rev-ord" right="rev-base" on="pays" type="left" prefix-right="b_"></dsfr-data-join>
+  <dsfr-data-normalize id="rev-i" source="rev-j"
+    compute="i_sal = round(m_sal * 100 / b_m_sal, 1);
+             i_pen = round(m_pen * 100 / b_m_pen, 1);
+             f_sal = round(m_sal / b_m_sal, 2);
+             f_pen = round(m_pen / b_m_pen, 2)">
+  </dsfr-data-normalize>
+  <!-- Pour les phrases : la dernière année, et l'année où le rapport culmine -->
+  <dsfr-data-query id="rev-der" source="rev-i" order-by="annee:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="rev-pic" source="rev-r" order-by="pour100:desc" limit="1"></dsfr-data-query>
+
+  <!-- ─── 2. Situation de famille : cinq cases à cocher, 19 ans ─────────────
+       Chaque déclaration coche une et une seule situation : leur somme est le
+       nombre de foyers. Pour une case à cocher, `nombre` = `montant` : on lit
+       `nombre`. -->
+  <dsfr-data-source id="fam" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
+    api-key-ref="ods-mef" fetch-mode="export"
+    select="annee, nom, nombre"
+    where='nom in ("0AM","0AO","0AC","0AD","0AV")'>
+  </dsfr-data-source>
+  <dsfr-data-normalize id="fam-f" source="fam"
+    compute="situation = when nom = '0AM' then 'Mariés' when nom = '0AO' then 'Pacsés' when nom = '0AC' then 'Célibataires' when nom = '0AD' then 'Divorcés ou séparés' else 'Veufs';
+             cle = nom + '_' + annee; pays = 'France'">
+  </dsfr-data-normalize>
+  <!-- Avant / après : une ligne par situation, une colonne par année -->
+  <dsfr-data-pivot id="fam-large" source="fam-f"
+    row="nom, situation" column="annee" value="nombre" column-format="n_{value}"></dsfr-data-pivot>
+  <dsfr-data-normalize id="fam-ecart" source="fam-large"
+    compute="ecart = n_2024 - n_2006; fois = round(n_2024 / n_2006, 1)"></dsfr-data-normalize>
+  <dsfr-data-query id="fam-tri" source="fam-ecart" order-by="n_2024:desc"></dsfr-data-query>
+  <!-- Pour la phrase : une seule ligne, une colonne par couple (situation, année) -->
+  <dsfr-data-query id="fam-bornes" source="fam-f" where="annee:in:2006|2024"></dsfr-data-query>
+  <dsfr-data-pivot id="fam-phr" source="fam-bornes"
+    row="pays" column="cle" value="nombre" column-format="n{value}"></dsfr-data-pivot>
+  <dsfr-data-normalize id="fam-phrase" source="fam-phr"
+    compute="tot06 = n0AM_2006 + n0AO_2006 + n0AC_2006 + n0AD_2006 + n0AV_2006;
+             tot24 = n0AM_2024 + n0AO_2024 + n0AC_2024 + n0AD_2024 + n0AV_2024;
+             couples06 = round((n0AM_2006 + n0AO_2006) * 100 / tot06, 1);
+             couples24 = round((n0AM_2024 + n0AO_2024) * 100 / tot24, 1);
+             foyers_plus = round((tot24 - tot06) / 1000000, 1);
+             maries_moins = round((n0AM_2006 - n0AM_2024) / 1000000, 1);
+             pacs06 = round(n0AO_2006 / 1000, 0);
+             pacs24 = round(n0AO_2024 / 1000000, 2);
+             pacs_fois = round(n0AO_2024 / n0AO_2006, 1);
+             celib_plus = round((n0AC_2024 - n0AC_2006) / 1000000, 1);
+             div_plus = round((n0AD_2024 - n0AD_2006) / 1000000, 1)">
+  </dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,353 +133,418 @@
       </div>
     </nav>
 
-    <h1>L'impôt sur le revenu&nbsp;: les déclarations nationales</h1>
+    <p class="fr-badge fr-badge--info fr-mb-2v">Impôt sur le revenu · déclarations des revenus 2006 à 2024</p>
+    <h1>Dans les déclarations de revenus, les pensions ont gagné du terrain sur les salaires</h1>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-8">
-        <details class="fr-callout fr-icon-database-line odv-contexte">
+    <dsfr-data-repeat source="rev-der">
+      <template>
+        <p class="fr-text--lead">
+          Pour 100&nbsp;€ de salaires déclarés, les foyers déclaraient {{b_pour100:number:0}}&nbsp;€ de
+          pensions et retraites sur les revenus {{b_annee}}&nbsp;; ils en déclarent
+          <strong>{{pour100:number:0}}&nbsp;€</strong> sur les revenus {{annee}}. En dix-neuf ans, le total
+          des pensions a été multiplié par <strong>{{f_pen:number:1}}</strong>
+          ({{b_pen_md:number}} puis {{pen_md:number}}&nbsp;milliards d'euros), celui des salaires par
+          {{f_sal:number:1}} ({{b_sal_md:number}} puis {{sal_md:number}}&nbsp;milliards). L'écart s'est
+          creusé jusqu'en 2020, pas depuis. Dans le même temps, le foyer qui déclare est de moins en
+          moins un couple.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-            <a href="https://data.economie.gouv.fr/explore/dataset/ir-declarations-2042-nat/"
-               target="_blank" rel="noopener external"><code>ir-declarations-2042-nat</code></a>
-            — pour chaque case des déclarations 2042 et complémentaires, de 2006 à 2024, le nombre de foyers
-            qui l'ont remplie et le total déclaré — en euros, ou un effectif selon la case (DGFiP&nbsp;; 19&nbsp;388 lignes
-            et 2&nbsp;253 codes relevés à l'API le 26/09/2026).
-            Le catalogue ne renvoie à aucune visualisation, seulement à la page du jeu&nbsp;: c'est une
-            entrée de type «&nbsp;Jeu de données&nbsp;». Cette page propose l'exploration que le portail
-            offre dans son onglet «&nbsp;Analyse&nbsp;»&nbsp;: choisir une case, suivre son nombre de
-            déclarants et son total sur dix-neuf ans.
-          </p>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.economie.gouv.fr/explore/dataset/ir-declarations-2042-nat/"
+           target="_blank" rel="noopener external"><code>ir-declarations-2042-nat</code></a>
+        (DGFiP, mis à jour le 07/04/2026) — pour chaque case des déclarations 2042, 2042-C et
+        2042-IOM, de l'année de revenus 2006 à 2024&nbsp;: le nombre de déclarations où la case est
+        remplie et le total qui y est déclaré. 19&nbsp;388 lignes et 2&nbsp;253 codes, relevés à l'API
+        le 27/09/2026. Des totaux nationaux&nbsp;: ni revenu par foyer, ni ventilation par territoire
+        ou par tranche. L'année est celle des revenus (les revenus 2024 sont déclarés en 2025).
+      </p>
     </details>
-      </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <div class="fr-callout fr-icon-lightbulb-line">
-          <p class="fr-callout__text fr-text--sm">Exemples&nbsp;:
-            <a href="?nom=1AJ">1AJ salaires</a> ·
-            <a href="?nom=1AS">1AS pensions</a> ·
-            <a href="?nom=7UF">7UF dons aux œuvres</a> ·
-            <a href="?nom=0AC">0AC célibataires</a> ·
-            <a href="?nom=8HW">8HW acomptes déjà payés</a>
-          </p>
-        </div>
-      </div>
-    </div>
   </div>
 
-  <!-- ==========================================================================
-       Architecture (relecture dataviz-metier du 2026-09-26) : un contexte, deux
-       sources sur le même jeu, et chacune ne répond qu'à sa question.
-
-       - `ir` : la RECHERCHE. `server-search` lui pose `search("…")`, le contexte
-         lui ajoute la case choisie. Elle nourrit la facette « case », la liste
-         et le compteur. `require-where` : rien ne part tant qu'aucun filtre
-         n'est arrivé par commande (AM-035, 0.25.0).
-       - `ir2` : la CASE. Elle ne reçoit QUE le filtre du contexte (nom = …) —
-         jamais la recherche. Les courbes, les KPI de pic et la fiche de la case
-         la lisent. `require-where` : tant qu'aucune case n'est choisie, elle
-         reste en attente. Avant, une recherche sans case choisie levait
-         l'attente et les courbes additionnaient toutes les cases trouvées
-         (« pensions » : 96 cases sommées sous un titre qui parlait de « la
-         case »). La facette, en mode client, ne commandait rien à la source.
-       - `dsfr-data-facets context="ctx"` : la facette devient un filtre du
-         contexte, qui diffuse `nom = "…"` aux deux sources et porte l'URL
-         (`?nom=1AJ` : les liens d'exemple restent vivants). La recherche passe
-         sur `?q=` pour ne pas se disputer `nom` avec le contexte.
-
-       `fetch-mode="export"` (#689, 0.25.0) : une requête au lieu de 194 pages
-       de 100 ; `max-records` relevé à 25 000 parce que le jeu dépasse le
-       plafond par défaut de 1 000, qui tronquerait en silence (19 388 lignes
-       relevées à l'API le 2026-09-10).
-       ========================================================================== -->
-
-  <dsfr-data-context id="ctx" sources="ir ir2" url-sync></dsfr-data-context>
-
-  <dsfr-data-source id="ir" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
-    fetch-mode="export" max-records="25000" require-where
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="ir2" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
-    fetch-mode="export" max-records="25000" require-where
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <!-- L'unité du « montant » n'est pas dans le jeu : pour les cases à cocher,
-       la DGFiP recopie le nombre de foyers dans `montant` ; pour les cases
-       « Nombre de … », `montant` compte des personnes. Règle heuristique, dite
-       comme telle en page : montant = nombre, ou libellé qui contient
-       « nombre » ou « coch » → effectif, sinon euros. -->
-  <dsfr-data-normalize id="ir2-u" source="ir2"
-    compute="unite = when montant = nombre or contains(lower(libelle), 'nombre') or contains(lower(libelle), 'coch') then 'effectif' else 'euros'">
-  </dsfr-data-normalize>
-
-  <dsfr-data-query id="ir-annees" source="ir2" group-by="annee"
-    aggregate="nombre:sum:nombre, montant:sum:montant" order-by="annee:asc">
-  </dsfr-data-query>
-
-  <dsfr-data-query id="ir-libelles" source="ir2-u" group-by="libelle, unite"
-    aggregate="annee:min:de, annee:max:a, annee:count:n" order-by="de:asc">
-  </dsfr-data-query>
-
-  <dsfr-data-query id="ir-bornes" source="ir2"
-    aggregate="annee:min:premiere, annee:max:derniere, annee:count:n">
-  </dsfr-data-query>
-
-  <!-- Le socle du gabarit : la recherche et son compteur, pleine largeur.
-       Elle compte des LIGNES (une par case et par année), pas des cases. -->
-  <section class="odv-bandeau">
-    <div class="fr-container">
-      <div class="odv-bandeau__recherche">
-        <dsfr-data-search id="ir-q" source="ir"
-          fields="libelle, nom" label="Libellé ou code de la case" placeholder="Ex. : salaires, pensions, 1AJ…"
-          server-search url-search-param="q" count count-label="ligne">
-        </dsfr-data-search>
-      </div>
-    </div>
-  </section>
-
   <div class="fr-container fr-mb-8w">
-    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
 
-      <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
-        <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-          Filtrer<span class="odv-filtres__compte"></span>
-        </summary>
-        <h2 class="fr-h6">Filtrer</h2>
+    <!-- ====================== L'accroche ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-accroche">
+      <h2 class="fr-h3" id="t-accroche">Les pensions déclarées ont crû presque deux fois plus vite que les salaires</h2>
+      <dsfr-data-repeat source="rev-der">
+        <template>
+          <dsfr-data-kpi-group per-row="3" class="fr-mb-3w">
+            <dsfr-data-kpi source="rev-der" value="pour100:first" format="decimal" decimals="0" unit="€"
+              heading="Pensions pour 100 € de salaires" label="revenus {{annee}}"
+              lines='[{"value":"b_pour100:first","format":"decimal","decimals":0,"prefix":"contre ","suffix":" € sur les revenus {{b_annee}}"}]'
+              color-token="bleu"></dsfr-data-kpi>
+            <dsfr-data-kpi source="rev-der" value="f_pen:first" format="decimal" decimals="2" unit="fois"
+              heading="Pensions et retraites" label="total {{annee}} rapporté à {{b_annee}}"
+              color-token="bleu"></dsfr-data-kpi>
+            <dsfr-data-kpi source="rev-der" value="f_sal:first" format="decimal" decimals="2" unit="fois"
+              heading="Salaires" label="total {{annee}} rapporté à {{b_annee}}"></dsfr-data-kpi>
+          </dsfr-data-kpi-group>
+        </template>
+      </dsfr-data-repeat>
+      <p class="fr-text--sm fr-hint-text">
+        Montants déclarés par les deux déclarants du foyer (cases 1AJ et 1BJ pour les salaires, 1AS et
+        1BS pour les pensions, retraites et rentes, avant abattement), en euros courants&nbsp;: le rapport
+        entre les deux ne dépend pas de l'inflation, les multiplicateurs si.
+      </p>
 
-        <dsfr-data-facets id="ir-f" source="ir-q"
-          fields="nom" labels="nom:Case de la déclaration" display="nom:select"
-          context="ctx">
-        </dsfr-data-facets>
-        <p class="fr-text--xs fr-hint-text">
-          La recherche restreint la liste des cases&nbsp;; les courbes n'apparaissent qu'une fois une case
-          choisie. Une recherche seule ne trace rien&nbsp;: additionner des cases différentes n'a pas de sens.
-        </p>
-      </details>
-
-      <div class="fr-col-12 fr-col-lg-9">
-        <h2 class="fr-h3 fr-mb-1w">
-          <dsfr-data-context-value for="ctx" template="Case {{nom}}" fallback="Choisissez une case" live>
-          </dsfr-data-context-value>
-        </h2>
-        <p class="fr-text--sm fr-hint-text fr-mb-2w">
-          Année des revenus déclarés&nbsp;; effectifs et totaux nationaux, DGFiP, jeu
-          <code>ir-declarations-2042-nat</code> mis à jour le 07/04/2026 (métadonnées du jeu, relevées le 26/09/2026).
-        </p>
-
-        <!-- La fiche de la case : ce que ce code a désigné au fil des ans, et
-             dans quelle unité. Un code libéré est réattribué à une autre case
-             (1BI : case à cocher jusqu'en 2017, pensions en capital depuis 2019). -->
-        <div class="odv-viz" data-code="Fiche de la case : libellés, années, unité">
-        <dsfr-data-repeat source="ir-bornes">
-          <template>
-            <p class="fr-mb-1w"><strong>{{n}} années couvertes</strong>, de {{premiere}} à {{derniere}}.
-              Une année absente n'est pas un zéro&nbsp;: la case n'existait pas cette année-là, ou elle
-              est soumise au secret statistique (le jeu ne publie alors aucune ligne).</p>
-          </template>
-        </dsfr-data-repeat>
-        <h3 class="fr-h6 fr-mb-1w fr-mt-2w">Libellés portés par ce code, et unité du montant</h3>
-        <dsfr-data-display source="ir-libelles" cols="1" count-label="libellé"
-          idle-message="Choisissez une case pour afficher ses libellés.">
-          <template>
-            <p class="fr-text--sm fr-mb-1v">«&nbsp;{{libelle}}&nbsp;» — de {{de}} à {{a}}, présent {{n}}&nbsp;an(s) — montant en <strong>{{unite}}</strong></p>
-          </template>
-        </dsfr-data-display>
-        <p class="fr-text--xs fr-hint-text fr-mt-1w">
-          Plusieurs libellés&nbsp;: la formulation a changé, ou le code a été <strong>réattribué à une
-          autre case</strong> — les courbes ne décrivent alors pas la même chose avant et après.
-          «&nbsp;Effectif&nbsp;»&nbsp;: pour une case à cocher, la DGFiP recopie le nombre de foyers dans
-          le montant&nbsp;; pour une case «&nbsp;Nombre de…&nbsp;», le montant compte des personnes.
-          L'unité est déduite de la donnée et du libellé (règle approchée&nbsp;: quelques cases, comme
-          7FZ en m², ne sont ni l'un ni l'autre).
-        </p>
-        </div>
-
-        <dsfr-data-kpi-group class="fr-mb-4w fr-mt-4w">
-          <dsfr-data-kpi source="ir" value="nom:distinct" format="nombre" col="3"
-            idle-message="Lancez une recherche ou choisissez une case"
-            heading="Cases dans la sélection" label="codes distincts trouvés"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ir2" value="libelle:distinct" format="nombre" col="3"
-            idle-message="Choisissez une case pour afficher les données"
-            heading="Libellés portés par ce code" label="plus d'un : lire la fiche"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ir2" value="nombre:max" format="nombre" col="3"
-            idle-message="Choisissez une case pour afficher les données"
-            heading="Pic de déclarants" label="foyers, meilleure année"></dsfr-data-kpi>
-          <dsfr-data-kpi source="ir2" value="montant:max" format="compact" col="3"
-            idle-message="Choisissez une case pour afficher les données"
-            heading="Pic de montant" label="meilleure année, en euros ou en effectif selon la case"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Nombre de foyers ayant rempli la case, par année">
-              <dsfr-data-chart id="g-nombre" source="ir-annees" type="line" y-min="0"
-                idle-message="Choisissez une case pour afficher les données"
-                label-field="annee" value-field="nombre:Foyers déclarants"
-                databox databox-title="Nombre de foyers ayant rempli la case, par année"
-                databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-nombre" source="ir-annees" table download
-                description="Nombre de foyers ayant rempli la case, par année de revenus. Une année absente n'est pas un zéro : la case n'existait pas cette année-là, ou elle est soumise au secret statistique ; la courbe relie alors les années voisines. Un libellé qui change peut signaler la réattribution du code à une autre case : les deux parties de la courbe ne décrivent alors pas la même chose (voir la fiche de la case)."></dsfr-data-a11y>
-              </div>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12">
+          <dsfr-data-repeat source="rev-der">
+            <template>
+              <p class="odv-lecture">Base 100 sur les revenus {{b_annee}}&nbsp;: les pensions atteignent
+                <strong>{{i_pen:number:0}}</strong> sur les revenus {{annee}}, les salaires
+                <strong>{{i_sal:number:0}}</strong>. Les deux courbes s'écartent jusqu'en 2020, puis les
+                salaires accélèrent et suivent le même rythme.</p>
+            </template>
+          </dsfr-data-repeat>
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Salaires et pensions déclarés, base 100 en 2006">
+            <dsfr-data-chart id="g-base100" source="rev-i" type="line" y-min="0"
+              label-field="annee"
+              value-field="i_pen:Pensions et retraites" value-fields="i_sal:Salaires"
+              databox databox-title="Total déclaré, base 100 sur les revenus 2006"
+              databox-source="DGFiP — ir-declarations-2042-nat (cases 1AS + 1BS, 1AJ + 1BJ), via data.economie.gouv.fr"
+              databox-date="Revenus 2006 à 2024" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-base100" source="rev-i" table download
+              label-field="annee" value-field="i_pen, i_sal, pen_md, sal_md"
+              description="Deux courbes, base 100 sur les revenus 2006 : total des pensions et retraites déclarées (cases 1AS et 1BS, bleu foncé) et total des salaires déclarés (cases 1AJ et 1BJ, bleu clair). Les pensions finissent au-dessus de 180, les salaires vers 150. Le tableau donne aussi les totaux en milliards d'euros courants."></dsfr-data-a11y>
             </div>
           </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-chart-slot">
-              <div class="odv-viz" data-code="Montant total déclaré dans la case, par année">
-              <dsfr-data-chart id="g-montant" source="ir-annees" type="line" y-min="0"
-                idle-message="Choisissez une case pour afficher les données"
-                label-field="annee" value-field="montant:Montant déclaré"
-                databox databox-title="Montant total déclaré dans la case, par année"
-                databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr" databox-download>
-              </dsfr-data-chart>
-              <dsfr-data-a11y for="g-montant" source="ir-annees" table download
-                description="Total déclaré dans la case, par année de revenus, en euros ou en effectif selon la case (voir la fiche de la case : pour une case à cocher, le montant recopie le nombre de foyers). Une année absente n'est pas un zéro : la case n'existait pas cette année-là, ou elle est soumise au secret statistique. Une rupture d'une seule année peut venir d'un changement de périmètre de la case que le jeu ne documente pas."></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <h2 class="fr-h4">Le détail</h2>
-        <p class="fr-text--xs fr-hint-text">
-          Le tableau garde la recherche <em>et</em> la case&nbsp;; les courbes, la case entière. Avec
-          «&nbsp;pensions&nbsp;» et la case 1BI, le tableau ne montre que les années où le libellé contient le mot.
-        </p>
-        <dsfr-data-normalize id="ir-lu" source="ir-f"
-          compute="unite = when montant = nombre or contains(lower(libelle), 'nombre') or contains(lower(libelle), 'coch') then 'effectif' else 'euros'">
-        </dsfr-data-normalize>
-        <div class="odv-viz" data-code="Graphique">
-        <dsfr-data-list source="ir-lu"
-          idle-message="Lancez une recherche ou choisissez une case"
-          columns="annee:Année, nom:Case, libelle:Libellé, nombre:Foyers, montant:Montant, unite:Unité du montant"
-          sort="annee:desc" pagination="20" export="csv" count-label="ligne">
-        </dsfr-data-list>
         </div>
       </div>
+    </section>
 
-    </div>
+    <!-- ====================== La nuance ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-nuance">
+      <h2 class="fr-h3" id="t-nuance">Le rattrapage s'est arrêté en 2020</h2>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-8">
+          <dsfr-data-repeat source="rev-pic">
+            <template>
+              <p class="odv-lecture">Le rapport culmine sur les revenus <strong>{{annee}}</strong>&nbsp;:
+                {{pour100:number:1}}&nbsp;€ de pensions pour 100&nbsp;€ de salaires. Il n'a pas retrouvé ce niveau
+                depuis&nbsp;: les salaires déclarés progressent de nouveau aussi vite que les pensions.</p>
+            </template>
+          </dsfr-data-repeat>
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Pensions déclarées pour 100 € de salaires, par année de revenus">
+            <dsfr-data-chart id="g-rapport" source="rev-i" type="line" y-min="0"
+              label-field="annee"
+              value-field="pour100:Salaires seuls" value-fields="pour100_hs:Salaires et heures supplémentaires exonérées"
+              databox databox-title="Pensions déclarées pour 100 € de salaires, par année de revenus"
+              databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr"
+              databox-date="Revenus 2006 à 2024" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-rapport" source="rev-i" table download
+              label-field="annee" value-field="pour100, pour100_hs, hs_md"
+              description="Deux courbes, par année de revenus : euros de pensions et retraites déclarés pour 100 euros de salaires. La courbe bleu foncé rapporte les pensions aux seuls salaires ; la bleu clair ajoute aux salaires les heures supplémentaires exonérées, déclarées dans des cases à part (1AU et 1BU de 2007 à 2013, 1GH et 1HH depuis 2019). Les deux montent jusqu'en 2020 puis reculent légèrement."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-4">
+          <dsfr-data-repeat source="rev-der">
+            <template>
+              <p class="fr-text--sm">Les heures supplémentaires exonérées ne sont pas dans les cases de
+                salaires&nbsp;: elles ont leurs propres cases pendant les deux périodes où elles sont
+                défiscalisées. Sur les revenus {{annee}}, elles pèsent <strong>{{hs_md:number:1}}&nbsp;milliards
+                d'euros</strong>&nbsp;; en les comptant, le rapport tombe à {{pour100_hs:number:1}}&nbsp;€.
+                La tendance ne change pas.</p>
+            </template>
+          </dsfr-data-repeat>
+          <p class="fr-text--sm">Sur les revenus 2019 et 2020, ces cases restent faibles alors que
+            l'exonération s'applique toute l'année&nbsp;; le jeu ne dit pas pourquoi.</p>
+          <p class="fr-text--sm">Le jeu ne dit pas non plus pourquoi le rapport cesse de monter&nbsp;: il
+            ne porte ni le nombre de retraités, ni le niveau des pensions par personne, seulement des
+            totaux par case.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================== Le second récit : les foyers ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-foyers">
+      <h2 class="fr-h3" id="t-foyers">Le foyer fiscal est de moins en moins un couple marié</h2>
+      <dsfr-data-repeat source="fam-phrase">
+        <template>
+          <p class="odv-lecture">Sur les revenus 2024, <strong>{{couples24:number:1}}&nbsp;%</strong> des foyers
+            sont mariés ou pacsés, contre {{couples06:number:1}}&nbsp;% en 2006. Le nombre de foyers a
+            augmenté de {{foyers_plus:number:1}}&nbsp;millions, mais les mariés en ont perdu
+            {{maries_moins:number:1}}&nbsp;million&nbsp;; les pacsés sont passés de {{pacs06:number}}&nbsp;000 à
+            {{pacs24:number:2}}&nbsp;million (<strong>{{pacs_fois:number:1}} fois plus</strong>). La hausse vient
+            surtout des personnes seules&nbsp;: {{celib_plus:number:1}}&nbsp;millions de célibataires et
+            {{div_plus:number:1}}&nbsp;millions de divorcés ou séparés en plus.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-8">
+          <div class="odv-chart-slot">
+            <div class="odv-viz" data-code="Foyers selon la situation de famille, revenus 2006 et 2024">
+            <dsfr-data-chart id="g-foyers" source="fam-tri" type="bar" horizontal
+              label-field="situation"
+              value-field="n_2006:Revenus 2006" value-fields="n_2024:Revenus 2024"
+              color-map="Revenus 2006:#929292,Revenus 2024:#000091"
+              databox databox-title="Foyers selon la situation de famille cochée, revenus 2006 et 2024"
+              databox-source="DGFiP — ir-declarations-2042-nat (cases 0AM, 0AO, 0AC, 0AD, 0AV), via data.economie.gouv.fr"
+              databox-date="Revenus 2006 et 2024" databox-download heading-level="3">
+            </dsfr-data-chart>
+            <dsfr-data-a11y for="g-foyers" source="fam-tri" table download
+              label-field="situation" value-field="n_2006, n_2024, ecart"
+              description="Barres horizontales groupées, une paire par situation de famille, triées par nombre de foyers en 2024 : célibataires, mariés, divorcés ou séparés, veufs, pacsés. Gris : revenus 2006 ; bleu : revenus 2024. Les célibataires, divorcés et pacsés augmentent ; les mariés et les veufs diminuent."></dsfr-data-a11y>
+            </div>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-4">
+          <dsfr-data-kpi-group per-row="1">
+            <dsfr-data-kpi source="fam" value="nombre:sum{annee:eq:2024, nom:in:0AM|0AO} / nombre:sum{annee:eq:2024}"
+              format="pourcentage" decimals="1" heading="Couples mariés ou pacsés" label="part des foyers, revenus 2024"
+              lines='[{"value":"nombre:sum{annee:eq:2006, nom:in:0AM|0AO} / nombre:sum{annee:eq:2006}","format":"pourcentage","decimals":1,"prefix":"contre ","suffix":" en 2006"}]'
+              color-token="bleu"></dsfr-data-kpi>
+            <dsfr-data-kpi source="fam" value="nombre:sum{annee:eq:2024}" format="compact" decimals="1"
+              heading="Foyers" label="ayant coché une situation de famille, revenus 2024"
+              lines='[{"value":"nombre:sum{annee:eq:2006}","format":"compact","decimals":1,"prefix":"contre ","suffix":" en 2006"}]'></dsfr-data-kpi>
+          </dsfr-data-kpi-group>
+        </div>
+      </div>
+      <p class="fr-text--sm fr-hint-text">
+        Chaque déclaration coche une seule situation&nbsp;: la somme des cinq cases est le nombre de foyers.
+        Un couple marié ou pacsé fait une déclaration commune&nbsp;; une personne seule, la sienne. La
+        progression n'est pas régulière&nbsp;: sur les revenus 2011 et 2016, tous les comptes fléchissent
+        ensemble puis repartent, un mouvement de la collecte que le jeu n'explique pas. La page compare
+        donc les deux bornes, 2006 et 2024.
+      </p>
+    </section>
+
+    <!-- ====================== L'exploration ====================== -->
+    <!-- Architecture reprise de la version précédente, vérifiée au pilote du
+         2026-09-26 : un contexte, deux sources sur le même jeu.
+         - `ir` : la RECHERCHE (server-search + case choisie), nourrit la
+           facette, la liste et le compteur ;
+         - `ir2` : la CASE, ne reçoit que `nom = …` du contexte ; courbes et
+           fiche la lisent. Une recherche sans case ne trace rien (additionner
+           des cases hétérogènes n'a pas de sens).
+         `require-where` : rien ne part tant que rien n'est choisi.
+         `max-records` relevé à 25 000 : le jeu dépasse le plafond par défaut
+         de 1 000, qui tronquerait en silence (19 388 lignes au 2026-09-27). -->
+    <section class="fr-mb-6w" aria-labelledby="t-explorer">
+      <h2 class="fr-h3" id="t-explorer">Et votre case&nbsp;? Plus de 2&nbsp;000 codes, dix-neuf ans</h2>
+      <p>Choisissez une case de la déclaration pour suivre le nombre de foyers qui l'ont remplie et le
+        total déclaré. Exemples&nbsp;:
+        <a href="?nom=1AJ#t-explorer">1AJ salaires</a> ·
+        <a href="?nom=1AS#t-explorer">1AS pensions</a> ·
+        <a href="?nom=7UF#t-explorer">7UF dons aux œuvres</a> ·
+        <a href="?nom=0AO#t-explorer">0AO pacsés</a> ·
+        <a href="?nom=1BI#t-explorer">1BI, un code qui a changé de case</a>.</p>
+
+      <dsfr-data-context id="ctx" sources="ir ir2" url-sync></dsfr-data-context>
+
+      <dsfr-data-source id="ir" api-type="opendatasoft"
+        base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
+        fetch-mode="export" max-records="25000" require-where
+        api-key-ref="ods-mef">
+      </dsfr-data-source>
+      <dsfr-data-source id="ir2" api-type="opendatasoft"
+        base-url="https://data.economie.gouv.fr" dataset-id="ir-declarations-2042-nat"
+        fetch-mode="export" max-records="25000" require-where
+        api-key-ref="ods-mef">
+      </dsfr-data-source>
+
+      <!-- L'unité du « montant » n'est pas dans le jeu : case à cocher → la
+           DGFiP recopie le nombre de foyers ; case « Nombre de … » → des
+           personnes. Règle approchée, dite en page. -->
+      <dsfr-data-normalize id="ir2-u" source="ir2"
+        compute="unite = when montant = nombre or contains(lower(libelle), 'nombre') or contains(lower(libelle), 'coch') then 'effectif' else 'euros'">
+      </dsfr-data-normalize>
+      <dsfr-data-query id="ir-annees" source="ir2" group-by="annee"
+        aggregate="nombre:sum:nombre, montant:sum:montant" order-by="annee:asc">
+      </dsfr-data-query>
+      <dsfr-data-query id="ir-libelles" source="ir2-u" group-by="libelle, unite"
+        aggregate="annee:min:de, annee:max:a, annee:count:n" order-by="de:asc">
+      </dsfr-data-query>
+      <dsfr-data-query id="ir-bornes" source="ir2"
+        aggregate="annee:min:premiere, annee:max:derniere, annee:count:n">
+      </dsfr-data-query>
+
+      <div class="fr-grid-row fr-grid-row--gutters odv-zone">
+        <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
+          <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
+            Chercher une case<span class="odv-filtres__compte"></span>
+          </summary>
+          <dsfr-data-search id="ir-q" source="ir"
+            fields="libelle, nom" label="Libellé ou code de la case" placeholder="Ex. : dons, pensions, 1AJ…"
+            server-search url-search-param="q" count count-label="ligne">
+          </dsfr-data-search>
+          <dsfr-data-facets id="ir-f" source="ir-q"
+            fields="nom" labels="nom:Case de la déclaration" display="nom:select"
+            context="ctx">
+          </dsfr-data-facets>
+          <p class="fr-text--xs fr-hint-text">
+            La recherche restreint la liste des cases&nbsp;; les courbes n'apparaissent qu'une fois une case
+            choisie.
+          </p>
+        </details>
+
+        <div class="fr-col-12 fr-col-lg-9">
+          <h3 class="fr-h4 fr-mb-1w">
+            <dsfr-data-context-value for="ctx" template="Case {{nom}}" fallback="Choisissez une case" live>
+            </dsfr-data-context-value>
+          </h3>
+
+          <!-- La fiche de la case : ce que ce code a désigné, et dans quelle unité -->
+          <div class="odv-viz" data-code="Fiche de la case : libellés, années, unité">
+          <dsfr-data-repeat source="ir-bornes">
+            <template>
+              <p class="fr-mb-1w"><strong>{{n}} années couvertes</strong>, de {{premiere}} à {{derniere}}.
+                Une année absente n'est pas un zéro&nbsp;: la case n'existait pas cette année-là, ou elle
+                est soumise au secret statistique (le jeu ne publie alors aucune ligne).</p>
+            </template>
+          </dsfr-data-repeat>
+          <dsfr-data-display source="ir-libelles" cols="1" count-label="libellé"
+            idle-message="Choisissez une case pour afficher ses libellés.">
+            <template>
+              <p class="fr-text--sm fr-mb-1v">«&nbsp;{{libelle}}&nbsp;» — de {{de}} à {{a}}, présent {{n}}&nbsp;an(s) — montant en <strong>{{unite}}</strong></p>
+            </template>
+          </dsfr-data-display>
+          <p class="fr-text--xs fr-hint-text fr-mt-1w">
+            Plusieurs libellés&nbsp;: la formulation a changé, ou le code a été <strong>réattribué à une
+            autre case</strong> (1BI&nbsp;: une case à cocher jusqu'en 2017, des pensions en capital depuis
+            2019) — les courbes ne décrivent alors pas la même chose avant et après.
+            «&nbsp;Effectif&nbsp;»&nbsp;: pour une case à cocher, la DGFiP recopie le nombre de foyers dans
+            le montant&nbsp;; pour une case «&nbsp;Nombre de…&nbsp;», il compte des personnes. Règle
+            approchée&nbsp;: quelques cases, comme 7FZ en m², ne sont ni l'un ni l'autre.
+          </p>
+          </div>
+
+          <div class="fr-grid-row fr-grid-row--gutters fr-mt-2w fr-mb-4w">
+            <div class="fr-col-12 fr-col-lg-6">
+              <div class="odv-chart-slot">
+                <div class="odv-viz" data-code="Foyers ayant rempli la case, par année">
+                <dsfr-data-chart id="g-nombre" source="ir-annees" type="line" y-min="0"
+                  idle-message="Choisissez une case pour afficher les données"
+                  label-field="annee" value-field="nombre:Foyers déclarants"
+                  databox databox-title="Foyers ayant rempli la case, par année de revenus"
+                  databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr" databox-download heading-level="4">
+                </dsfr-data-chart>
+                <dsfr-data-a11y for="g-nombre" source="ir-annees" table download
+                  description="Nombre de foyers ayant rempli la case choisie, par année de revenus. Une année absente n'est pas un zéro : la courbe relie alors les années voisines. Un libellé qui change peut signaler la réattribution du code à une autre case (voir la fiche au-dessus)."></dsfr-data-a11y>
+                </div>
+              </div>
+            </div>
+            <div class="fr-col-12 fr-col-lg-6">
+              <div class="odv-chart-slot">
+                <div class="odv-viz" data-code="Total déclaré dans la case, par année">
+                <dsfr-data-chart id="g-montant" source="ir-annees" type="line" y-min="0"
+                  idle-message="Choisissez une case pour afficher les données"
+                  label-field="annee" value-field="montant:Total déclaré"
+                  databox databox-title="Total déclaré dans la case, par année de revenus (euros ou effectif, voir la fiche)"
+                  databox-source="DGFiP — ir-declarations-2042-nat, via data.economie.gouv.fr" databox-download heading-level="4">
+                </dsfr-data-chart>
+                <dsfr-data-a11y for="g-montant" source="ir-annees" table download
+                  description="Total déclaré dans la case choisie, par année de revenus, en euros ou en effectif selon la case (voir la fiche). Une année absente n'est pas un zéro. Une rupture d'une seule année peut venir d'un changement de périmètre que le jeu ne documente pas."></dsfr-data-a11y>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <dsfr-data-normalize id="ir-lu" source="ir-f"
+            compute="unite = when montant = nombre or contains(lower(libelle), 'nombre') or contains(lower(libelle), 'coch') then 'effectif' else 'euros'">
+          </dsfr-data-normalize>
+          <div class="odv-viz" data-code="Tableau des lignes trouvées">
+          <dsfr-data-list source="ir-lu"
+            idle-message="Lancez une recherche ou choisissez une case"
+            columns="annee:Année, nom:Case, libelle:Libellé, nombre:Foyers, montant:Montant, unite:Unité du montant"
+            sort="annee:desc" pagination="20" export="csv" count-label="ligne">
+          </dsfr-data-list>
+          </div>
+          <p class="fr-text--xs fr-hint-text">
+            Le tableau garde la recherche <em>et</em> la case&nbsp;; les courbes, la case entière.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================== Ce qu'on ne montre pas ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-limites">
+      <h2 class="fr-h4" id="t-limites">Ce que cette page ne montre pas</h2>
+      <ul class="fr-text--sm">
+        <li><strong>Des revenus par personne.</strong> Le jeu donne des totaux par case. «&nbsp;Les pensions
+          ont gagné du terrain&nbsp;» dit que leur masse déclarée a crû plus vite que celle des salaires,
+          pas qu'un retraité gagne plus qu'avant&nbsp;: le nombre de retraités augmente aussi (la case 1AS
+          est remplie par 11,2&nbsp;millions de foyers sur les revenus 2006, 13,2&nbsp;millions sur 2024,
+          relevé à l'API le 27/09/2026).</li>
+        <li><strong>Tous les revenus.</strong> Seuls les salaires et les pensions des deux déclarants sont
+          comparés&nbsp;; les revenus des personnes à charge (moins de 0,5&nbsp;% des salaires), les revenus
+          d'activité non salariée, fonciers et du capital ne le sont pas. Les salaires non déclarés (sous le
+          seuil, exonérés hors heures supplémentaires) échappent au jeu.</li>
+        <li><strong>La cause du plafonnement après 2020.</strong> Le jeu dit quand, pas pourquoi.</li>
+        <li><strong>Des valeurs arrondies.</strong> Certaines cases des revenus 2021 et 2023 sont publiées
+          arrondies au million (1AJ 2021&nbsp;: 530&nbsp;999&nbsp;000&nbsp;000&nbsp;€)&nbsp;; sans effet sur les
+          rapports, visible dans le tableau.</li>
+        <li><strong>Le secret statistique.</strong> La documentation annonce une valeur vide&nbsp;; le jeu n'en
+          contient aucune. Une case secrète est donc une ligne absente, indiscernable d'une case qui
+          n'existait pas cette année-là.</li>
+        <li><strong>Les pics inexpliqués.</strong> Dans l'explorateur, certaines cases font un bond d'une ou
+          deux années sans changer de libellé (7UF, dons aux œuvres&nbsp;: 7,3 puis 6,9&nbsp;milliards sur les
+          revenus 2017 et 2018, autour de 2,2&nbsp;milliards avant et après). Le jeu ne l'explique pas&nbsp;;
+          la page le montre sans le raconter.</li>
+      </ul>
+    </section>
+
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
       <details class="odv-technique">
-        <summary>Analyse — L'impôt sur le revenu, déclarations nationales — ce que la reproduction a coûté</summary>
+        <summary>Analyse — L'impôt sur le revenu, déclarations nationales — ce que la recréation a coûté</summary>
 
     <div class="fr-container">
-      <p>
-        Il n'y a pas de page d'origine&nbsp;: le catalogue renvoie à la fiche du jeu de données, dont
-        l'onglet «&nbsp;Analyse&nbsp;» du portail permet, à la main, de choisir un axe, une mesure et un
-        filtre. Cette page fige l'usage le plus naturel de ce jeu — une case, dix-neuf ans — et sert de
-        test à une question du banc d'essai&nbsp;: <em>que vaut ChartsBuilder comme outil d'exploration,
-        et pas seulement de restitution&nbsp;?</em>
-      </p>
-      <p class="fr-text--sm">
-        La page a été relue le 26/09/2026 avec la grille <code>dataviz-metier</code>, au navigateur et à
-        l'API (export complet du jeu ce jour-là&nbsp;: 19&nbsp;388 lignes, 2&nbsp;253 codes). Cette relecture
-        a trouvé deux affichages faux que la première version portait sans le savoir, et une affirmation
-        fausse dans cette analyse même. Ils sont décrits ci-dessous, avec ce qui les a corrigés.
+      <p class="fr-text--lead">
+        Pas de page d'origine&nbsp;: le catalogue renvoie à la fiche du jeu, dont l'onglet
+        «&nbsp;Analyse&nbsp;» laisse choisir une case. Recréée le 27/09/2026 en page qui raconte deux
+        histoires du jeu, puis rend l'explorateur de la version précédente, corrigée au pilote du
+        26/09/2026.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>L'URL comme état.</strong> Le contexte (<code>dsfr-data-context url-sync</code>) lit
-              <code>?nom=1AJ</code> au chargement et réécrit l'URL à chaque choix de case&nbsp;: chaque case a
-              une adresse, les liens d'exemple continuent de marcher.</li>
-            <li><strong>Une facette qui se restreint avec la recherche.</strong> Plus de 2&nbsp;000 codes dans une
-              liste déroulante seraient inutilisables&nbsp;; comme la facette est en aval de la recherche,
-              taper «&nbsp;pensions&nbsp;» la ramène aux seules cases trouvées (96 le 26/09/2026).</li>
-            <li><strong>Séparer ce que la recherche trouve de ce que la courbe trace.</strong> Deux sources
-              sur le même jeu, un contexte qui les pilote toutes deux&nbsp;: la recherche ne va qu'à la
-              première (liste, facette), la case choisie va aux deux. Aucune ligne de JavaScript, et
-              exactement deux requêtes pour une case ouverte par son URL (mesuré).</li>
-            <li><strong>Calculer dans la donnée ce que la donnée ne dit pas.</strong> L'unité du montant et
-              la liste des libellés portés par un code se dérivent en trois balises
-              (<code>dsfr-data-normalize compute</code>, <code>dsfr-data-query group-by="libelle, unite"</code>,
-              <code>dsfr-data-display</code>), et le titre suit la case par
-              <code>dsfr-data-context-value</code>.</li>
+            <li><strong>Choisir des cases pérennes évite le piège du jeu.</strong> Un code peut changer
+              de case et un «&nbsp;montant&nbsp;» peut compter des foyers&nbsp;; les onze cases du récit ont
+              été vérifiées libellé par libellé sur dix-neuf ans avant d'écrire une ligne. Le seul code
+              réattribué (1AU en 2018) est écarté dans <code>compute</code>.</li>
+            <li><strong>Une base 100 sans script.</strong> <code>dsfr-data-pivot</code> met les familles de
+              cases en colonnes, une <code>dsfr-data-query limit="1"</code> isole la première année,
+              <code>dsfr-data-join</code> la reporte sur chaque ligne, <code>compute</code> fait l'indice. La
+              première année n'est écrite nulle part&nbsp;: elle est lue dans la donnée.</li>
+            <li><strong>Des phrases qui se recalculent.</strong> Chapeau, KPI et phrases de lecture passent
+              par <code>dsfr-data-repeat</code>&nbsp;; les libellés des KPI y reprennent l'année.</li>
+            <li><strong>Deux requêtes pour tout le récit</strong> (88 et 95 lignes, <code>where nom in (…)</code>
+              délégué au portail).</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le «&nbsp;montant&nbsp;» n'est pas toujours des euros.</strong> Pour les cases à
-              cocher, la DGFiP recopie le nombre de foyers dans <code>montant</code>&nbsp;; pour les cases
-              «&nbsp;Nombre de…&nbsp;», il compte des personnes. Relevé à l'export le 26/09/2026&nbsp;:
-              1&nbsp;242 lignes (209 codes) où <code>montant</code> égale <code>nombre</code>. La première
-              version affichait «&nbsp;17&nbsp;934&nbsp;123&nbsp;€&nbsp;» pour la case 0AC (célibataires), l'un
-              de ses propres liens d'exemple. La description du champ à l'API l'annonce à moitié («&nbsp;il
-              peut s'agir de la somme d'un nombre de personnes&nbsp;») et se trompe sur l'autre moitié
-              («&nbsp;la case est vide s'il s'agit d'une case à cocher&nbsp;»&nbsp;: aucune valeur vide dans le
-              jeu). C'est le jeu, pas l'outil&nbsp;; la page ne pose plus aucun «&nbsp;€&nbsp;» statique et
-              déduit l'unité par une règle approchée qu'elle dit comme telle.</li>
-            <li><strong>Un code n'est pas une case.</strong> La première version écrivait ici qu'un code
-              suffisait à suivre une case dans le temps. C'était faux&nbsp;: la DGFiP réattribue des codes
-              libérés. 1BI a été «&nbsp;Conjoint demandeur d'emploi + 1 an&nbsp;» (case à cocher, jusqu'en
-              2017) puis «&nbsp;Pensions en capital des nouveaux PER&nbsp;» (euros, depuis 2019)&nbsp;; la
-              courbe «&nbsp;chute&nbsp;» de 147&nbsp;652 à 409 foyers et c'est un changement de case. 1AI, 1CT,
-              1DV, 7HW suivent le même schéma. La page affiche désormais les libellés portés par le code et
-              leurs années. Ce qui reste vrai&nbsp;: les libellés changent aussi pour les cases pérennes
-              (1AJ «&nbsp;Salaires - vous&nbsp;» devenu «&nbsp;Salaires - Déclarant 1&nbsp;»), et le jeu ne
-              distingue pas une reformulation d'une réattribution (LIM-003).</li>
-            <li><strong>Séparer les courbes par libellé comble les trous par zéro.</strong>
-              <code>series-field="libelle"</code> sépare bien les séries, mais le pivot remplit les cellules
-              (année, série) absentes par <code>0</code>&nbsp;: sur 1BI, la série 2019-2020 est prolongée à
-              plat sur zéro jusqu'en 2024. Une donnée manquante n'est pas un zéro&nbsp;; la page n'utilise
-              donc pas cette voie, et la fiche des libellés en tient lieu. À remonter à la bibliothèque.</li>
-            <li><strong>Les années absentes sont reliées sans marque.</strong> 1CT n'a pas de ligne entre 2008
-              et 2020&nbsp;: la courbe tire un segment droit à travers onze ans vides. Aucun geste natif
-              n'insère une valeur nulle pour une année manquante. La page dit à la place les bornes et le
-              nombre d'années couvertes («&nbsp;8 années couvertes, de 2006 à 2024&nbsp;»), et que le secret
-              statistique, que la documentation du jeu annonce comme une valeur vide, ne peut être qu'une
-              ligne absente&nbsp;: le jeu ne contient aucune valeur vide.</li>
-            <li><strong>L'infobulle écrit l'année «&nbsp;2,024&nbsp;».</strong> DSFR Chart met en forme
-              l'étiquette d'axe comme un nombre en anglais, et c'était déjà le cas avant la relecture. Rien
-              à régler depuis la page&nbsp;: à remonter chez <code>GouvernementFR/dsfr-chart</code>.</li>
-            <li><strong>Deux avertissements en console</strong> (pas des erreurs)&nbsp;: trois queries lisent
-              la même source de courbes, la bibliothèque garde donc leurs agrégats côté client et le dit.
-              C'est le comportement voulu&nbsp;: une case fait au plus dix-neuf lignes, et une délégation au
-              serveur ferait recevoir des lignes agrégées aux KPI de pic.</li>
+            <li><strong>Le bloc des foyers écrit ses années.</strong> Le pivot par année nomme ses colonnes
+              <code>n_2006</code>, <code>n_2024</code>&nbsp;: le graphique avant/après et sa phrase les
+              citent. Quand les revenus 2025 seront publiés, ce bloc restera sur 2024 jusqu'à ce qu'on le
+              touche. Le bloc salaires/pensions, lui, suit la dernière année.</li>
+            <li><strong>Le champ <code>annee</code> est typé date.</strong> Un filtre serveur sur l'année
+              serait émis en texte (BUG-005)&nbsp;: tous les filtres d'année de la page sont calculés dans le
+              navigateur, sur moins de cent lignes.</li>
+            <li><strong>Pas de contraste sur les courbes.</strong> <code>color-map</code> recolore le trait,
+              la légende et la pastille de l'infobulle d'un <code>type="line"</code>, pas ses points&nbsp;: la
+              courbe grise des salaires portait des points bleu clair (relevé au pixel du canevas, et dans
+              <code>applyColorMap</code>, qui ne pose pas <code>pointBackgroundColor</code>). Les deux courbes
+              gardent donc la palette par défaut, deux bleus.</li>
+            <li><strong>L'infobulle écrit l'année «&nbsp;2,024&nbsp;»</strong> et ne nomme pas les séries
+              (DSFR Chart, déjà consigné).</li>
           </ul>
         </div>
-      </div>
-
-      <div class="fr-alert fr-alert--success fr-mt-4w fr-mb-4w odv-corrige-depuis">
-        <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.22.0 et 0.25.0</h4>
-        <p class="fr-text--sm">
-          Trois frictions notées à la première reproduction ont été comblées par la bibliothèque <em>après</em>
-          coup. La trace reste écrite, les contournements ont été retirés. Détail au
-          <a href="/retours">registre des retours</a>.
-        </p>
-        <ul class="fr-text--sm">
-          <li><strong>AM-031</strong> — <strong>0.22.0</strong> (#665)&nbsp;: la première analyse imputait la
-            notation complète des montants («&nbsp;616 007 685 378 €&nbsp;») à l'absence d'un format compact,
-            et son verdict concluait «&nbsp;AM-031 confirmé&nbsp;». C'était périmé&nbsp;: <code>format="compact"</code>
-            existe, et la page chargeait déjà une version qui le porte. Le KPI de montant lit désormais
-            «&nbsp;616 Md&nbsp;» pour 1AJ (vérifié au navigateur), sans unité accolée puisque l'unité dépend
-            de la case. Ce qui reste vrai&nbsp;: les graduations d'axe de DSFR Chart restent en notation
-            anglaise abrégée («&nbsp;600B&nbsp;»).</li>
-          <li><strong>AM-035</strong> — <strong>0.25.0</strong> (#690)&nbsp;: <code>require-where</code>. Tant
-            qu'aucun filtre n'est arrivé <em>par commande</em>, une source ne part rien chercher et chaque
-            afficheur rend son <code>idle-message</code>. <strong>Vérifié au navigateur le 26/09/2026&nbsp;:</strong>
-            zéro requête vers <code>data.economie.gouv.fr</code> sur la page vide. Ce que la relecture a
-            ajouté&nbsp;: une recherche serveur lève l'attente de sa source, donc, avec une seule source, taper
-            «&nbsp;pensions&nbsp;» sans choisir de case traçait la somme des 96 cases trouvées, avec un
-            «&nbsp;décollage&nbsp;» en 2019 qui n'était que l'arrivée de nouveaux libellés. La facette, en
-            mode client, ne commandait rien. D'où la seconde source réservée aux courbes, qui ne reçoit que
-            la case&nbsp;: après «&nbsp;pensions&nbsp;», une seule requête part, la liste compte 762 lignes,
-            courbes et KPI de pic restent en attente&nbsp;; le choix de 1BI envoie
-            <code>search("pensions") AND nom = "1BI"</code> à la liste et <code>nom = "1BI"</code> aux
-            courbes.</li>
-          <li><strong>AM-011</strong> — <strong>0.25.0</strong> (#689)&nbsp;: <code>fetch-mode="export"</code>,
-            le chargement en une requête sans quitter le mode adaptateur. Contrepartie&nbsp;:
-            <code>max-records</code> redevient actif, relevé à 25&nbsp;000 sur les deux sources.</li>
-        </ul>
       </div>
 
       <div class="fr-table fr-table--bordered">
@@ -389,29 +555,20 @@
           </thead>
           <tbody>
             <tr><td>filtre par facette + recherche plein texte</td><td><code>dsfr-data-search server-search</code> + <code>dsfr-data-facets display="nom:select" context</code></td><td>Équivalent</td></tr>
-            <tr><td>axe X année, mesure somme, courbe</td><td><code>dsfr-data-query group-by="annee"</code> + <code>dsfr-data-chart type="line" y-min="0"</code>, sur une source qui ne reçoit que la case</td><td>Équivalent, figé plutôt que libre&nbsp;; axe à zéro</td></tr>
-            <tr><td>onglet tableau + export</td><td><code>dsfr-data-list</code> + <code>export="csv"</code></td><td>Équivalent, avec une colonne d'unité calculée</td></tr>
-            <tr><td>URL de l'état d'exploration</td><td><code>dsfr-data-context url-sync</code> (case) + <code>url-search-param="q"</code> (recherche, lue au chargement)</td><td>Équivalent pour la case&nbsp;; la recherche n'est pas réécrite dans l'URL</td></tr>
-            <tr><td>l'onglet « Analyse » n'affiche rien avant qu'on ait choisi</td><td><code>require-where</code> + <code>idle-message</code> (0.25.0)</td><td>Équivalent</td></tr>
-            <tr><td>(aucun) libellés d'un code, unité du montant</td><td><code>dsfr-data-normalize compute</code> + <code>dsfr-data-query group-by="libelle, unite"</code> + <code>dsfr-data-display</code></td><td>Plus que l'original, par une règle approchée</td></tr>
-            <tr><td>choix libre de l'axe et de la mesure</td><td>—</td><td>Absent&nbsp;: c'est une page, pas un explorateur</td></tr>
-            <tr><td>contexte ODS paginé à 100</td><td><code>fetch-mode="export"</code> (0.25.0)</td><td>1 requête au lieu de 194</td></tr>
+            <tr><td>axe X année, mesure somme, courbe</td><td><code>dsfr-data-query group-by="annee"</code> + <code>dsfr-data-chart type="line" y-min="0"</code></td><td>Équivalent, figé</td></tr>
+            <tr><td>onglet tableau + export</td><td><code>dsfr-data-list export="csv"</code>, unité calculée</td><td>Équivalent, plus honnête sur l'unité</td></tr>
+            <tr><td>plusieurs séries sur un axe (à la main)</td><td><code>pivot</code> + <code>join</code> + <code>compute</code>, base 100 et rapport</td><td>Le récit, absent de l'original</td></tr>
+            <tr><td>—</td><td><code>dsfr-data-repeat</code> (phrases et KPI datés)</td><td>Absent de l'original</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Une page d'exploration utile, et plus honnête que l'onglet qu'elle remplace</strong> — à
-          condition d'avoir regardé la donnée. La première version tenait techniquement et se trompait sur
-          le sens&nbsp;: des effectifs affichés en euros, un code réattribué lu comme une chute, une somme de
-          cases sous un titre qui parlait d'une case. Les trois corrections sont natives (une seconde source
-          et un contexte, une colonne calculée, une fiche calculée), aucune n'a demandé de code. Le manque
-          structurel reste assumé&nbsp;: une page déclarative fige les axes. Deux manques relèvent des
-          outils&nbsp;: le pivot par série qui comble par zéro (<code>dsfr-data</code>) et l'année écrite
-          «&nbsp;2,024&nbsp;» dans l'infobulle (DSFR Chart).</p>
-        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AM-011, AM-031 et AM-035 corrigés et mis en œuvre
-          ici&nbsp;; LIM-003 (le jeu, pas l'outil) précisé par les codes réattribués et le montant-effectif.</p>
+        <p><strong>Un jeu de 2&nbsp;253 cases se prête mal à une seule histoire, mais il en porte&nbsp;; il
+          fallait choisir les cases avant l'outil.</strong> Salaires contre pensions, couples contre
+          personnes seules&nbsp;: onze cases pérennes suffisent, deux requêtes, aucun script. L'explorateur
+          reste pour le reste, avec ses garde-fous.</p>
       </div>
     </div>
 
@@ -424,7 +581,7 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.umd.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>

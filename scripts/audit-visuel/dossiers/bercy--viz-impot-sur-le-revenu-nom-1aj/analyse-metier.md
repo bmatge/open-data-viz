@@ -4,6 +4,68 @@
 > **Ce fichier n'est jamais ecrase par un script.** Les sorties du modele
 > multimodal arrivent dans `constats/` ; ce qui est retenu se reecrit ici, a la main.
 
+
+## Recréation en récit — 2026-09-27 (dsfr-data 0.42.0)
+
+Niveau avancé : une page. La relecture du 2026-09-26 (plus bas, conservée) avait corrigé l'outil ;
+la recréation change de lecteur : la page raconte d'abord, puis rend l'explorateur.
+
+### L'histoire trouvée
+
+Export complet rejoué le 2026-09-27 (19 388 lignes, 2 253 codes, jeu modifié le 2026-04-07).
+
+- **Angle retenu — les pensions gagnent du terrain sur les salaires, jusqu'en 2020.** Cases 1AS + 1BS
+  (pensions, retraites, rentes des deux déclarants) contre 1AJ + 1BJ (salaires) : 205,6 → 374,1 Md€
+  (×1,82) contre 526,1 → 791,2 Md€ (×1,50), revenus 2006 → 2024. Pour 100 € de salaires : 39,1 € →
+  47,3 €. **La rupture** : le rapport culmine à 48,1 € sur les revenus 2020, puis 47,0 / 46,1 / 46,1 /
+  47,3 ; de 2020 à 2024 les salaires font +20,9 %, les pensions +18,8 %. En ajoutant les heures
+  supplémentaires exonérées (1AU/1BU 2007-2013, 1GH/1HH depuis 2019 ; 21,7 Md€ en 2024) : 39,1 → 47,7 (2020)
+  → 46,0 € (2024), même dessin.
+- **Second récit — le foyer fiscal est de moins en moins un couple.** Les cinq cases de situation
+  (0AM, 0AO, 0AC, 0AD, 0AV) somment les foyers : 35,63 M → 41,64 M. Mariés ou pacsés : 36,0 % → 31,4 %.
+  Mariés −1,41 M ; pacsés 199 100 → 1 840 777 (×9,2) ; célibataires +3,91 M ; divorcés +2,04 M ; veufs
+  −0,17 M.
+- **Angles écartés** : les heures supplémentaires défiscalisées comme récit (deux codes par période,
+  1AU réattribué en 2018, montants 2019-2020 inexpliqués : 1,1 et 4,9 Md€) ; les dons (7UF, pic
+  2017-2018 inexpliqué, à ne pas raconter) ; le crédit d'impôt emploi à domicile (7DB ×5,5 en 2017 : un
+  changement de dispositif, pas un comportement).
+
+### La forme
+
+Accroche : trois KPI (47 € contre 39 €, ×1,82, ×1,50). Preuve : base 100 (deux courbes, base lue dans
+la donnée par `query limit=1` + `join`). Nuance : le rapport par année, avec et sans heures
+supplémentaires, et sa phrase sur le pic calculé (`order-by pour100:desc limit 1`). Second récit :
+barres horizontales groupées avant/après (2006 gris, 2024 bleu), triées par 2024, et deux KPI.
+Exploration : l'explorateur de la version précédente (deux sources, contexte, fiche de la case).
+
+### Honnêteté
+
+- Échelles à zéro partout (`y-min="0"`), y compris la base 100 et le rapport.
+- Euros courants : le rapport ne dépend pas de l'inflation, les multiplicateurs si — dit sous les KPI.
+- Des masses, pas des revenus par personne : le nombre de foyers remplissant 1AS passe de 11,19 M à
+  13,15 M. Dit dans « Ce que cette page ne montre pas ».
+- Cases pérennes seulement, vérifiées libellé par libellé sur 19 ans ; 1AU réattribué en 2018 écarté
+  par `compute` (`annee <= 2013`, vérifié : le rapport « avec HS » vaut 45,3 en 2013 et le rapport seul
+  à partir de 2014).
+- Années 2011 et 2016 : tous les comptes de situation fléchissent ensemble (foyers 36,96 → 36,39 M puis
+  37,68 → 36,96 M) : la page compare les bornes et le dit.
+- Valeurs arrondies au million (1AJ 2021 : 530 999 000 000) : dites.
+
+### Phrases de lecture
+
+Toutes calculées (`dsfr-data-repeat` sur `rev-der`, `rev-pic`, `fam-phrase`) ; seules les années 2006,
+2020 et 2024 du bloc foyers et du titre de nuance sont écrites.
+
+### Ce qu'on ne montre pas (dit en page)
+
+Revenus par personne, autres revenus (non-salariés, capital, fonciers, PAC < 0,5 % des salaires), la
+cause du plafonnement, le secret statistique (ligne absente, pas valeur vide), les pics inexpliqués
+de l'explorateur (7UF).
+
+---
+
+## Relecture du 2026-09-26 (version précédente, conservée)
+
 Niveau avancé : une page entière, relue au navigateur (Playwright, dsfr-data 0.33.0 CDN, cinq états : `?nom=1AJ`, `?nom=0AC`, `?nom=1BI`, `?nom=1CT`, recherche « pensions » sans case, page vide) et à l'API (`/exports/json` complet, 19 388 lignes, et `/records` pour les recoupements). Les chiffres ci-dessous sont ceux du 2026-09-26 ; le jeu a été modifié le 2026-04-07.
 
 ## La question posee, et pour quel lecteur
