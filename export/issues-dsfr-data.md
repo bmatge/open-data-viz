@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 25 demandes cadrées — 12 bugs,
-> 9 améliorations,
+> 26 demandes cadrées — 14 bugs,
+> 8 améliorations,
 > 4 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -44,7 +44,7 @@ vigilance qu'elles exigent de chaque auteur de page.
 
 63 critiques ont été **retirées** au fil du
 banc d'essai parce qu'une vérification a montré une voie native ou une erreur de notre part (entrées
-`faux-probleme` du registre), et 109
+`faux-probleme` du registre), et 111
 autres sont marquées **corrigées** parce que la bibliothèque les a résolues depuis (leur trace reste au
 registre, avec ce qui en demeure vrai). Ce rapport ne liste que ce qui a résisté à la vérification.
 
@@ -56,7 +56,7 @@ apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux const
 (AM-017, AM-039) en sont sortis.
 
 Le dépôt charge aujourd'hui `dsfr-data@0.42.0`. Les montées successives ont comblé
-109 des constats déposés,
+111 des constats déposés,
 passés au statut `corrige` et sortis de ce rapport. Chaque constat restant porte dans son champ
 *Vérifié* la date et la version contre lesquelles il a été rejoué : c'est cette preuve, et non la
 version du dépôt, qui établit qu'il tient encore.
@@ -69,32 +69,34 @@ version du dépôt, qui établit qu'il tient encore.
 |---|---|---|---|---|---|
 | PG-033 | API Tabular : un tri serveur combiné à la pagination **perd des lignes en silence** — 177 distinctes sur 180 rendues, et une courbe qui plonge à zéro | piege | S | 1 | Déposer chez dsfr-data |
 | BUG-026 | Une source groupée perd son `group_by` quand un `dsfr-data-normalize` s'intercale devant une `dsfr-data-query group-by` seule lectrice | bug | S | 1 | Déposer chez dsfr-data |
-| BUG-027 | Un `where` de `dsfr-data-query` sur un alias d'agrégat est délégué au portail (HTTP 400), et l'échec de l'export fait passer les autres sources du même jeu en pagination | bug | S | 1 | Déposer chez dsfr-data |
 | BUG-028 | `dsfr-data-query` : `avg`, `sum`, `min` et `max` rendent 0 pour un groupe dont toutes les valeurs sont nulles, au lieu de null | bug | S | 3 | Déposer chez dsfr-data |
-| BUG-036 | Une query en aval de `normalize(rename) → query → normalize(valeurs)` est déléguée à la source sous les noms renommés : l'export Parquet est abandonné, l'API Tabular refuse, et toute la source tombe | bug | S | 1 | Déposer chez dsfr-data |
+| PG-034 | API Tabular : `__in` **ignore toute valeur contenant une parenthèse**, avec un HTTP 200 et zéro ligne — là où `__exact` accepte la même valeur | piege | S | 1 | Déposer chez dsfr-data et signaler à data.gouv.fr |
+| BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 3 | Déposer chez dsfr-data |
+| BUG-029 | `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul | bug | S | 8 | Déposer chez dsfr-data |
+| BUG-031 | Une valeur de facette qui contient une virgule ne survit pas au rechargement de l'URL : `join(',')` à l'écriture, `split(',')` à la lecture | bug | S | 1 | Déposer chez dsfr-data |
+| BUG-032 | `min` / `max` d'une query sur un mois « 2024-09 » rendent 2024 : le parseur numérique strict accepte un préfixe | bug | S | 2 | Déposer chez dsfr-data, avec BUG-023 (même racine) |
+| PG-083 | Le résumé d'une carte (`map-summary`) ne porte que sur les lignes dessinées : les lignes hors découpage en sortent, et l'écran ne le dit pas | piege | S | 3 | Déposer chez dsfr-data |
+| BUG-038 | `min` / `max` de `dsfr-data-query` sur plus de ~125 000 valeurs par groupe : `Math.min(...values)` dépasse la pile, et l'affichage garde l'ancien résultat | bug | XS | 1 | Déposer chez dsfr-data |
+| BUG-037 | Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2 | bug | XS | 1 | Déposer chez dsfr-data |
 
-_5 demandes — S 5, M 0, L 0._
+_11 demandes — S 9, M 0, L 0._
 
 ### P2 — prochain cycle : gain net, effort mesuré
 
 | Id | Demande | Type | Effort | Pages | Décision |
 |---|---|---|---|---|---|
+| BUG-027 | Un `where` de `dsfr-data-query` sur un alias d'agrégat est délégué au portail (HTTP 400), et l'échec de l'export fait passer les autres sources du même jeu en pagination | bug | S | 1 | Déposer chez dsfr-data |
+| BUG-036 | Une query en aval de `normalize(rename) → query → normalize(valeurs)` est déléguée à la source sous les noms renommés : l'export Parquet est abandonné, l'API Tabular refuse, et toute la source tombe | bug | S | 1 | Déposer chez dsfr-data |
 | PG-032 | `dsfr-data-a11y` n'accepte pas la grammaire `champ:Libellé` de son propre graphique : les en-têtes gardent le nom de colonne, et écrire le libellé **vide le tableau** sans un mot | piege | S | 4 | Déposer chez dsfr-data |
-| PG-034 | API Tabular : `__in` **ignore toute valeur contenant une parenthèse**, avec un HTTP 200 et zéro ligne — là où `__exact` accepte la même valeur | piege | S | 1 | Déposer chez dsfr-data et signaler à data.gouv.fr |
-| BUG-023 | L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026 | bug | S | 3 | Déposer chez dsfr-data |
-| AM-089 | `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro | amelioration | S | 1 | Déposer chez dsfr-data |
-| BUG-029 | `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul | bug | S | 7 | Déposer chez dsfr-data |
 | AM-103 | `compute` n'a pas de sous-chaîne : ni SIREN depuis un SIRET, ni département depuis un code commune | amelioration | S | 9 | Déposer chez dsfr-data |
 | BUG-033 | `color-map` sur `type="line"` recolore le trait et la légende, pas les points : quatrième surface de la famille BUG-016 / BUG-022 | bug | S | 4 | Déposer chez dsfr-data |
 | BUG-035 | La vue tableau de la DataBox ne montre que `label-field` et `value-field` : les séries de `value-fields` en sont absentes, et les lignes sont coupées à 100 | bug | S | 1 | Déposer chez dsfr-data |
 | AM-107 | `radius-field` fait croître le rayon, pas l'aire, et la plus petite valeur prend `radius-min` : pas de cercles proportionnels honnêtes, et `compute` n'a pas de racine carrée pour compenser | amelioration | S | 1 | Déposer chez dsfr-data |
-| PG-083 | Le résumé d'une carte (`map-summary`) ne porte que sur les lignes dessinées : les lignes hors découpage en sortent, et l'écran ne le dit pas | piege | S | 3 | Déposer chez dsfr-data |
 | BUG-039 | La couche d'une `dsfr-data-map` ignore le retour en attente (`require-where`) : après retrait du dernier filtre, les marqueurs restent | bug | S | 2 | Déposer chez dsfr-data |
 | BUG-034 | Un encart de carte clone la couche entière : chaque encart dessine tous les points, parfois en double, et garde les anciens après un filtre | bug | M | 2 | Déposer chez dsfr-data |
-| BUG-038 | `min` / `max` de `dsfr-data-query` sur plus de ~125 000 valeurs par groupe : `Math.min(...values)` dépasse la pile, et l'affichage garde l'ancien résultat | bug | XS | 1 | Déposer chez dsfr-data |
 | AM-087 | La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-_14 demandes — S 11, M 1, L 0._
+_10 demandes — S 8, M 1, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -105,9 +107,8 @@ _14 demandes — S 11, M 1, L 0._
 | AM-102 | Préréglages d'encart : La Réunion (zoom 9) coupe le sud de l'île, et Wallis-et-Futuna (zoom 7) laisse ses deux îles hors cadre | amelioration | S | 3 | Déposer chez dsfr-data |
 | AM-113 | Le repli « Autres valeurs » de la légende de carte est écrit en dur : `dsfr-data-map-layer` et `dsfr-data-map-legend` n'ont pas d'équivalent d'`empty-label` | amelioration | S | 2 | Déposer chez dsfr-data |
 | AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 4 | Déposer chez dsfr-data |
-| BUG-037 | Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2 | bug | XS | 1 | Déposer chez dsfr-data |
 
-_6 demandes — S 4, M 0, L 0._
+_5 demandes — S 4, M 0, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -151,6 +152,8 @@ Structurel tant que l'API Tabular pagine par offset sans clé de départage. Le 
 
 Relevé au navigateur le 2026-09-21 contre `dsfr-data@0.42.0` (courbe « Total enregistré » à 0 en 2018 sur `/demo/delinquance-sans-total`, `q-stups` rendant 28 lignes au lieu de 30), puis **reproduit à l'API hors de toute page** : les quatre pages de `?annee__sort=asc&page_size=50&page=N&annee__groupby&indicateur__groupby&nombre__sum` rendent 180 lignes / 177 couples distincts, avec (2018, 'Usage de stupéfiants'), (2018, 'Usage de stupéfiants (AFD)') et (2018, "Vols d'accessoires sur véhicules") manquants et trois autres couples de 2018 en double ; les mêmes quatre pages **sans** `annee__sort` rendent 180 lignes / 180 distinctes. Contre-épreuve sans `group-by` : `?indicateur__exact=Homicides&annee__exact=2025&nombre__sort=desc` sur trois pages rend 101 lignes / 99 départements distincts (56 et 49 en double) ; sans tri, 101 / 101.
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). **API rejouée par le tunnel** : `indicateur__exact=Homicides&annee__exact=2025&nombre__sort=desc&page_size=50`, trois pages → 101 lignes, 99 départements distincts (49 et 56 en double) — toujours vrai côté data.gouv.fr. Avec une seconde clé `__id__sort=asc` : même perte, et 34 inversions d'`__id` entre valeurs égales — **l'API n'applique qu'une clé de tri**, donc la clé de départage proposée dans la demande est impossible par la requête. À `page_size=200`, la taille de page de la bibliothèque depuis #1019 : 1 818 lignes (toutes les infractions de 2025, `nombre__sort=desc`) sur 10 pages → 1 818 distinctes, **non reproduit**. Les deux cas de la page (101 et 180 lignes) tiennent désormais en une page. Le risque reste structurel au-delà de 200 lignes. Source : `tabular-adapter.ts` `buildUrl` l. 1090-1093 et `fetchAll` l. 663-671 : le tri part au serveur sur un chargement paginé, sans départage. Le tri local sur groupes complets (`_fetchAllSortedLocally`, #1045) existe déjà et peut servir de correctif. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 Ne rien trier au serveur sur ce fournisseur : retirer `order-by` de la `dsfr-data-source` et le poser en aval, sur une `dsfr-data-query` qui travaille sur des lignes déjà toutes chargées. C'est ce que fait la page. Le coût est nul tant que le jeu tient en mémoire ; il devient réel en `server-side`, où le tri n'a pas d'aval — et là il n'y a pas de contournement.
@@ -193,6 +196,8 @@ Structurel : le nettoyage de libellés avant agrégation est un motif courant su
 
 Page minimale, dsfr-data 0.42.0, 2026-09-26 (agent de recréation DECP). Requête relevée au réseau : `exports/json?select=procedure, count(*) as n&where=…&order_by=n DESC&limit=101`, sans `group_by`. KPI 96 667 200. Sans `normalize` : `group_by=procedure`, KPI 966 672. Le contournement est appliqué sur /viz/decp-augmente.
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-query.ts` `_delegationTarget` l. 786-800 ne teste que `transformsSchema()`. Rien ne refuse une source qui porte déjà son `group-by`, alors que `_delegateOrderBy` refuse une source qui porte son `order-by` (`sourceEl.orderBy`). Antécédents : #855 (délégation à travers `normalize`, 2026-09-14) et #765. Non rejoué au navigateur. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 Donner un second lecteur au `normalize`. La query cesse alors de déléguer et calcule côté client.
@@ -206,50 +211,6 @@ Ne pas déléguer `group-by` à travers un transformateur (`normalize`, `pivot`�
 - [ ] La chaîne source groupée → `normalize replace-fields` → `query group-by` seule lectrice envoie `group_by=procedure` ou calcule côté client, et le KPI rend 966 672.
 - [ ] La même chaîne sans `normalize` garde son comportement.
 - [ ] Un test couvre la délégation à travers un transformateur.
-
----
-
-## BUG-027 — Un `where` de `dsfr-data-query` sur un alias d'agrégat est délégué au portail (HTTP 400), et l'échec de l'export fait passer les autres sources du même jeu en pagination
-
-**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
-**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-query`, `dsfr-data-source`
-**Rencontré sur** 1 page(s) : edu/dataviz-ips-ecoles
-
-### Constat
-
-Une `dsfr-data-query where="n:gte:40"`, seule lectrice d'une source Opendatasoft groupée (`count(ips) as n`), ajoute `AND n >= 40` au `where` de l'export. Le portail répond 400 (« Aggregation functions are only available in a select or an order by clause »), la console annonce « l'export ne sera plus retenté », et une autre source sur le même jeu (`paire`), qui n'avait rien demandé d'illégal, part directement en pagination `/records` et finit elle aussi en 400. Même famille que BUG-025 (un `order-by` sur un alias client délégué, corrigé en 0.36.0) : le correctif a couvert `order-by`, pas `where`.
-
-### Impact de l'erreur ou du manque
-
-Une page entière tombe en 400 dès qu'on filtre un agrégat (« communes d'au moins 40 écoles »), et l'échec s'étend aux autres sources du même jeu.
-
-### Objectif métier de la correction
-
-Qu'un filtre sur un alias d'agrégat reste côté client, comme le fait `order-by` depuis 0.36.0.
-
-### Pérennité et reproductibilité du besoin
-
-Structurel : filtrer un agrégat par un seuil d'effectif est le geste qu'impose toute moyenne honnête.
-
-### Comment ça a été vérifié
-
-Agent de recréation, /education/dataviz-ips-ecoles, dsfr-data 0.42.0, 2026-09-26 : requête d'export relevée au réseau avec `…AND n >= 40`, HTTP 400, message console « l'export ne sera plus retenté », source `paire` en `/records` puis 400. Seuil déplacé derrière un `dsfr-data-normalize` : les deux exports répondent 200 (835 ms et 2 757 ms). Non rejoué sur une page minimale.
-
-— **Rejoué sur page minimale le 2026-09-27 (issue #71)** : `scripts/rejeu-findings/pages/f71-where-alias.html`, `run-70-71.mjs alias`, Playwright. Source Opendatasoft `donnees-ips-ecoles`, `select="code_departement, count(ips) as n" group-by="code_departement"`, `fetch-mode="export"` ; `dsfr-data-query where="n:gte:500"` seule lectrice ; une source voisine `s2` sur le même jeu. **Bundle publié 0.42.0** : export `…where=rentree_scolaire = '2024-2025' AND n >= 500…` → **HTTP 400**, avertissement « export JSON indisponible … l'export ne sera plus retenté », repli `/records` avec la même clause → 400, erreur `dsfr-data-source[s]`. **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. **Confirmé en 0.42.0 et sur origin/main.** Deux précisions : (1) ce n'est pas silencieux à l'écran — le KPI branché sur la query affiche « Erreur de chargement: HTTP 400: » ; (2) **l'extension de l'échec à la source voisine n'est pas reproduite** sur la page minimale : `s2` part en export et répond 200 dans les deux ordres observés (avant et après l'échec de `s`) — la seconde moitié du constat reste attestée par la seule page `dataviz-ips-ecoles`. Contrôle à l'API du même jour : un `where` sur l'alias d'un champ de groupement (`dep = '075'`, alias posé dans `select` ou dans `group_by`) répond 200 — seul l'alias d'**agrégat** pose problème, ce qui situe la relecture du 2026-09-20 (« where délégué sur un alias de group-by ») dans ce constat.
-
-### Contournement actuel
-
-Intercaler un `dsfr-data-normalize` (ou donner un second lecteur à la source) pour que le filtre reste côté client.
-
-### Demande
-
-Ne pas déléguer un `where` qui porte sur un alias d'agrégat ; et ne pas étendre à tout un jeu l'abandon de l'export décidé pour une requête invalide.
-
-### Critères d'acceptation
-
-- [ ] Une query seule lectrice `where="n:gte:40"` sur une source ODS groupée n'envoie pas `n >= 40` au portail et rend les lignes attendues.
-- [ ] L'échec d'un export n'interdit pas l'export aux autres sources du même jeu.
-- [ ] Un test couvre `where` sur alias, à côté de celui d'`order-by` (#1045).
 
 ---
 
@@ -283,6 +244,8 @@ Page minimale 0.42.0 (agent IPS lycées, 2026-09-26) : groupe `b` à `v: null, n
 
 /developpement-durable/logements-neufs, 0.42.0, 2026-09-26 (agent).
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-query.ts` l. 1833-1849 : `sum` réduit depuis 0 ; `avg`, `min` et `max` rendent `0` quand `values.length === 0` ; type de retour `number`. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 Un `where="champ:isnotnull"` (ou `:gt:0`) sur chaque query concernée.
@@ -299,9 +262,421 @@ Rendre `null` pour `avg`, `min`, `max` (et `sum`, à trancher) quand le groupe n
 
 ---
 
-## BUG-036 — Une query en aval de `normalize(rename) → query → normalize(valeurs)` est déléguée à la source sous les noms renommés : l'export Parquet est abandonné, l'API Tabular refuse, et toute la source tombe
+## PG-034 — API Tabular : `__in` **ignore toute valeur contenant une parenthèse**, avec un HTTP 200 et zéro ligne — là où `__exact` accepte la même valeur
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data et signaler à data.gouv.fr
+**Labels suggérés** : `enhancement, dx`, `severity:moyenne`, `dsfr-data-source`, `dsfr-data-query`
+**Rencontré sur** 1 page(s) : demo/delinquance-sans-total
+
+### Constat
+
+`where="champ:in:a|b|c"` part chez Tabular en `champ__in=a,b,c`. Dès qu'une des valeurs contient une parenthèse, elle est **écartée sans un mot** : la réponse est un 200 avec les lignes des autres valeurs, ou zéro ligne s'il n'y en a pas d'autre. Le même `champ__exact=<valeur à parenthèses>` rend, lui, toutes les lignes attendues — ce n'est donc pas un problème d'encodage mais du parseur de liste.
+
+Sur la base SSMSI, trois des dix-huit indicateurs portent une parenthèse (« Usage de stupéfiants (AFD) », « Usage de stupéfiants (hors AFD) ») : un `where="indicateur:in:…"` pour tracer les trois courbes du chapitre 1 aurait rendu un graphique **incomplet sans prévenir**. Les libellés parenthésés sont courants en open data français (millésimes, variantes, unités), ce qui rend le piège banal.
+
+### Impact de l'erreur ou du manque
+
+Un graphique ou un tableau amputé d'une partie de ses séries, sans erreur ni avertissement. Le cas est d'autant plus facile à payer que `__exact` sur la même valeur fonctionne : rien n'invite à se méfier de la forme liste. — **Priorité revue le 2026-09-27 (rapport #95) : P2 → P1**, des séries disparaissent en silence (HTTP 200).
+
+### Objectif métier de la correction
+
+Qu'une clause `in` déléguée à Tabular rende les mêmes lignes qu'un filtrage client, ou dise qu'elle ne le fait pas.
+
+### Pérennité et reproductibilité du besoin
+
+Durable tant que le parseur de liste de l'API Tabular n'est pas corrigé. Les libellés parenthésés sont fréquents dans les nomenclatures publiques.
+
+### Comment ça a été vérifié
+
+Relevé à l'API le 2026-09-21, six requêtes sur la ressource `2b27a675-e3bf-41ef-a852-5fb9ab483967` avec `annee__exact=2025` : `indicateur__exact=Usage de stupéfiants (AFD)` → **101** lignes ; `indicateur__in=Usage de stupéfiants (AFD)` → **0** ; `indicateur__in=Homicides,Usage de stupéfiants (AFD)` → **101** (seul « Homicides » retenu, au lieu de 202) ; contre-épreuves sans parenthèse : `indicateur__in=Homicides,Tentatives d'homicide` → 202, `indicateur__in=Usage de stupéfiants,Trafic de stupéfiants` → 202. Aucune erreur, aucun avertissement dans aucun des cas.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). **API rejouée par le tunnel**, `annee__exact=2025` : `indicateur__exact=Usage de stupéfiants (AFD)` → 101 ; `indicateur__in=` la même valeur → 0 ; `indicateur__in=Homicides,Usage de stupéfiants (AFD)` → 101 au lieu de 202. Toujours vrai côté data.gouv.fr. Source : `tabular-adapter.ts` `_applyColonFilters` l. 1193-1200 joint la liste par `,` sans garde ; `supportsServerWhere` (l. 1253) ne refuse que les clauses multi-champs, alors que le même fichier sait qu'une parenthèse casse le parseur de `or=(…)` (l. 1217-1240). Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+Dériver une colonne par `dsfr-data-normalize compute="…"` et filtrer dessus : le `compute` change le schéma, donc la `dsfr-data-query` en aval cesse de déléguer et filtre côté client, où la parenthèse ne gêne pas. C'est ce que fait la page (colonne `serie`, puis `where="serie:isnotnull"`). Le contournement cesse de marcher dès que le jeu est trop gros pour être chargé entièrement — c'est-à-dire exactement quand la délégation serveur était nécessaire.
+
+### Demande
+
+Avertir en console quand une valeur de `in` / `notin` déléguée à Tabular contient une parenthèse, la clause étant alors silencieusement incomplète. Le correctif de fond appartient à `data.gouv.fr` ; la bibliothèque peut au moins refuser de déléguer la clause et la calculer côté client.
+
+### Critères d'acceptation
+
+- [ ] Un `where="champ:in:…"` dont une valeur contient une parenthèse rend les mêmes lignes que le même filtre appliqué côté client, ou émet un avertissement console nommant la valeur en cause.
+- [ ] Aucun changement pour une liste dont aucune valeur ne contient de parenthèse.
+
+---
+
+## BUG-023 — L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026
 
 **Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-query`, `dsfr-data-kpi`
+**Rencontré sur** 3 page(s) : aides-de-minimis, edu/passe-ton-hack-dabord, culture/entrepreneurs-spectacles
+
+### Constat
+
+`aggregate="d:max:dmax"` sur une colonne de dates ISO rend **2026**, avec ou sans `group-by`. La même expression `d:max` sur `dsfr-data-kpi` rend **25/09/2026** : le KPI compare les dates en texte (#667, `computeExtremum`, branche ISO), la query passe par `toNumber` (`_computeAggregate`), qui garde l'année. Deux résultats pour la même expression, sans avertissement. Conséquence : impossible de porter une date de fraîcheur jusqu'aux lignes groupées d'un graphique, donc `databox-date-field` (livré pour AM-021) est inutilisable sur tout graphique alimenté par un `group-by`.
+
+**Lot 6 et vague 2 (2026-09-26)** : deux pages de plus. Passe ton hack : `aggregate="cree_a:max"` rend 2026, alors que le KPI `cree_a:max format="date"` rend bien 20/09/2026. Entrepreneurs de spectacles : `aggregate="date_depot_dossier:min"` rend 2020, que le gabarit formate en « Depuis le 01/01/1970 » dans le chapô. La troncature ne se voit plus comme une année : elle devient une **date fausse**. Contournement : `order-by` ascendant et `limit="1"`.
+
+### Impact de l'erreur ou du manque
+
+Une date devient une année sans un mot, et la même expression rend deux résultats selon le composant. La fraîcheur des données — l'information que `databox-date-field` était venue servir — ne peut pas atteindre un graphique groupé. — **Priorité revue le 2026-09-27 (rapport #95) : P2 → P1**, une date devient une année, ou une date fausse (« Depuis le 01/01/1970 »), sans signal : chiffre faux.
+
+### Objectif métier de la correction
+
+Que `d:max` veuille dire la même chose sur une query et sur un KPI.
+
+### Pérennité et reproductibilité du besoin
+
+Permanent : toute page qui date ses données par un `max` sur un jeu groupé.
+
+### Comment ça a été vérifié
+
+Page minimale le 2026-09-26, dsfr-data 0.33.0 du CDN. Source en ligne [{g:A,d:2026-09-01},{g:A,d:2026-09-25},{g:B,d:2026-08-10}] : `group-by="g" aggregate="d:max:dmax"` rend dmax=2026 pour A et pour B ; l'agrégat global rend 2026 ; `dsfr-data-kpi value="d:max" format="date"` rend 25/09/2026. Aucun message console hors #765. Source : `dsfr-data-query.ts` `_computeAggregate` (`toNumber` strict), `utils/aggregations.ts` `computeExtremum`. **Toujours présent sur origin/main (0.42.0)** le 2026-09-26 : `_computeAggregate` passe toujours par `toNumber`.
+
+Passe ton hack : query injectée au navigateur, `max=2026 min=2026`, 2026-09-26. Entrepreneurs : page minimale, 0.42.0 du CDN, query `min=2020 max=2026`, KPI `d:min` 23/04/2020 (agents). **Toujours présent sur origin/main le 2026-09-27** : `toNumber` (`packages/shared/src/utils/number-parser.ts`) se termine par `parseFloat(cleaned)`, qui lit « 2026-09-20 » comme 2026.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). **Rejeu unitaire du source** (vite-node, origin/main) : `toNumber('2026-09-25', true)` = 2026 ; `dsfr-data-query.ts` `_computeAggregate` l. 1833-1849 passe toujours par `toNumber`, alors que `utils/aggregations.ts` `computeExtremum` (l. 600-616) a une branche ISO. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+KPI de fraîcheur hors du graphique (`dsfr-data-kpi value="date_octroi:max" format="date"`) ; pas de date par ligne groupée.
+
+### Demande
+
+Aligner `min`/`max` de `dsfr-data-query` sur `computeExtremum` : une colonne de dates ISO rend la date extrême (chaîne ISO), pas un nombre. À défaut, avertir en console quand `toNumber` tronque une valeur ISO.
+
+### Critères d'acceptation
+
+- [ ] `aggregate="d:max:dmax"` sur des dates ISO rend la date la plus récente, avec et sans `group-by`.
+- [ ] Même résultat que `dsfr-data-kpi value="d:max"` sur les mêmes lignes.
+- [ ] Les colonnes numériques gardent le comportement actuel.
+
+---
+
+## BUG-029 — `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-chart`
+**Rencontré sur** 8 page(s) : edu/gar-ressources-numeriques, tourisme-et-handicap, edu/capytale-usages, developpement-durable/logements-neufs, developpement-durable/qualite-air, developpement-durable/portrait-odd, culture/livre-trente-ans, impot-sur-le-revenu
+
+### Constat
+
+En format long (`series-field`), le graphique pivote lui-même les lignes en séries, et toute cellule (libellé, série) absente vaut 0. Sur GAR, l'infobulle de Nancy-Metz affiche « 12,7 accès par accédant / 0 accès par accédant ». Sur Tourisme & Handicap, « 0 établissements » pour la série absente d'une région, que la valeur calculée soit 0 ou `null`. **Règle 4 tranchée** : l'agent se demandait si c'était DSFR Chart ; c'est `dsfr-data`, le `bar-chart` reçoit déjà `y=[[12.7,11.6,10.9,0,0,…],[0,0,0,8.4,…]]`. Contraire à la règle #301 que `dsfr-data-pivot` applique (« une cellule sans observation vaut `null`, jamais 0 »). Même symptôme sur une courbe en format large (Capytale) : un mois sorti de la fenêtre glissante tracé à 0 — observé à la capture, cause non isolée.
+
+**Vagues 1 et 2 de création (2026-09-26) : le contournement de ce constat était faux.** Le format large trace lui aussi une valeur absente à 0. Dans `_processData`, chaque valeur de `value-field` / `value-fields` passe par `toNumber` **non strict** (`dsfr-data-chart.ts` l. 728), qui rend 0 pour `null`. « Pré-pivoter avec `dsfr-data-pivot` et passer en `value-fields` » ne fait donc que déplacer le zéro : le pivot rend bien `null`, et le graphique le redessine à 0. Relevé trois fois : livre (Internet à 0 de 1993 à 2001, `y=[0,0,0,0,0,0,0,0,0,2,3,…]`), qualité de l'air (PM10 à 0 de 2000 à 2006, `y=[0,0,0,0,0,0,0,27.3,…]`), logements neufs (courbe « Logements commencés » à 0 en 2025). Et une fois de plus en format long : sur Portrait ODD, Paris, sans surface bio, reçoit une barre à 0. Même mécanisme sur les cartes (l. 833). ⚠️ AM-089 décrit le même défaut que ce constat (format long, `_processTidyData`, mêmes lignes de source) : les deux entrées sont à réunir.
+
+**AM-089 réuni ici (2026-09-27)** : sur `ir-declarations-2042-nat`, séparer par `series-field` les deux libellés du code 1BI prolonge la série « pension capital PER dec2 » à zéro jusqu'en 2024, et fait naître l'autre à zéro en 2019-2020 (`y='[[409,2321,0,0,0,0],[0,0,8618,15772,20436,25815]]'`, 0.33.0, 2026-09-26). Ce sont deux fins de série fabriquées, qui se lisent comme des effondrements. AM-089 proposait aussi un attribut `missing="gap|zero"`, avec `gap` par défaut.
+
+### Impact de l'erreur ou du manque
+
+L'infobulle affiche « 0 » pour une série qui n'existe pas à ce libellé ; en courbe, un trou devient une chute à zéro. — **Priorité revue le 2026-09-27 (rapport #95) : P2 → P1**, une série absente est dessinée à 0 et annoncée « 0 » dans l'infobulle, sans signal : chiffre faux.
+
+### Objectif métier de la correction
+
+Même règle dans `series-field` que dans `dsfr-data-pivot` : une cellule sans observation vaut null.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : `series-field` est la voie documentée du format long.
+
+### Comment ça a été vérifié
+
+GAR, `#g-aca`, 0.42.0, 2026-09-26 : attribut `y` relevé au DOM sur `<bar-chart>`, infobulle au survol. Tourisme, `#g-reg`, survol d'Auvergne-Rhône-Alpes avec `else 0` puis `else null` : même rendu. **Lu au source à la consignation** : `dsfr-data-chart.ts` l. 649-675, `_processTidyData` — « Missing (label, series) cells are 0 », `new Array(labels.length).fill(0)`. Capytale : capture du 2026-09-26, septembre 2023 à 0.
+
+Attributs `y` relevés au DOM par les agents, 0.42.0, 2026-09-26 (livre `g-internet` ; qualité de l'air ; Portrait ODD `y=[[0,90,83,43,…],[100,35,1,0,100,98,3]]`). **Lu au source à la consignation** (origin/main, 2026-09-27) : `dsfr-data-chart.ts` l. 728, `allSeries[i].push(toNumber(getByPath(record, allFields[i])))` sans `strict` ; `number-parser.ts` : `if (typeof val !== 'string') return strict ? null : 0`.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-chart.ts` l. 674 (`fill(0)`) et l. 728 (`toNumber` non strict). DSFR Chart 2.1.1 (`dist/LineChart/LineChart.js`) passe chaque ligne de `y` telle quelle à Chart.js (`data: e`), qui interrompt une courbe sur `null` : lecture du dist, **non rejouée au navigateur** ; le rendu de l'infobulle sur `null` n'est pas vérifié. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+**Corrigé le 2026-09-27.** L'ancien contournement (« pré-pivoter avec `dsfr-data-pivot` et passer en `value-fields` ») ne marche pas : le format large trace aussi `null` à 0. Voies qui marchent : des petits multiples où chaque graphique ne reçoit que les années de sa série (livre, qualité de l'air), deux graphiques d'une série à la même échelle (logements neufs), ou ne garder que les indicateurs publiés partout (Portrait ODD).
+
+### Demande
+
+Remplir de `null` dans `_processTidyData`, comme `dsfr-data-pivot`. Même règle pour le format large : `toNumber(…, true)` et `null` conservé dans `y` (l. 728), comme dans les valeurs de carte (l. 833). Variante proposée par AM-089 : un attribut `missing="gap|zero"`, `gap` par défaut.
+
+### Critères d'acceptation
+
+- [ ] `_processTidyData` remplit de null les cellules absentes.
+- [ ] L'infobulle n'affiche pas de ligne pour une série absente (ou l'affiche vide).
+- [ ] Un test aligne `series-field` sur `dsfr-data-pivot`.
+- [ ] Une valeur `null` en format large (`value-field`, `value-fields`) rend `null` dans `y`.
+
+---
+
+## BUG-031 — Une valeur de facette qui contient une virgule ne survit pas au rechargement de l'URL : `join(',')` à l'écriture, `split(',')` à la lecture
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-facets`
+**Rencontré sur** 1 page(s) : edu/carto-pix-fiche-etablissement
+
+### Constat
+
+La tranche « 1,5 à 2 parcours » s'écrit bien dans l'URL (`?intensite=1%2C5+%C3%A0+2+parcours`), mais au rechargement la facette la relit comme deux valeurs, « 1 » et « 5 à 2 parcours » : deux cases cochées, zéro établissement, aucune erreur. Une valeur sans virgule (« 2 à 3 parcours ») se recharge bien (1 081). Cause lue au source : `writeUrlSelections` assemble les valeurs par `[...values].join(',')`, `readUrlSelections` les relit par `paramValue.split(',')`, sans échappement. Même famille que LIM-011 (`color-map`) et BUG-011 (`group-by`) : la virgule sert de séparateur dans une grammaire dont les valeurs métier la contiennent. Toute valeur française décimale (« 1,5 ») ou énumérative y passe.
+
+### Impact de l'erreur ou du manque
+
+Un lien profond vers une modalité qui contient une virgule rend zéro ligne au rechargement, avec deux cases cochées que personne n'a choisies, sans erreur. Les modalités décimales françaises (« 1,5 à 2 ») et énumératives (« Lettres, langues ») y passent toutes.
+
+### Objectif métier de la correction
+
+Qu'une sélection de facette survive au rechargement de l'URL quelle que soit sa ponctuation.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : toute facette `url-sync` dont une valeur porte une virgule.
+
+### Comment ça a été vérifié
+
+Agent de recréation, /education/carto-pix-fiche-etablissement, navigateur, 0.42.0, 2026-09-26 : 0 établissement et deux cases cochées au rechargement, 1 081 pour une valeur sans virgule. **Relu à la consignation** : `packages/core/src/components/facets/facets-url.ts` sur origin/main (9755f63), `.split(',')` l. 47 et `params.set(paramName, [...values].join(','))` l. 93 ; `git diff v0.42.0 origin/main` vide sur ce fichier. **Verdict ADR-120 : absent du source** (non corrigé après 0.42.0) → demande à la bibliothèque. Aucune issue trouvée (`gh issue list` sur « virgule facette url »).
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). **Rejeu unitaire du source** (vite-node, origin/main) : `writeUrlSelections` avec « 1,5 à 2 parcours » écrit `?intensite=1%2C5+%C3%A0+2+parcours` ; `readUrlSelections` relit `["1", "5 à 2 parcours"]`. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+Écrire les modalités sans virgule en amont (« 1 et demi à 2 parcours ») par `replace-fields` ou `compute`.
+
+### Demande
+
+Répéter le paramètre (`?intensite=a&intensite=b`, que `readUrlSelections` sait déjà lire puisqu'il itère `params.entries()`) au lieu de joindre par virgule, ou échapper la virgule en `%2C` dans la valeur comme #676 l'a fait pour `replace`.
+
+### Critères d'acceptation
+
+- [ ] « 1,5 à 2 parcours » cochée, puis page rechargée : une seule case cochée, 1 081 établissements ou le compte attendu, pas zéro.
+- [ ] Les URL déjà publiées sans virgule dans les valeurs se relisent comme avant.
+- [ ] Un test aller-retour `writeUrlSelections` → `readUrlSelections` couvre une valeur à virgule.
+
+---
+
+## BUG-032 — `min` / `max` d'une query sur un mois « 2024-09 » rendent 2024 : le parseur numérique strict accepte un préfixe
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data, avec BUG-023 (même racine)
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-query`
+**Rencontré sur** 2 page(s) : edu/tne-dashboard, culture/architecture-contemporaine
+
+### Constat
+
+`aggregate="mois_concerne:min:debut, mois_concerne:max:fin"` sur le jeu de satisfaction TNE affichait « 2024 à 2025 » : les mois ont perdu leur partie mois, sans erreur. Cause lue au source : `_computeAggregate` passe chaque valeur par `toNumber(v, true)`, dont la dernière étape est `parseFloat(cleaned)` — or `parseFloat("2024-09")` vaut 2024 : le mode strict n'exclut que `NaN`, pas une chaîne dont seul le **préfixe** est numérique. Un `min`/`max` de dates ISO rend donc l'année, et n'importe quel code alphanumérique à préfixe chiffré (« 75A ») devient un nombre.
+
+**Vague 3 de création (2026-09-27)** : Même parseur, autre porte : `numeric` de `dsfr-data-normalize` lit « 1922-1930 » comme 1922 et « 2008 : 2012 » comme 2008. Ici, c'est ce que la page voulait (la première année du chantier), et 1 794 édifices datés en page correspondent exactement à une émulation Python. Mais c'est silencieux. Le même comportement qui sert cette page transforme un mois « 2024-09 » en 2024 sur une autre (TNE).
+
+### Impact de l'erreur ou du manque
+
+Un mois « 2024-09 » devient 2024 et un code « 75A » devient 75, sans signal : le mode strict de `toNumber` accepte tout préfixe numérique. La période affichée (« 2024 à 2025 ») est fausse et plausible.
+
+### Objectif métier de la correction
+
+Qu'une valeur qui n'est pas entièrement un nombre ne soit jamais lue comme un nombre en mode strict.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : `toNumber` strict sert tous les agrégats de `dsfr-data-query`.
+
+### Comment ça a été vérifié
+
+Agent de recréation, /education/tne-dashboard, navigateur, 0.42.0, 2026-09-26 (« 2024 à 2025 »). **Relu à la consignation** (origin/main) : `dsfr-data-query.ts` l. 1834-1849 (`toNumber(getByPath(item, agg.field), true)` puis `Math.min`/`Math.max`) et `packages/shared/src/utils/number-parser.ts` (`const num = parseFloat(cleaned); return isNaN(num) ? … : num`). **Non rejoué sur une page minimale** : la chaîne de causes est lue, pas mesurée isolément.
+
+Vague 3 (2026-09-27) : Agent, 2026-09-27 : émulation Python de `number-parser.ts` = 1 794 édifices datés, comme la page. Source relu sur origin/main (5b3bf7e) : `parseFloat(cleaned)`, inchangé depuis la consignation de BUG-032.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). **Rejeu unitaire du source** (vite-node, origin/main) : `toNumber('2024-09', true)` = 2024, `toNumber('75A', true)` = 75, `toNumber('1922-1930', true)` = 1922, alors que `looksLikeNumber('2026-09-25')` = false. La chaîne de causes est donc mesurée au niveau de la fonction ; elle n'est toujours pas rejouée sur une page minimale. Même racine que BUG-023 : les deux se déposent ensemble. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+Libellé de période écrit en toutes lettres (la page), ou `compute` d'une clé numérique `year(d) * 100 + month(d)` avant le `min`/`max`.
+
+### Demande
+
+En mode strict, refuser une chaîne qui n'est pas entièrement numérique (comparer à `looksLikeNumber`), et offrir `min`/`max` lexicographiques sur les chaînes ISO.
+
+### Critères d'acceptation
+
+- [ ] `toNumber('2024-09', true)` et `toNumber('75A', true)` rendent `null`.
+- [ ] `min` / `max` de `dsfr-data-query` sur des mois ou des dates ISO rendent la valeur extrême en chaîne, comme `computeExtremum` du KPI.
+- [ ] `numeric` de `dsfr-data-normalize` garde un mode qui lit le préfixe (« 1922-1930 » → 1922), explicite et documenté, pour les pages qui s'en servent.
+
+---
+
+## PG-083 — Le résumé d'une carte (`map-summary`) ne porte que sur les lignes dessinées : les lignes hors découpage en sortent, et l'écran ne le dit pas
+
+**Priorité** P1 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement, dx`, `severity:moyenne`, `dsfr-data-chart`
+**Rencontré sur** 3 page(s) : edu/educajou-ecolemap, edu/offre-formation-langues, edu/fei-chiffres-cles
+
+### Constat
+
+`map-summary="sum"` (comme `avg` et `weighted`) calcule le résumé sur les lignes que la carte **dessine**, pas sur les lignes qu'elle **reçoit**. Une ligne dont le code géographique sort du découpage (collectivités d'outre-mer 975 à 988 sur une carte départementale, entité hors académies, pays absent du fond) est écartée de la carte **et** du chiffre affiché sous le titre « …, en France ». Seul un `console.warn` compte les lignes ignorées, et il ne dit pas que le résumé les ignore aussi. Le total affiché est plausible et faux de la part écartée.
+
+C'est le comportement documenté : le JSDoc de `map-summary` écrit « calculé sur les lignes dessinées » et « les lignes écartées faute de code géographique exploitable ne sont dans aucun résumé — le compte de ces lignes est déjà journalisé ». Mais un journal de console n'est pas un signal pour le lecteur. La même famille est déjà apparue deux fois au registre : la moyenne académique pondérée de l'allemand (81,13 % contre 80,2 %, PG-031, lot 3) et les sommes de la carte du monde d'ENIC (49 734 pour 50 477, AM-095, lot 5). La page d'origine (`educajou-ecolemap`, relecture du 2026-09-20 : 62 485 affichés pour 63 186, écart 701 = somme des cinq collectivités ignorées) a été recréée depuis avec `map-summary="none"`.
+
+### Impact de l'erreur ou du manque
+
+Un total national faux de la part hors découpage, affiché sous le titre de la carte, plausible et sans signal à l'écran. Trois pages du banc l'ont payé (éducation outre-mer, académies, carte du monde). — **Priorité revue le 2026-09-27 (rapport #95) : P2 → P1**, le total affiché sous la carte est faux de la part hors découpage, sans signal à l'écran.
+
+### Objectif métier de la correction
+
+Qu'un lecteur sache, sans ouvrir la console, que le chiffre sous la carte ne porte pas sur toutes les lignes reçues.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : tout jeu national qui inclut les collectivités d'outre-mer, ou tout jeu mondial, a des lignes que DSFR Chart ne dessine pas.
+
+### Comment ça a été vérifié
+
+**Rejoué le 2026-09-27 (issue #70)**, page minimale `scripts/rejeu-findings/pages/f70-map-summary.html`, `node scripts/rejeu-findings/run-70-71.mjs summary`, Playwright. Neuf lignes en données inline, total 201 : 75, 13, 2A, 971 (165 à elles quatre) plus 977, 978, 986, 987 et un code vide (36). **Bundle publié 0.42.0 (jsDelivr)** : KPI témoin « 201 » ; carte `type="map" map-summary="sum"` : `data` du `map-chart` = `{"13":50,"75":100,"971":5,"2A":10}`, attribut `value` = 165, texte rendu « Nombre, en France 165 » ; `getSkippedCount()` = 5 ; console : un seul avertissement, « 5 ligne(s) sur 9 ignorée(s) — code géographique absent, invalide ou hors référentiel dans "dep" pour map ». **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. Source lu : `_processMapData` fait `continue` avant `_mapRows.push`, `_computeMapSummary` parcourt `_mapRows` (`packages/core/src/components/dsfr-data-chart.ts`, 0.42.0) ; `isValidDeptCode` n'accepte que 01-95, 2A, 2B et 971-976 (`packages/shared/src/utils/dept-codes.ts`).
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Rejoué le même jour contre la 0.42.0 et origin/main (voir plus haut). Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+Comparer le résumé à un KPI calculé sur les lignes reçues : l'écart est le signal. Quand les lignes hors découpage existent, soit `map-summary-value` (valeur nationale publiée), soit `map-summary="none"` et le total dans un KPI à côté de la carte, avec une phrase qui dit ce que la carte ne montre pas (c'est ce que fait `educajou-ecolemap` recréée). `map-summary-value` est un littéral : il ne suit plus les filtres.
+
+### Demande
+
+Rendre la part écartée visible là où le chiffre est lu : au minimum un avertissement qui dit que le RÉSUMÉ ignore N lignes (valeur écartée incluse en mode `sum`), idéalement une mention sous la carte (« hors 5 territoires non cartographiés ») ou un mode qui résume les lignes reçues. Le libellé « en France » appartient à DSFR Chart ; le calcul et le compte appartiennent à `dsfr-data`.
+
+### Critères d'acceptation
+
+- [ ] Sur la page minimale f70 (201 reçus, 165 dessinés), l'écran ou au moins l'avertissement console dit que le résumé porte sur 4 lignes sur 9 et en écarte 36.
+- [ ] Le calcul par défaut ne change pas sans attribut (aucun chiffre déjà publié ne bouge).
+
+---
+
+## BUG-038 — `min` / `max` de `dsfr-data-query` sur plus de ~125 000 valeurs par groupe : `Math.min(...values)` dépasse la pile, et l'affichage garde l'ancien résultat
+
+**Priorité** P1 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-query`
+**Rencontré sur** 1 page(s) : culture/sibil-lieux
+
+### Constat
+
+`_computeAggregate` calcule `min` et `max` par `Math.min(...values)` et `Math.max(...values)`. L'étalement passe chaque valeur en argument, et V8 lève « RangeError: Maximum call stack size exceeded » entre 120 000 et 125 000 arguments. Sibil (204 628 lignes) : la date minimale sur tout le jeu plante la query, et le `dsfr-data-repeat` en aval continue d'afficher l'ancien résultat, sans message à l'écran. Le même motif est dans `utils/aggregations.ts` (min/max du KPI) et dans `dsfr-data-map-layer.ts` (bornes de la discrétisation). Le seuil dépend du moteur : ce n'est pas un plafond qu'une page peut connaître d'avance.
+
+### Impact de l'erreur ou du manque
+
+Un agrégat sur un grand jeu échoue et l'affichage garde un chiffre périmé, sans rien à l'écran. — **Priorité revue le 2026-09-27 (rapport #95) : P2 → P1**, l'affichage garde un résultat périmé sans message à l'écran.
+
+### Objectif métier de la correction
+
+Que `min` et `max` tiennent sur n'importe quel volume chargé.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : `fetch-mode="export"` rend courants les jeux de plus de 100 000 lignes.
+
+### Comment ça a été vérifié
+
+Agent, page minimale inline, 0.42.0, 2026-09-27 : 100 000 lignes passent, 200 000 lèvent la `RangeError`. **Rejoué à la consignation** : Node 24 (V8), `Math.min(...new Array(n).fill(1))` passe à 120 000, lève « Maximum call stack size exceeded » à 125 000. Source relu sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `dsfr-data-query.ts` l. 1846-1849, `packages/core/src/utils/aggregations.ts` l. 616, `dsfr-data-map-layer.ts` l. 1126-1127.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Rejeu Node 24 : `Math.min(...)` passe à 120 000 arguments, lève « Maximum call stack size exceeded » à 125 000. Étalements sur des tableaux de données relevés sur origin/main : `dsfr-data-query.ts` l. 1847-1849, `utils/aggregations.ts` l. 616, `dsfr-data-map-layer.ts` l. 1126-1127, `packages/shared/src/utils/pivot.ts` l. 189. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+Regrouper d'abord (par date), puis prendre le minimum des groupes.
+
+### Demande
+
+Remplacer l'étalement par une boucle (`reduce`) partout où un tableau de données est étalé en arguments.
+
+### Critères d'acceptation
+
+- [ ] `aggregate="x:min"` sur 500 000 lignes rend la bonne valeur.
+- [ ] Plus aucun `Math.min(...` / `Math.max(...` sur un tableau de données dans `packages/core/src`.
+
+---
+
+## BUG-037 — Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2
+
+**Priorité** P1 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:basse`, `dsfr-data-facets`, `dsfr-data-query`
+**Rencontré sur** 1 page(s) : culture/lieux-culturels-ouverts
+
+### Constat
+
+Avec deux lignes `["Patrimoine","Patrimoine"]` et `["Patrimoine"]`, la facette affiche « Patrimoine 3 ». Cocher la valeur rend 2 lignes. Le compteur promet donc plus que la sélection ne donne. `facetValuesOf` renvoie chaque élément du tableau sans dédoublonner, et le comptage ajoute un poids par élément. `query explode` compte aussi 3, ce qui se défend pour un éclatement, mais fausse un « nombre de lieux par domaine ». La base des lieux a 2 851 lignes à tableaux collés (PG-073) : le doublon y est courant.
+
+### Impact de l'erreur ou du manque
+
+Compteur de facette supérieur au nombre de lignes que la sélection rend. — **Priorité revue le 2026-09-27 (rapport #95) : P3 → P1**, le compteur de la facette est faux en silence (effort XS).
+
+### Objectif métier de la correction
+
+Le compteur d’une valeur égale le nombre de lignes rendues par sa sélection.
+
+### Pérennité et reproductibilité du besoin
+
+Jeux à champs multivalués saisis à la main ou concaténés.
+
+### Comment ça a été vérifié
+
+Agent, page minimale injectée, 0.42.0, 2026-09-27 : « Patrimoine 3 » pour 2 lignes, `explode` 3. Source relu sur origin/main (5b3bf7e) : `packages/core/src/components/facets/facets-client.ts` l. 37-43 (`facetValuesOf`, sans `Set`) et l. 131-145 (`countFacetValues`, un poids par élément).
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). **Rejeu unitaire du source** (vite-node, origin/main) : `countFacetValues([{d:['Patrimoine','Patrimoine']},{d:['Patrimoine']}], 'd', '')` → `Patrimoine: 3`. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+Dédoublonner la cellule en amont (réécriture du texte avant `split`, PG-073).
+
+### Demande
+
+Dédoublonner les valeurs d'une cellule dans `facetValuesOf` : une ligne compte une fois par valeur distincte.
+
+### Critères d'acceptation
+
+- [ ] `["A","A"]` et `["A"]` → « A 2 ».
+
+---
+
+## BUG-027 — Un `where` de `dsfr-data-query` sur un alias d'agrégat est délégué au portail (HTTP 400), et l'échec de l'export fait passer les autres sources du même jeu en pagination
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-query`, `dsfr-data-source`
+**Rencontré sur** 1 page(s) : edu/dataviz-ips-ecoles
+
+### Constat
+
+Une `dsfr-data-query where="n:gte:40"`, seule lectrice d'une source Opendatasoft groupée (`count(ips) as n`), ajoute `AND n >= 40` au `where` de l'export. Le portail répond 400 (« Aggregation functions are only available in a select or an order by clause »), la console annonce « l'export ne sera plus retenté », et une autre source sur le même jeu (`paire`), qui n'avait rien demandé d'illégal, part directement en pagination `/records` et finit elle aussi en 400. Même famille que BUG-025 (un `order-by` sur un alias client délégué, corrigé en 0.36.0) : le correctif a couvert `order-by`, pas `where`.
+
+### Impact de l'erreur ou du manque
+
+Une page entière tombe en 400 dès qu'on filtre un agrégat (« communes d'au moins 40 écoles »), et l'échec s'étend aux autres sources du même jeu. — **Priorité revue le 2026-09-27 (rapport #95) : P1 → P2**, le rejeu du 2026-09-27 montre une erreur affichée (« Erreur de chargement: HTTP 400 »), pas un chiffre faux, et l'extension à la source voisine n'est pas reproduite.
+
+### Objectif métier de la correction
+
+Qu'un filtre sur un alias d'agrégat reste côté client, comme le fait `order-by` depuis 0.36.0.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : filtrer un agrégat par un seuil d'effectif est le geste qu'impose toute moyenne honnête.
+
+### Comment ça a été vérifié
+
+Agent de recréation, /education/dataviz-ips-ecoles, dsfr-data 0.42.0, 2026-09-26 : requête d'export relevée au réseau avec `…AND n >= 40`, HTTP 400, message console « l'export ne sera plus retenté », source `paire` en `/records` puis 400. Seuil déplacé derrière un `dsfr-data-normalize` : les deux exports répondent 200 (835 ms et 2 757 ms). Non rejoué sur une page minimale.
+
+— **Rejoué sur page minimale le 2026-09-27 (issue #71)** : `scripts/rejeu-findings/pages/f71-where-alias.html`, `run-70-71.mjs alias`, Playwright. Source Opendatasoft `donnees-ips-ecoles`, `select="code_departement, count(ips) as n" group-by="code_departement"`, `fetch-mode="export"` ; `dsfr-data-query where="n:gte:500"` seule lectrice ; une source voisine `s2` sur le même jeu. **Bundle publié 0.42.0** : export `…where=rentree_scolaire = '2024-2025' AND n >= 500…` → **HTTP 400**, avertissement « export JSON indisponible … l'export ne sera plus retenté », repli `/records` avec la même clause → 400, erreur `dsfr-data-source[s]`. **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. **Confirmé en 0.42.0 et sur origin/main.** Deux précisions : (1) ce n'est pas silencieux à l'écran — le KPI branché sur la query affiche « Erreur de chargement: HTTP 400: » ; (2) **l'extension de l'échec à la source voisine n'est pas reproduite** sur la page minimale : `s2` part en export et répond 200 dans les deux ordres observés (avant et après l'échec de `s`) — la seconde moitié du constat reste attestée par la seule page `dataviz-ips-ecoles`. Contrôle à l'API du même jour : un `where` sur l'alias d'un champ de groupement (`dep = '075'`, alias posé dans `select` ou dans `group_by`) répond 200 — seul l'alias d'**agrégat** pose problème, ce qui situe la relecture du 2026-09-20 (« where délégué sur un alias de group-by ») dans ce constat.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-query.ts` `_delegateWhereOnly` l. 934-950 délègue sans regarder si le champ est un alias d'agrégat de la source. `opendatasoft-adapter.ts` l. 923-928 : tout 4xx hors 429 condamne l'export pour le **jeu** (`_exportUnavailable`, clé `_datasetKey`), y compris un 400 dû à une clause. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
+### Contournement actuel
+
+Intercaler un `dsfr-data-normalize` (ou donner un second lecteur à la source) pour que le filtre reste côté client.
+
+### Demande
+
+Ne pas déléguer un `where` qui porte sur un alias d'agrégat ; et ne pas étendre à tout un jeu l'abandon de l'export décidé pour une requête invalide.
+
+### Critères d'acceptation
+
+- [ ] Une query seule lectrice `where="n:gte:40"` sur une source ODS groupée n'envoie pas `n >= 40` au portail et rend les lignes attendues.
+- [ ] L'échec d'un export n'interdit pas l'export aux autres sources du même jeu.
+- [ ] Un test couvre `where` sur alias, à côté de celui d'`order-by` (#1045).
+
+---
+
+## BUG-036 — Une query en aval de `normalize(rename) → query → normalize(valeurs)` est déléguée à la source sous les noms renommés : l'export Parquet est abandonné, l'API Tabular refuse, et toute la source tombe
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
 **Labels suggérés** : `bug`, `severity:haute`, `dsfr-data-normalize`, `dsfr-data-query`, `dsfr-data-source`
 **Rencontré sur** 1 page(s) : culture/architecture-contemporaine
 
@@ -311,7 +686,7 @@ Chaîne sur une source Tabular `fetch-mode="export"` : `normalize` qui renomme (
 
 ### Impact de l'erreur ou du manque
 
-Une chaîne légale fait tomber toute une source, donc tous les blocs qui la lisent. L'erreur visible (CORS) ne désigne pas la cause.
+Une chaîne légale fait tomber toute une source, donc tous les blocs qui la lisent. L'erreur visible (CORS) ne désigne pas la cause. — **Priorité revue le 2026-09-27 (rapport #95) : P1 → P2**, l'échec est visible (blocs vides, erreur CORS en console) : la cause est mal désignée, mais rien de faux n'est affiché.
 
 ### Objectif métier de la correction
 
@@ -324,6 +699,8 @@ Structurel : `rename` puis filtre puis typage est une chaîne ordinaire.
 ### Comment ça a été vérifié
 
 Rejoué à la consignation (2026-09-27), page minimale Playwright, bundle `dsfr-data@0.42.0` du CDN (`dsfr-data.core.esm.js`), ressource Tabular `80b6ac20-…` par le tunnel : variante `normalize(rename) → query(where) → normalize(numeric) → query(group-by)` → requête `/data/?page_size=200&page=1&d__groupby&ref__count`, erreur CORS, « dsfr-data-source[s]: Erreur de chargement TypeError: Failed to fetch » ; variante avec `explode` → `?ref__groupby&d__min`, même échec ; sans le second normalize → 1 809 lignes, aucune requête `tabular-api`. Scripts : `scratchpad/culture-architecture-contemporaine/repro.mjs`. Source relu sur origin/main (5b3bf7e, pas de commit de code depuis la 0.42.0) : `dsfr-data-normalize.ts` l. 316-326 ; `transformsSchema` n'existe que dans normalize, pivot et unpivot (`git grep`).
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-normalize.ts` `transformsSchema` l. 316-326 ; `transformsSchema` n'existe que dans normalize, pivot et unpivot. `dsfr-data-query.ts` l. 798 la consulte sans l'implémenter. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
 
 ### Contournement actuel
 
@@ -379,6 +756,8 @@ Relevé au navigateur le 2026-09-20 contre la 0.33.0 (`node scripts/rejeu-findin
 
 /developpement-durable/fret-ports, 2026-09-26 (agent).
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-a11y.ts` l. 68-76, JSDoc de `value-field` « séparées par des virgules », aucun appel à `parseAliasedColumn` (que `dsfr-data-chart` utilise). Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 Aucun côté page : on écrit les noms de colonnes nus et on accepte des en-têtes techniques, ou bien on renomme les colonnes en amont (`dsfr-data-normalize rename="v_fede:Fédération sélectionnée"`), ce qui déplace le libellé dans la donnée mais oblige alors le `dsfr-data-chart` à référencer le nouveau nom — et rend le libellé impossible à changer sans retoucher le pipeline.
@@ -393,188 +772,6 @@ Accepter sur `dsfr-data-a11y` la grammaire `champ:Libellé` déjà en vigueur su
 - [ ] Un champ écrit sans deux-points continue de rendre l'en-tête technique : la forme actuelle reste valide, sans changement de comportement pour les 15 balises du banc.
 - [ ] À défaut de la grammaire : un avertissement console lorsqu'une entrée de `label-field` ou `value-field` ne correspond à aucune colonne des données reçues, sur le modèle du garde-fou de `series-field` — le silence sur un tableau vide est la partie coûteuse.
 - [ ] Un test couvre le cas « grammaire du chart recopiée » et vérifie que le corps du tableau n'est pas vide.
-
----
-
-## PG-034 — API Tabular : `__in` **ignore toute valeur contenant une parenthèse**, avec un HTTP 200 et zéro ligne — là où `__exact` accepte la même valeur
-
-**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data et signaler à data.gouv.fr
-**Labels suggérés** : `enhancement, dx`, `severity:moyenne`, `dsfr-data-source`, `dsfr-data-query`
-**Rencontré sur** 1 page(s) : demo/delinquance-sans-total
-
-### Constat
-
-`where="champ:in:a|b|c"` part chez Tabular en `champ__in=a,b,c`. Dès qu'une des valeurs contient une parenthèse, elle est **écartée sans un mot** : la réponse est un 200 avec les lignes des autres valeurs, ou zéro ligne s'il n'y en a pas d'autre. Le même `champ__exact=<valeur à parenthèses>` rend, lui, toutes les lignes attendues — ce n'est donc pas un problème d'encodage mais du parseur de liste.
-
-Sur la base SSMSI, trois des dix-huit indicateurs portent une parenthèse (« Usage de stupéfiants (AFD) », « Usage de stupéfiants (hors AFD) ») : un `where="indicateur:in:…"` pour tracer les trois courbes du chapitre 1 aurait rendu un graphique **incomplet sans prévenir**. Les libellés parenthésés sont courants en open data français (millésimes, variantes, unités), ce qui rend le piège banal.
-
-### Impact de l'erreur ou du manque
-
-Un graphique ou un tableau amputé d'une partie de ses séries, sans erreur ni avertissement. Le cas est d'autant plus facile à payer que `__exact` sur la même valeur fonctionne : rien n'invite à se méfier de la forme liste.
-
-### Objectif métier de la correction
-
-Qu'une clause `in` déléguée à Tabular rende les mêmes lignes qu'un filtrage client, ou dise qu'elle ne le fait pas.
-
-### Pérennité et reproductibilité du besoin
-
-Durable tant que le parseur de liste de l'API Tabular n'est pas corrigé. Les libellés parenthésés sont fréquents dans les nomenclatures publiques.
-
-### Comment ça a été vérifié
-
-Relevé à l'API le 2026-09-21, six requêtes sur la ressource `2b27a675-e3bf-41ef-a852-5fb9ab483967` avec `annee__exact=2025` : `indicateur__exact=Usage de stupéfiants (AFD)` → **101** lignes ; `indicateur__in=Usage de stupéfiants (AFD)` → **0** ; `indicateur__in=Homicides,Usage de stupéfiants (AFD)` → **101** (seul « Homicides » retenu, au lieu de 202) ; contre-épreuves sans parenthèse : `indicateur__in=Homicides,Tentatives d'homicide` → 202, `indicateur__in=Usage de stupéfiants,Trafic de stupéfiants` → 202. Aucune erreur, aucun avertissement dans aucun des cas.
-
-### Contournement actuel
-
-Dériver une colonne par `dsfr-data-normalize compute="…"` et filtrer dessus : le `compute` change le schéma, donc la `dsfr-data-query` en aval cesse de déléguer et filtre côté client, où la parenthèse ne gêne pas. C'est ce que fait la page (colonne `serie`, puis `where="serie:isnotnull"`). Le contournement cesse de marcher dès que le jeu est trop gros pour être chargé entièrement — c'est-à-dire exactement quand la délégation serveur était nécessaire.
-
-### Demande
-
-Avertir en console quand une valeur de `in` / `notin` déléguée à Tabular contient une parenthèse, la clause étant alors silencieusement incomplète. Le correctif de fond appartient à `data.gouv.fr` ; la bibliothèque peut au moins refuser de déléguer la clause et la calculer côté client.
-
-### Critères d'acceptation
-
-- [ ] Un `where="champ:in:…"` dont une valeur contient une parenthèse rend les mêmes lignes que le même filtre appliqué côté client, ou émet un avertissement console nommant la valeur en cause.
-- [ ] Aucun changement pour une liste dont aucune valeur ne contient de parenthèse.
-
----
-
-## BUG-023 — L'agrégat `max` (et `min`) de `dsfr-data-query` lit une date ISO comme un nombre : `2026-09-25` devient 2026, là où le KPI rend 25/09/2026
-
-**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
-**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-query`, `dsfr-data-kpi`
-**Rencontré sur** 3 page(s) : aides-de-minimis, edu/passe-ton-hack-dabord, culture/entrepreneurs-spectacles
-
-### Constat
-
-`aggregate="d:max:dmax"` sur une colonne de dates ISO rend **2026**, avec ou sans `group-by`. La même expression `d:max` sur `dsfr-data-kpi` rend **25/09/2026** : le KPI compare les dates en texte (#667, `computeExtremum`, branche ISO), la query passe par `toNumber` (`_computeAggregate`), qui garde l'année. Deux résultats pour la même expression, sans avertissement. Conséquence : impossible de porter une date de fraîcheur jusqu'aux lignes groupées d'un graphique, donc `databox-date-field` (livré pour AM-021) est inutilisable sur tout graphique alimenté par un `group-by`.
-
-**Lot 6 et vague 2 (2026-09-26)** : deux pages de plus. Passe ton hack : `aggregate="cree_a:max"` rend 2026, alors que le KPI `cree_a:max format="date"` rend bien 20/09/2026. Entrepreneurs de spectacles : `aggregate="date_depot_dossier:min"` rend 2020, que le gabarit formate en « Depuis le 01/01/1970 » dans le chapô. La troncature ne se voit plus comme une année : elle devient une **date fausse**. Contournement : `order-by` ascendant et `limit="1"`.
-
-### Impact de l'erreur ou du manque
-
-Une date devient une année sans un mot, et la même expression rend deux résultats selon le composant. La fraîcheur des données — l'information que `databox-date-field` était venue servir — ne peut pas atteindre un graphique groupé.
-
-### Objectif métier de la correction
-
-Que `d:max` veuille dire la même chose sur une query et sur un KPI.
-
-### Pérennité et reproductibilité du besoin
-
-Permanent : toute page qui date ses données par un `max` sur un jeu groupé.
-
-### Comment ça a été vérifié
-
-Page minimale le 2026-09-26, dsfr-data 0.33.0 du CDN. Source en ligne [{g:A,d:2026-09-01},{g:A,d:2026-09-25},{g:B,d:2026-08-10}] : `group-by="g" aggregate="d:max:dmax"` rend dmax=2026 pour A et pour B ; l'agrégat global rend 2026 ; `dsfr-data-kpi value="d:max" format="date"` rend 25/09/2026. Aucun message console hors #765. Source : `dsfr-data-query.ts` `_computeAggregate` (`toNumber` strict), `utils/aggregations.ts` `computeExtremum`. **Toujours présent sur origin/main (0.42.0)** le 2026-09-26 : `_computeAggregate` passe toujours par `toNumber`.
-
-Passe ton hack : query injectée au navigateur, `max=2026 min=2026`, 2026-09-26. Entrepreneurs : page minimale, 0.42.0 du CDN, query `min=2020 max=2026`, KPI `d:min` 23/04/2020 (agents). **Toujours présent sur origin/main le 2026-09-27** : `toNumber` (`packages/shared/src/utils/number-parser.ts`) se termine par `parseFloat(cleaned)`, qui lit « 2026-09-20 » comme 2026.
-
-### Contournement actuel
-
-KPI de fraîcheur hors du graphique (`dsfr-data-kpi value="date_octroi:max" format="date"`) ; pas de date par ligne groupée.
-
-### Demande
-
-Aligner `min`/`max` de `dsfr-data-query` sur `computeExtremum` : une colonne de dates ISO rend la date extrême (chaîne ISO), pas un nombre. À défaut, avertir en console quand `toNumber` tronque une valeur ISO.
-
-### Critères d'acceptation
-
-- [ ] `aggregate="d:max:dmax"` sur des dates ISO rend la date la plus récente, avec et sans `group-by`.
-- [ ] Même résultat que `dsfr-data-kpi value="d:max"` sur les mêmes lignes.
-- [ ] Les colonnes numériques gardent le comportement actuel.
-
----
-
-## AM-089 — `series-field` de `dsfr-data-chart` comble les cellules (année, série) absentes par 0 : une série qui s'arrête est tracée à plat sur zéro
-
-**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
-**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-chart`
-**Rencontré sur** 1 page(s) : impot-sur-le-revenu
-
-### Constat
-
-Le pivot long → large (`_processTidyData`) remplit par 0 toute cellule absente, contre la règle « donnée manquante ≠ zéro ». Sur `ir-declarations-2042-nat`, séparer les courbes d'un code réattribué par libellé (1BI) prolonge la série « pension capital PER dec2 » (2019-2020) à zéro jusqu'en 2024, et fait naître l'autre série à zéro en 2019-2020. Deux fins de série fabriquées, qui se lisent comme des effondrements. ⚠️ La demande suppose que DSFR Chart accepte `null` dans `y` — non vérifié : si ce n'est pas le cas, la moitié du correctif se remonte chez `GouvernementFR/dsfr-chart` (règle n° 4).
-
-**Consignation du 2026-09-27** : doublon de BUG-029, qui porte le même défaut (`_processTidyData`, l. 650 et 674) et son extension au format large. Les deux entrées sont à réunir avant tout dépôt.
-
-### Impact de l'erreur ou du manque
-
-Une série qui commence ou s'arrête dans la fenêtre est dessinée comme une chute à zéro : un événement fabriqué, sans erreur ni avertissement. Tout jeu dont les séries n'ont pas les mêmes bornes est concerné (codes réattribués, nomenclatures qui changent).
-
-### Objectif métier de la correction
-
-Qu'une absence de donnée se voie comme une absence.
-
-### Pérennité et reproductibilité du besoin
-
-Structurel : le pivot est le chemin de tout graphique multi-séries en format long.
-
-### Comment ça a été vérifié
-
-2026-09-26, page minimale, 0.33.0 du CDN. Source générique `/records where nom="1BI"`, query `where annee:gte:2019`, chart `type="line" label-field="annee" value-field="nombre" series-field="libelle"` → attribut rendu `y='[[409,2321,0,0,0,0],[0,0,8618,15772,20436,25815]]'`, zéro erreur console. Source `dsfr-data-chart.ts` l. 650 (« Missing (label, series) cells are 0 ») et l. 674 (`new Array(labels.length).fill(0)`), identiques sur origin/main (0.42.0) le 2026-09-26.
-
-Comparaison des deux entrées à la consignation : mêmes lignes de source citées.
-
-### Contournement actuel
-
-Ne pas séparer les séries par `series-field` quand elles ne couvrent pas les mêmes années ; la page trace la seule case choisie.
-
-### Demande
-
-Remplir par `null` (que Chart.js interrompt) au lieu de 0, ou un attribut `missing="gap|zero"`, `gap` par défaut.
-
-### Critères d'acceptation
-
-- [ ] Une cellule (label, série) absente rend `null` dans `y`, et la courbe s'interrompt.
-- [ ] Un 0 présent dans les données reste 0.
-- [ ] Si DSFR Chart refuse `null`, le constat est remonté chez `GouvernementFR/dsfr-chart` et le comportement documenté.
-
----
-
-## BUG-029 — `dsfr-data-chart series-field` remplit de 0 les cellules sans observation : une série absente devient « 0 » dans l'infobulle et un segment nul
-
-**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
-**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-chart`
-**Rencontré sur** 7 page(s) : edu/gar-ressources-numeriques, tourisme-et-handicap, edu/capytale-usages, developpement-durable/logements-neufs, developpement-durable/qualite-air, developpement-durable/portrait-odd, culture/livre-trente-ans
-
-### Constat
-
-En format long (`series-field`), le graphique pivote lui-même les lignes en séries, et toute cellule (libellé, série) absente vaut 0. Sur GAR, l'infobulle de Nancy-Metz affiche « 12,7 accès par accédant / 0 accès par accédant ». Sur Tourisme & Handicap, « 0 établissements » pour la série absente d'une région, que la valeur calculée soit 0 ou `null`. **Règle 4 tranchée** : l'agent se demandait si c'était DSFR Chart ; c'est `dsfr-data`, le `bar-chart` reçoit déjà `y=[[12.7,11.6,10.9,0,0,…],[0,0,0,8.4,…]]`. Contraire à la règle #301 que `dsfr-data-pivot` applique (« une cellule sans observation vaut `null`, jamais 0 »). Même symptôme sur une courbe en format large (Capytale) : un mois sorti de la fenêtre glissante tracé à 0 — observé à la capture, cause non isolée.
-
-**Vagues 1 et 2 de création (2026-09-26) : le contournement de ce constat était faux.** Le format large trace lui aussi une valeur absente à 0. Dans `_processData`, chaque valeur de `value-field` / `value-fields` passe par `toNumber` **non strict** (`dsfr-data-chart.ts` l. 728), qui rend 0 pour `null`. « Pré-pivoter avec `dsfr-data-pivot` et passer en `value-fields` » ne fait donc que déplacer le zéro : le pivot rend bien `null`, et le graphique le redessine à 0. Relevé trois fois : livre (Internet à 0 de 1993 à 2001, `y=[0,0,0,0,0,0,0,0,0,2,3,…]`), qualité de l'air (PM10 à 0 de 2000 à 2006, `y=[0,0,0,0,0,0,0,27.3,…]`), logements neufs (courbe « Logements commencés » à 0 en 2025). Et une fois de plus en format long : sur Portrait ODD, Paris, sans surface bio, reçoit une barre à 0. Même mécanisme sur les cartes (l. 833). ⚠️ AM-089 décrit le même défaut que ce constat (format long, `_processTidyData`, mêmes lignes de source) : les deux entrées sont à réunir.
-
-### Impact de l'erreur ou du manque
-
-L'infobulle affiche « 0 » pour une série qui n'existe pas à ce libellé ; en courbe, un trou devient une chute à zéro.
-
-### Objectif métier de la correction
-
-Même règle dans `series-field` que dans `dsfr-data-pivot` : une cellule sans observation vaut null.
-
-### Pérennité et reproductibilité du besoin
-
-Structurel : `series-field` est la voie documentée du format long.
-
-### Comment ça a été vérifié
-
-GAR, `#g-aca`, 0.42.0, 2026-09-26 : attribut `y` relevé au DOM sur `<bar-chart>`, infobulle au survol. Tourisme, `#g-reg`, survol d'Auvergne-Rhône-Alpes avec `else 0` puis `else null` : même rendu. **Lu au source à la consignation** : `dsfr-data-chart.ts` l. 649-675, `_processTidyData` — « Missing (label, series) cells are 0 », `new Array(labels.length).fill(0)`. Capytale : capture du 2026-09-26, septembre 2023 à 0.
-
-Attributs `y` relevés au DOM par les agents, 0.42.0, 2026-09-26 (livre `g-internet` ; qualité de l'air ; Portrait ODD `y=[[0,90,83,43,…],[100,35,1,0,100,98,3]]`). **Lu au source à la consignation** (origin/main, 2026-09-27) : `dsfr-data-chart.ts` l. 728, `allSeries[i].push(toNumber(getByPath(record, allFields[i])))` sans `strict` ; `number-parser.ts` : `if (typeof val !== 'string') return strict ? null : 0`.
-
-### Contournement actuel
-
-**Corrigé le 2026-09-27.** L'ancien contournement (« pré-pivoter avec `dsfr-data-pivot` et passer en `value-fields` ») ne marche pas : le format large trace aussi `null` à 0. Voies qui marchent : des petits multiples où chaque graphique ne reçoit que les années de sa série (livre, qualité de l'air), deux graphiques d'une série à la même échelle (logements neufs), ou ne garder que les indicateurs publiés partout (Portrait ODD).
-
-### Demande
-
-Remplir de `null` dans `_processTidyData`, comme `dsfr-data-pivot`. Même règle pour le format large : `toNumber(…, true)` et `null` conservé dans `y` (l. 728), comme dans les valeurs de carte (l. 833).
-
-### Critères d'acceptation
-
-- [ ] `_processTidyData` remplit de null les cellules absentes.
-- [ ] L'infobulle n'affiche pas de ligne pour une série absente (ou l'affiche vide).
-- [ ] Un test aligne `series-field` sur `dsfr-data-pivot`.
-- [ ] Une valeur `null` en format large (`value-field`, `value-fields`) rend `null` dans `y`.
 
 ---
 
@@ -615,6 +812,8 @@ Vague 3 (2026-09-27) : Liste blanche relue sur origin/main (5b3bf7e, 2026-09-27)
 Vague 4 : relu sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : la table `FUNCTIONS` de `packages/shared/src/utils/compute.ts` n'a ni `substr`, ni `left`, ni `match` (abs, floor, ceil, round, lower, upper, trim, len, concat, replace, coalesce, is_null, is_empty, join, contains…). Intervalles relus dans `public/demo/vacance-logements.html` à la consignation.
 
 Vague 5 (2026-09-27) : Agents, recalcul Python, 2026-09-27. Liste blanche relue à la consignation (`packages/shared/src/utils/compute.ts`, origin/main 23b1b9a, `FUNCTIONS` l. 167-257) : ni `substr`, ni `left`, ni `min` sur tableau.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). **Rejeu unitaire du source** (vite-node, origin/main) : `left(s, 9)` et `substr(s, 1, 2)` → « fonction inconnue » ; `COMPUTE_FUNCTIONS` = year, month, day, round, abs, floor, ceil, lower, upper, trim, len, concat, replace, coalesce, is_null, is_empty, join, contains (18). Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
 
 ### Contournement actuel
 
@@ -661,6 +860,8 @@ Agents, 0.42.0, 2026-09-26 : capture (qualité de l'air), page minimale à deux 
 
 Vague 4 : agent, page minimale à trois lignes inline sans `databox`, 0.42.0, capture `rejeu-colormap-courbe.png`. Relu sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `git grep pointBackgroundColor` dans `packages/core/src/utils/color-map.ts` ne trouve toujours rien.
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). `git grep pointBackgroundColor packages/core/src` ne rend rien. DSFR Chart 2.1.1 pose lui-même `pointBackgroundColor` et `pointBorderColor` (`dist/LineChart/LineChart.js`) : c'est la recoloration de `utils/color-map.ts`, faite après lui, qui ne les reprend pas. Règle 4 confirmée : `dsfr-data`. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 Retirer `color-map` des courbes (qualité de l'air) ou garder la palette par défaut.
@@ -701,6 +902,8 @@ Structurel : tout graphique multisérie avec `databox`.
 ### Comment ça a été vérifié
 
 Agent, 0.42.0, 2026-09-26 : tableaux `databox-g-compo-table-default` et `databox-g-cc-table-default` sur /developpement-durable/fret-ports. **Source relu à la consignation** (origin/main, `dsfr-data-chart.ts` l. 2035-2060, `_injectDataboxTable`) : colonnes = `labelField` et `parseAliasedColumn(this.valueField)` seulement ; `rows = this._data.slice(0, 100)`.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-chart.ts` `_injectDataboxTable` l. 2035-2060, inchangé. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
 
 ### Contournement actuel
 
@@ -743,6 +946,8 @@ Structurel : toute carte de volumes (entrées, effectifs, montants) par point.
 
 Source relu sur origin/main (5b3bf7e) : `dsfr-data-map-layer.ts` l. 1119-1132, `rMin + ((val - min) / range) * (rMax - rMin)` ; liste blanche `FUNCTIONS` de `packages/shared/src/utils/compute.ts` sans `sqrt` ni `pow`. Verdict ADR-120 : absent du source. Page : agent, 2026-09-27.
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-map-layer.ts` l. 1132 (`rMin + ((val - min) / range) * (rMax - rMin)`). Rejeu unitaire : `sqrt(v)` → « fonction inconnue ». Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 Rayon fixe, ou classes de taille par `compute` (trois ou quatre paliers), légende écrite à la main.
@@ -756,49 +961,6 @@ Une échelle en aire pour `radius-field` (`radius-scale="sqrt"`, et pourquoi pas
 - [ ] Avec `radius-scale="sqrt"`, une valeur quatre fois plus grande a un rayon deux fois plus grand.
 - [ ] Une valeur nulle a un rayon nul (ou `radius-min` documenté comme plancher visuel, non comme origine).
 - [ ] `sqrt(x)` dans `compute`, `null` pour un négatif.
-
----
-
-## PG-083 — Le résumé d'une carte (`map-summary`) ne porte que sur les lignes dessinées : les lignes hors découpage en sortent, et l'écran ne le dit pas
-
-**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
-**Labels suggérés** : `enhancement, dx`, `severity:moyenne`, `dsfr-data-chart`
-**Rencontré sur** 3 page(s) : edu/educajou-ecolemap, edu/offre-formation-langues, edu/fei-chiffres-cles
-
-### Constat
-
-`map-summary="sum"` (comme `avg` et `weighted`) calcule le résumé sur les lignes que la carte **dessine**, pas sur les lignes qu'elle **reçoit**. Une ligne dont le code géographique sort du découpage (collectivités d'outre-mer 975 à 988 sur une carte départementale, entité hors académies, pays absent du fond) est écartée de la carte **et** du chiffre affiché sous le titre « …, en France ». Seul un `console.warn` compte les lignes ignorées, et il ne dit pas que le résumé les ignore aussi. Le total affiché est plausible et faux de la part écartée.
-
-C'est le comportement documenté : le JSDoc de `map-summary` écrit « calculé sur les lignes dessinées » et « les lignes écartées faute de code géographique exploitable ne sont dans aucun résumé — le compte de ces lignes est déjà journalisé ». Mais un journal de console n'est pas un signal pour le lecteur. La même famille est déjà apparue deux fois au registre : la moyenne académique pondérée de l'allemand (81,13 % contre 80,2 %, PG-031, lot 3) et les sommes de la carte du monde d'ENIC (49 734 pour 50 477, AM-095, lot 5). La page d'origine (`educajou-ecolemap`, relecture du 2026-09-20 : 62 485 affichés pour 63 186, écart 701 = somme des cinq collectivités ignorées) a été recréée depuis avec `map-summary="none"`.
-
-### Impact de l'erreur ou du manque
-
-Un total national faux de la part hors découpage, affiché sous le titre de la carte, plausible et sans signal à l'écran. Trois pages du banc l'ont payé (éducation outre-mer, académies, carte du monde).
-
-### Objectif métier de la correction
-
-Qu'un lecteur sache, sans ouvrir la console, que le chiffre sous la carte ne porte pas sur toutes les lignes reçues.
-
-### Pérennité et reproductibilité du besoin
-
-Structurel : tout jeu national qui inclut les collectivités d'outre-mer, ou tout jeu mondial, a des lignes que DSFR Chart ne dessine pas.
-
-### Comment ça a été vérifié
-
-**Rejoué le 2026-09-27 (issue #70)**, page minimale `scripts/rejeu-findings/pages/f70-map-summary.html`, `node scripts/rejeu-findings/run-70-71.mjs summary`, Playwright. Neuf lignes en données inline, total 201 : 75, 13, 2A, 971 (165 à elles quatre) plus 977, 978, 986, 987 et un code vide (36). **Bundle publié 0.42.0 (jsDelivr)** : KPI témoin « 201 » ; carte `type="map" map-summary="sum"` : `data` du `map-chart` = `{"13":50,"75":100,"971":5,"2A":10}`, attribut `value` = 165, texte rendu « Nombre, en France 165 » ; `getSkippedCount()` = 5 ; console : un seul avertissement, « 5 ligne(s) sur 9 ignorée(s) — code géographique absent, invalide ou hors référentiel dans "dep" pour map ». **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. Source lu : `_processMapData` fait `continue` avant `_mapRows.push`, `_computeMapSummary` parcourt `_mapRows` (`packages/core/src/components/dsfr-data-chart.ts`, 0.42.0) ; `isValidDeptCode` n'accepte que 01-95, 2A, 2B et 971-976 (`packages/shared/src/utils/dept-codes.ts`).
-
-### Contournement actuel
-
-Comparer le résumé à un KPI calculé sur les lignes reçues : l'écart est le signal. Quand les lignes hors découpage existent, soit `map-summary-value` (valeur nationale publiée), soit `map-summary="none"` et le total dans un KPI à côté de la carte, avec une phrase qui dit ce que la carte ne montre pas (c'est ce que fait `educajou-ecolemap` recréée). `map-summary-value` est un littéral : il ne suit plus les filtres.
-
-### Demande
-
-Rendre la part écartée visible là où le chiffre est lu : au minimum un avertissement qui dit que le RÉSUMÉ ignore N lignes (valeur écartée incluse en mode `sum`), idéalement une mention sous la carte (« hors 5 territoires non cartographiés ») ou un mode qui résume les lignes reçues. Le libellé « en France » appartient à DSFR Chart ; le calcul et le compte appartiennent à `dsfr-data`.
-
-### Critères d'acceptation
-
-- [ ] Sur la page minimale f70 (201 reçus, 165 dessinés), l'écran ou au moins l'avertissement console dit que le résumé porte sur 4 lignes sur 9 et en écarte 36.
-- [ ] Le calcul par défaut ne change pas sans attribut (aucun chiffre déjà publié ne bouge).
 
 ---
 
@@ -827,6 +989,8 @@ Structurel : toute page d'exploration en `require-where` avec une carte (localis
 ### Comment ça a été vérifié
 
 **Rejoué le 2026-09-27 (issue #71)**, page minimale `scripts/rejeu-findings/pages/f71-map-idle.html`, `run-70-71.mjs idle`, Playwright : trois points inline, `dsfr-data-query require-where`, un `dsfr-data-display` témoin et une couche `type="circle"` sur la query. **Bundle publié 0.42.0** : (1) chargement : display « Choisissez un filtre », 0 cercle ; (2) `where="t:eq:a"` posé : display « 2 resultats Paris Lyon », 2 cercles, annonce « Couches : 2 cercles » ; (3) `where` retiré : display revenu à « Choisissez un filtre », **2 cercles toujours dessinés**, annonce inchangée. Aucune erreur console. **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. Source lu (0.42.0) : `dsfr-data-map-layer.ts` n'implémente que `onSourceData`, l'`onSourceReset` du mixin est un no-op.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Rejoué le même jour contre la 0.42.0 et origin/main (voir plus haut). `git grep onSourceReset` dans `dsfr-data-map-layer.ts` ne rend rien. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
 
 ### Contournement actuel
 
@@ -869,6 +1033,8 @@ Permanent : `insets="drom"` est le motif recommandé pour toute carte nationale.
 
 Agents, 0.42.0, 2026-09-26 : festivals, cercles comptés au DOM et chronométrage ; bibliothèques, page minimale (`scratchpad/culture-bibliotheques/min/`), 3 exécutions avec et sans facettes. **Source relu à la consignation** (origin/main, `packages/core/src/components/dsfr-data-map-inset.ts` l. 240-246) : boucle `for (const layer of layers)` → `layer.cloneNode(false)`, sans filtre d'emprise. Le doublement et la persistance après filtre n'ont pas été rejoués à la consignation.
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-map-inset.ts` l. 242, `layer.cloneNode(false)` sans filtre d'emprise. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 Limiter les encarts aux territoires qui portent des points (festivals : de 9 à 5), ou les retirer (bibliothèques).
@@ -882,47 +1048,6 @@ Filtrer la couche clonée à l'emprise de l'encart, et remplacer (au lieu d'ajou
 - [ ] Un encart ne contient que les entités de son emprise.
 - [ ] Après un filtre, chaque encart a exactement les entités filtrées de son emprise.
 - [ ] Le temps de refiltre ne croît pas avec le nombre d'encarts vides.
-
----
-
-## BUG-038 — `min` / `max` de `dsfr-data-query` sur plus de ~125 000 valeurs par groupe : `Math.min(...values)` dépasse la pile, et l'affichage garde l'ancien résultat
-
-**Priorité** P2 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
-**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-query`
-**Rencontré sur** 1 page(s) : culture/sibil-lieux
-
-### Constat
-
-`_computeAggregate` calcule `min` et `max` par `Math.min(...values)` et `Math.max(...values)`. L'étalement passe chaque valeur en argument, et V8 lève « RangeError: Maximum call stack size exceeded » entre 120 000 et 125 000 arguments. Sibil (204 628 lignes) : la date minimale sur tout le jeu plante la query, et le `dsfr-data-repeat` en aval continue d'afficher l'ancien résultat, sans message à l'écran. Le même motif est dans `utils/aggregations.ts` (min/max du KPI) et dans `dsfr-data-map-layer.ts` (bornes de la discrétisation). Le seuil dépend du moteur : ce n'est pas un plafond qu'une page peut connaître d'avance.
-
-### Impact de l'erreur ou du manque
-
-Un agrégat sur un grand jeu échoue et l'affichage garde un chiffre périmé, sans rien à l'écran.
-
-### Objectif métier de la correction
-
-Que `min` et `max` tiennent sur n'importe quel volume chargé.
-
-### Pérennité et reproductibilité du besoin
-
-Structurel : `fetch-mode="export"` rend courants les jeux de plus de 100 000 lignes.
-
-### Comment ça a été vérifié
-
-Agent, page minimale inline, 0.42.0, 2026-09-27 : 100 000 lignes passent, 200 000 lèvent la `RangeError`. **Rejoué à la consignation** : Node 24 (V8), `Math.min(...new Array(n).fill(1))` passe à 120 000, lève « Maximum call stack size exceeded » à 125 000. Source relu sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `dsfr-data-query.ts` l. 1846-1849, `packages/core/src/utils/aggregations.ts` l. 616, `dsfr-data-map-layer.ts` l. 1126-1127.
-
-### Contournement actuel
-
-Regrouper d'abord (par date), puis prendre le minimum des groupes.
-
-### Demande
-
-Remplacer l'étalement par une boucle (`reduce`) partout où un tableau de données est étalé en arguments.
-
-### Critères d'acceptation
-
-- [ ] `aggregate="x:min"` sur 500 000 lignes rend la bonne valeur.
-- [ ] Plus aucun `Math.min(...` / `Math.max(...` sur un tableau de données dans `packages/core/src`.
 
 ---
 
@@ -953,6 +1078,8 @@ Ponctuel — une correction de fiche.
 ### Comment ça a été vérifié
 
 Vérifié le 2026-09-21 : `curl -D- -H 'Origin: https://open-data-viz.lab.miweb.run' 'https://tabular-api.data.gouv.fr/api/resources/2b27a675-e3bf-41ef-a852-5fb9ab483967/data/?page_size=1'` rend HTTP 200 avec `access-control-allow-origin: *`, `access-control-allow-methods: GET, OPTIONS`, `access-control-expose-headers: *` ; la préflight `OPTIONS` avec `Access-Control-Request-Method: GET` rend 204 avec les mêmes en-têtes. Confirmé au navigateur : les 13 requêtes Tabular de `/demo/delinquance-sans-total` aboutissent depuis `localhost:3000` sans proxy et sans erreur CORS en console.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). `curl` rejoué par le tunnel : HTTP 200, `access-control-allow-origin: *`. La fiche est inchangée : `skills/dsfr-data/references/api-providers.md` l. 152 et 172, `packages/shared/src/skills/skills.ts` l. 3038 et 3058. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
 
 ### Contournement actuel
 
@@ -994,6 +1121,8 @@ Structurel : enquêtes, séries par catégorie, compositions par territoire.
 ### Comment ça a été vérifié
 
 Agent, navigateur, 0.42.0, 2026-09-27 : parts identiques au recalcul pandas avec le contournement. **Relu à la consignation** sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `dsfr-data-query.ts` l. 1807-1821 (`_applyShareAggregate` : `total` = somme de la colonne sur toutes les lignes `data`), JSDoc l. 347-375 (« divisée par la somme de cette colonne sur toutes les lignes de sortie ») ; aucune option de partition.
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-query.ts` `_applyShareAggregate` l. 1807-1821, total sur toutes les lignes, sans partition. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
 
 ### Contournement actuel
 
@@ -1040,6 +1169,8 @@ Source `packages/core/src/components/dsfr-data-podium.ts` l. 389-391 (`String()`
 
 Démonstrations : agent, navigateur, 0.42.0, 2026-09-27. **Relu à la consignation** sur origin/main de dsfr-data (23b1b9a, 0.42.0 + 7 commits hors `packages/core`) : `dsfr-data-podium.ts` l. 436-438, `_formatValue` appelle `formatNumber(value)` sans décimales ; `packages/shared/src/utils/formatters.ts` l. 140-145, sans `decimals` → `Math.round(value)`. Aucune `@property` de décimales ni de format parmi celles du podium.
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `dsfr-data-podium.ts` l. 389-391 (`String()`) et l. 437 (`formatNumber(value)` sans décimales) ; aucune propriété de format ni de décimales parmi les `@property` du podium. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 Un `dsfr-data-normalize compute` de cinq assignations (milliers, reste, zéros de tête, espace fine insécable, singulier) produit « 5 164 aides ».
@@ -1085,6 +1216,8 @@ Agents, 0.42.0, 2026-09-26 : captures des encarts vides ; `zoom="8"` (La Réunio
 
 Vague 5 (2026-09-27) : Agent, capture de la carte, 2026-09-27. Non rejoué à la consignation ; cohérent avec le calcul de l'emprise ci-dessus.
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Source relu : `utils/territories.ts` l. 10 (`la-reunion`, zoom 9) et l. 21 (`wallis-et-futuna`, zoom 7), inchangés. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 `<dsfr-data-map-inset>` avec `zoom` ou `center` explicites.
@@ -1125,6 +1258,8 @@ Durable : toute carte catégorielle sur un champ incomplet.
 ### Comment ça a été vérifié
 
 **Rejoué le 2026-09-27 (issue #71)**, page minimale `scripts/rejeu-findings/pages/f71-map-legend.html`, `run-70-71.mjs legend`, Playwright : trois points (a, b, c), `color-map="a:…,b:…"`, `color="#929292"`. **Bundle publié 0.42.0** : légende « Type a b Autres valeurs », `getLegendEntries()` = a, b, « Autres valeurs » ; `empty-label`, `other-label` et `fallback-label` posés sur la couche : trois avertissements « attribut … inconnu de la version chargée », sans effet ; les mêmes sur la légende : sans effet et **sans avertissement**. **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. Contournement vérifié dans la même page : `dsfr-data-normalize compute="t2 = when t = 'a' then 'a' else when t = 'b' then 'b' else 'Non renseigné'"` puis `color-map` qui nomme « Non renseigné » : légende « Type a b Non renseigné ».
+
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). Rejoué le même jour contre la 0.42.0 et origin/main (voir plus haut). Constante « Autres valeurs » : `dsfr-data-map-layer.ts` l. 597. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
 
 ### Contournement actuel
 
@@ -1177,6 +1312,8 @@ Contournement lu dans /education/cactus-hameconnage (agent, 2026-09-26).
 
 Vague 5 (2026-09-27) : Agent, page minimale 0.42.0 `core`, 2026-09-27. Non rejoué à la consignation.
 
+**Revérifié pour le rapport #95 (2026-09-27)** : origin/main de dsfr-data 23b1b9a = v0.42.0 + 7 commits ; `git diff v0.42.0 origin/main -- packages/core` est vide, et la PR de version #1154 (0.42.1) ne porte que l'assistant (`packages/app-ui`, `packages/shared/src/ui`). **Rejeu unitaire du source** (vite-node, origin/main) : `compileCompute("x = when l = 'J''en ai' then 1 else 0")` → « "then" attendu après la condition d'un "when", trouvé 'en ai' ». L'erreur est **dite**, pas silencieuse. Tokenizer `compute.ts` l. 331-334 inchangé. Verdict ADR-120 : **absent du source** (vraie demande). Rapport : `docs/rapport-dsfr-data-2026-09-27.md`.
+
 ### Contournement actuel
 
 `contains(champ, 'en ai')`, qui ne tient que si aucun autre libellé ne contient la sous-chaîne — à vérifier jeu par jeu.
@@ -1189,43 +1326,3 @@ Accepter `''` dans un littéral, comme SQL et ODSQL ; à défaut, le dire dans l
 
 - [ ] `when libelle = 'J''en ai' then 1 else 0` compare au libellé « J'en ai ».
 - [ ] Les littéraux sans quote gardent leur comportement.
-
----
-
-## BUG-037 — Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2
-
-**Priorité** P3 · **Effort estimé** XS · **Décision proposée** Déposer chez dsfr-data
-**Labels suggérés** : `bug`, `severity:basse`, `dsfr-data-facets`, `dsfr-data-query`
-**Rencontré sur** 1 page(s) : culture/lieux-culturels-ouverts
-
-### Constat
-
-Avec deux lignes `["Patrimoine","Patrimoine"]` et `["Patrimoine"]`, la facette affiche « Patrimoine 3 ». Cocher la valeur rend 2 lignes. Le compteur promet donc plus que la sélection ne donne. `facetValuesOf` renvoie chaque élément du tableau sans dédoublonner, et le comptage ajoute un poids par élément. `query explode` compte aussi 3, ce qui se défend pour un éclatement, mais fausse un « nombre de lieux par domaine ». La base des lieux a 2 851 lignes à tableaux collés (PG-073) : le doublon y est courant.
-
-### Impact de l'erreur ou du manque
-
-Compteur de facette supérieur au nombre de lignes que la sélection rend.
-
-### Objectif métier de la correction
-
-Le compteur d’une valeur égale le nombre de lignes rendues par sa sélection.
-
-### Pérennité et reproductibilité du besoin
-
-Jeux à champs multivalués saisis à la main ou concaténés.
-
-### Comment ça a été vérifié
-
-Agent, page minimale injectée, 0.42.0, 2026-09-27 : « Patrimoine 3 » pour 2 lignes, `explode` 3. Source relu sur origin/main (5b3bf7e) : `packages/core/src/components/facets/facets-client.ts` l. 37-43 (`facetValuesOf`, sans `Set`) et l. 131-145 (`countFacetValues`, un poids par élément).
-
-### Contournement actuel
-
-Dédoublonner la cellule en amont (réécriture du texte avant `split`, PG-073).
-
-### Demande
-
-Dédoublonner les valeurs d'une cellule dans `facetValuesOf` : une ligne compte une fois par valeur distincte.
-
-### Critères d'acceptation
-
-- [ ] `["A","A"]` et `["A"]` → « A 2 ».
