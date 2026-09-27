@@ -9,6 +9,58 @@
 > clé `ods-mef`) et, pour les rendus, au navigateur (Playwright, dsfr-data 0.33.0, zéro erreur console).
 > État du jeu : 17 621 lignes, 190 209 959,61 € d'équivalent-subvention brut, modifié le 2026-09-25.
 
+## Recréation du 2026-09-27 — la page en récit (dsfr-data 0.42.0)
+
+> Niveau **avancé**. La page a été recréée page blanche ; la relecture du 2026-09-26 (plus bas) reste
+> comme trace. Chiffres rejoués le 2026-09-27 à l'API (`aides_minimis`, modifié le 2026-09-26 21:30 UTC,
+> 17 621 lignes, 190 209 959,61 €) et relus au navigateur, à l'identique.
+
+**L'histoire retenue — le paradoxe, puis la concentration.** Deux directions de Bercy, la DGE (6 872)
+et la DGDDI (5 164), déclarent **68 %** des aides pour **26 %** des montants ; les douze conseils
+régionaux déclarants font l'inverse : **19 %** des aides, **44 %** de l'argent (84,3 M€). Derrière, une
+concentration par taille : **57 %** des aides font moins de 5 000 € et pèsent 8 % des montants ; les
+aides de 20 000 € et plus sont **11 %** du nombre et **70 %** de l'argent. La relecture précédente
+trouvait le paradoxe au niveau « DGE + DGDDI » ; le regroupement par famille le rend frappant, parce que
+les Régions en sont le miroir.
+
+**Plan de page.** Titre-message + chapô calculé → preuve 1 : part des aides / part des montants par
+famille (DGE, DGDDI, Régions, autres) → preuve 2 : même lecture par tranche de montant → nuance 1 :
+aide moyenne des douze autorités qui versent le plus (DGEFP 157 445 € sur 35 aides, ADEME 64 194 €,
+CDC 53 801 € … DGDDI 5 294 €, DGE 3 249 €) → nuance 2 : calendrier des octrois par famille (avril = 33 %
+des aides, dont 68 % DGDDI ; derniers mois incomplets) → exploration (recherche SIREN / nom / commune,
+facettes régime / instrument / autorité, six KPI dont l'agricole « Non publié », tableau 10 colonnes avec
+l'opérateur) → ce qu'on ne montre pas.
+
+**La forme.** Barres groupées « part des aides / part des montants » : deux parts sur le même
+groupement (`share_percent`), même échelle en %, une paire par catégorie — c'est l'écart entre les deux
+barres qui porte le message. Barres horizontales triées pour l'aide moyenne, palette neutre. Barres
+empilées par mois pour montrer QUI fait le pic d'avril. Le podium et le camembert de l'ancienne page
+sont retirés (le podium ne formate toujours pas son sous-titre, AM-088).
+
+**L'honnêteté.** L'aide moyenne est un ratio de sommes (montant total / nombre d'aides de l'autorité),
+calculé après groupement. Le nombre d'aides est une colonne constante sommée : `montant_esb:count` perd
+les 7 lignes sans montant. Les tranches écartent explicitement ces 7 lignes, et la page le dit. Le récit
+ne suit pas les filtres (il lit la source brute), l'exploration si — dit en page. Aucune interprétation
+des dispositifs : la phrase de la moyenne dit que l'écart tient à la nature des dispositifs, « que le
+registre ne décrit pas ». La DGEFP est en tête sur 35 aides seulement : le nombre est dans la phrase.
+
+**Phrase de lecture (chapô calculé).** « Depuis le 1er janvier 2026, 17 621 aides de minimis ont été
+déclarées au registre public, pour 190,2 millions d'euros d'équivalent-subvention. Deux directions de
+Bercy, la DGE et la DGDDI, en déclarent 68 % — mais ne versent que 26 % des montants. Les conseils
+régionaux font l'inverse : 19 % des aides, 44 % de l'argent. Une aide de minimis est d'abord petite :
+57 % d'entre elles font moins de 5 000 €. »
+
+**Ce qu'on ne montre pas (dit en page).** 221 lignes répétées à l'identique sur six champs (phrase
+calculée) ; 7 lignes sans montant (calculé) ; le régime agricole (non collecté avant 2027) ; les aides
+de 300 000 € et plus — 35 du régime général déclarées à exactement 300 000 €, 6 au-dessus, question au
+producteur et non constat ; l'opérateur (les aides de la DGE sont gérées par la DGFiP, 3 634, et
+Bpifrance, 3 236) ; le pays (99,9 % France, retiré des facettes) ; toute « tendance » mensuelle.
+
+**Angles écartés.** Dépassements de plafond (à instruire) ; carte par commune (pas de coordonnées, la
+question n'est pas territoriale) ; série mensuelle lue comme une évolution.
+
+---
+
 ## La question posée, et pour quel lecteur
 
 **Qui a déclaré quelles aides de minimis depuis le 1er janvier 2026, pour combien, sous quelle forme — et une entreprise donnée y figure-t-elle ?**

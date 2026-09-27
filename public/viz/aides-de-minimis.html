@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Registre des aides de minimis — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data de la page Studio « Registre public des aides de minimis » de data.economie.gouv.fr.">
+  <meta name="description" content="Registre public des aides de minimis (DGE) : deux directions de Bercy déclarent deux aides sur trois, mais ce sont les Régions qui versent la plus grosse part de l'argent. Une aide de minimis est petite ; les montants tiennent dans quelques grosses.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,112 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       UNE SEULE REQUÊTE pour toute la page. Le registre compte moins de 20 000
+       lignes : on le charge en entier par l'endpoint d'export (fetch-mode="export",
+       0,6 Mo), et tout le reste — récit ET exploration — se calcule côté client.
+       Le récit lit la source brute (il ne suit PAS les filtres) ; l'exploration
+       lit la sortie des facettes.
+
+       max-records : le plafond par défaut (1 000) tronquerait en silence. Le jeu
+       croît d'une soixantaine de lignes par jour (16 610 le 2026-09-10, 17 621 le
+       2026-09-26) : 100 000 laisse plusieurs années de marge au rythme observé.
+       `mois` et `octroi_txt` sont formatés par le portail (`date_format`), la date
+       ISO reste là pour le tri et le KPI de fraîcheur.
+       ========================================================================== -->
+  <dsfr-data-source id="minimis" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="aides_minimis"
+    fetch-mode="export" max-records="100000"
+    select='regime,nom_beneficiaire,identifiant_beneficiaire,montant_esb,instrument_aide,secteur_aide,commune_beneficiaire,date_octroi,date_format(date_octroi, "yyyy-MM") as mois,date_format(date_octroi, "dd/MM/yyyy") as octroi_txt,autorite,operateur'
+    api-key-ref="ods-mef">
+  </dsfr-data-source>
+
+  <!-- LE RÉCIT — colonnes de lecture, ligne à ligne.
+       famille : les deux directions de Bercy à part, les douze conseils régionaux
+       déclarants ensemble (les seuls libellés qui contiennent « Région »,
+       vérifié à l'API le 2026-09-26), le reste en « autres ».
+       tranche : six classes de montant ; les 7 lignes sans montant restent hors
+       tranche (null), comptées à part en fin de page.
+       Les colonnes 0/1 et « montant si… » se somment plus bas en une ligne de
+       repères : c'est elle qui écrit le chapô. -->
+  <dsfr-data-normalize id="mi-n" source="minimis"
+    compute="famille = when autorite = 'DGE - Economie Finances' then 'DGE (Bercy)' when autorite = 'DGDDI - Economie Finances' then 'DGDDI (Bercy)' when contains(autorite, 'Région ') then 'Conseils régionaux' else 'Autres autorités';
+             ordre_f = when famille = 'DGE (Bercy)' then 1 when famille = 'DGDDI (Bercy)' then 2 when famille = 'Conseils régionaux' then 3 else 4;
+             tranche = when is_empty(montant_esb) then null when montant_esb < 1000 then 'Moins de 1 000 €' when montant_esb < 5000 then '1 000 à 5 000 €' when montant_esb < 20000 then '5 000 à 20 000 €' when montant_esb < 100000 then '20 000 à 100 000 €' when montant_esb < 300000 then '100 000 à 300 000 €' else '300 000 € et plus';
+             rang_t = when montant_esb < 1000 then 1 when montant_esb < 5000 then 2 when montant_esb < 20000 then 3 when montant_esb < 100000 then 4 when montant_esb < 300000 then 5 else 6;
+             un = 1;
+             m = coalesce(montant_esb, 0);
+             bercy = when contains(famille, 'Bercy') then 1 else 0;
+             m_bercy = when contains(famille, 'Bercy') then m else 0;
+             m_reg = when famille = 'Conseils régionaux' then m else 0;
+             reg = when famille = 'Conseils régionaux' then 1 else 0;
+             petite = when montant_esb < 5000 then 1 else 0;
+             m_petite = when montant_esb < 5000 then m else 0;
+             grosse = when montant_esb >= 20000 then 1 else 0;
+             m_grosse = when montant_esb >= 20000 then m else 0;
+             avril = when mois = '2026-04' then 1 else 0;
+             avril_ddi = when mois = '2026-04' and autorite = 'DGDDI - Economie Finances' then 1 else 0;
+             sans_montant = when is_empty(montant_esb) then 1 else 0">
+  </dsfr-data-normalize>
+
+  <!-- Une ligne de repères (agrégat sans group-by), puis les parts. -->
+  <dsfr-data-query id="mi-reperes-a" source="mi-n"
+    aggregate="un:sum:n, m:sum:s, bercy:sum:n_bercy, m_bercy:sum:s_bercy, reg:sum:n_reg, m_reg:sum:s_reg, petite:sum:n_petite, m_petite:sum:s_petite, grosse:sum:n_grosse, m_grosse:sum:s_grosse, avril:sum:n_avril, avril_ddi:sum:n_avril_ddi, sans_montant:sum:n_sans">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="mi-reperes" source="mi-reperes-a"
+    compute="s_m = round(s / 1000000, 1);
+             p_n_bercy = round(n_bercy / n * 100);
+             p_s_bercy = round(s_bercy / s * 100);
+             p_n_reg = round(n_reg / n * 100);
+             p_s_reg = round(s_reg / s * 100);
+             p_n_petite = round(n_petite / n * 100);
+             p_s_petite = round(s_petite / s * 100);
+             p_n_grosse = round(n_grosse / n * 100);
+             p_s_grosse = round(s_grosse / s * 100);
+             p_avril = round(n_avril / n * 100);
+             p_avril_ddi = round(n_avril_ddi / n_avril * 100)">
+  </dsfr-data-normalize>
+
+  <!-- Part des aides et part des montants, par famille d'autorité. -->
+  <dsfr-data-query id="mi-familles" source="mi-n" group-by="ordre_f, famille"
+    aggregate="un:sum:aides, m:sum:montant, aides:share_percent:part_aides, montant:share_percent:part_montants"
+    order-by="ordre_f:asc">
+  </dsfr-data-query>
+
+  <!-- Même lecture par tranche de montant. -->
+  <dsfr-data-query id="mi-tranches" source="mi-n" where="tranche:isnotnull" group-by="rang_t, tranche"
+    aggregate="un:sum:aides, m:sum:montant, aides:share_percent:part_aides, montant:share_percent:part_montants"
+    order-by="rang_t:asc">
+  </dsfr-data-query>
+
+  <!-- Aide moyenne des douze autorités qui versent le plus : ratio de sommes
+       (montant total / nombre d'aides de l'autorité), jamais une moyenne de moyennes. -->
+  <dsfr-data-query id="mi-top-a" source="mi-n" group-by="autorite"
+    aggregate="m:sum:montant, un:sum:aides" order-by="montant:desc" limit="12">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="mi-top-n" source="mi-top-a"
+    compute="aide_moyenne = round(montant / aides)"></dsfr-data-normalize>
+  <dsfr-data-query id="mi-top" source="mi-top-n" order-by="aide_moyenne:desc"></dsfr-data-query>
+  <dsfr-data-query id="mi-top-haut" source="mi-top" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="mi-top-bas" source="mi-top-n" order-by="aide_moyenne:asc" limit="1"></dsfr-data-query>
+
+  <!-- Le calendrier des octrois, par famille d'autorité. -->
+  <dsfr-data-query id="mi-mois" source="mi-n" group-by="mois, ordre_f, famille"
+    aggregate="un:sum:aides" order-by="mois:asc">
+  </dsfr-data-query>
+
+  <!-- Lignes identiques sur les six champs qui décrivent l'aide : le group-by
+       multi-champs EST le dédoublonnage. Rien n'est retiré des autres blocs. -->
+  <dsfr-data-query id="mi-uniques" source="minimis"
+    group-by="identifiant_beneficiaire, montant_esb, date_octroi, autorite, instrument_aide, regime"
+    aggregate="montant_esb:count:nb">
+  </dsfr-data-query>
+  <dsfr-data-query id="mi-uniques-n" source="mi-uniques"
+    aggregate="nb:sum:lignes, nb:count:distinctes">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="mi-uniques-d" source="mi-uniques-n"
+    compute="doublons = lignes - distinctes"></dsfr-data-normalize>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,344 +138,329 @@
       </div>
     </nav>
 
-    <h1>Registre public des aides de minimis</h1>
+    <p class="fr-text--sm fr-hint-text fr-mb-1w">Registre public des aides de minimis — aides octroyées depuis le 1er janvier 2026</p>
+    <h1>Bercy déclare la plupart des aides de minimis, les Régions versent la plus grosse part de l'argent</h1>
+
+    <dsfr-data-repeat source="mi-reperes">
+      <template>
+        <p class="fr-text--lead">
+          Depuis le 1er janvier 2026, {{n:number}} aides de minimis ont été déclarées au registre public, pour
+          {{s_m:number:1}}&nbsp;millions d'euros d'équivalent-subvention. Deux directions de Bercy, la DGE et
+          la DGDDI, en déclarent <strong>{{p_n_bercy:number}}&nbsp;%</strong> — mais ne versent que
+          {{p_s_bercy:number}}&nbsp;% des montants. Les conseils régionaux font l'inverse&nbsp;:
+          {{p_n_reg:number}}&nbsp;% des aides, <strong>{{p_s_reg:number}}&nbsp;% de l'argent</strong>. Une aide
+          de minimis est d'abord petite&nbsp;: {{p_n_petite:number}}&nbsp;% d'entre elles font moins de
+          5&nbsp;000&nbsp;€.
+        </p>
+      </template>
+    </dsfr-data-repeat>
 
     <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
       <div class="fr-col-12 fr-col-md-6">
         <details class="fr-callout fr-icon-database-line odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
+          <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
+          <p class="fr-callout__text fr-text--sm">
             <a href="https://data.economie.gouv.fr/explore/dataset/aides_minimis/"
-               target="_blank" rel="noopener external"><code>aides_minimis</code></a>
-            — les aides déclarées par les autorités d'octroi (État, collectivités, opérateurs), mis à
-            jour chaque jour par la DGE. En application des règlements européens, les aides de minimis des
-            secteurs général, SIEG et pêche-aquaculture sont publiques depuis le 1er janvier 2026&nbsp;: le
-            registre ne recense que les <strong>aides octroyées à partir du 1er janvier 2026</strong>. Celles
-            du secteur agricole le seront au 1er janvier 2027. Les derniers mois sont incomplets&nbsp;: les
-            autorités déclarent avec délai, une baisse récente n'est donc pas une baisse des aides.
-            Le registre est publié tel que déclaré&nbsp;: des lignes identiques sur tous les champs (même
-            bénéficiaire, même montant, même jour, même autorité, même instrument) y figurent et sont
-            comptées comme des aides distinctes — rien ne permet de dire s'il s'agit de doubles saisies.
-            La page d'origine est une <strong>page Studio</strong> Opendatasoft
-            (<a href="https://data.economie.gouv.fr/p/registre-public-des-aides-de-minimis/" target="_blank"
-            rel="noopener external"><code>/p/registre-public-des-aides-de-minimis/</code></a>)&nbsp;: un texte,
-            quatre compteurs, quatre filtres, un tableau.
+               target="_blank" rel="noopener external"><code>aides_minimis</code></a>, publié chaque jour par la
+            DGE sur data.economie.gouv.fr&nbsp;: les aides déclarées par les autorités d'octroi (État,
+            collectivités, opérateurs). En application des règlements européens, le registre recense les aides
+            des régimes général, SIEG et pêche-aquaculture <strong>octroyées à partir du 1er janvier
+            2026</strong>&nbsp;; les aides agricoles le seront au 1er janvier 2027. Le montant est
+            l'<strong>équivalent-subvention brut</strong> déclaré&nbsp;: pour un prêt, l'avantage qu'il
+            procure, pas la somme prêtée. Chaque chiffre de la page est recalculé à l'ouverture.
           </p>
-    </details>
+        </details>
       </div>
       <div class="fr-col-12 fr-col-sm-6 fr-col-md-3">
-        <dsfr-data-kpi source="minimis" value="count" format="nombre"
-          heading="Au registre" label="aides octroyées depuis le 1er janvier 2026" icon="fr-icon-government-line">
-        </dsfr-data-kpi>
+        <dsfr-data-kpi source="minimis" value="montant_esb:sum" format="compact" unit="€"
+          heading="Au registre" label="d'équivalent-subvention brut déclaré"
+          icon="fr-icon-money-euro-circle-line"></dsfr-data-kpi>
       </div>
       <div class="fr-col-12 fr-col-sm-6 fr-col-md-3">
-        <!-- Fraîcheur lue dans la donnée : max sur une colonne de dates ISO
-             (#667, ordre lexicographique), rendu par format="date". -->
+        <!-- Fraîcheur lue dans la donnée : max d'une date ISO, rendu par format="date". -->
         <dsfr-data-kpi source="minimis" value="date_octroi:max" format="date"
           heading="Dernière aide octroyée" label="les derniers mois sont incomplets"
-          icon="fr-icon-calendar-line">
-        </dsfr-data-kpi>
+          icon="fr-icon-calendar-line"></dsfr-data-kpi>
       </div>
     </div>
   </div>
 
-  <!-- ==========================================================================
-       Un export JSON projeté (572 Ko, 0,9 s), puis recherche, facettes, quatre
-       sommes par régime et un tableau, tous côté client. Les quatre compteurs
-       de la page Studio sont quatre <dsfr-data-query where> sur la sélection.
+  <!-- ====================== 1. LE PARADOXE ====================== -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-paradoxe">
+    <h2 id="t-paradoxe">Qui déclare le plus n'est pas qui verse le plus</h2>
+    <p class="fr-hint-text">
+      Pour chaque famille d'autorités d'octroi, sa part du nombre d'aides et sa part des montants. Les deux
+      directions de Bercy sont montrées séparément&nbsp;; les douze conseils régionaux qui déclarent sont
+      regroupés&nbsp;; les «&nbsp;autres&nbsp;» sont plus d'une centaine d'autorités (Caisse des dépôts,
+      ADEME, ministères, agences, collectivités).
+    </p>
+    <div class="odv-chart-slot">
+      <div class="odv-viz" data-code="Part des aides et part des montants, par famille d'autorité">
+        <dsfr-data-chart id="g-familles" source="mi-familles" type="bar"
+          label-field="famille" value-field="part_aides:Part des aides" value-fields="part_montants:Part des montants"
+          unit-tooltip="%" y-min="0"
+          databox databox-title="Part des aides et part des montants, par famille d'autorité d'octroi"
+          databox-source="DGE — aides_minimis, data.economie.gouv.fr" databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-familles" source="mi-familles" table download
+          label-field="famille" value-field="part_aides, part_montants, aides, montant"
+          filename="minimis-familles.csv"
+          description="Pour la DGE, la DGDDI, les conseils régionaux et les autres autorités : part du nombre d'aides et part des montants, en pourcentage. La DGE et la DGDDI ont une part des aides bien plus forte que leur part des montants ; les conseils régionaux et les autres autorités, l'inverse.">
+        </dsfr-data-a11y>
+      </div>
+    </div>
+  </section>
 
-       Lot 13 — cette source était écrite en mode générique (`url=` vers
-       /exports/json + `params`), contournement d'AM-011 : c'était le seul moyen
-       d'obtenir la requête unique, et il coûtait le mode adaptateur lui-même
-       (plus de délégation serveur du where/order-by, plus de server-facets, plus
-       de meta.truncated, et une source qui n'annonçait plus quel jeu elle lit).
-       La mesure d'origine reste la justification : /records plafonne à 100 lignes
-       par requête, soit 167 allers-retours séquentiels pour ce jeu-ci.
-       `fetch-mode="export"` (#689, dsfr-data 0.25.0) rend la même requête unique
-       EN restant en mode adaptateur : le `select` redevient un attribut, délégué
-       au portail. Conséquence directe : `max-records` s'applique de nouveau, et
-       son plafond par défaut (1 000) tronquerait le jeu en silence. Le jeu croît :
-       16 610 lignes le 2026-09-10, 17 621 le 2026-09-26 (`total_count` de l'API),
-       soit environ 63 par jour. Le plafond de 20 000 posé d'abord aurait été
-       atteint début novembre 2026 — d'où max-records="100000", une marge de
-       plusieurs années au rythme observé.
-       `octroi_txt` : la date d'octroi formatée par le portail (`date_format`,
-       FP-003), pour le tableau ; le tri reste sur la date ISO.
-       ========================================================================== -->
+  <!-- ====================== 2. LA CONCENTRATION ====================== -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-tranches">
+    <h2 id="t-tranches">Une aide sur deux est petite ; l'argent tient dans quelques grosses</h2>
+    <dsfr-data-repeat source="mi-reperes">
+      <template>
+        <p class="odv-lecture">
+          Les aides de moins de 5&nbsp;000&nbsp;€ sont <strong>{{p_n_petite:number}}&nbsp;%</strong> du nombre et
+          {{p_s_petite:number}}&nbsp;% des montants. À l'autre bout, celles de 20&nbsp;000&nbsp;€ et plus ne
+          sont que {{p_n_grosse:number}}&nbsp;% des aides, mais <strong>{{p_s_grosse:number}}&nbsp;% de
+          l'argent</strong>.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot">
+      <div class="odv-viz" data-code="Part des aides et part des montants, par tranche de montant">
+        <dsfr-data-chart id="g-tranches" source="mi-tranches" type="bar"
+          label-field="tranche" value-field="part_aides:Part des aides" value-fields="part_montants:Part des montants"
+          unit-tooltip="%" y-min="0"
+          databox databox-title="Part des aides et part des montants, par tranche de montant"
+          databox-source="DGE — aides_minimis, data.economie.gouv.fr" databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-tranches" source="mi-tranches" table download
+          label-field="tranche" value-field="part_aides, part_montants, aides, montant"
+          filename="minimis-tranches.csv"
+          description="Six tranches de montant, de moins de 1 000 euros à 300 000 euros et plus : part du nombre d'aides et part des montants. Les petites tranches portent la majorité des aides et une faible part de l'argent ; les tranches au-dessus de 20 000 euros, l'inverse.">
+        </dsfr-data-a11y>
+      </div>
+    </div>
+  </section>
 
-  <dsfr-data-source id="minimis" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="aides_minimis"
-    fetch-mode="export" max-records="100000"
-    select='regime,nom_beneficiaire,identifiant_beneficiaire,montant_esb,instrument_aide,secteur_aide,commune_beneficiaire,pays_beneficiaire,date_octroi,date_format(date_octroi, "dd/MM/yyyy") as octroi_txt,date_publication,autorite,operateur'
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
+  <!-- ====================== 3. LA NUANCE : DEUX MÉTIERS ====================== -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-moyenne">
+    <h2 id="t-moyenne">Deux métiers : des milliers de petites aides, ou quelques centaines de grosses</h2>
+    <dsfr-data-repeat source="mi-top-bas">
+      <template>
+        <p class="odv-lecture">
+          Parmi les douze autorités qui versent le plus, l'aide moyenne la plus faible est celle de
+          <strong>{{autorite}}</strong>&nbsp;: {{aide_moyenne:number}}&nbsp;€, sur {{aides:number}} aides.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="mi-top-haut">
+      <template>
+        <p class="odv-lecture">
+          La plus forte est celle de <strong>{{autorite}}</strong>&nbsp;: {{aide_moyenne:number}}&nbsp;€ par
+          aide, sur {{aides:number}} aides. L'écart ne mesure pas la générosité d'une autorité mais la nature
+          de ses dispositifs, que le registre ne décrit pas&nbsp;; et le plafond de minimis porte sur
+          l'entreprise, pas sur l'aide.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot odv-chart-slot--haut">
+      <div class="odv-viz" data-code="Aide moyenne des douze autorités qui versent le plus">
+        <dsfr-data-chart id="g-moyenne" source="mi-top" type="bar" horizontal
+          label-field="autorite" value-field="aide_moyenne" name="Aide moyenne (montant total / nombre d'aides)"
+          unit-tooltip="€" selected-palette="neutral"
+          databox databox-title="Aide moyenne des douze autorités qui versent le plus, en euros"
+          databox-source="DGE — aides_minimis, data.economie.gouv.fr" databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-moyenne" source="mi-top" table download decimals="0"
+          label-field="autorite" value-field="aide_moyenne, aides, montant"
+          filename="minimis-aide-moyenne.csv"
+          description="Pour les douze autorités d'octroi dont le montant total déclaré est le plus élevé : aide moyenne en euros (montant total divisé par le nombre d'aides), triée de la plus forte à la plus faible. Les deux directions de Bercy ferment le classement.">
+        </dsfr-data-a11y>
+      </div>
+    </div>
+  </section>
 
-  <dsfr-data-query id="mi-general" source="mi-f" where="regime:eq:Minimis"></dsfr-data-query>
-  <dsfr-data-query id="mi-sieg" source="mi-f" where="regime:eq:Minimis_SIEG"></dsfr-data-query>
-  <dsfr-data-query id="mi-peche" source="mi-f" where="regime:eq:Minimis_Peche"></dsfr-data-query>
+  <!-- ====================== 4. LA NUANCE : LE CALENDRIER ====================== -->
+  <section class="fr-container fr-mb-6w" aria-labelledby="t-calendrier">
+    <h2 id="t-calendrier">Le calendrier est celui des déclarations, pas celui des aides</h2>
+    <dsfr-data-repeat source="mi-reperes">
+      <template>
+        <p class="odv-lecture">
+          Avril concentre <strong>{{p_avril:number}}&nbsp;%</strong> des aides du registre
+          ({{n_avril:number}}), dont {{p_avril_ddi:number}}&nbsp;% déclarées par la seule DGDDI. Les derniers mois
+          sont bas parce que les autorités déclarent avec délai&nbsp;: la baisse de fin de période n'est pas
+          une baisse des aides.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-chart-slot">
+      <div class="odv-viz" data-code="Aides par mois d'octroi et par famille d'autorité">
+        <dsfr-data-chart id="g-mois" source="mi-mois" type="bar" stacked
+          label-field="mois" value-field="aides" series-field="famille"
+          unit-tooltip="aides" y-min="0"
+          databox databox-title="Aides par mois d'octroi et par famille d'autorité"
+          databox-source="DGE — aides_minimis, data.economie.gouv.fr" databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-mois" source="mi-mois" table download
+          label-field="mois" value-field="aides" series-field="famille"
+          filename="minimis-mois.csv"
+          description="Nombre d'aides par mois d'octroi depuis janvier 2026, empilé par famille d'autorité. Avril se détache nettement, porté par la DGDDI ; les deux derniers mois sont incomplets.">
+        </dsfr-data-a11y>
+      </div>
+    </div>
+  </section>
 
-  <!-- `share_percent` (#926) ajoute à chaque groupe sa part du total : c'est
-       elle que lisent les phrases de lecture, et la première ligne (order-by
-       desc, puis une query `limit="1"` en aval) est le groupe de tête. La part
-       est calculée sur les lignes du groupement, AVANT la coupe à une ligne. -->
-  <dsfr-data-query id="mi-par-autorite" source="mi-f" group-by="autorite"
-    aggregate="montant_esb:sum:total, montant_esb:count:nb, total:share_percent:part" order-by="total:desc">
-  </dsfr-data-query>
-  <dsfr-data-query id="mi-autorite-1" source="mi-par-autorite" limit="1"></dsfr-data-query>
-  <!-- Le podium classe par montant ; le nombre d'aides va dessous
-       (`subtitle-field`). Le champ est lu tel quel (String()), sans format :
-       le séparateur de milliers est donc construit ici, en `compute`. -->
-  <dsfr-data-normalize id="mi-par-autorite-n" source="mi-par-autorite"
-    compute="mil = floor(nb / 1000); reste = nb - mil * 1000; aides = when nb = 1 then '1 aide' when mil = 0 then concat(nb, ' aides') when reste < 10 then concat(mil, '&#8239;00', reste, ' aides') when reste < 100 then concat(mil, '&#8239;0', reste, ' aides') else concat(mil, '&#8239;', reste, ' aides')">
-  </dsfr-data-normalize>
-  <!-- La seconde lecture : le même groupement, classé en nombre d'aides. -->
-  <dsfr-data-query id="mi-par-autorite-nb" source="mi-f" group-by="autorite"
-    aggregate="montant_esb:count:nb" order-by="nb:desc">
-  </dsfr-data-query>
-  <dsfr-data-query id="mi-autorite-nb-1" source="mi-par-autorite-nb" limit="1"></dsfr-data-query>
-  <dsfr-data-query id="mi-par-instrument" source="mi-f" group-by="instrument_aide"
-    aggregate="montant_esb:sum:total, total:share_percent:part" order-by="total:desc">
-  </dsfr-data-query>
-  <dsfr-data-query id="mi-instrument-1" source="mi-par-instrument" limit="1"></dsfr-data-query>
-  <!-- Lignes identiques sur tous les champs publiés qui décrivent l'aide :
-       le group-by multi-champs EST le dédoublonnage ; `nb` compte les lignes
-       de chaque groupe, l'agrégat global (sans group-by) en tire le nombre de
-       groupes et le nombre de lignes. Rien n'est retiré des autres blocs. -->
-  <dsfr-data-query id="mi-uniques" source="mi-f"
-    group-by="identifiant_beneficiaire, montant_esb, date_octroi, autorite, instrument_aide, regime"
-    aggregate="montant_esb:count:nb">
-  </dsfr-data-query>
-  <dsfr-data-query id="mi-uniques-n" source="mi-uniques"
-    aggregate="nb:sum:lignes, nb:count:distinctes">
-  </dsfr-data-query>
-  <!-- `{{#if}}` tient 0 pour VRAI (seuls null, '', [] et false sont faux) :
-       l'écart est donc rendu null quand il est nul, pour que la phrase dise
-       « aucune » plutôt que « les autres » sur une sélection sans doublon. -->
-  <dsfr-data-normalize id="mi-uniques-d" source="mi-uniques-n"
-    compute="doublons = when lignes > distinctes then lignes - distinctes else null">
-  </dsfr-data-normalize>
-
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
-  <section class="odv-bandeau">
+  <!-- ====================== 5. EXPLORER ====================== -->
+  <section class="odv-bandeau" aria-labelledby="t-explorer">
     <div class="fr-container">
+      <h2 id="t-explorer">Explorer : une entreprise, une autorité, un instrument</h2>
+      <p class="fr-hint-text">
+        La recherche et les filtres pilotent les compteurs et le tableau de cette section — pas le récit
+        au-dessus, qui porte sur le registre entier.
+      </p>
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="mi-q" source="minimis"
-        fields="nom_beneficiaire, identifiant_beneficiaire, commune_beneficiaire"
-        label="Bénéficiaire, SIREN ou commune" placeholder="Raison sociale, SIREN, commune…"
-        operator="words" count count-label="aide">
+          fields="nom_beneficiaire, identifiant_beneficiaire, commune_beneficiaire"
+          label="Bénéficiaire, SIREN ou commune" placeholder="Raison sociale, SIREN, commune…"
+          operator="words" count count-label="aide">
         </dsfr-data-search>
       </div>
     </div>
   </section>
+
+  <dsfr-data-query id="mi-general" source="mi-f" where="regime:eq:Minimis"></dsfr-data-query>
+  <dsfr-data-query id="mi-sieg" source="mi-f" where="regime:eq:Minimis_SIEG"></dsfr-data-query>
+  <dsfr-data-query id="mi-peche" source="mi-f" where="regime:eq:Minimis_Peche"></dsfr-data-query>
 
   <div class="fr-container fr-mb-8w">
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
 
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-          Rechercher et filtrer<span class="odv-filtres__compte"></span>
+          Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Rechercher et filtrer</h2>
-
-
+        <h3 class="fr-h6">Filtrer</h3>
         <dsfr-data-facets id="mi-f" source="mi-q"
-          fields="regime, instrument_aide, autorite, pays_beneficiaire"
-          labels="regime:Base légale | instrument_aide:Instrument | autorite:Autorité d'octroi | pays_beneficiaire:Pays"
+          fields="regime, instrument_aide, autorite"
+          labels="regime:Base légale | instrument_aide:Instrument | autorite:Autorité d'octroi"
           searchable="autorite" max-values="6"
           display="instrument_aide:multiselect | autorite:multiselect">
         </dsfr-data-facets>
       </details>
 
       <div class="fr-col-12 fr-col-lg-9">
-        <h2 class="fr-h4">Montants déclarés, par régime</h2>
-        <!-- Deux par ligne : à quatre dans la zone de 9 colonnes, « 174 536 650 € »
-             débordait sa tuile (251 px de texte pour 208 px, relevé le 2026-09-26). -->
         <dsfr-data-kpi-group class="fr-mb-2w" cols="2">
+          <dsfr-data-kpi source="mi-f" value="count" format="nombre"
+            heading="Aides de la sélection" label="lignes du registre"></dsfr-data-kpi>
+          <dsfr-data-kpi source="mi-f" value="montant_esb:sum" format="euro"
+            heading="Montant de la sélection" label="équivalent-subvention brut"></dsfr-data-kpi>
           <dsfr-data-kpi source="mi-general" value="montant_esb:sum" format="euro"
             heading="De minimis général" label="équivalent-subvention brut"></dsfr-data-kpi>
           <dsfr-data-kpi source="mi-sieg" value="montant_esb:sum" format="euro"
             heading="De minimis SIEG" label="équivalent-subvention brut"></dsfr-data-kpi>
-          <!-- Le régime agricole n'est pas collecté avant 2027 : pas de somme
-               calculée sur une absence (un « 0 € » se lirait « aucune aide »).
-               Un littéral, au même gabarit que les trois autres. -->
-          <dsfr-data-kpi value="=Non publié"
-            heading="De minimis agricole" label="publication au 1er janvier 2027"></dsfr-data-kpi>
           <dsfr-data-kpi source="mi-peche" value="montant_esb:sum" format="euro"
             heading="De minimis pêche et aquaculture" label="équivalent-subvention brut"></dsfr-data-kpi>
+          <!-- Pas collecté avant 2027 : un littéral, pas une somme calculée sur une absence. -->
+          <dsfr-data-kpi value="=Non publié"
+            heading="De minimis agricole" label="publication au 1er janvier 2027"></dsfr-data-kpi>
         </dsfr-data-kpi-group>
 
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12">
-            <div class="odv-viz" data-code="Les dix autorités d'octroi par montant versé">
-              <h3 class="fr-h6">Qui verse le plus</h3>
-              <!-- Deux phrases qui viennent de la donnée : `dsfr-data-repeat` clone
-                   son gabarit pour l'unique ligne de chaque query `limit="1"`, sans
-                   compteur ni rôle ARIA. Les deux classements (montant, nombre)
-                   diffèrent : leur écart est le message. Elles suivent les filtres. -->
-              <dsfr-data-repeat source="mi-autorite-1">
-                <template>
-                  <p class="odv-lecture"><strong>{{autorite}}</strong> porte
-                    <strong>{{part:number:1}}&nbsp;%</strong> des montants de la sélection, en
-                    {{nb:number}} aides.</p>
-                </template>
-              </dsfr-data-repeat>
-              <dsfr-data-repeat source="mi-autorite-nb-1">
-                <template>
-                  <p class="odv-lecture">En nombre d'aides, c'est <strong>{{autorite}}</strong> qui
-                    déclare le plus ({{nb:number}}).</p>
-                </template>
-              </dsfr-data-repeat>
-              <dsfr-data-podium source="mi-par-autorite-n" label-field="autorite" value-field="total"
-                subtitle-field="aides"
-                value-unit="€" max-items="10" selected-palette="sequentialDescending">
-              </dsfr-data-podium>
-            </div>
-          </div>
-          <div class="fr-col-12">
-            <div class="odv-viz" data-code="Répartition par instrument d'aide">
-              <h3 class="fr-h6">Sous quelle forme</h3>
-              <dsfr-data-repeat source="mi-instrument-1">
-                <template>
-                  <p class="odv-lecture">L'instrument «&nbsp;{{instrument_aide}}&nbsp;» concentre
-                    <strong>{{part:number:1}}&nbsp;%</strong> des montants de la sélection.</p>
-                </template>
-              </dsfr-data-repeat>
-              <div class="odv-chart-slot">
-                <dsfr-data-chart id="g-instrument" source="mi-par-instrument" type="bar" horizontal
-                  label-field="instrument_aide" value-field="total" unit-tooltip="€" name="Équivalent-subvention brut"
-                  empty-label="Instrument non renseigné"
-                  databox databox-title="Répartition par instrument d'aide"
-                  databox-source="DGE — aides_minimis, via data.economie.gouv.fr" databox-download>
-                </dsfr-data-chart>
-                <dsfr-data-a11y for="g-instrument" source="mi-par-instrument" table download
-                  label-field="instrument_aide" value-field="total, part"
-                  empty-label="Instrument non renseigné"></dsfr-data-a11y>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div class="odv-viz" data-code="Le tableau des aides">
-          <h2 class="fr-h4">Les aides</h2>
+          <h3 class="fr-h5">Les aides, de la plus récente à la plus ancienne</h3>
           <dsfr-data-list source="mi-f"
-            columns="regime:Régime, nom_beneficiaire:Bénéficiaire, identifiant_beneficiaire:Identifiant, montant_esb:Montant (€), instrument_aide:Instrument, secteur_aide:Secteur (code NAF), commune_beneficiaire:Commune, octroi_txt:Octroi, autorite:Autorité"
-            sort="date_octroi:desc" pagination="20" export="csv" count-label="aide">
+            columns="nom_beneficiaire:Bénéficiaire, identifiant_beneficiaire:Identifiant, montant_esb:Montant (€), instrument_aide:Instrument, octroi_txt:Octroi, autorite:Autorité d'octroi, operateur:Opérateur, regime:Régime, secteur_aide:Secteur (code NAF), commune_beneficiaire:Commune"
+            sort="date_octroi:desc" pagination="20" export="csv" count-label="aide"
+            caption="Aides de minimis de la sélection">
           </dsfr-data-list>
-          <dsfr-data-repeat source="mi-uniques-d">
-            <template>
-              <p class="fr-text--sm fr-hint-text fr-mt-2w">Sur les {{lignes:number}} lignes de la
-                sélection, {{distinctes:number}} sont distinctes sur les champs qui décrivent l'aide
-                (bénéficiaire, montant, jour d'octroi, autorité, instrument, régime).{{#if doublons}}
-                Les {{doublons:number}} autres répètent exactement une ligne déjà présente&nbsp;: elles
-                sont publiées, sommées et listées comme des aides distinctes.{{/if}}{{#unless doublons}}
-                Aucune répétition exacte dans cette sélection.{{/unless}}</p>
-            </template>
-          </dsfr-data-repeat>
         </div>
       </div>
 
     </div>
   </div>
 
+  <!-- ====================== 6. CE QU'ON NE MONTRE PAS ====================== -->
+  <section class="fr-container fr-mb-8w" aria-labelledby="t-hors-champ">
+    <h2 id="t-hors-champ" class="fr-h3">Ce que cette page ne montre pas, et pourquoi</h2>
+      <dsfr-data-repeat source="mi-uniques-d">
+        <template>
+          <p><strong>Les lignes répétées.</strong> Sur les {{lignes:number}} lignes du registre,
+            {{distinctes:number}} sont distinctes sur les six champs qui décrivent une aide (bénéficiaire,
+            montant, jour d'octroi, autorité, instrument, régime)&nbsp;: {{doublons:number}} répètent exactement une
+            ligne déjà présente. Elles sont publiées telles quelles, et comptées ici comme des aides
+            distinctes&nbsp;: rien ne dit s'il s'agit de doubles saisies ou de plusieurs aides identiques.</p>
+        </template>
+      </dsfr-data-repeat>
+    <dsfr-data-repeat source="mi-reperes">
+        <template>
+          <p><strong>Les aides sans montant.</strong> {{n_sans:number}} lignes n'ont pas de montant&nbsp;: elles
+            comptent dans le nombre d'aides, pas dans les tranches ni dans les sommes.</p>
+        </template>
+      </dsfr-data-repeat>
+    <ul>
+      <li><strong>Le régime agricole</strong>, qui n'est pas encore collecté (publication au 1er janvier
+        2027)&nbsp;: absent par construction, pas nul.</li>
+      <li><strong>Les aides de 300&nbsp;000&nbsp;€ et plus</strong> (dernière tranche). Au relevé du
+        27&nbsp;septembre&nbsp;2026, 35 aides du régime général sont déclarées à exactement 300&nbsp;000&nbsp;€, le
+        plafond par entreprise sur trois ans, et six le dépassent à elles seules. Le registre publie des
+        équivalents-subvention déclarés, sans cumul par entreprise ni correction&nbsp;: c'est une question à
+        poser au producteur, pas un constat de dépassement. On ne l'instruit pas ici.</li>
+      <li><strong>L'opérateur</strong>, distinct de l'autorité d'octroi&nbsp;: au relevé du 27&nbsp;septembre&nbsp;2026,
+        les aides de la DGE sont gérées par la DGFiP (3&nbsp;634) et par Bpifrance (3&nbsp;236). Les classements se
+        font par autorité&nbsp;; l'opérateur est dans le tableau.</li>
+      <li><strong>Le pays du bénéficiaire</strong>, qui n'est pas proposé en filtre&nbsp;: plus de 99,8&nbsp;%
+        des lignes sont en France au relevé du 27&nbsp;septembre&nbsp;2026.</li>
+      <li><strong>Une tendance mensuelle</strong>&nbsp;: le délai de déclaration rend les derniers mois
+        incomplets, et un pic comme celui d'avril tient au rythme d'une autorité. Le calendrier est montré
+        comme tel, pas comme une évolution.</li>
+    </ul>
+  </section>
+
   <!-- ====================== Analyse de reproduction ====================== -->
-  <details class="odv-technique fr-container" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-  <section class="odv-analyse fr-py-8w">
+  <section class="fr-container fr-mb-8w" id="analyse">
+    <details class="odv-technique">
+      <summary>Analyse — Registre des aides de minimis — ce que la recréation a coûté</summary>
+
     <div class="fr-container">
-      <h2>Analyse de reproduction — Registre des aides de minimis</h2>
-      <p>
-        Cible d'origine&nbsp;: la première page <strong>Studio</strong> rencontrée dans ce banc d'essai.
-        Studio est l'éditeur sans code d'Opendatasoft, successeur des pages AngularJS&nbsp;: la page est
-        un JSON (<code>dataProviders</code>, <code>layouts</code>, <code>blocks</code>, <code>filters</code>)
-        lu dans le source HTML. Ici&nbsp;: un bloc texte, quatre blocs <code>kpi</code> (somme de
-        <code>montant_esb</code> sous condition <code>regime = …</code>), quatre filtres <code>select</code>
-        à sélection multiple dont trois cherchables, un bloc <code>table</code> de 13 colonnes à 20 lignes.
-        Aucun graphique.
-      </p>
-      <p>
-        <strong>Relecture métier du 2026-09-26.</strong> La première version reproduisait bien les chiffres
-        mais racontait mal le jeu&nbsp;: un titre «&nbsp;Qui déclare&nbsp;» au-dessus d'un classement par
-        <em>montant</em>, une phrase de lecture à moitié écrite à la main (fausse dès qu'on filtrait), un
-        «&nbsp;0&nbsp;€&nbsp;» calculé pour un régime qui n'est pas encore collecté, un effectif figé dans
-        l'encadré, aucune date. Tout a été corrigé avec des balises existantes&nbsp;; ce qui suit décrit la
-        page telle qu'elle est après correction.
+      <p class="fr-text--lead">
+        Page d'origine&nbsp;: une page <strong>Studio</strong> Opendatasoft
+        (<a href="https://data.economie.gouv.fr/p/registre-public-des-aides-de-minimis/" target="_blank"
+        rel="noopener external"><code>/p/registre-public-des-aides-de-minimis/</code></a>)&nbsp;— un texte,
+        quatre sommes par régime, quatre filtres, un tableau de 13 colonnes. Recréée le 27&nbsp;septembre&nbsp;2026
+        comme une page qui répond avant qu'on cherche&nbsp;: qui déclare, qui verse, et de quelle taille sont
+        les aides. L'outil de recherche de l'original est gardé, en bas.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Le JSON de Studio se lit comme une spécification.</strong> Là où les pages AngularJS
-              demandaient de reconstituer l'intention depuis un template, la configuration Studio dit
-              exactement quoi calculer (<code>yFunction: sum, yField: montant_esb, conditions: regime = Minimis</code>).
-              La transposition en <code>dsfr-data-query where="regime:eq:Minimis"</code> +
-              <code>dsfr-data-kpi value="montant_esb:sum"</code> est mécanique.</li>
-            <li><strong>Les compteurs suivent les filtres</strong>, comme dans Studio, parce que les
-              requêtes sont branchées en aval des facettes (<code>source="mi-f"</code>).</li>
-            <li><strong>Deux classements pour le prix d'une balise.</strong> Qui verse le plus (montant) et qui
-              déclare le plus (nombre) ne sont pas les mêmes autorités&nbsp;: c'est l'histoire du jeu. Une
-              seconde <code>dsfr-data-query group-by="autorite"</code> triée sur le nombre, coupée à une ligne,
-              donne la seconde phrase&nbsp;; le podium porte le nombre d'aides sous chaque autorité
-              (<code>subtitle-field</code>). Les deux phrases viennent de <code>dsfr-data-repeat</code> et de
-              <code>share_percent</code>&nbsp;: aucun mot ni chiffre fixe, vérifié en filtrant par instrument,
-              par autorité et par régime.</li>
-            <li><strong>Le zéro qui n'en est pas un disparaît sans conditionnelle.</strong> Le régime agricole
-              n'est publié qu'en 2027&nbsp;: la tuile porte un littéral (<code>value="=Non publié"</code>, sans
-              <code>source</code>), au même gabarit que les trois sommes. La première version affirmait qu'il
-              fallait une conditionnelle de template pour écrire autre chose que «&nbsp;0&nbsp;€&nbsp;»&nbsp;:
-              c'était faux, et la question n'était pas là — on ne calcule pas ce qui n'est pas collecté.</li>
-            <li><strong>Les répétitions exactes se comptent en une balise.</strong> Un <code>group-by</code>
-              sur six champs (bénéficiaire, montant, jour, autorité, instrument, régime) est le dédoublonnage&nbsp;;
-              un agrégat global en tire le nombre de lignes et de groupes, et une phrase sous le tableau le
-              dit, en suivant les filtres. On ne retire rien des sommes&nbsp;: rien ne prouve qu'il s'agit
-              d'erreurs.</li>
-            <li><strong>Dater la donnée.</strong> <code>value="date_octroi:max" format="date"</code> sur le KPI
-              lit la dernière date ISO du jeu&nbsp;; la période (octroi depuis le 1er janvier 2026) est dans le
-              libellé du compteur. La date du tableau vient du portail (<code>date_format</code> dans le
-              <code>select</code>, délégué en <code>fetch-mode="export"</code>), le tri reste sur la date ISO.</li>
-            <li><strong>Le tableau est un composant.</strong> <code>dsfr-data-list</code> avec
-              <code>columns</code>, <code>sort</code>, <code>pagination</code> et <code>export="csv"</code>
-              couvre le bloc <code>table</code> de Studio, export en plus.</li>
+            <li><strong>Une requête pour toute la page.</strong> <code>fetch-mode="export"</code> charge le
+              registre entier en un appel&nbsp;; récit et exploration se calculent côté client, le récit sur la
+              source brute, l'exploration sur la sortie des facettes.</li>
+            <li><strong>Un chapô entièrement calculé.</strong> Des colonnes 0/1 et «&nbsp;montant si…&nbsp;» posées par
+              <code>compute</code>, sommées par un agrégat sans <code>group-by</code>, donnent une ligne de repères
+              que <code>dsfr-data-repeat</code> écrit. Aucun chiffre en dur dans le récit.</li>
+            <li><strong>Part des aides contre part des montants</strong> en deux <code>share_percent</code> sur le
+              même groupement, et un graphique à deux séries (<code>value-fields</code>)&nbsp;: la forme qui montre
+              le paradoxe, par famille puis par tranche.</li>
+            <li><strong>Une moyenne honnête</strong>&nbsp;: montant total divisé par le nombre d'aides, calculé
+              après le groupement — jamais une moyenne de moyennes.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Les filtres cherchables de Studio sur des champs à forte cardinalité</strong>
-              (plus de 15&nbsp;000 identifiants, plus de 10&nbsp;000 raisons sociales, plus de 6&nbsp;000
-              communes au relevé du 2026-09-26) n'ont pas d'équivalent en facette&nbsp;: une facette à
-              15&nbsp;000 valeurs n'a pas de sens. Ils deviennent une recherche plein texte sur ces trois
-              champs — plus rapide à l'usage, mais on perd la sélection multiple exacte («&nbsp;ces trois
-              SIREN précisément&nbsp;»).</li>
-            <li><strong>Le sous-titre du podium n'a pas de format.</strong> <code>subtitle-field</code> lit le
-              champ tel quel&nbsp;: un nombre s'y affiche «&nbsp;5164&nbsp;», sans séparateur de milliers.
-              Le libellé «&nbsp;5&nbsp;164 aides&nbsp;» est construit en amont par un
-              <code>dsfr-data-normalize compute</code> de cinq lignes (milliers, reste, zéros de tête).
-              Ça marche, mais c'est du formatage écrit à la main.</li>
-            <li><strong>La date de la DataBox n'a pas pu être posée.</strong> <code>databox-date-field</code>
-              lit la date dans les lignes du graphique, et le graphique reçoit des lignes <em>groupées par
-              instrument</em>, sans date. Le seul moyen d'en porter une serait un agrégat <code>max</code> sur
-              la date dans la <code>dsfr-data-query</code>&nbsp;: il rend <strong>2026</strong> au lieu de
-              2026-09-25 — l'agrégat de la query lit la date comme un nombre, là où celui du KPI la compare en
-              texte. Sans erreur ni avertissement. La date est donc portée par le KPI de fraîcheur, pas par la
-              DataBox.</li>
-            <li><strong><code>{{#if}}</code> tient 0 pour vrai.</strong> Pour ne pas écrire «&nbsp;les autres
-              sont des répétitions&nbsp;» sur une sélection qui n'en a aucune, l'écart est calculé en
-              <code>compute</code> et rendu <code>null</code> quand il est nul&nbsp;: seuls <code>null</code>,
-              <code>''</code>, <code>[]</code> et <code>false</code> ferment un bloc.</li>
-            <li><strong>Un jeu qui croît sous un plafond fixe.</strong> Le registre gagne une soixantaine de
-              lignes par jour (16&nbsp;610 le 2026-09-10, 17&nbsp;621 le 2026-09-26). Le
-              <code>max-records="20000"</code> posé d'abord aurait tronqué tous les chiffres vers novembre
-              2026, en silence. Porté à 100&nbsp;000.</li>
-            <li><strong>Quatre montants par ligne ne tiennent pas</strong> dans la zone de neuf colonnes&nbsp;:
-              «&nbsp;174&nbsp;536&nbsp;650&nbsp;€&nbsp;» mesure 251&nbsp;px pour une tuile de 208&nbsp;px et
-              débordait depuis le premier lot. Deux par ligne.</li>
-            <li><strong>Le tableau accessible du graphique</strong> garde les noms de colonnes
-              (<code>instrument_aide</code>, <code>total</code>, <code>part</code>) en en-tête (PG-032).</li>
+            <li><strong>Sept aides sans montant</strong>, que <code>montant_esb:count</code> ne compte pas. Le
+              nombre d'aides passe par une colonne constante (<code>un = 1</code>) sommée, et les tranches écartent
+              explicitement la valeur absente.</li>
+            <li><strong>Le sous-titre du podium n'a toujours pas de format</strong> (AM-088)&nbsp;: plutôt que
+              reconstruire un séparateur de milliers en <code>compute</code> comme l'ancienne page, le podium a
+              cédé la place à des barres triées et à un tableau accessible.</li>
+            <li><strong>Des séries sans nom, sans un mot.</strong> <code>value-fields</code> seul (sans
+              <code>value-field</code>, pourtant requis) trace bien les deux séries, mais ignore leurs alias&nbsp;:
+              la légende dit «&nbsp;Série&nbsp;1 / Série&nbsp;2&nbsp;», sans erreur de configuration. La première
+              série va sur <code>value-field</code>, la seconde sur <code>value-fields</code>.</li>
+            <li><strong>Deux mondes de filtres.</strong> Le récit ne suit pas la recherche, l'exploration si&nbsp;:
+              c'est un choix de branchement (source brute ou sortie des facettes), à dire en page.</li>
           </ul>
         </div>
       </div>
@@ -381,34 +472,26 @@
             <tr><th scope="col">Page Studio</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>dataProviders</code> (1 jeu)</td><td><code>dsfr-data-source</code> en <code>fetch-mode="export"</code> avec <code>select</code> et <code>max-records</code> explicite</td><td>Équivalent&nbsp;: une requête au lieu d'une par tranche de 100 lignes, sans quitter le mode adaptateur</td></tr>
-            <tr><td>4 blocs <code>kpi</code> à condition</td><td>3 <code>dsfr-data-query where</code> + <code>dsfr-data-kpi</code>&nbsp;; 1 KPI littéral pour le régime agricole</td><td>Équivalent pour trois régimes&nbsp;; mieux pour le quatrième (plus de «&nbsp;0&nbsp;€&nbsp;» calculé sur une absence)</td></tr>
-            <tr><td>4 filtres <code>select</code> (1 multiple, 3 cherchables)</td><td><code>dsfr-data-facets</code> + <code>dsfr-data-search</code></td><td>Équivalent pour le régime&nbsp;; recherche à la place des listes de plus de 10&nbsp;000 entrées</td></tr>
-            <tr><td>bloc <code>table</code> 13 colonnes</td><td><code>dsfr-data-list</code> 9 colonnes + export&nbsp;; date formatée par <code>date_format</code></td><td>Équivalent, export en plus&nbsp;; <code>operateur</code>, <code>pays</code> et les deux dates de déclaration ne sont pas affichés</td></tr>
-            <tr><td>—</td><td>podium (montant + nombre d'aides), graphique en barres, <code>dsfr-data-a11y</code>, 3 phrases de lecture (<code>share_percent</code> + <code>dsfr-data-repeat</code>)</td><td>Ajout</td></tr>
-            <tr><td>—</td><td>KPI de fraîcheur (<code>date_octroi:max</code>, <code>format="date"</code>)</td><td>Ajout&nbsp;; la DataBox reste sans date</td></tr>
-            <tr><td>—</td><td>répétitions exactes (<code>group-by</code> sur six champs + agrégat global + <code>{{#if}}</code>)</td><td>Ajout</td></tr>
+            <tr><td><code>dataProviders</code> (1 jeu)</td><td><code>dsfr-data-source fetch-mode="export"</code> + <code>max-records</code> explicite</td><td>Équivalent, une requête</td></tr>
+            <tr><td>4 blocs <code>kpi</code> à condition</td><td>3 <code>dsfr-data-query where</code> + KPI&nbsp;; KPI littéral pour l'agricole</td><td>Équivalent, sans «&nbsp;0&nbsp;€&nbsp;» calculé sur une absence</td></tr>
+            <tr><td>4 filtres <code>select</code> (3 cherchables)</td><td><code>dsfr-data-search</code> + <code>dsfr-data-facets</code></td><td>Recherche à la place des listes de plus de 10&nbsp;000 entrées</td></tr>
+            <tr><td>bloc <code>table</code> 13 colonnes</td><td><code>dsfr-data-list</code> 10 colonnes, opérateur compris, export CSV</td><td>Équivalent&nbsp;; pays et dates de déclaration non affichés</td></tr>
+            <tr><td>—</td><td><code>compute</code> + agrégat + <code>share_percent</code> + <code>dsfr-data-repeat</code>&nbsp;; quatre graphiques et leurs <code>dsfr-data-a11y</code></td><td>Ajout&nbsp;: le récit</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Reproduction immédiate&nbsp;; la lecture, elle, a demandé une seconde passe.</strong>
-          Studio et ChartsBuilder sont deux outils déclaratifs de la même génération&nbsp;: un JSON d'un côté,
-          des balises de l'autre. À périmètre égal, ils se valent&nbsp;; ChartsBuilder ajoute les graphiques,
-          l'accessibilité et l'export sans rien changer au pipeline, Studio garde l'avantage sur les listes de
-          sélection à très forte cardinalité. La relecture métier n'a trouvé aucune capacité manquante pour
-          dire vrai — deux titres, une phrase, un zéro et un effectif étaient faux par écriture, pas par
-          bibliothèque. Les deux frictions réelles sont de petite taille&nbsp;: un sous-titre de podium sans
-          format numérique, et un agrégat <code>max</code> de query qui lit une date comme un nombre.</p>
-        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: AV-020 (le JSON Studio comme spécification),
-          AM-031 confirmé, PG-032 (en-têtes du tableau accessible). La mention d'AM-007 comme raison du
-          «&nbsp;0&nbsp;€&nbsp;» agricole est retirée&nbsp;: elle était périmée et hors sujet.</p>
+        <p><strong>Le récit tient dans des balises, sur une seule requête.</strong> Ce que l'original ne disait
+          pas — deux directions de Bercy déclarent deux aides sur trois pour un quart de l'argent, les Régions
+          l'inverse — sort de deux parts calculées sur le même groupement. Rien n'a manqué à la bibliothèque
+          pour le dire&nbsp;; ce qui a coûté, c'est de lire le jeu (unités, lignes sans montant, calendrier de
+          déclaration).</p>
       </div>
     </div>
+    </details>
   </section>
-  </details>
 
 </main>
 

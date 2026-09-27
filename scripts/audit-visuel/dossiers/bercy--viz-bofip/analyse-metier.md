@@ -9,6 +9,50 @@
 > `modified` 2026-09-17) et la page a été chargée au navigateur (Playwright, dsfr-data 0.33.0,
 > 0 erreur console). Piste héritée de #75 et check-list de #76 revérifiées point par point.
 
+## Recréation du 2026-09-27 — niveau avancé, en récit (dsfr-data 0.42.0)
+
+> Cette section prime sur la relecture du pilote (plus bas, conservée comme trace). Chiffres
+> relevés à l'API `bofip-vigueur` le 2026-09-27 (`modified` 2026-09-17, dernière version publiée
+> le 2026-09-09) et rejoués à l'écran.
+
+**L'histoire trouvée.** Sur 6 357 commentaires en vigueur (type « Contenu »), **1 350 (21 %) sont
+encore dans la version versée le 12 septembre 2012**, jour d'ouverture du BOFiP, jamais republiée.
+La part va de **59 % au contentieux** (129 / 217) et 49 % à l'enregistrement à **7,8 % à l'impôt
+sur le revenu**, qui a republié 34 % de ses commentaires depuis 2024 ; trois séries n'en gardent
+aucun (AIS, RES, TPS). Exemple vérifiable : 27 commentaires ont encore « tribunal de grande
+instance » dans leur titre, juridiction devenue tribunal judiciaire au 1er janvier 2020 ; leur
+version la plus récente date du 12/08/2015. C'est un **écart** (entre séries) doublé d'une
+**inertie** (le stock d'ouverture), que ni l'original (page éditoriale sans dataviz) ni la page du
+pilote (moteur + chronologie de tout le corpus) ne racontaient.
+
+**Angles écartés.** Chronologie de tout le corpus (actualités incluses) : mêle deux objets, et son
+pic de 2012 appelait trois phrases d'excuse — remplacée par une chronologie des seuls commentaires
+où 2012 est scindé (ouverture / reste de l'année). « Volume de doctrine par impôt » : une série
+n'est pas un poids fiscal.
+
+**Plan.** Titre-message + chapeau calculé → 3 KPI (commentaires, part de 2012, actualités à part)
+→ preuve 1 : barres horizontales empilées à 100 % par série, triées par la part d'ouverture
+(tranches : 12/09/2012 / fin 2012-2023 / depuis 2024) → preuve 2 : barres annuelles empilées
+(ouverture / version de l'année), rythme 2013-2025 (239 à 493 par an, 344 en moyenne), médiane
+2018 → nuance : « ancien n'est pas faux », exemple TGI → exploration (recherche plein texte,
+facettes serveur avec libellés de série, liste paginée) → ce qu'on ne montre pas.
+
+**Honnêteté.** Axes à zéro ; parts calculées sur les commentaires de chaque série (ratio de
+comptes, pas de moyenne de taux) ; séries < 20 commentaires non dessinées et comptées sous le
+graphique (2 séries, 14 commentaires : DAE, IMG) ; la date est celle de la version, dit en tête
+des limites ; année en cours bornée par `max(debut_de_validite)`.
+
+**Phrases de lecture** : toutes par `dsfr-data-repeat` (série de tête, contrepoint IR, rythme,
+médiane, TGI, date de la dernière version). Seules bornes écrites : « 2013 à 2025 » (dites dans la
+phrase) et le seuil « depuis 2024 » (dit dans le sous-titre).
+
+**Ce qu'on ne montre pas** (encadré en page) : la date du droit ; l'historique des versions (le
+graphique annuel décrit l'âge du stock, pas l'activité) ; les actualités dans le récit ; 6 lignes
+sans série ; 23 identifiants en double (9 148 lignes / 9 125 identifiants, compte exact par export
+— `count(distinct)` d'ODS rend 9 278, approximatif).
+
+---
+
 ## La question posée, et pour quel lecteur
 
 _Une phrase. Si on ne sait pas la dire, la dataviz ne sait pas ce qu'elle montre._

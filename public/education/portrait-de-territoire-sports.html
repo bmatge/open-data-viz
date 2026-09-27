@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Portrait de territoire — équipements sportifs — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du « Portrait de territoire » du portail Data ES : neuf jeux, une clé pivot qui change de nom dans chacun, et une fiche d'équipement sportif par territoire.">
+  <meta name="description" content="De 1 à 20 équipements sportifs par habitant d'un département à l'autre : la densité en explique l'essentiel. Choisissez un département, la page le compare à la France et à ce que sa densité laisse attendre. Recréation avec dsfr-data du « Portrait de territoire » du recensement des équipements sportifs (Data ES).">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -14,12 +14,72 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
-  <script src="/assets/cles.js"></script>
 </head>
 <body>
 <div id="site-header"></div>
 
 <main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       DEUX requêtes pour tout le récit national et tous les portraits.
+       L'original (AngularJS, equipements.sports.gouv.fr) en émet 71 au chargement
+       et 87 à chaque changement de territoire ; la reproduction précédente de
+       cette page en émettait 12, puis 13 à chaque changement.
+         s-es  : data-es, compté par département × classe de densité (628 lignes)
+         s-pop : population INSEE, sommée par département × classe (629 lignes)
+       Tout le reste — taux, rang, taux attendu à densité égale, France entière —
+       se calcule dans le navigateur, et choisir un département ne les relance pas.
+       Le contexte ne filtre que deux petites sources propres au département :
+         s-fam-dep : son parc par famille (une trentaine de lignes), qui sert
+                     aussi de clé pour extraire sa ligne du classement calculé
+         s-carte   : ses équipements, paresseuse (au défilement)
+       et une source nationale paresseuse, s-fam-nat (29 familles), une fois.
+       ⚠️ Viser une dsfr-data-query CLIENT avec le contexte ne marche pas : la
+       query relaie la clause à sa source amont, qui se recharge filtrée — et
+       tout le classement national se réduit au seul département (essayé : la
+       « France » affichait 5 961 équipements, 1 pour 10 000 habitants).
+       ========================================================================== -->
+
+  <dsfr-data-source id="s-es" api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
+    select="count(*) as n" group-by="dep_nom, reg_nom, dens_lib"
+    fetch-mode="export" max-records="2000"></dsfr-data-source>
+
+  <!-- Le champ `population` du référentiel communal publié sur le même portail. -->
+  <dsfr-data-source id="s-pop" api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="insee-2020-geoapi-2023"
+    select="sum(population) as pop" group-by="nom_departement, dens_lib"
+    fetch-mode="export" max-records="2000"></dsfr-data-source>
+
+  <!-- Le département choisi : la SEULE source que le contexte filtre avec le
+       tableau de la carte. Ses lignes (une par famille, une trentaine) servent
+       deux fois : la clé qui sélectionne la ligne du département dans le
+       classement calculé (jointure `inner`), et la composition de son parc. -->
+  <dsfr-data-source id="s-fam-dep" require-where api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
+    select="count(*) as n" group-by="dep_nom, equip_type_famille"
+    fetch-mode="export" max-records="100"></dsfr-data-source>
+
+  <dsfr-data-source id="s-fam-nat" lazy api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
+    select="count(*) as n" group-by="equip_type_famille"
+    fetch-mode="export" max-records="100"></dsfr-data-source>
+
+  <dsfr-data-source id="s-carte" lazy require-where api-type="opendatasoft"
+    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
+    where="equip_coordonnees is not null"
+    select="inst_nom, equip_nom, equip_numero, equip_type_name, equip_type_famille, new_name, equip_coordonnees"
+    fetch-mode="export" max-records="12000"></dsfr-data-source>
+
+  <!-- Un filtre, une clé : `dep_nom`, le NOM du département, porté à l'identique
+       par data-es (s-carte, s-fam) et par les lignes calculées (q-sel). Pas le code :
+       dep_code de data-es est sans zéro de tête (« 1 »), l'INSEE en a un (« 01 »),
+       et le filtre de contexte compare du texte (PG-030). Le paramètre d'URL
+       `dep_nom` est celui de la version précédente : les liens déjà partagés
+       ouvrent le même département. -->
+  <dsfr-data-context id="ctx" url-sync sources="s-fam-dep s-carte">
+    <dsfr-data-context-filter field="dep_nom" label="Département" ui="sel-dep"></dsfr-data-context-filter>
+  </dsfr-data-context>
 
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
@@ -32,231 +92,46 @@
       </div>
     </nav>
 
-    <h1>Portrait de territoire —
-      <dsfr-data-context-value for="ctx" template="{{reg_nom}}" fallback="France entière" live></dsfr-data-context-value>
-    </h1>
+    <h1>Équipements sportifs&nbsp;: le rang d'un département dit d'abord sa densité</h1>
 
-    <p class="fr-text--lead">
-      Un générateur de fiche de synthèse : vous apportez un territoire, la page rend le parc
-      sportif qui s'y trouve — volumétrie, profil de carence, taux pour 10 000 habitants, âge des
-      équipements. <strong>333 611 équipements</strong>, <strong>68 029 342 habitants</strong>,
-      <strong>35 075 communes</strong> au national.
+    <dsfr-data-repeat source="n-nat">
+      <template>
+        <p class="fr-text--lead">
+          La France compte <strong>{{n_fr:number}}&nbsp;équipements sportifs</strong> recensés, soit
+          <strong>{{taux_fr:number:0}} pour 10&nbsp;000&nbsp;habitants</strong>. D'un département à l'autre,
+          l'écart va de 1 à {{ratio:number:0}}&nbsp;: {{taux_max:number:0}} ({{dep_max}}) contre
+          {{taux_min:number:0}} ({{dep_min}}). La densité en explique l'essentiel&nbsp;: {{c_rtd:number:0}}&nbsp;équipements pour
+          10&nbsp;000&nbsp;habitants dans les communes rurales à habitat très dispersé, {{c_gcu:number:0}} dans les
+          grands centres urbains. Un département se juge donc moins à son rang qu'à l'écart avec ce que sa
+          densité laisse attendre.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <p class="fr-text--sm fr-hint-text fr-mb-4w">
+      Ministère des Sports, recensement des équipements sportifs, espaces et sites de pratique
+      (<a href="https://equipements.sports.gouv.fr/explore/dataset/data-es/" target="_blank" rel="noopener external">Data&nbsp;ES</a>,
+      lu en direct, mis à jour chaque jour) ; population du référentiel communal INSEE 2020 publié sur le
+      même portail. Classes de densité&nbsp;: <a href="https://www.insee.fr/fr/information/6439600" target="_blank" rel="noopener external">grille communale de densité de l'INSEE</a>.
     </p>
 
-    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Les jeux de données utilisés — et la clé qui change de nom quatre fois</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        Quatre jeux du portail <code>equipements.sports.gouv.fr</code>, tous en Licence Ouverte,
-        tous lus sans clé : <a href="https://equipements.sports.gouv.fr/explore/dataset/data-es/" target="_blank" rel="noopener external"><code>data-es</code></a>
-        (333 611 équipements), <code>insee-2020-geoapi-2023</code> (35 075 communes : population,
-        surface, ZRR, ZFRR, CRTE, loi Montagne, label « Ville active et sportive »),
-        <code>quartiers-prioritaires-de-la-politique-de-la-ville-qpv</code> (1 584 QPV) et
-        <code>data-es-agregation</code> (334 360 lignes, pour l'ancienneté — voir l'encadré suivant).
-        <strong>L'original en déclare dix-huit contextes sur neuf jeux</strong> — la moitié
-        suffixée <code>2</code> pour un territoire de comparaison. C'est, de loin, la page la plus
-        multi-sources du banc d'essai.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>La même clé géographique ne porte le même nom dans aucun des quatre jeux</strong> :
-        la région s'appelle <code>reg_nom</code> ici, <code>nom_region</code> là,
-        <code>region_nom</code> ailleurs ; le département <code>dep_code</code>,
-        <code>codedepartement</code>, <code>departement_code</code>. C'est le motif qui structure
-        toute la transposition, et c'est la règle plutôt que l'exception en open data français.
-      </p>
-    </details>
-
-    <details class="fr-callout fr-icon-alert-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le tableau d'ancienneté ne décrit pas la population qu'on croit — et pas celle qu'on croyait ce matin non plus</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        Les tableaux « mise en service et rénovations » de l'original sont branchés sur un
-        <em>autre</em> jeu que le reste de la page : <code>data-es-agregation</code>. La fiche
-        d'audit, écrite le matin même, y a relevé <strong>20 325 lignes</strong> et en a conclu
-        que ces tableaux portaient sur 6,1 % du parc.
-        <strong>Recompté à l'API au moment du portage : 334 360 lignes</strong>
-        (<code>records_count</code> de la métadonnée compris), dont <strong>89 032</strong>
-        catégorisées « structurant » et 208 459 sans catégorie. C'est l'échelle du parc entier,
-        pas 6 %. <strong>Le constat de l'audit ne tient pas, et il est rectifié ici</strong> —
-        la trace de la correction fait partie du livrable.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Ce qui reste vrai, et qui est le vrai problème</strong> : le tableau d'origine
-        affiche « Terrain de football — <strong>2 281</strong> équipements » là où le même jeu,
-        interrogé aujourd'hui avec la même clause, en compte <strong>36 438</strong>. Les deux
-        nombres ne décrivent pas la même population, et rien à l'écran ne dit laquelle. Le tableau
-        est reproduit ci-dessous avec les valeurs de l'API du jour, et son changement de jeu de
-        référence est signalé.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Et l'âge y est calculé par arithmétique de dates sur un entier d'année.</strong>
-        La formule d'origine retranche <code>1 984,84</code> <em>années</em> à la date du jour,
-        puis lit les <em>deux derniers chiffres</em> de l'année obtenue : « 42 ans » est l'an 42
-        après J.-C., pas un âge. Ça marche tant que la moyenne tombe entre 1927 et 2026 ; un
-        équipement moyen de 1900 afficherait « 26 ans ». Ici, l'âge est une soustraction.
-      </p>
-    </details>
-  </div>
-
-  <!-- ==========================================================================
-       Neuf sources, toutes agrégées côté serveur, toutes abonnées au même
-       contexte. L'original émet 71 requêtes au chargement et 87 après un
-       changement de territoire (mesuré) : 64 `ods-adv-analysis` et
-       10 `ods-aggregation`, un par indicateur. Ici, `group-by` multi-champs
-       ramène huit indicateurs de carence en UNE requête, et les vingt lignes
-       « pour 10 000 habitants » se recomposent depuis trois agrégats.
-       ========================================================================== -->
-
-  <dsfr-data-source id="s-es-tot" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    select="count(*) as n" limit="1"></dsfr-data-source>
-
-  <dsfr-data-source id="s-es-scol" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    where="search(inst_part_type_filter, 'scolaire')"
-    select="count(*) as n" limit="1"></dsfr-data-source>
-
-  <!-- Les critères booléens du parc : une requête, 2^n lignes, recomposées
-       par le `where` des KPI (#674) — qui filtre les lignes REÇUES avant de
-       sommer. C'est ce qui permet de lire huit indicateurs sur une source. -->
-  <dsfr-data-source id="s-es-crit" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    group-by="equip_pmr_aire, equip_acc_libre, equip_saison, inst_trans_bool"
-    select="count(*) as n" max-records="50"></dsfr-data-source>
-
-  <dsfr-data-source id="s-es-fam" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    group-by="equip_type_famille"
-    select="count(*) as n, sum(equip_surf) as surf, sum(equip_bassin_surf) as bassin"
-    order-by="n:desc" max-records="40"></dsfr-data-source>
-
-  <dsfr-data-source id="s-es-prop" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    group-by="equip_prop_type" select="count(*) as n"
-    order-by="n:desc" max-records="30"></dsfr-data-source>
-
-  <dsfr-data-source id="s-es-dens" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    group-by="dens_lib" select="count(*) as n"
-    order-by="n:desc" max-records="20"></dsfr-data-source>
-
-  <dsfr-data-source id="s-es-aps" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    group-by="aps_name" select="count(*) as n"
-    order-by="n:desc" max-records="15"></dsfr-data-source>
-
-  <dsfr-data-source id="s-es-cat" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    group-by="categorie" select="count(*) as n" max-records="10"></dsfr-data-source>
-
-  <!-- Le socle INSEE : population, surface (EN HECTARES — le champ `surface`
-       est en ha, l'original le divise par 100 et c'est facile à rater) et
-       nombre de communes, en une requête. -->
-  <dsfr-data-source id="s-insee" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="insee-2020-geoapi-2023"
-    select="sum(population) as pop, sum(surface) as surf_ha, count(*) as communes"
-    limit="1"></dsfr-data-source>
-
-  <!-- Les cinq critères de carence + leurs populations : UNE requête, 25 lignes. -->
-  <dsfr-data-source id="s-carence" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="insee-2020-geoapi-2023"
-    group-by="zrr, zfrr, typo_rurb_crte, commune_loi_montagne, vas"
-    select="count(*) as n, sum(population) as pop" max-records="200"></dsfr-data-source>
-
-  <dsfr-data-source id="s-qpv" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr"
-    dataset-id="quartiers-prioritaires-de-la-politique-de-la-ville-qpv"
-    select="count(*) as n" limit="1"></dsfr-data-source>
-
-  <!-- L'ancienneté : `avg` sur un entier d'année. L'âge se calcule par
-       soustraction, pas par arithmétique de dates. -->
-  <dsfr-data-source id="s-anc-src" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es-agregation"
-    where="equipement_categorie = 'structurant'"
-    group-by="equipement_type"
-    select="count(*) as n, avg(equipement_mise_en_service_date) as annee_service,
-            avg(equipement_derniers_travaux_date) as annee_travaux"
-    order-by="n:desc" max-records="200"></dsfr-data-source>
-
-  <dsfr-data-source id="s-carte" api-type="opendatasoft"
-    base-url="https://equipements.sports.gouv.fr" dataset-id="data-es"
-    where="equip_coordonnees is not null"
-    select="inst_nom, equip_nom, equip_numero, equip_type_name, inst_adresse, inst_cp, new_name, equip_coordonnees"
-    fetch-mode="export" max-records="45000" require-where></dsfr-data-source>
-
-  <!-- Le maître : deux mailles, huit filtres. La même clé porte quatre noms
-       différents, donc un filtre par jeu — c'est ce que `apply-to` permet, et
-       c'est le point le plus coûteux de la transposition. -->
-  <dsfr-data-context id="ctx" url-sync
-    sources="s-es-tot s-es-scol s-es-crit s-es-fam s-es-prop s-es-dens s-es-aps s-es-cat
-             s-insee s-carence s-qpv s-anc-src s-carte">
-    <dsfr-data-context-filter apply-to="s-es-tot s-es-scol s-es-crit s-es-fam s-es-prop s-es-dens s-es-aps s-es-cat s-carte s-qpv"
-      field="reg_nom" label="Région" ui="sel-reg"></dsfr-data-context-filter>
-    <dsfr-data-context-filter apply-to="s-insee s-carence"
-      field="nom_region" ui="sel-reg"></dsfr-data-context-filter>
-    <dsfr-data-context-filter apply-to="s-anc-src"
-      field="region_nom" ui="sel-reg"></dsfr-data-context-filter>
-
-    <!-- La clé du département est un NOM, pas un code — comme celle de la région
-         trois lignes plus haut. Jusqu'au 2026-09-19, le <select> émettait le code
-         (« 1 », « 2 »…) : `dep_code` de `data-es` est bien sur un caractère, mais
-         `codedepartement` d'`insee-2020-geoapi-2023` et `departement_code` de
-         `data-es-agregation` sont sur DEUX, à zéro de tête. Les neuf premiers
-         départements (Ain → Ariège) rendaient donc zéro ligne sur ces deux jeux,
-         EN SILENCE (PG-030 : le filtre de contexte émet `champ = "1"`, comparaison
-         texte, aucune erreur). Vérifié à l'API le 2026-09-19 :
-         `codedepartement='1'` → 0 ligne, `codedepartement='01'` → 392 communes.
-         Les quatre jeux portent un libellé de département, et les 107 valeurs
-         coïncident exactement entre `dep_nom` et `nom_departement` (comparé jeu à
-         jeu) ; `departement_nom` en a 101, les six manquants étant des
-         collectivités sans équipement structurant. -->
-    <dsfr-data-context-filter apply-to="s-es-tot s-es-scol s-es-crit s-es-fam s-es-prop s-es-dens s-es-aps s-es-cat s-carte s-qpv"
-      field="dep_nom" label="Département" ui="sel-dep"></dsfr-data-context-filter>
-    <dsfr-data-context-filter apply-to="s-insee s-carence"
-      field="nom_departement" ui="sel-dep"></dsfr-data-context-filter>
-    <dsfr-data-context-filter apply-to="s-anc-src"
-      field="departement_nom" ui="sel-dep"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <div class="fr-container fr-mb-8w">
-
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-3w">
+    <!-- ===================== Le choix du lecteur ===================== -->
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-2w">
       <div class="fr-col-12 fr-col-md-6">
         <div class="fr-select-group">
-          <label class="fr-label" for="sel-reg">Région</label>
-          <select class="fr-select" id="sel-reg">
-            <option value="">France entière</option>
-            <option value="Auvergne-Rhône-Alpes">Auvergne-Rhône-Alpes</option>
-            <option value="Bourgogne-Franche-Comté">Bourgogne-Franche-Comté</option>
-            <option value="Bretagne">Bretagne</option>
-            <option value="Centre-Val de Loire">Centre-Val de Loire</option>
-            <option value="Corse">Corse</option>
-            <option value="Grand Est">Grand Est</option>
-            <option value="Guadeloupe">Guadeloupe</option>
-            <option value="Guyane">Guyane</option>
-            <option value="Hauts-de-France">Hauts-de-France</option>
-            <option value="La Réunion">La Réunion</option>
-            <option value="Martinique">Martinique</option>
-            <option value="Mayotte">Mayotte</option>
-            <option value="Normandie">Normandie</option>
-            <option value="Nouvelle-Aquitaine">Nouvelle-Aquitaine</option>
-            <option value="Nouvelle-Calédonie">Nouvelle-Calédonie</option>
-            <option value="Occitanie">Occitanie</option>
-            <option value="Pays de la Loire">Pays de la Loire</option>
-            <option value="Polynésie française">Polynésie française</option>
-            <option value="Provence-Alpes-Côte d&#x27;Azur">Provence-Alpes-Côte d&#x27;Azur</option>
-            <option value="Saint-Barthélemy">Saint-Barthélemy</option>
-            <option value="Saint-Martin">Saint-Martin</option>
-            <option value="Saint-Pierre-et-Miquelon">Saint-Pierre-et-Miquelon</option>
-            <option value="Wallis-et-Futuna">Wallis-et-Futuna</option>
-            <option value="Île-de-France">Île-de-France</option>
-          </select>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-dep">Département</label>
+          <label class="fr-label" for="sel-dep">Département
+            <span class="fr-hint-text">Les 101 départements&nbsp;; le choix est gardé dans l'adresse de la page.</span>
+          </label>
           <select class="fr-select" id="sel-dep">
-            <option value="">Tous</option>
-            <option value="Ain">1 — Ain</option>
+            <option value="">Choisir un département</option>
+            <option value="Ain">01 — Ain</option>
+            <option value="Aisne">02 — Aisne</option>
+            <option value="Allier">03 — Allier</option>
+            <option value="Alpes-de-Haute-Provence">04 — Alpes-de-Haute-Provence</option>
+            <option value="Hautes-Alpes">05 — Hautes-Alpes</option>
+            <option value="Alpes-Maritimes">06 — Alpes-Maritimes</option>
+            <option value="Ardèche">07 — Ardèche</option>
+            <option value="Ardennes">08 — Ardennes</option>
+            <option value="Ariège">09 — Ariège</option>
             <option value="Aube">10 — Aube</option>
             <option value="Aude">11 — Aude</option>
             <option value="Aveyron">12 — Aveyron</option>
@@ -267,9 +142,10 @@
             <option value="Charente-Maritime">17 — Charente-Maritime</option>
             <option value="Cher">18 — Cher</option>
             <option value="Corrèze">19 — Corrèze</option>
-            <option value="Aisne">2 — Aisne</option>
-            <option value="Côte-d&#x27;Or">21 — Côte-d&#x27;Or</option>
-            <option value="Côtes-d&#x27;Armor">22 — Côtes-d&#x27;Armor</option>
+            <option value="Corse-du-Sud">2A — Corse-du-Sud</option>
+            <option value="Haute-Corse">2B — Haute-Corse</option>
+            <option value="Côte-d&#x27;Or">21 — Côte-d’Or</option>
+            <option value="Côtes-d&#x27;Armor">22 — Côtes-d’Armor</option>
             <option value="Creuse">23 — Creuse</option>
             <option value="Dordogne">24 — Dordogne</option>
             <option value="Doubs">25 — Doubs</option>
@@ -277,9 +153,6 @@
             <option value="Eure">27 — Eure</option>
             <option value="Eure-et-Loir">28 — Eure-et-Loir</option>
             <option value="Finistère">29 — Finistère</option>
-            <option value="Corse-du-Sud">2A — Corse-du-Sud</option>
-            <option value="Haute-Corse">2B — Haute-Corse</option>
-            <option value="Allier">3 — Allier</option>
             <option value="Gard">30 — Gard</option>
             <option value="Haute-Garonne">31 — Haute-Garonne</option>
             <option value="Gers">32 — Gers</option>
@@ -290,7 +163,6 @@
             <option value="Indre-et-Loire">37 — Indre-et-Loire</option>
             <option value="Isère">38 — Isère</option>
             <option value="Jura">39 — Jura</option>
-            <option value="Alpes-de-Haute-Provence">4 — Alpes-de-Haute-Provence</option>
             <option value="Landes">40 — Landes</option>
             <option value="Loir-et-Cher">41 — Loir-et-Cher</option>
             <option value="Loire">42 — Loire</option>
@@ -301,7 +173,6 @@
             <option value="Lot-et-Garonne">47 — Lot-et-Garonne</option>
             <option value="Lozère">48 — Lozère</option>
             <option value="Maine-et-Loire">49 — Maine-et-Loire</option>
-            <option value="Hautes-Alpes">5 — Hautes-Alpes</option>
             <option value="Manche">50 — Manche</option>
             <option value="Marne">51 — Marne</option>
             <option value="Haute-Marne">52 — Haute-Marne</option>
@@ -312,7 +183,6 @@
             <option value="Moselle">57 — Moselle</option>
             <option value="Nièvre">58 — Nièvre</option>
             <option value="Nord">59 — Nord</option>
-            <option value="Alpes-Maritimes">6 — Alpes-Maritimes</option>
             <option value="Oise">60 — Oise</option>
             <option value="Orne">61 — Orne</option>
             <option value="Pas-de-Calais">62 — Pas-de-Calais</option>
@@ -323,7 +193,6 @@
             <option value="Bas-Rhin">67 — Bas-Rhin</option>
             <option value="Haut-Rhin">68 — Haut-Rhin</option>
             <option value="Rhône">69 — Rhône</option>
-            <option value="Ardèche">7 — Ardèche</option>
             <option value="Haute-Saône">70 — Haute-Saône</option>
             <option value="Saône-et-Loire">71 — Saône-et-Loire</option>
             <option value="Sarthe">72 — Sarthe</option>
@@ -334,7 +203,6 @@
             <option value="Seine-et-Marne">77 — Seine-et-Marne</option>
             <option value="Yvelines">78 — Yvelines</option>
             <option value="Deux-Sèvres">79 — Deux-Sèvres</option>
-            <option value="Ardennes">8 — Ardennes</option>
             <option value="Somme">80 — Somme</option>
             <option value="Tarn">81 — Tarn</option>
             <option value="Tarn-et-Garonne">82 — Tarn-et-Garonne</option>
@@ -345,433 +213,345 @@
             <option value="Haute-Vienne">87 — Haute-Vienne</option>
             <option value="Vosges">88 — Vosges</option>
             <option value="Yonne">89 — Yonne</option>
-            <option value="Ariège">9 — Ariège</option>
             <option value="Territoire de Belfort">90 — Territoire de Belfort</option>
             <option value="Essonne">91 — Essonne</option>
             <option value="Hauts-de-Seine">92 — Hauts-de-Seine</option>
             <option value="Seine-Saint-Denis">93 — Seine-Saint-Denis</option>
             <option value="Val-de-Marne">94 — Val-de-Marne</option>
-            <option value="Val-d&#x27;Oise">95 — Val-d&#x27;Oise</option>
+            <option value="Val-d&#x27;Oise">95 — Val-d’Oise</option>
             <option value="Guadeloupe">971 — Guadeloupe</option>
             <option value="Martinique">972 — Martinique</option>
             <option value="Guyane">973 — Guyane</option>
             <option value="La Réunion">974 — La Réunion</option>
-            <option value="Saint-Pierre-et-Miquelon">975 — Saint-Pierre-et-Miquelon</option>
             <option value="Mayotte">976 — Mayotte</option>
-            <option value="Saint-Barthélemy">977 — Saint-Barthélemy</option>
-            <option value="Saint-Martin">978 — Saint-Martin</option>
-            <option value="Wallis-et-Futuna">986 — Wallis-et-Futuna</option>
-            <option value="Polynésie française">987 — Polynésie française</option>
-            <option value="Nouvelle-Calédonie">988 — Nouvelle-Calédonie</option>
           </select>
-          <p class="fr-hint-text">
-            Les deux se combinent en « et ». L'original a six onglets exclusifs, et changer
-            d'onglet ne change pas le territoire affiché.
-          </p>
         </div>
       </div>
     </div>
 
-    <dsfr-data-context-tags for="ctx" class="fr-mb-4w"></dsfr-data-context-tags>
+    <!-- ===================== 1. Le portrait ===================== -->
+    <h2 class="fr-mt-4w">
+      <dsfr-data-context-value for="ctx" template="{{dep_nom}} face à la France et à sa densité"
+        fallback="Votre département face à la France et à sa densité" live></dsfr-data-context-value>
+    </h2>
 
-    <h2 class="fr-h4">1. Votre territoire</h2>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-      <dsfr-data-kpi source="s-es-tot" value="n:max" format="nombre"
-        heading="Équipements sportifs" label="et lieux de pratique"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-es-scol" value="n:max" format="nombre"
-        heading="En établissement scolaire" label="équipements déclarés"></dsfr-data-kpi>
-      <!-- Pas `value="n:sum / n:sum"` : sur une source déjà agrégée, le
-           `where` du KPI s'applique aux DEUX membres du ratio et le compteur
-           affiche 100 % sans lever d'erreur (essayé, vu à l'écran). La valeur
-           vient de la chaîne pivot → compute, plus bas. -->
-      <dsfr-data-kpi source="crit-taux"
-        value="t_pmr:max" format="pourcentage" decimals="2"
-        heading="Accessibilité PMR" label="des aires de pratique"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-insee" value="pop:max" format="nombre"
-        heading="Habitants" label="population INSEE 2020"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <div class="fr-alert fr-alert--warning fr-alert--sm fr-mb-4w">
-      <p class="fr-text--sm">
-        <strong>Le compteur d'accessibilité PMR n'est pas écrit comme on l'écrirait
-        d'instinct.</strong> La forme naturelle, <code>value="n:sum / n:sum"</code> avec un
-        <code>where</code> sur le numérateur, <strong>affiche 100 %</strong> : le ratio de
-        <code>dsfr-data-kpi</code> (#673) évalue ses deux membres sur la <em>même</em> source, et
-        son <code>where</code> (#674) s'applique <strong>aux deux côtés à la fois</strong>. Sur une
-        source déjà agrégée — où la mesure est une somme et non un nombre de lignes — une part
-        n'est donc pas calculable en un KPI. Essayé, vu à l'écran, sans la moindre erreur ni le
-        moindre avertissement. La valeur affichée ci-dessus (<strong>51,90 %</strong> au national,
-        soit 173 145 sur 333 611) vient de la chaîne <code>pivot</code> →
-        <code>compute</code> décrite au § 5.
-      </p>
-    </div>
-
-    <h2 class="fr-h4">2. Population, surface, densité</h2>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-      <dsfr-data-kpi source="s-insee-n" value="communes:max" format="nombre"
-        heading="Communes" label="dans le territoire"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-insee-n" value="surf_km2:max" format="nombre" decimals="0"
-        heading="Surface" label="km² (le champ INSEE est en hectares)"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-insee-n" value="densite:max" format="nombre" decimals="0"
-        heading="Densité" label="habitants par km²"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-qpv" value="n:max" format="nombre"
-        heading="QPV" label="quartiers prioritaires de la politique de la ville"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <h2 class="fr-h4">3. Profil et carences du territoire</h2>
-    <p class="fr-text--sm fr-mb-2w">
-      Huit indicateurs, <strong>une seule requête</strong> : un <code>group-by</code> sur les cinq
-      critères de l'INSEE renvoie 25 lignes dont chaque compteur ci-dessous extrait sa part, par le
-      <code>where</code> du KPI. L'original en fait huit <code>ods-adv-analysis</code> distincts.
-    </p>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-2w">
-      <dsfr-data-kpi source="s-carence" value="n:sum" where="zrr:eq:zrr" format="nombre"
-        heading="Communes en ZRR" label="zone de revitalisation rurale"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-carence" value="pop:sum" where="zrr:eq:zrr" format="nombre"
-        heading="Population en ZRR" label="habitants"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-carence" value="n:sum" where="zfrr:eq:zfrr" format="nombre"
-        heading="Communes en ZFRR" label="France ruralités revitalisation"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-carence" value="pop:sum" where="zfrr:eq:zfrr" format="nombre"
-        heading="Population en ZFRR" label="habitants"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-    <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-      <dsfr-data-kpi source="s-carence" value="n:sum" where="typo_rurb_crte:eq:RURAL" format="nombre"
-        heading="Communes CRTE rural" label="typologie rural / urbain"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-carence" value="n:sum" where="commune_loi_montagne:isnotnull" format="nombre"
-        heading="Communes loi Montagne" label="classement montagne"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-carence" value="n:sum" where="vas:isnotnull" format="nombre"
-        heading="Villes actives et sportives" label="communes labellisées"></dsfr-data-kpi>
-      <dsfr-data-kpi source="s-carence" value="n:sum" format="nombre"
-        heading="Communes" label="total du territoire (contrôle)"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <h2 class="fr-h4">4. Le parc, par famille, par propriétaire, par emplacement</h2>
-    <div class="fr-grid-row fr-grid-row--gutters">
-      <div class="fr-col-12 fr-col-lg-7">
-        <h3 class="fr-h6">Les quinze premières familles d'équipements</h3>
-        <div class="odv-viz" data-code="Les quinze premières familles d'équipements">
-        <dsfr-data-chart id="g-fam" source="q-fam" type="bar" horizontal
-          label-field="equip_type_famille" value-field="n"
-          name="Équipements" unit-tooltip="équipements" heading-level="4"
-          empty-label="Famille non renseignée"
-          databox databox-title="Les quinze premières familles d'équipements"
-          databox-source="Data ES — ministère des Sports" databox-download></dsfr-data-chart>
-        <dsfr-data-a11y for="g-fam" empty-label="Famille non renseignée" source="q-fam" table download></dsfr-data-a11y>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-5">
-        <h3 class="fr-h6">Emplacement des équipements</h3>
-        <div class="odv-viz" data-code="Emplacement des équipements (grille de densité INSEE)">
-        <dsfr-data-chart id="g-dens" source="s-es-dens" type="pie"
-          label-field="dens_lib" value-field="n"
-          empty-label="Densité non renseignée" unit-tooltip="équipements" heading-level="4"
-          databox databox-title="Emplacement des équipements (grille de densité INSEE)"
-          databox-source="INSEE — grille communale de densité" databox-download></dsfr-data-chart>
-        <dsfr-data-a11y for="g-dens" empty-label="Densité non renseignée" source="s-es-dens" table download></dsfr-data-a11y>
-        </div>
-        <p class="fr-text--xs fr-mt-1w">
-          <strong>3 349 équipements</strong> (1,0 %) n'ont pas de classe de densité et
-          <strong>3 147</strong> (0,9 %) pas de propriétaire : les camemberts de l'original les
-          font disparaître, et leurs totaux ne recollent donc pas au compteur qui les surplombe.
-          <code>empty-label</code> les nomme.
-          <a href="https://www.insee.fr/fr/information/6439600" target="_blank" rel="noopener external">La grille communale de densité, sur insee.fr</a>.
+    <dsfr-data-repeat source="n-msg" empty="">
+      <template>
+        <p class="fr-text--lead">
+          <strong>{{dep_nom}}&nbsp;: {{taux:number:0}}&nbsp;équipements sportifs pour 10&nbsp;000&nbsp;habitants,
+          {{ecart_fr:number:0}}&nbsp;% {{sens_fr}} que la moyenne nationale ({{taux_fr:number:0}}) — {{rang_txt}}
+          département sur {{nb_dep:number}}.</strong>
+          À densité égale — avec la même répartition de ses habitants entre villes, bourgs et campagne — on
+          en attendrait {{taux_att:number:0}}. Le département est donc {{verdict}}&nbsp;: {{ecart_att:number:0}}&nbsp;% {{sens_att}}.
         </p>
-      </div>
-    </div>
+      </template>
+    </dsfr-data-repeat>
 
-    <h3 class="fr-h6 fr-mt-4w">Type de propriétaires (bâti)</h3>
-    <p class="fr-text--sm fr-mb-2w">
-      De <strong>235 631</strong> équipements communaux à <strong>168</strong> classés « Autre » :
-      <strong>trois ordres de grandeur</strong>. L'original pose <code>logarithmic="true"</code>
-      sur son axe ; <code>dsfr-data-chart</code> n'expose aucune échelle
-      (<code>y-min</code>, <code>y-max</code>, <code>x-min</code>, <code>x-max</code> seulement),
-      donc onze barres sur douze sont écrasées. Le tableau de données sous le graphique reste
-      lisible, lui — et c'est un point à trancher chez
-      <a href="https://github.com/GouvernementFR/dsfr-chart" target="_blank" rel="noopener external">DSFR&nbsp;Chart</a>
-      plutôt qu'ici, l'échelle d'un axe étant sa responsabilité.
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="n-msg" value="taux:max" format="nombre" decimals="0" span="6"
+        heading="Équipements pour 10 000 habitants" label="dans le département choisi"
+        idle-message="Choisissez un département"></dsfr-data-kpi>
+      <dsfr-data-kpi source="n-msg" value="taux_att:max" format="nombre" decimals="0" span="3"
+        heading="Attendu à densité égale" label="pour 10 000 habitants"
+        idle-message="—"></dsfr-data-kpi>
+      <dsfr-data-kpi source="n-msg" value="rang:max" format="nombre" span="3"
+        heading="Rang" label="sur 101 départements, du mieux au moins bien doté"
+        idle-message="—"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <div class="odv-viz" data-code="Le département, ce que sa densité laisse attendre, et la France">
+      <dsfr-data-chart id="g-preuve" source="u-msg" type="bar" horizontal
+        label-field="serie" value-field="valeur" name="Équipements pour 10 000 habitants"
+        unit-tooltip="pour 10 000 hab." selected-palette="neutral" highlight-index="[0]"
+        idle-message="Choisissez un département : le graphique le placera entre ce que sa densité laisse attendre et la France."
+        databox databox-title="Le département comparé à ce que sa densité laisse attendre"
+        databox-source="Ministère des Sports (Data ES) ; INSEE, population 2020" heading-level="3"
+        databox-download></dsfr-data-chart>
+      <dsfr-data-a11y for="g-preuve" source="u-msg"
+        description="Trois barres : le nombre d'équipements sportifs pour 10 000 habitants du département choisi, le nombre attendu si chaque classe de densité y avait le taux national de cette classe, et la moyenne nationale."
+        idle-message="Choisissez un département"></dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-mt-1w">
+      <strong>Comment se calcule «&nbsp;attendu à densité égale&nbsp;»</strong>&nbsp;: pour chaque classe de la grille
+      de densité (des grands centres urbains au rural très dispersé), on applique à la population du département
+      dans cette classe le taux national de la classe, puis on additionne. Un département à 1,0 est équipé comme
+      la France l'est, à densité comparable.
     </p>
-    <div class="odv-viz" data-code="Type de propriétaires du bâti">
-    <dsfr-data-chart id="g-prop" source="s-es-prop" type="bar" horizontal
-      label-field="equip_prop_type" value-field="n"
-      name="Équipements" unit-tooltip="équipements" heading-level="4"
-      empty-label="Propriétaire non renseigné"
-      databox databox-title="Type de propriétaires du bâti"
-      databox-source="Data ES — ministère des Sports" databox-download></dsfr-data-chart>
-    <dsfr-data-a11y for="g-prop" empty-label="Propriétaire non renseigné" source="s-es-prop" table download></dsfr-data-a11y>
-    </div>
 
-    <h3 class="fr-h6 fr-mt-4w">Nombre de lieux de pratique selon les activités</h3>
-    <div class="odv-viz" data-code="Les quinze premières activités physiques et sportives">
-    <dsfr-data-chart id="g-aps" source="s-es-aps" type="bar"
-      label-field="aps_name" value-field="n"
-      name="Lieux de pratique" unit-tooltip="lieux" heading-level="4"
-      databox databox-title="Les quinze premières activités physiques et sportives"
-      databox-source="Data ES — ministère des Sports" databox-download></dsfr-data-chart>
-    <dsfr-data-a11y for="g-aps" source="s-es-aps" table download></dsfr-data-a11y>
+    <!-- ===================== 2. La nuance : la densité ===================== -->
+    <h2 class="fr-mt-6w">Plus la commune est dense, moins elle compte d'équipements par habitant</h2>
+    <dsfr-data-repeat source="n-nat">
+      <template>
+        <p class="odv-lecture">
+          Dans les communes rurales à habitat très dispersé, on compte {{c_rtd:number:0}}&nbsp;équipements pour
+          10&nbsp;000&nbsp;habitants&nbsp;; dans les grands centres urbains, {{c_gcu:number:0}} — {{ratio_cls:number:1}} fois
+          moins. Le classement brut des départements reproduit d'abord cette pente&nbsp;: les plus ruraux en tête,
+          Paris et la petite couronne en queue.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz" data-code="Équipements pour 10 000 habitants, par classe de densité de la commune">
+      <dsfr-data-chart id="g-dens" source="q-cls" type="bar" horizontal
+        label-field="dens_lib" value-field="taux_cls_10k" name="Équipements pour 10 000 habitants"
+        unit-tooltip="pour 10 000 hab."
+        databox databox-title="Équipements pour 10 000 habitants, selon la densité de la commune"
+        databox-source="Ministère des Sports (Data ES) ; INSEE, population 2020 et grille de densité" heading-level="3"
+        databox-download></dsfr-data-chart>
+      <dsfr-data-a11y for="g-dens" source="q-cls"
+        description="Le taux d'équipement décroît avec la densité : il est le plus élevé dans le rural à habitat très dispersé et le plus faible dans les grands centres urbains. France entière, équipements sans classe de densité exclus."></dsfr-data-a11y>
     </div>
-
-    <h2 class="fr-h4 fr-mt-6w">5. Statistiques détaillées des équipements</h2>
-    <p class="fr-text--sm fr-mb-2w">
-      Les quatre critères déclarés du parc, extraits d'une seule requête. Le taux est donné à côté
-      du total, ce que l'original fait aussi — sauf pour l'ouverture aux clubs, où il affiche à la
-      place le libellé d'un lien, « <em>non ouvert</em> », de sorte que <strong>le taux réel
-      (19,3 %) ne figure nulle part sur la page</strong> alors que sa voisine l'affiche.
-    </p>
-    <div class="odv-viz" data-code="Équipements déclarés selon quatre critères">
-    <dsfr-data-chart id="g-crit" source="q-crit" type="bar" horizontal
-      label-field="critere" value-field="part"
-      name="Part du parc" unit-tooltip="%" heading-level="3"
-      databox databox-title="Équipements déclarés selon quatre critères"
-      databox-source="Data ES — ministère des Sports" databox-download></dsfr-data-chart>
-    <dsfr-data-a11y for="g-crit" source="q-crit" table download></dsfr-data-a11y>
-    </div>
-
-    <h2 class="fr-h4 fr-mt-6w">6. Ancienneté des équipements structurants</h2>
-    <div class="fr-alert fr-alert--info fr-alert--sm fr-mb-2w">
-      <p class="fr-text--sm">
-        <strong>Ce tableau change de jeu de référence</strong> : il porte sur
-        <code>data-es-agregation</code> (<strong>334 360 lignes</strong>, dernière mise à jour le
-        <strong>23 mars 2026</strong>) et non sur <code>data-es</code>, qui est quotidien. Les deux
-        jeux sont d'échelle comparable, mais ils ne sont pas synchrones, et l'original ne le
-        signale pas. <strong>L'âge est ici une soustraction</strong> (2026 moins l'année moyenne de
-        mise en service), pas une arithmétique de dates dont on lirait les deux derniers chiffres :
-        le terrain de football moyen a <strong>41 ans</strong>, pas 42.
+    <div class="fr-callout fr-icon-information-line fr-mt-3w">
+      <p class="fr-callout__text fr-text--sm">
+        <strong>Ce que cette pente ne dit pas.</strong> Le recensement compte des équipements, pas leur taille ni
+        leur fréquentation&nbsp;: un city-stade de village pèse autant qu'un stade d'agglomération, un site
+        d'escalade autant qu'une piscine. Une partie de l'avantage rural tient à cette unité de compte, l'autre à
+        l'éloignement — il faut plus d'équipements pour desservir des habitants dispersés. Le taux n'est donc pas
+        une mesure de l'accès&nbsp;; c'est pourquoi le portrait compare chaque département à sa propre densité.
       </p>
     </div>
-    <div class="odv-viz" data-code="Graphique">
-    <dsfr-data-list source="anc"
-      caption="Âge moyen de mise en service et de rénovation des équipements structurants"
-      columns="equipement_type:Type d'équipement, n:Équipements, age_service:Âge moyen (ans), age_travaux:Depuis les derniers travaux (ans)"
-      sort="n:desc" pagination="10" count-label="type d'équipement|types d'équipement"></dsfr-data-list>
-    </div>
 
-    <h2 class="fr-h4 fr-mt-6w">7. La carte des équipements</h2>
-    <p class="fr-text--sm fr-mb-2w">
-      L'original ouvre sa carte sur le <strong>planisphère</strong> — <code>&lt;ods-map&gt;</code>
-      sans aucun attribut, échelle 3 000 km, la France est une bulle « 322 773 » au milieu de
-      l'Atlantique — et affiche sous elle « Certaines couches sont affichées partiellement pour des
-      raisons de performance. Essayez de zoomer. » Ici, la carte attend qu'un territoire soit
-      choisi, puis charge tout en une requête.
-      <strong>1 743 équipements n'ont pas de coordonnées</strong> et ne sont sur aucune carte.
+    <!-- ===================== 3. Ce qui distingue le département ===================== -->
+    <h2 class="fr-mt-6w">
+      <dsfr-data-context-value for="ctx" template="{{dep_nom}} : les familles d'équipements qui pèsent plus qu'en France"
+        fallback="Ce qui distingue un département : les familles d'équipements qui pèsent plus qu'en France"></dsfr-data-context-value>
+    </h2>
+    <dsfr-data-repeat source="n-fam-1">
+      <template>
+        <p class="odv-lecture">
+          Rapportée au parc du département, la famille «&nbsp;{{equip_type_famille}}&nbsp;» y pèse
+          {{indice:number:1}}&nbsp;fois son poids national&nbsp;: {{part_dep:number:1}}&nbsp;% des équipements
+          ({{n_dep:number}}), contre {{part_nat:number:1}}&nbsp;% en France.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+    <div class="odv-viz" data-code="Familles d'équipements surreprésentées dans le département">
+      <dsfr-data-chart id="g-fam" source="q-fam-top" type="bar" horizontal
+        label-field="equip_type_famille" value-field="indice" name="Poids dans le département / poids en France"
+        unit-tooltip="× le poids national"
+        idle-message="Choisissez un département : les familles qui y pèsent le plus, rapportées à la France, s'afficheront ici."
+        databox databox-title="Les huit familles d'équipements les plus surreprésentées (1 = même poids qu'en France)"
+        databox-source="Ministère des Sports (Data ES)" heading-level="3"
+        databox-download></dsfr-data-chart>
+      <dsfr-data-a11y for="g-fam" source="q-fam-top"
+        description="Pour chaque famille d'équipements, sa part dans le parc du département divisée par sa part dans le parc national. Seules les familles comptant au moins dix équipements dans le département sont classées."
+        idle-message="Choisissez un département"></dsfr-data-a11y>
+    </div>
+    <p class="fr-text--xs fr-mt-1w">
+      Indice de spécialisation&nbsp;: part de la famille dans le parc du département, divisée par sa part dans le
+      parc national. Les familles de moins de dix équipements dans le département sont écartées, pour qu'un
+      bowling isolé ne passe pas en tête.
     </p>
-    <div class="odv-viz" data-code="Équipements sportifs du territoire">
-    <dsfr-data-map id="carte-pt" name="Équipements sportifs du territoire"
-      height="600px" tiles="ign-plan" tiles-style="muted"
-      tiles-switcher="ign-plan, ign-ortho, osm-fr"
-      center="46.6,2.3" zoom="6" fit-bounds fit-max-zoom="13"
-      idle-message="Choisissez une région ou un département : la carte ne charge rien avant.">
-      <dsfr-data-map-layer id="couche-pt" source="s-carte" type="circle"
-        geo-field="equip_coordonnees" radius="5" fill-opacity="0.85" color="#000091"
-        label="Équipements sportifs et lieux de pratique"
-        tooltip-field="inst_nom" cluster cluster-radius="45" max-items="45000">
-      </dsfr-data-map-layer>
-      <dsfr-data-map-legend label="Équipements sportifs"></dsfr-data-map-legend>
 
-      <dsfr-data-map-popup mode="panel-right" title-field="inst_nom" width="380px">
-        <template>
-          <p class="fr-text--sm fr-mb-1v">{{equip_nom|}}</p>
-          <p class="fr-badge fr-badge--sm fr-mb-3v">{{equip_type_name}}</p>
-          <p class="fr-text--sm fr-mb-1v">{{inst_adresse|Adresse non renseignée}}</p>
-          <p class="fr-text--sm fr-mb-3v"><strong>{{inst_cp}} {{new_name}}</strong></p>
-          <p class="fr-text--xs fr-mb-0">
-            Référence {{equip_numero}} —
-            <a href="https://equipements.sports.gouv.fr/pages/fiche/?refine.equip_numero={{equip_numero}}"
-               target="_blank" rel="noopener external">fiche de l'équipement</a>
-          </p>
-        </template>
-      </dsfr-data-map-popup>
-    </dsfr-data-map>
-
-    <dsfr-data-a11y source="s-carte" for="carte-pt" table download
-      filename="portrait-territoire-equipements.csv"
-      label="Données de la carte"
-      label-field="inst_nom"
-      value-field="equip_nom, equip_type_name, inst_cp, new_name, equip_numero">
-    </dsfr-data-a11y>
+    <!-- ===================== 4. Explorer ===================== -->
+    <h2 class="fr-mt-6w">Explorer&nbsp;: les 101 départements, et les équipements du vôtre</h2>
+    <p class="fr-text--sm">
+      Le tableau est trié par taux brut. La colonne «&nbsp;indice&nbsp;» donne l'écart à ce que la densité laisse
+      attendre&nbsp;: triez-la pour voir quels départements sont réellement mieux ou moins bien dotés que leurs pairs.
+    </p>
+    <div class="odv-viz" data-code="Les 101 départements">
+      <dsfr-data-list source="q-rang"
+        caption="Équipements sportifs pour 10 000 habitants, par département, et écart à la densité"
+        columns="rang:Rang, dep_nom:Département, reg_nom:Région, n:Équipements, pop:Habitants (2020), taux:Pour 10 000 hab., taux_att:Attendu à densité égale, indice:Indice (1 = attendu)"
+        sort="rang:asc" search pagination="20" count-label="département"></dsfr-data-list>
     </div>
+
+    <h3 class="fr-h5 fr-mt-6w">
+      <dsfr-data-context-value for="ctx" template="Les équipements de {{dep_nom}}"
+        fallback="Les équipements du département choisi"></dsfr-data-context-value>
+    </h3>
+    <div class="odv-viz" data-code="Équipements sportifs du département">
+      <dsfr-data-map id="carte-pt" name="Équipements sportifs du département"
+        height="560px" tiles="ign-plan" tiles-style="muted"
+        center="46.6,2.3" zoom="6" fit-bounds fit-max-zoom="13"
+        idle-message="Choisissez un département : la carte ne charge rien avant.">
+        <dsfr-data-map-layer id="couche-pt" source="s-carte" type="circle"
+          geo-field="equip_coordonnees" radius="5" fill-opacity="0.85" color="#000091"
+          label="Équipements sportifs" tooltip-field="inst_nom"
+          cluster cluster-radius="45" max-items="12000"></dsfr-data-map-layer>
+        <dsfr-data-map-popup mode="panel-right" title-field="inst_nom" width="360px">
+          <template>
+            <p class="fr-text--sm fr-mb-1v">{{equip_nom|}}</p>
+            <p class="fr-badge fr-badge--sm fr-mb-3v">{{equip_type_name}}</p>
+            <p class="fr-text--sm fr-mb-3v"><strong>{{new_name}}</strong> — {{equip_type_famille}}</p>
+            <p class="fr-text--xs fr-mb-0">
+              <a href="https://equipements.sports.gouv.fr/pages/fiche/?refine.equip_numero={{equip_numero}}"
+                 target="_blank" rel="noopener external">Fiche de l'équipement {{equip_numero}}</a>
+            </p>
+          </template>
+        </dsfr-data-map-popup>
+      </dsfr-data-map>
+      <dsfr-data-a11y source="s-carte" for="carte-pt" table download
+        filename="equipements-sportifs-departement.csv" label="Données de la carte"
+        label-field="inst_nom" value-field="equip_nom, equip_type_name, new_name, equip_numero"
+        idle-message="Choisissez un département"></dsfr-data-a11y>
+    </div>
+
+    <!-- ===================== Conclusion ===================== -->
+    <div class="fr-callout fr-mt-6w">
+      <h2 class="fr-callout__title">Ce qu'il faut retenir</h2>
+      <p class="fr-callout__text">
+        Le nombre d'équipements sportifs par habitant sépare d'abord la campagne de la ville&nbsp;: un classement
+        brut des départements est un classement de densité. Rapporté à ce que sa densité laisse attendre, un
+        département dit quelque chose de sa politique d'équipement — et de l'exhaustivité de son recensement.
+        Ce que la donnée ne dit pas&nbsp;: la taille, l'état, l'ouverture réelle et la fréquentation des équipements.
+      </p>
+    </div>
+
+    <!-- ===================== Ce qu'on ne montre pas ===================== -->
+    <section class="fr-mt-6w" id="hypotheses">
+      <h2 class="fr-h4">Ce que la page ne montre pas, et les choix qu'elle fait</h2>
+      <dsfr-data-repeat source="n-vide">
+        <template>
+          <ol>
+            <li><strong>{{n_sans_dep:number}}&nbsp;équipements n'ont pas de département</strong> dans le recensement&nbsp;:
+              ils comptent dans le total national, dans aucun portrait. {{n_sans_dens:number}} n'ont pas de classe de
+              densité et sortent du calcul du taux attendu.</li>
+            <li><strong>Les six collectivités d'outre-mer</strong> (Saint-Barthélemy, Saint-Martin,
+              Saint-Pierre-et-Miquelon, Wallis-et-Futuna, Polynésie française, Nouvelle-Calédonie) comptent dans la France entière mais pas dans le classement, qui
+              porte sur les 101 départements&nbsp;: leur population n'a pas de classe de densité dans le référentiel.</li>
+            <li><strong>Deux millésimes se rencontrent</strong>&nbsp;: le parc d'aujourd'hui, la population de 2020.</li>
+            <li><strong>Le recensement est déclaratif.</strong> Un indice bas peut venir d'un parc réellement plus
+              maigre ou d'un recensement moins complet&nbsp;; la donnée ne permet pas de trancher.</li>
+            <li><strong>Angles écartés.</strong> L'âge des équipements (le jeu d'agrégation qui le porte n'est pas
+              synchrone avec le recensement quotidien), l'accessibilité (traitée sur la page dédiée), les zonages
+              ruraux (ZRR, France ruralités) qui décrivent le territoire et non son équipement, et la maille
+              communale, où un seul équipement fait varier le taux du tout au tout.</li>
+          </ol>
+        </template>
+      </dsfr-data-repeat>
+    </section>
   </div>
 
-  <!-- Transformateurs. -->
-  <dsfr-data-normalize id="s-insee-n" source="s-insee"
-    compute="surf_km2 = round(surf_ha / 100, 0); densite = round(pop / (surf_ha / 100), 0)">
-  </dsfr-data-normalize>
+  <!-- ======================= Le pipeline, dans le navigateur ======================= -->
 
-  <dsfr-data-normalize id="fam-n" source="s-es-fam"></dsfr-data-normalize>
-  <dsfr-data-query id="q-fam" source="fam-n" order-by="n:desc" limit="15"></dsfr-data-query>
+  <!-- Par département (101 : hors équipements sans département et hors COM). -->
+  <dsfr-data-query id="q-es-dep" source="s-es"
+    where="dep_nom:isnotnull, reg_nom:notin:Saint-Barthélemy|Saint-Martin|Saint-Pierre-et-Miquelon|Wallis-et-Futuna|Polynésie française|Nouvelle-Calédonie"
+    group-by="dep_nom, reg_nom" aggregate="n:sum:n"></dsfr-data-query>
+  <dsfr-data-query id="q-pop-dep" source="s-pop" group-by="nom_departement" aggregate="pop:sum:pop"></dsfr-data-query>
 
-  <!-- Les quatre critères déclarés du parc, en UNE requête et une chaîne de
-       transformateurs. Le montage mérite d'être lu, parce qu'il n'a rien
-       d'évident :
-         group-by sur 4 booléens   → 16 lignes (2^4)
-         compute d'une constante    → une clé de jointure commune
-         4 x pivot                  → 4 lignes d'une colonne v_true / v_false
-         3 x join sur cette clé     → UNE ligne portant les 8 colonnes
-         compute                    → les 4 taux, sur la même ligne
-         unpivot                    → 4 lignes {critère, taux}, prêtes à tracer
-       Huit composants pour quatre nombres. Il n'y a pas d'union dans le
-       pipeline (join juxtapose des colonnes, il n'empile pas des lignes) :
-       passer par une ligne unique puis la déplier est le seul chemin. -->
-  <dsfr-data-normalize id="crit-k" source="s-es-crit" compute="k = 'tout'"></dsfr-data-normalize>
-  <dsfr-data-pivot id="crit-pmr" source="crit-k" row="k" column="equip_pmr_aire"
-    value="n" aggregate="sum" column-format="pmr_{value}"></dsfr-data-pivot>
-  <dsfr-data-pivot id="crit-libre" source="crit-k" row="k" column="equip_acc_libre"
-    value="n" aggregate="sum" column-format="libre_{value}"></dsfr-data-pivot>
-  <dsfr-data-pivot id="crit-saison" source="crit-k" row="k" column="equip_saison"
-    value="n" aggregate="sum" column-format="saison_{value}"></dsfr-data-pivot>
-  <dsfr-data-pivot id="crit-trans" source="crit-k" row="k" column="inst_trans_bool"
-    value="n" aggregate="sum" column-format="trans_{value}"></dsfr-data-pivot>
+  <!-- Taux national par classe de densité. -->
+  <dsfr-data-query id="q-cls-n" source="s-es" where="dens_lib:isnotnull" group-by="dens_lib" aggregate="n:sum:n_cls"></dsfr-data-query>
+  <dsfr-data-query id="q-cls-p" source="s-pop" where="dens_lib:isnotnull" group-by="dens_lib" aggregate="pop:sum:pop_cls"></dsfr-data-query>
+  <dsfr-data-join id="j-cls" left="q-cls-n" right="q-cls-p" on="dens_lib" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="n-cls" source="j-cls"
+    compute="taux_cls = n_cls / pop_cls; taux_cls_10k = round(n_cls / pop_cls * 10000, 1); k = 'fr'; code = when dens_lib = 'Grands centres urbains' then 'gcu' when dens_lib = 'Rural à habitat très dispersé' then 'rtd' else 'autre'"></dsfr-data-normalize>
+  <dsfr-data-query id="q-cls" source="n-cls" order-by="taux_cls_10k:desc"></dsfr-data-query>
 
-  <dsfr-data-join id="crit-j1" left="crit-pmr" right="crit-libre" on="k" type="left"></dsfr-data-join>
-  <dsfr-data-join id="crit-j2" left="crit-j1" right="crit-saison" on="k" type="left"></dsfr-data-join>
-  <dsfr-data-join id="crit-j3" left="crit-j2" right="crit-trans" on="k" type="left"></dsfr-data-join>
+  <!-- Taux attendu : population du département dans chaque classe × taux national de la classe. -->
+  <dsfr-data-join id="j-att" left="s-pop" right="n-cls" on="dens_lib" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="n-att" source="j-att" compute="att = pop * taux_cls"></dsfr-data-normalize>
+  <dsfr-data-query id="q-att-dep" source="n-att" group-by="nom_departement" aggregate="att:sum:att"></dsfr-data-query>
 
-  <dsfr-data-normalize id="crit-taux" source="crit-j3"
-    compute="total = coalesce(pmr_true, 0) + coalesce(pmr_false, 0);
-             t_pmr = round(coalesce(pmr_true, 0) / (coalesce(pmr_true, 0) + coalesce(pmr_false, 0)) * 100, 1);
-             t_libre = round(coalesce(libre_true, 0) / (coalesce(libre_true, 0) + coalesce(libre_false, 0)) * 100, 1);
-             t_saison = round(coalesce(saison_true, 0) / (coalesce(saison_true, 0) + coalesce(saison_false, 0)) * 100, 1);
-             t_trans = round(coalesce(trans_true, 0) / (coalesce(trans_true, 0) + coalesce(trans_false, 0)) * 100, 1)">
-  </dsfr-data-normalize>
-  <dsfr-data-unpivot id="q-crit" source="crit-taux"
-    value-cols="t_pmr:Accessibilité PMR des aires de pratique, t_libre:En accès libre (sans encadrement), t_trans:Accessible en transports en commun, t_saison:Saisonnier (moins de six mois)"
-    var-name="critere" value-name="part"></dsfr-data-unpivot>
+  <dsfr-data-join id="j-dep1" left="q-es-dep" right="q-pop-dep" on="dep_nom=nom_departement" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="j-dep" left="j-dep1" right="q-att-dep" on="dep_nom=nom_departement" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="n-dep" source="j-dep"
+    compute="taux = round(n / pop * 10000, 1); taux_att = round(att / pop * 10000, 1); indice = round(n / att, 2); un = 1; k = 'fr'"></dsfr-data-normalize>
+  <!-- Le rang : un cumul de 1 sur les lignes triées par taux décroissant. -->
+  <dsfr-data-query id="q-rang" source="n-dep" order-by="taux:desc" aggregate="un:running_sum:rang"></dsfr-data-query>
+  <!-- Le département choisi : sa ligne du classement, extraite par jointure
+       interne sur la clé que renvoie s-fam-dep (en attente tant qu'aucun choix). -->
+  <dsfr-data-query id="q-key" source="s-fam-dep" group-by="dep_nom" aggregate="n:sum:n_cle"></dsfr-data-query>
+  <dsfr-data-join id="q-sel" left="q-rang" right="q-key" on="dep_nom" type="inner"></dsfr-data-join>
 
-  <dsfr-data-normalize id="anc" source="s-anc-src"
-    compute="age_service = when is_null(annee_service) then null else round(2026 - annee_service, 0); age_travaux = when is_null(annee_travaux) then null else round(2026 - annee_travaux, 0)">
-  </dsfr-data-normalize>
+  <!-- La ligne nationale : totaux, extrêmes, classes. Clé constante k = 'fr'. -->
+  <dsfr-data-query id="q-fr-n" source="s-es" aggregate="n:sum:n_fr"></dsfr-data-query>
+  <dsfr-data-normalize id="n-fr-n" source="q-fr-n" compute="k = 'fr'"></dsfr-data-normalize>
+  <dsfr-data-query id="q-fr-p" source="s-pop" aggregate="pop:sum:pop_fr"></dsfr-data-query>
+  <dsfr-data-normalize id="n-fr-p" source="q-fr-p" compute="k = 'fr'"></dsfr-data-normalize>
+  <dsfr-data-query id="q-top" source="n-dep" order-by="taux:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="n-top" source="q-top" compute="dep_max = dep_nom; taux_max = taux"></dsfr-data-normalize>
+  <dsfr-data-query id="q-bot" source="n-dep" order-by="taux:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="n-bot" source="q-bot" compute="dep_min = dep_nom; taux_min = taux"></dsfr-data-normalize>
+  <dsfr-data-query id="q-nb" source="n-dep" aggregate="dep_nom:count:nb_dep"></dsfr-data-query>
+  <dsfr-data-normalize id="n-nb" source="q-nb" compute="k = 'fr'"></dsfr-data-normalize>
+  <dsfr-data-pivot id="p-cls" source="n-cls" row="k" column="code" value="taux_cls_10k" aggregate="max" column-format="c_{value}"></dsfr-data-pivot>
+  <dsfr-data-join id="j-n1" left="n-fr-n" right="n-fr-p" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="j-n2" left="j-n1" right="p-cls" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="j-n3" left="j-n2" right="n-top" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-join id="j-n4" left="j-n3" right="n-bot" on="k" type="inner" prefix-right="bas_"></dsfr-data-join>
+  <dsfr-data-join id="j-n5" left="j-n4" right="n-nb" on="k" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="n-nat" source="j-n5"
+    compute="taux_fr = round(n_fr / pop_fr * 10000, 1); ratio = round(taux_max / taux_min, 0); ratio_cls = round(c_rtd / c_gcu, 1)"></dsfr-data-normalize>
 
-  <!-- ====================== Analyse de reproduction ====================== -->
+  <!-- Le message du département choisi. -->
+  <dsfr-data-join id="j-msg" left="q-sel" right="n-nat" on="k" type="inner" prefix-right="nat_"></dsfr-data-join>
+  <dsfr-data-normalize id="n-msg" source="j-msg"
+    compute="ecart_fr = round(abs(taux / taux_fr - 1) * 100, 0);
+             sens_fr = when taux >= taux_fr then 'de plus' else 'de moins';
+             ecart_att = round(abs(indice - 1) * 100, 0);
+             sens_att = when indice >= 1 then 'de plus que prévu' else 'de moins que prévu';
+             rang_txt = when rang = 1 then '1er' else concat(rang, 'e');
+             verdict = when indice >= 1.1 then 'mieux équipé que sa densité ne le laisse attendre' when indice <= 0.9 then 'moins équipé que sa densité ne le laisse attendre' else 'équipé à peu près comme sa densité le laisse attendre'"></dsfr-data-normalize>
+  <dsfr-data-unpivot id="u-msg0" source="n-msg" id-cols="dep_nom"
+    value-cols="taux:dep, taux_att:Attendu à densité égale, taux_fr:France entière"
+    var-name="serie0" value-name="valeur"></dsfr-data-unpivot>
+  <dsfr-data-normalize id="u-msg" source="u-msg0"
+    compute="serie = when serie0 = 'dep' then dep_nom else serie0"></dsfr-data-normalize>
+
+  <!-- Spécialisation : part de chaque famille dans le département / part en France. -->
+  <dsfr-data-query id="q-fam-nat" source="s-fam-nat" aggregate="n:sum:n_nat, n_nat:share:p_nat" group-by="equip_type_famille"></dsfr-data-query>
+  <dsfr-data-query id="q-fam-dep" source="s-fam-dep" group-by="equip_type_famille" aggregate="n:sum:n_dep, n_dep:share:p_dep"></dsfr-data-query>
+  <dsfr-data-join id="j-fam" left="q-fam-dep" right="q-fam-nat" on="equip_type_famille" type="inner"></dsfr-data-join>
+  <dsfr-data-normalize id="n-fam" source="j-fam"
+    compute="indice = round(p_dep / p_nat, 1); part_dep = round(p_dep * 100, 1); part_nat = round(p_nat * 100, 1)"></dsfr-data-normalize>
+  <dsfr-data-query id="q-fam-top" source="n-fam" where="n_dep:gte:10" order-by="indice:desc" limit="8"></dsfr-data-query>
+  <dsfr-data-query id="n-fam-1" source="q-fam-top" limit="1"></dsfr-data-query>
+
+  <!-- Ce qu'on ne montre pas : les lignes sans département, sans densité. -->
+  <dsfr-data-normalize id="n-es-v" source="s-es"
+    compute="sans_dep = when is_null(dep_nom) then n else 0; sans_dens = when is_null(dens_lib) then n else 0"></dsfr-data-normalize>
+  <dsfr-data-query id="n-vide" source="n-es-v" aggregate="sans_dep:sum:n_sans_dep, sans_dens:sum:n_sans_dens"></dsfr-data-query>
+
+  <!-- ====================== Analyse ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Portrait de territoire — ce que la reproduction a coûté</summary>
+    <details class="odv-technique">
+      <summary>Analyse — ce que la recréation a coûté</summary>
 
-    <div class="fr-container">
-      <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine :
-        <a href="https://equipements.sports.gouv.fr/pages/portrait-territoire/" target="_blank" rel="noopener external">une page AngularJS de <code>equipements.sports.gouv.fr</code></a>,
-        <strong>186 Ko de template pour une quarantaine d'indicateurs</strong>.
-        Fiche d'audit : <code>docs/portail-education/portrait-de-territoire-sports.md</code>,
-        vingt défauts. C'est la page la plus multi-sources du banc — dix-huit contextes, neuf jeux,
-        six mailles, un territoire de comparaison.
+      <p class="fr-text--lead">
+        Cible d'origine&nbsp;:
+        <a href="https://equipements.sports.gouv.fr/pages/portrait-territoire/" target="_blank" rel="noopener external">le «&nbsp;Portrait de territoire&nbsp;» de <code>equipements.sports.gouv.fr</code></a>,
+        une quarantaine d'indicateurs de même poids sur neuf jeux, 71&nbsp;requêtes au chargement. La reproduction
+        précédente en gardait l'inventaire (12&nbsp;requêtes, puis 13 à chaque changement de territoire). La
+        recréation garde le générateur — un département choisi, dans l'adresse — et lui donne une question&nbsp;:
+        <em>ce département est-il plus ou moins équipé que sa densité ne le laisse attendre&nbsp;?</em> Deux
+        requêtes au chargement, une par changement de département (deux si la carte est à l'écran).
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Une clé, quatre noms, quatre attributs.</strong> La région s'appelle
-              <code>reg_nom</code> dans <code>data-es</code> et dans le jeu QPV,
-              <code>nom_region</code> à l'INSEE, <code>region_nom</code> dans le jeu d'agrégation.
-              <code>dsfr-data-context-filter</code> accepte plusieurs filtres sur le
-              <em>même</em> élément d'UI, chacun avec son <code>field</code> et sa liste
-              <code>apply-to</code> : trois balises par maille, et la clé se traduit à la volée
-              pour chaque jeu. <strong>Vérifié au navigateur</strong> — c'était le point que la
-              fiche d'audit signalait comme « établi par lecture du code, pas rejoué ».</li>
-            <li><strong>Huit indicateurs de carence en une requête.</strong> Un
-              <code>group-by</code> sur cinq critères de l'INSEE renvoie 25 lignes ; le
-              <code>where</code> du KPI (#674) filtre les lignes reçues avant de sommer. Les huit
-              <code>ods-adv-analysis</code> de l'original deviennent <strong>une</strong>
-              requête et huit attributs.</li>
-            <li><strong>Le titre qui dit le territoire.</strong> La page d'origine interpole
-              <code>{{search.selection}}</code> <strong>dix-sept fois</strong> — titre, paragraphes,
-              en-têtes de colonne. La fiche d'audit en faisait un manque réel (« aucun composant ne
-              rend la valeur d'un filtre dans du texte courant »).
-              <strong><code>dsfr-data-context-value</code> (#742) le fait</strong>, avec un
-              <code>template</code>, un <code>fallback</code> et une région live pour les lecteurs
-              d'écran. <strong>À requalifier.</strong></li>
-            <li><strong>Les hectares, la densité et l'âge, en arithmétique simple.</strong>
-              Le champ <code>surface</code> de l'INSEE est en hectares — l'original le divise par
-              100 et c'est facile à rater ; <code>compute</code> le fait, et calcule la densité
-              dans la foulée. L'âge des équipements est une soustraction, pas une arithmétique de
-              dates dont on lit les deux derniers chiffres.</li>
-            <li><strong>Le groupe <code>null</code> nommé.</strong> <code>empty-label</code> rend
-              visibles les 3 349 équipements sans classe de densité et les 3 147 sans propriétaire
-              que les camemberts d'origine escamotent — d'où des totaux qui ne recollaient pas au
-              compteur juste au-dessus.</li>
+            <li><strong>Tout le classement dans le navigateur.</strong> Deux sources agrégées côté serveur
+              (département × classe de densité, 628 et 629&nbsp;lignes, <code>fetch-mode="export"</code>)&nbsp;;
+              taux, taux attendu, indice et France entière en <code>dsfr-data-query</code>,
+              <code>dsfr-data-join</code> et <code>compute</code>. Le rang est un <code>running_sum</code> d'une
+              colonne à 1 sur les lignes triées.</li>
+            <li><strong>Le taux attendu à densité égale</strong>, standardisation directe, en trois balises&nbsp;:
+              joindre la population par classe au taux national de la classe, multiplier, sommer par département.
+              Rejoué à l'API&nbsp;: Gironde 36,4 pour 10&nbsp;000 contre 46,2 attendus, 81<sup>e</sup> sur 101.</li>
+            <li><strong>Les phrases calculées</strong>&nbsp;: <code>dsfr-data-repeat</code> sur une ligne unique,
+              <code>when … then</code> pour «&nbsp;de plus / de moins&nbsp;» et «&nbsp;1er / 81e&nbsp;», formats
+              <code>:number</code> du gabarit.</li>
+            <li><strong>La spécialisation</strong> en deux <code>share</code> et une division.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Un constat de l'audit qui ne tient pas, et qu'il fallait rejouer.</strong>
-              La fiche d'audit fait de son défaut n° 1 que les deux tableaux d'ancienneté
-              « portent sur 6,1 % du parc, sans le dire » : 20 325 lignes dans
-              <code>data-es-agregation</code> contre 333 611 dans <code>data-es</code>.
-              <strong>Recompté à l'API au moment du portage : 334 360 lignes</strong>, dont 89 032
-              structurantes. L'échelle est celle du parc entier. Le constat est rectifié dans
-              l'encadré du haut de page, et il rappelle une règle du dépôt : <strong>un chiffre
-              relevé à l'écran n'est pas un chiffre vérifié à l'API</strong>, et un jeu peut
-              changer entre l'audit et le portage. Ce qui reste vrai, en revanche, est plus
-              gênant : le tableau d'origine affiche 2 281 terrains de football là où le même jeu,
-              avec la même clause, en compte aujourd'hui 36 438.</li>
-            <li><strong>Le ratio inter-jeux : je l'ai déclaré impossible, il ne l'est pas.</strong>
-              «&nbsp;Surface des bassins pour 10 000 habitants&nbsp;» divise une somme de
-              <code>data-es</code> par une somme d'<code>insee-2020-geoapi-2023</code>. J'avais conclu
-              qu'aucune voie native n'existait&nbsp;: un <code>dsfr-data-kpi</code> n'a qu'un
-              <code>source</code>, et <code>dsfr-data-join</code> + <code>compute</code> donne un taux
-              <em>par commune</em>, dont la moyenne n'est pas le taux du territoire. <strong>Le
-              raisonnement était juste sur <code>compute</code> et faux sur la conclusion</strong>&nbsp;:
-              le motif documenté depuis la 0.27.0 (issue #748) est <em>agréger, joindre, puis diviser</em>,
-              et le ratio du KPI <code>a:sum / b:sum</code> somme les deux colonnes <strong>avant</strong>
-              de diviser. Trois balises suffisent&nbsp;:
-              <code>group-by="dep_code"</code> d'un côté, <code>group-by="codedepartement"</code> de
-              l'autre, <code>dsfr-data-join</code>, puis
-              <code>value="surf_bassin:sum / pop:sum"</code>. Vérifié au navigateur, sans erreur.
-              J'avais raisonné sur <code>compute</code> sans essayer le ratio sur la table jointe.</li>
-            <li><strong>Et le motif natif rend un chiffre faux en silence, pour une raison qui n'est
-              pas la sienne.</strong> Sur cet indicateur, il donne <strong>235,64</strong> m² pour
-              10 000 habitants là où les deux sommes à l'API en donnent <strong>239,16</strong>&nbsp;:
-              −1,5&nbsp;%, sans un mot. <code>data-es</code> publie ses départements en
-              <code>1</code>…<code>9</code>, l'INSEE en <code>01</code>…<code>09</code>&nbsp;; la
-              jointure <code>inner</code> apparie <strong>98 lignes sur 101</strong> et perd
-              110 600 m² de bassin. C'est le même défaut de zéro de tête que la carte de l'issue #766,
-              sur un autre chemin de code — mais là où la carte se <em>vide</em>, ce qui se voit, la
-              jointure rend un total plausible, ce qui ne se voit pas. Une jointure qui apparie 98
-              lignes sur 101 se comporte aujourd'hui comme une jointure qui marche. Remonté en
-              commentaire de l'épic #781. <strong>Le bloc «&nbsp;pour 10 000 habitants&nbsp;» reste
-              donc à construire ici</strong>, et il le sera avec un <code>dsfr-data-normalize</code>
-              de cadrage sur la clé&nbsp;: c'est du travail restant, plus une limite.</li>
-            <li><strong>Une part n'est pas calculable en un KPI sur une source agrégée.</strong>
-              Le troisième compteur du haut de page affiche <strong>100 %</strong> : le
-              <code>where</code> du KPI s'applique aux deux membres du ratio à la fois, donc
-              <code>n:sum / n:sum</code> est toujours 1. Le contournement est la chaîne
-              <code>pivot</code> → <code>compute</code>, utilisée pour le tableau du § 5 — quatre
-              composants par indicateur. <strong>Le compteur faux est laissé en place, avec sa
-              note</strong> : c'est un piège silencieux, il ne lève aucune erreur, et il valait
-              mieux le montrer que le taire.</li>
-            <li><strong>Il n'y a pas d'union dans le pipeline, et ça se paie en huit
-              composants.</strong> Le § 5 met quatre taux côte à côte. Chacun vient d'un critère
-              différent, donc d'un <code>dsfr-data-pivot</code> différent, et
-              <code>dsfr-data-join</code> <em>juxtapose des colonnes</em> — il n'empile pas des
-              lignes. Le chemin qui marche est un détour :
-              <strong>agréger, replier quatre fois, joindre trois fois pour n'avoir plus qu'UNE
-              ligne à huit colonnes, calculer les quatre taux dessus, puis la déplier en quatre
-              lignes</strong>. Huit composants pour quatre nombres, à partir d'<em>une seule</em>
-              requête. Le résultat est juste, il suit les filtres, et il est entièrement
-              déclaratif — mais un <code>dsfr-data-concat</code> qui empilerait les lignes de
-              plusieurs sources ferait la même chose en une balise, et c'est le pendant exact du
-              besoin qui a fait naître le pivot.</li>
-            <li><strong>Pas d'échelle logarithmique.</strong> Les propriétaires vont de 235 631 à
-              168 : sur un axe linéaire, onze barres sur douze sont invisibles. L'original pose
-              <code>logarithmic="true"</code>. <code>dsfr-data-chart</code> n'expose que
-              <code>x-min</code>/<code>x-max</code>/<code>y-min</code>/<code>y-max</code>.
-              <strong>À trancher chez DSFR&nbsp;Chart</strong>, l'échelle d'un axe étant sa
-              responsabilité, pas celle de la couche de données.</li>
-            <li><strong>Pas de couleur par catégorie sur un graphique… mais si.</strong>
-              La fiche d'audit classait <code>color-map</code> sur <code>dsfr-data-chart</code> en
-              manque réel (« la grammaire existe sur la couche de carte, pas sur le graphique »).
-              <strong>Elle existe depuis #732</strong>, avec la même écriture
-              <code>modalité:#couleur</code>. Elle est <em>sans effet sur les cartes</em>, ce qui
-              est cohérent. <strong>À requalifier</strong> — même si, sur ce jeu, les trente
-              couleurs nommées de l'original sont surtout un problème de maintenance.</li>
-            <li><strong>Le sélecteur à six mailles n'est pas transposable tel quel.</strong> Six
-              mailles × quatre jeux = vingt-quatre filtres, et rien ne dit qu'ils sont mutuellement
-              exclusifs : <code>clearAll()</code> vide tout le contexte, sans sélection. Cette page
-              retient <strong>deux mailles combinées en « et »</strong> (région puis département),
-              ce qui est plus simple à comprendre et évite d'ailleurs le défaut n° 8 de l'original —
-              un refine QPV posé sur <code>code_epci</code> et effacé sur <code>epci_code</code>,
-              qui reste donc collé au dernier EPCI choisi quand on revient à « France ».</li>
+            <li><strong>Le contexte ne sait pas filtrer une requête client.</strong> Première version&nbsp;: le
+              contexte visait la <code>dsfr-data-query</code> qui extrait le département du classement. La query a
+              relayé la clause à sa source, qui s'est rechargée filtrée&nbsp;: la «&nbsp;France&nbsp;» affichait
+              5&nbsp;961&nbsp;équipements et la Gironde se retrouvait 1<sup>re</sup> sur 1 — sans erreur. Contournement&nbsp;:
+              le contexte filtre une petite source du département (sa composition par famille), et une jointure
+              <code>inner</code> sur sa clé extrait la ligne du classement. Une requête de plus par choix, là où un
+              filtre client n'en coûterait aucune.</li>
+            <li><strong>Une ligne nationale coûte cinq jointures.</strong> Totaux, extrêmes, taux par classe et
+              nombre de départements viennent de requêtes différentes&nbsp;; pour les réunir en une ligne lisible
+              par un gabarit, il faut une clé constante (<code>k = 'fr'</code>), un pivot et cinq
+              <code>dsfr-data-join</code>.</li>
+            <li><strong>Onze avertissements de console</strong> (#765), un par requête qui regroupe une source
+              partagée&nbsp;: ils disent vrai, mais c'est ici le montage voulu.</li>
           </ul>
         </div>
       </div>
@@ -780,50 +560,30 @@
         <table>
           <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">Page AngularJS d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>18 <code>ods-dataset-context</code> sur 9 jeux</td><td>13 <code>dsfr-data-source</code> dans un <code>dsfr-data-context</code></td><td>Équivalent</td></tr>
-            <tr><td>la clé pivot, 4 noms de colonne selon le jeu</td><td>3 <code>dsfr-data-context-filter</code> par maille, même <code>ui</code></td><td>Natif — le point que l'audit n'avait pas rejoué</td></tr>
-            <tr><td>6 onglets exclusifs, qui ne réinitialisent pas le territoire</td><td>2 <code>&lt;select&gt;</code> combinés en « et »</td><td>Écart assumé, et plus lisible</td></tr>
-            <tr><td>8 <code>ods-adv-analysis</code> de carence</td><td>1 <code>group-by</code> + le <code>where</code> des KPI (#674)</td><td>Meilleur : une requête au lieu de huit</td></tr>
-            <tr><td><code>{{search.selection}}</code> ×17</td><td><code>dsfr-data-context-value</code> (#742)</td><td>Natif — <strong>requalification</strong></td></tr>
-            <tr><td><code>surf1 / 100</code>, <code>pop1 / surf1</code></td><td><code>compute</code></td><td>Équivalent</td></tr>
-            <tr><td><code>momentadd:'years':-1984.84 \| moment:'YY'</code></td><td><code>2026 - annee_service</code></td><td>Meilleur : un âge, pas une année à deux chiffres</td></tr>
-            <tr><td><code>surfbassin1 / pop1 * 10000</code> et 12 lignes du même genre</td><td>—</td><td><strong>Manque</strong> : ratio inter-jeux</td></tr>
-            <tr><td><code>pmr1 / nbequip1 * 100</code></td><td><code>pivot</code> → <code>compute</code></td><td>Contourné, quatre composants par indicateur</td></tr>
-            <tr><td><code>logarithmic="true"</code></td><td>—</td><td><strong>Manque</strong>, à porter chez DSFR&nbsp;Chart</td></tr>
-            <tr><td><code>category-colors</code> (30 entrées)</td><td><code>color-map</code> (#732)</td><td>Natif — <strong>requalification</strong></td></tr>
-            <tr><td><code>refine-on-click</code> sur 3 des 4 graphiques</td><td>les deux <code>&lt;select&gt;</code> du contexte</td><td>Substitut : le clic filtre tout, pas seulement les voisins</td></tr>
-            <tr><td><code>&lt;ods-map&gt;</code> nu → planisphère</td><td><code>require-where</code> + <code>fetch-mode="export"</code> + <code>cluster</code></td><td>Meilleur</td></tr>
-            <tr><td>2 liens CSV (<code>getV2DownloadURL(xlsx)</code>, variable non définie)</td><td><code>dsfr-data-a11y table download</code></td><td>Meilleur : et un tableau accessible en plus</td></tr>
-            <tr><td>— (aucune URL d'état pour une <em>fiche de territoire</em>)</td><td><code>url-sync</code></td><td>Sans équivalent, et c'est le défaut le plus coûteux de l'original</td></tr>
+            <tr><td>18 <code>ods-dataset-context</code>, 71 requêtes</td><td>2 <code>dsfr-data-source</code> agrégées + 2 par département (dont 1 paresseuse)</td><td>Meilleur</td></tr>
+            <tr><td>6 onglets de maille, <code>refine</code> par jeu</td><td>un <code>&lt;select&gt;</code> de département, <code>url-sync</code></td><td>Écart assumé (une maille)</td></tr>
+            <tr><td><code>{{search.selection}}</code> ×17</td><td><code>dsfr-data-context-value</code></td><td>Équivalent</td></tr>
+            <tr><td>40 indicateurs de même poids</td><td>taux, rang, attendu, indice — et une phrase</td><td>Choix éditorial</td></tr>
+            <tr><td>—</td><td>taux attendu à densité égale (<code>join</code> + <code>compute</code>)</td><td>Sans équivalent</td></tr>
+            <tr><td><code>ods-map</code> nu, planisphère</td><td><code>dsfr-data-map</code>, <code>lazy</code> + <code>require-where</code></td><td>Meilleur</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>partielle, et c'est le résultat</strong>. Ce qui passe, passe très
-          bien : la clé pivot qui change de nom dans chacun des quatre jeux se règle par trois
-          attributs, huit indicateurs de carence tiennent en une requête, et le titre dit enfin
-          quel territoire on regarde — trois choses que l'audit donnait comme incertaines ou
-          manquantes, et qui sont natives. Deux constats de la fiche d'audit se requalifient au
-          passage : <code>dsfr-data-context-value</code> (#742) et <code>color-map</code> sur
-          <code>dsfr-data-chart</code> (#732) existent.</p>
-        <p>Ce qui ne passe pas se nomme précisément : <strong>un ratio dont les deux membres
-          viennent de deux jeux différents</strong> — treize des quarante indicateurs de
-          l'original, et le besoin structurel de toute page « pour 10 000 habitants », « par
-          élève », « par km² » —, <strong>une part calculée sur une source déjà agrégée</strong>
-          (le compteur à 100 % du haut de page, laissé visible avec sa note), et
-          <strong>l'empilement de lignes calculées venues de plusieurs transformateurs</strong>,
-          pour lequel il existe un pivot et une jointure mais pas d'union.
-          Trois manques, tous du même côté : <strong>le pipeline sait très bien filtrer et
-          replier, et beaucoup moins bien combiner deux agrégats</strong>.</p>
+        <p>Le générateur de portrait tient en deux requêtes et un pipeline client&nbsp;: c'est la page la plus
+          lourde du banc devenue l'une des plus légères, et elle répond avant qu'on ait cliqué. Le seul vrai coût
+          est l'absence de filtre de contexte <em>client</em>&nbsp;: il faut une source pour porter la sélection.
+          Et l'histoire trouvée change la lecture de l'original&nbsp;: ses indicateurs «&nbsp;pour 10&nbsp;000
+          habitants&nbsp;», comparés à la France, mesuraient d'abord la densité du territoire choisi.</p>
       </div>
-    </div>
-  
-      </details></section>
+
+    </details>
+  </section>
 
 </main>
 

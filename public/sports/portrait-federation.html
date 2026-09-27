@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Portrait de fédération — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du « Portrait de fédération » de data.sports.gouv.fr : cinq onglets, treize jeux, une fédération choisie et son groupe de fédérations en regard.">
+  <meta name="description" content="Portrait d'une fédération sportive agréée, mise en regard des fédérations de son groupe : ce qui la distingue (féminisation, dynamique depuis 2019, âge du public), son évolution depuis 2016 et sa géographie. Données INJEP-MEDES via data.sports.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -14,34 +14,208 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
-  <link rel="stylesheet" href="/assets/demo.css">
-  <script src="/assets/cles.js"></script>
-  <style>
-    /* Boîtes « chiffre + comparaison au groupe » rendues par dsfr-data-display.
-       Local à la page : à monter dans site.css si le motif revient. */
-    .fede-boite { border: 1px solid var(--border-default-grey); padding: 1.25rem 1.5rem; }
-    /* hauteur égale seulement dans les grilles de la page : dsfr-data-display
-       enveloppe déjà chaque enregistrement dans un fr-col-12. */
-    .fede-grille > [class*="fr-col-"] > .fede-boite { height: 100%; }
-    .fede-boite__titre { color: var(--text-mention-grey); font-size: .875rem; margin: 0 0 .5rem; }
-    .fede-boite__chiffre { color: var(--text-title-blue-france); font-size: 1.75rem; font-weight: 700; line-height: 1.2; margin: 0; }
-    .fede-boite__groupe { color: var(--text-default-error); font-size: .875rem; margin: .5rem 0 0; }
-    /* La regle qui masquait « N resultat(s) » a disparu le 2026-09-20 : les neuf
-       fiches d'une ligne sont passees de `dsfr-data-display` a
-       `dsfr-data-repeat` (0.32.0), TRANSPARENT par contrat -- aucun compteur,
-       aucun role, aucun aria-live. On ne masque plus ce qui n'est plus emis, et
-       surtout on ne vise plus le DOM interne d'un composant : c'est la lecon
-       que BUG-018 a fait payer a 51 pages.
-       UNE exception subsiste : le bloc dont le gabarit porte un `{{#if}}` a
-       cheval sur deux elements freres, que `repeat` refuse (et le dit). La
-       regle ci-dessous ne vaut plus que pour lui. */
-    .fede-sans-compteur .dsfr-data-display > p[role="status"] { display: none; }
-  </style>
 </head>
 <body>
 <div id="site-header"></div>
 
 <main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-27 — ce que la page raconte, et pourquoi.
+
+       L'original (cinq onglets, 59 contextes, 169 requêtes pour une visite
+       complète) et la reproduction qui l'a précédée ici (28 requêtes au
+       chargement) sont des FICHES : tous les indicateurs, de même poids, à
+       côté de ceux du groupe. Aucune ne dit ce qui distingue la fédération.
+
+       Cette page le calcule. Pour la fédération choisie, elle classe ses trois
+       indicateurs de profil parmi les fédérations de SON groupe (olympiques,
+       délégataires non-olympiques, affinitaires, para-sportives, scolaires) —
+       part des femmes, évolution des licences depuis 2019, âge médian — et
+       retient comme titre celui où elle est la plus EXTRÊME (rang le plus proche
+       de la tête ou de la queue, rapporté à la taille du groupe). Le football
+       devient « la moins féminisée des 38 fédérations olympiques », le golf
+       « le public le plus âgé », l'athlétisme « la 7e plus féminisée ».
+
+       Le classement, les phrases et le titre sont calculés dans le navigateur à
+       partir d'UNE requête de 126 lignes (indicateurs_cles_fede entier) : le
+       jeu est petit, le charger entier coûte moins que de le refiltrer.
+
+       REQUÊTES : 3 au chargement (indicateurs, historique de la fédération,
+       historique des groupes), +1 quand la carte approche (lazy), +1 quand la
+       fiche approche (lazy). Changer de fédération : 2 à 3 requêtes.
+       ========================================================================== -->
+
+  <!-- ─── Le sélecteur : un contexte, l'URL de l'original ──────────────────
+       `?refine.code_fs=111` (le lien du portail) ouvre le football.
+       ⚠️ ORDRE (PG-029) : le contexte synchronisé à l'URL est déclaré AVANT
+       celui de la fiche, qui écoute le même <select> sous un autre nom de
+       champ (`code_fs`) : le pré-remplissage d'URL n'émet aucun événement. -->
+  <dsfr-data-context id="ctx" url-sync url-param-map="refine.code_fs:code_fede_ref"
+    sources="s-histo s-dep">
+    <dsfr-data-context-filter field="code_fede_ref" ui="sel-fede" label="Fédération"></dsfr-data-context-filter>
+  </dsfr-data-context>
+  <dsfr-data-context id="ctx-fs" sources="s-fiche">
+    <dsfr-data-context-filter field="code_fs" ui="sel-fede" label="Fédération"></dsfr-data-context-filter>
+  </dsfr-data-context>
+
+  <!-- ─── 1. Les indicateurs de TOUTES les fédérations : une requête ────────
+       126 lignes : 120 fédérations + 6 lignes de groupe (code_fede_ref = 'TOT').
+       Les taux publiés sont des fractions : passés en points (× 100).
+       `un` sert de compteur aux rangs ; `h_*` compte les valeurs renseignées. -->
+  <dsfr-data-source id="s-ind" api-type="opendatasoft"
+    base-url="https://data.sports.gouv.fr" dataset-id="indicateurs_cles_fede" fetch-mode="export"
+    select="code_fede_ref, federation, federation_court, fede_gp, libelle_groupe,
+            lics_tot_semidef, pct_f_semidef, lics_evol_5ans, med_age_semidef, millesime_semidef"
+    max-records="200"></dsfr-data-source>
+  <dsfr-data-normalize id="n-ind" source="s-ind"
+    compute="lics = lics_tot_semidef;
+             pct_f = pct_f_semidef * 100; e5 = lics_evol_5ans * 100; age = med_age_semidef;
+             pf_aff = round(pct_f, 1); e5_aff = round(e5, 1);
+             un = 1;
+             h_f = when is_null(pct_f_semidef) then 0 else 1;
+             h_e = when is_null(lics_evol_5ans) then 0 else 1;
+             h_a = when is_null(med_age_semidef) then 0 else 1"></dsfr-data-normalize>
+  <dsfr-data-query id="q-feds" source="n-ind" where="code_fede_ref:neq:TOT"></dsfr-data-query>
+  <dsfr-data-query id="q-gps" source="n-ind" where="code_fede_ref:eq:TOT"></dsfr-data-query>
+
+  <!-- ─── 2. L'historique de la fédération choisie (contexte) ──────────────
+       Il donne aussi son groupe (`fede_gp`) : pas besoin d'une requête de plus
+       pour savoir à qui la comparer. -->
+  <dsfr-data-source id="s-histo" api-type="opendatasoft" require-where
+    base-url="https://data.sports.gouv.fr" dataset-id="lics_histo"
+    where="annee >= date'2016'"
+    select="year(annee) as an, code_fede_ref, fede_gp, lics_100_2016"
+    order-by="an:asc" max-records="50"></dsfr-data-source>
+  <dsfr-data-query id="q-moi" source="s-histo" order-by="an:desc" limit="1"></dsfr-data-query>
+
+  <!-- ─── 3. Les pairs : les fédérations du même groupe ─────────────────────
+       `est_moi` marque la fédération choisie. Les colonnes `t*` sont les clés de
+       tri : la valeur, plus une epsilon pour la fédération choisie, qui passe
+       ainsi EN TÊTE de ses ex aequo dans les deux sens. Son rang est alors le
+       rang « de compétition » (1 + nombre de pairs strictement devant elle) —
+       l'âge médian est entier, les ex aequo y sont fréquents (4 à 22 ans chez
+       les olympiques). -->
+  <dsfr-data-join id="j-pairs" left="q-feds" right="q-moi" on="fede_gp" type="inner" prefix-right="moi_"></dsfr-data-join>
+  <dsfr-data-normalize id="n-pairs" source="j-pairs"
+    compute="est_moi = when code_fede_ref = moi_code_fede_ref then 1 else 0;
+             tfd = pct_f + est_moi * 0.000001; tfa = pct_f - est_moi * 0.000001;
+             ted = e5 + est_moi * 0.000001; tea = e5 - est_moi * 0.000001;
+             tad = age + est_moi * 0.001; taa = age - est_moi * 0.001"></dsfr-data-normalize>
+  <dsfr-data-query id="q-moi-ind" source="n-pairs" where="est_moi:eq:1"></dsfr-data-query>
+  <!-- Nombre de pairs renseignés, par indicateur -->
+  <dsfr-data-query id="q-n" source="n-pairs" group-by="fede_gp"
+    aggregate="h_f:sum:nf, h_e:sum:ne, h_a:sum:na, un:sum:npairs"></dsfr-data-query>
+
+  <!-- Rangs : un cumul de 1 dans l'ordre décroissant (rang depuis la tête),
+       puis dans l'ordre croissant (rang depuis la queue). -->
+  <dsfr-data-query id="q-f-d" source="n-pairs" where="pct_f:isnotnull" order-by="tfd:desc" aggregate="un:running_sum:rfd"></dsfr-data-query>
+  <dsfr-data-query id="q-f-a" source="q-f-d" order-by="tfa:asc" aggregate="un:running_sum:rfa"></dsfr-data-query>
+  <dsfr-data-query id="q-f-m" source="q-f-a" where="est_moi:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="q-e-d" source="n-pairs" where="e5:isnotnull" order-by="ted:desc" aggregate="un:running_sum:red"></dsfr-data-query>
+  <dsfr-data-query id="q-e-a" source="q-e-d" order-by="tea:asc" aggregate="un:running_sum:rea"></dsfr-data-query>
+  <dsfr-data-query id="q-e-m" source="q-e-a" where="est_moi:eq:1"></dsfr-data-query>
+  <dsfr-data-query id="q-a-d" source="n-pairs" where="age:isnotnull" order-by="tad:desc" aggregate="un:running_sum:rad"></dsfr-data-query>
+  <dsfr-data-query id="q-a-a" source="q-a-d" order-by="taa:asc" aggregate="un:running_sum:raa"></dsfr-data-query>
+  <dsfr-data-query id="q-a-m" source="q-a-a" where="est_moi:eq:1"></dsfr-data-query>
+
+  <!-- Une ligne : la fédération, ses trois rangs, la taille de son groupe, les
+       valeurs du groupe (préfixe g_). Jointures `left` : une fédération sans
+       âge médian publié garde ses deux autres rangs. -->
+  <dsfr-data-join id="j-r1" left="q-moi-ind" right="q-f-m" on="code_fede_ref" type="left" prefix-right="x1_"></dsfr-data-join>
+  <dsfr-data-join id="j-r2" left="j-r1" right="q-e-m" on="code_fede_ref" type="left" prefix-right="x2_"></dsfr-data-join>
+  <dsfr-data-join id="j-r3" left="j-r2" right="q-a-m" on="code_fede_ref" type="left" prefix-right="x3_"></dsfr-data-join>
+  <dsfr-data-join id="j-r4" left="j-r3" right="q-n" on="fede_gp" type="left" prefix-right="x4_"></dsfr-data-join>
+  <dsfr-data-join id="j-moi" left="j-r4" right="q-gps" on="fede_gp" type="left" prefix-right="g_"></dsfr-data-join>
+
+  <!-- Le titre. k* = rang compté depuis le bout le plus proche ; x* = ce rang
+       rapporté au nombre de pairs renseignés (plus petit = plus extrême) ;
+       le titre retient l'indicateur au x le plus petit. À égalité, l'ordre de
+       préférence est : femmes, évolution, âge. -->
+  <dsfr-data-normalize id="n-moi" source="j-moi"
+    compute="kf = when rfd <= rfa then rfd else rfa;
+             ke = when red <= rea then red else rea;
+             ka = when rad <= raa then rad else raa;
+             xf = coalesce(kf / nf, 9); xe = coalesce(ke / ne, 9); xa = coalesce(ka / na, 9);
+             choix = when xf = 9 and xe = 9 and xa = 9 then 'aucun' when xf <= xe and xf <= xa then 'f' when xe <= xa then 'e' else 'a';
+             gp = when fede_gp = '5. Para-sport' then 'para-sportives' else libelle_groupe;
+             of = when kf = 1 then '' else kf + 'e ';
+             oe = when ke = 1 then '' else ke + 'e ';
+             oa = when ka = 1 then '' else ka + 'e ';
+             qf = 'la ' + of + (when rfd <= rfa then 'plus' else 'moins') + ' féminisée des ' + nf + ' fédérations ' + gp;
+             qe = 'la ' + oe + (when red <= rea then 'plus' else 'moins') + ' dynamique des ' + ne + ' fédérations ' + gp + ' depuis 2019';
+             qa = 'le ' + oa + 'public le plus ' + (when rad <= raa then 'âgé' else 'jeune') + ' des ' + na + ' fédérations ' + gp;
+             a_lics = when lics > 0 then 'oui' else '';
+             part_gp = lics / g_lics * 100;
+             part_aff = when part_gp < 0.1 then round(part_gp, 2) else round(part_gp, 1);
+             best = when xf <= xe and xf <= xa then xf when xe <= xa then xe else xa;
+             titre = federation + ' : ' + (when lics = 0 then 'aucune licence recensée en ' + millesime_semidef
+               when npairs <= 5 then round(part_gp) + ' % des licences des ' + npairs + ' fédérations ' + gp
+               when best > 0.34 then 'un profil proche du milieu des ' + npairs + ' fédérations ' + gp
+               when choix = 'f' then qf when choix = 'e' then qe when choix = 'a' then qa else 'le portrait ' + millesime_semidef);
+             art = when contains(federation, 'Union') or contains(federation, 'UCPA') then 'l’' else 'la ';
+             sf = when is_null(pct_f) then '' else 'oui';
+             se = when is_null(e5) then '' else 'oui';
+             sa = when is_null(age) then '' else 'oui';
+             ecart_f = pct_f - g_pct_f;
+             sens_f = when ecart_f >= 0 then 'de plus' else 'de moins';
+             abs_ecart_f = abs(ecart_f);
+             sens_e = when e5 >= 0 then 'progressé' else 'reculé';
+             abs_e5 = abs(e5);
+             sens_ge = when g_e5 >= 0 then '+' else '−';
+             abs_ge5 = abs(g_e5);
+             ecart_a = age - g_age;
+             sens_a = when ecart_a > 0 then 'plus âgé' when ecart_a < 0 then 'plus jeune' else 'du même âge';
+             abs_ecart_a = abs(ecart_a);
+             ordf = when rfd = 1 then '1er' else rfd + 'e';
+             orde = when red = 1 then '1er' else red + 'e';
+             orda = when rad = 1 then '1er' else rad + 'e';
+             lab_f = when is_null(rfd) then 'non classée (valeur non publiée)' else 'rang ' + rfd + ' sur ' + nf + ' dans le groupe';
+             lab_e = when is_null(red) then 'non classée (valeur non publiée)' else 'rang ' + red + ' sur ' + ne + ' dans le groupe';
+             lab_a = when is_null(rad) then 'non classée (valeur non publiée)' else 'rang ' + rad + ' sur ' + na + ', du plus âgé au plus jeune';
+             pts = when abs_ecart_f < 2 then 'point' else 'points';
+             if0 = rfd - 1; ie0 = red - 1; ia0 = rad - 1"></dsfr-data-normalize>
+
+  <!-- ─── 4. Base 100 : la fédération, son groupe, toutes les fédérations ──
+       Le jeu PUBLIE l'indice (lics_100_2016) : rien à recalculer. Les lignes
+       de groupe sont à « champ constant 2016-2024 » (fédérations présentes
+       sur toute la période). Chaque branche est ramenée à deux colonnes
+       (an, v) par un regroupement, pour que concat les empile. -->
+  <dsfr-data-source id="s-histo-tot" api-type="opendatasoft"
+    base-url="https://data.sports.gouv.fr" dataset-id="lics_histo"
+    where="code_fede_ref = 'TOT' and annee >= date'2016'"
+    select="year(annee) as an, fede_gp, code_fede_2024, lics_100_2016"
+    max-records="100"></dsfr-data-source>
+  <dsfr-data-join id="j-h-gp" left="s-histo-tot" right="q-moi" on="fede_gp" type="inner" prefix-right="moi_"></dsfr-data-join>
+  <dsfr-data-query id="q-h-fed" source="s-histo" group-by="an" aggregate="lics_100_2016:sum:v" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-query id="q-h-gp" source="j-h-gp" group-by="an" aggregate="lics_100_2016:sum:v" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-query id="q-h-all" source="s-histo-tot" where="code_fede_2024:eq:0" group-by="an" aggregate="lics_100_2016:sum:v" order-by="an:asc"></dsfr-data-query>
+  <dsfr-data-concat id="c-histo" sources="q-h-fed, q-h-gp, q-h-all" origin-field="serie"
+    origin-labels="q-h-fed:Fédération choisie | q-h-gp:Son groupe | q-h-all:Toutes les fédérations"></dsfr-data-concat>
+  <!-- L'année passe en texte : numérique, l'infobulle l'écrivait « 2,024 ». -->
+  <dsfr-data-normalize id="n-histo" source="c-histo" round="v:1" compute="annee = '' + an"></dsfr-data-normalize>
+
+  <!-- ─── 5. Géographie (lazy : part quand la carte approche) ──────────────
+       Les onze « départements » hors territoire (étranger, COM, Monaco, non
+       réparti) sont écartés. Le jeu publie le taux national sur ces 101
+       départements (`lics_pop_fr`) et l'indice de spécificité (`is`). -->
+  <dsfr-data-source id="s-dep" lazy lazy-target="#g-carte" api-type="opendatasoft" require-where fetch-mode="export"
+    base-url="https://data.sports.gouv.fr" dataset-id="lics_dep"
+    where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
+    select="dep, dep_name, lics, pop, lics_pop, lics_pop_fr, is"
+    order-by="lics_pop:desc" max-records="200"></dsfr-data-source>
+  <dsfr-data-normalize id="n-dep" source="s-dep"
+    compute="taux = round(lics_pop, 2); indice = round(is, 2); mot = when lics_pop < 2 then 'licence' else 'licences'"></dsfr-data-normalize>
+  <dsfr-data-query id="q-dep-top" source="n-dep" order-by="lics_pop:desc" limit="1"></dsfr-data-query>
+
+  <!-- ─── 6. La fiche du ministère (lazy) ─────────────────────────────────── -->
+  <dsfr-data-source id="s-fiche" lazy api-type="opendatasoft" require-where
+    base-url="https://data.sports.gouv.fr" dataset-id="msjva-portraits-de-federations-base-2024"
+    select="code_fs, federations_sportives, adresses, sites_internet, presidence, dates_agrement,
+            saisonnalite, sportifs_haut_niveau, conseillers_techniques_sportifs, ans_total,
+            pass_sports, annee"></dsfr-data-source>
+  <dsfr-data-normalize id="n-fiche" source="s-fiche"
+    compute="an_agrement = year(dates_agrement)"></dsfr-data-normalize>
 
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
@@ -53,232 +227,17 @@
         </ol>
       </div>
     </nav>
-
-    <h1>Portrait de fédération</h1>
-    <p class="fr-text--lead">
-      Les chiffres clés des licences, l'organisation de la fédération et les politiques publiques
-      ministérielles, pour chacune des <strong>120 fédérations</strong> agréées — toujours mis en
-      regard de son <strong>groupe de fédérations</strong> (olympiques, délégataires
-      non-olympiques, affinitaires, para-sportives, scolaires).
-    </p>
-
-    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Treize jeux, une seule clé — et le groupe de comparaison est une jointure</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        Onze jeux de <code>data.sports.gouv.fr</code> portent la fédération sous le même nom,
-        <code>code_fede_ref</code>, et avec le même code que <code>code_fs</code> et
-        <code>code_fede_2024</code> — vérifié sur les 126 lignes d'<code>indicateurs_cles_fede</code>.
-        Les deux jeux du ministère (<code>msjva-portraits-de-federations-*</code>) n'ont que
-        <code>code_fs</code> : un second contexte écoute le même sélecteur. Les départements
-        s'écrivent <code>01</code>…<code>976</code> dans les onze jeux : aucune clé à harmoniser,
-        l'inverse exact du portail des équipements.
-      </p>
-      <p class="fr-callout__text fr-text--sm fr-mt-2w">
-        <strong>Le groupe de la fédération n'est pas un paramètre, c'est une jointure.</strong>
-        L'original lit le groupe de la fédération choisie, puis l'injecte en <code>refine</code>
-        dans huit contextes. Ici, les lignes de groupe (<code>code_fede_ref = 'TOT'</code>,
-        six lignes) sont chargées une fois, et <code>dsfr-data-join on="fede_gp"</code> les
-        apparie à la ligne de la fédération : le groupe suit la sélection sans que rien ne le
-        recopie.
-      </p>
-    </details>
-
-
-    <dsfr-data-repeat source="n-ind" class="fr-mb-4w">
-      <template>
-        <p class="fr-text--lg fr-mb-0">Fédération sélectionnée : <strong>{{federation}}</strong>
-          — groupe des fédérations {{g_lib}}</p>
-      </template>
-    </dsfr-data-repeat>
   </div>
 
-  <!-- ==========================================================================
-       Le câblage. Un contexte principal (URL synchronisée) porte la
-       fédération sur `code_fede_ref` et le territoire de l'onglet 2 ; un
-       second écoute le même <select> sur `code_fs` pour les deux jeux du
-       ministère ; un troisième porte la fédération de comparaison.
-       ⚠️ ORDRE : un filtre lit la valeur de son <select> AU MONTAGE, et le
-       pré-remplissage depuis l'URL n'émet aucun événement DOM. `ctx-fs` doit
-       donc suivre `ctx` dans le document, sinon il lirait 101 (l'option
-       sélectionnée par défaut) quand l'URL demande 111.
-       ========================================================================== -->
-  <dsfr-data-context id="ctx" url-sync
-    url-param-map="refine.code_fs:code_fede_ref | region:newreg | departement:dep"
-    sources="s-ind s-histo s-dep s-pyr s-clubs s-ans s-c-rr-a
-             s-t-lic s-t-rr s-t-age s-t-age-gp s-t-sexe s-t-sexe-gp s-t-clubs s-clubs-fr">
-    <dsfr-data-context-filter field="code_fede_ref" ui="sel-fede" label="Fédération"
-      apply-to="s-ind s-histo s-dep s-pyr s-clubs s-ans s-c-rr-a s-t-lic s-t-rr s-t-age s-t-sexe s-t-clubs s-clubs-fr"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="newreg" ui="sel-reg" label="Région"
-      apply-to="s-t-lic s-t-rr s-t-age s-t-age-gp s-t-sexe s-t-sexe-gp s-t-clubs"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="dep" ui="sel-dep" label="Département"
-      apply-to="s-t-lic s-t-rr s-t-age s-t-age-gp s-t-sexe s-t-sexe-gp s-t-clubs"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <dsfr-data-context id="ctx-fs" sources="s-fede s-shn">
-    <dsfr-data-context-filter field="code_fs" ui="sel-fede" label="Fédération"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <dsfr-data-context id="ctx-comp" sources="s-c-ind s-c-histo s-c-rr-b">
-    <dsfr-data-context-filter field="code_fede_2024" ui="sel-comp" label="Comparaison"
-      apply-to="s-c-ind s-c-histo"></dsfr-data-context-filter>
-    <dsfr-data-context-filter field="code_fede_ref" ui="sel-comp" label="Comparaison"
-      apply-to="s-c-rr-b"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <!-- ====================== Sources ====================== -->
-  <!-- La fiche du ministère (onglets 3 et 4) : 120 lignes, clé `code_fs`. -->
-  <dsfr-data-source id="s-fede" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="msjva-portraits-de-federations-base-2024"
-    select="code_fs, federations_sportives, groupes, adresses, sites_internet, presidence,
-            dates_agrement, annees_delegation_disciplines_para_sport, saisonnalite,
-            disciplines_deleguees, sportifs_haut_niveau, conseillers_techniques_sportifs,
-            pass_sports, handiguide, mss, mss_partenariats, ans_total, annee"></dsfr-data-source>
-
-  <!-- Les indicateurs clés : UNE ligne par fédération… -->
-  <dsfr-data-source id="s-ind" api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="indicateurs_cles_fede"
-    select="code_fede_2024, federation, fede_gp, libelle_groupe, lics_tot_semidef, lics_tot_def,
-            pop_fr, pct_f_semidef, pct_qpv_def, pct_zrr_tot_def, med_age_semidef,
-            med_taille_semidef, clubsepa_actifs_semidef, millesime_semidef, millesime_def,
-            pct_urbain_dense_def, pct_urbain_densinter_def, pct_rural_periurbain_def,
-            pct_rural_nonperiurbain_def"></dsfr-data-source>
-  <!-- … et les six lignes de groupe, chargées une fois, hors contexte. -->
-  <dsfr-data-source id="s-ind-gp" api-type="opendatasoft"
-    base-url="https://data.sports.gouv.fr" dataset-id="indicateurs_cles_fede"
-    where="code_fede_ref = 'TOT'"
-    select="fede_gp, libelle_groupe as g_lib, lics_tot_semidef as g_lics, pct_f_semidef as g_pct_f,
-            pct_qpv_def as g_qpv, pct_zrr_tot_def as g_zrr, med_age_semidef as g_age,
-            med_taille_semidef as g_taille"></dsfr-data-source>
-
-  <!-- Base 100 : la fédération, son groupe, l'ensemble. Le jeu publie déjà
-       l'indice (`lics_100_2016`) : aucun calcul d'évolution à faire. -->
-  <dsfr-data-source id="s-histo" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_histo"
-    where="annee >= date'2016'" select="year(annee) as an, fede_gp, lics_100_2016 as v_fede"
-    order-by="an:asc" max-records="50"></dsfr-data-source>
-  <dsfr-data-source id="s-histo-gp" lazy api-type="opendatasoft"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_histo"
-    where="code_fede_ref = 'TOT' and annee >= date'2016'"
-    select="year(annee) as an, fede_gp, lics_100_2016 as v_gp" max-records="100"></dsfr-data-source>
-  <dsfr-data-source id="s-histo-all" lazy api-type="opendatasoft"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_histo"
-    where="code_fede_ref = 'TOT' and code_fede_2024 = 0 and annee >= date'2016'"
-    select="year(annee) as an, lics_100_2016 as v_all" max-records="50"></dsfr-data-source>
-
-  <!-- Licences par département. Les onze « départements » hors territoire
-       (étranger, COM, Monaco, non réparti) sont écartés, comme dans l'original. -->
-  <dsfr-data-source id="s-dep" lazy api-type="opendatasoft" require-where fetch-mode="export"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_dep"
-    where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    select="dep, dep_name, lics, pop, lics_pop, lics * 1000 as lics_k"
-    order-by="lics_pop:desc" max-records="200"></dsfr-data-source>
-
-  <!-- Pyramide : la fédération, puis tous les groupes (5 × 17 × 2 lignes). -->
-  <dsfr-data-source id="s-pyr" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_dep_age_sexe"
-    where="not trage in ('NR','NR - Non réparti')"
-    group-by="fede_gp, trage_full, trage, sexe" select="sum(lics) as n"
-    order-by="trage_full:desc" max-records="100"></dsfr-data-source>
-  <dsfr-data-source id="s-pyr-gp" lazy api-type="opendatasoft" fetch-mode="export"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_dep_age_sexe"
-    where="not trage in ('NR','NR - Non réparti')"
-    group-by="fede_gp, trage_full, sexe" select="sum(lics) as n" max-records="400"></dsfr-data-source>
-
-  <dsfr-data-source id="s-clubs" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="clubs_dep"
-    group-by="year(annee) as an" select="sum(n_actifs_clubs) as clubs, sum(n_actifs_epa) as epa"
-    order-by="an:asc" max-records="20"></dsfr-data-source>
-
-  <!-- Onglet 2 : fédération ET territoire. -->
-  <dsfr-data-source id="s-t-lic" lazy api-type="opendatasoft" require-where fetch-mode="export"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_dep"
-    where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    select="dep, dep_name, lics, pop, lics_pop, lics * 1000 as lics_k"
-    order-by="lics_pop:desc" max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="s-t-rr" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_clubs_dep_ruralurbain"
-    group-by="typo"
-    select="sum(lics_tot) as l, sum(pop_22) as p, sum(clubsepa_actifs_tot) as c,
-            sum(n_cc_lics) as ncl, sum(n_cc_clubsepa_actifs) as ncc, sum(n_cc_tot) as nct"
-    order-by="typo:asc" max-records="10"></dsfr-data-source>
-  <dsfr-data-source id="s-t-age" lazy api-type="opendatasoft" require-where fetch-mode="export"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_distr_age"
-    where="niveau != 'Total'" select="niveau, fede_gp, med_age, newreg, dep"
-    max-records="300"></dsfr-data-source>
-  <dsfr-data-source id="s-t-age-gp" lazy api-type="opendatasoft" fetch-mode="export"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_distr_age"
-    where="code_fede_ref = 'TOT' and niveau != 'Total'" select="niveau, fede_gp, med_age"
-    max-records="1500"></dsfr-data-source>
-  <dsfr-data-source id="s-t-sexe" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_dep_sexe"
-    where="france = '1'" group-by="fede_gp" select="sum(lics_f) as f, sum(lics_tot) as t"></dsfr-data-source>
-  <dsfr-data-source id="s-t-sexe-gp" lazy api-type="opendatasoft"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_dep_sexe"
-    where="france = '1'" group-by="fede_gp" select="sum(lics_f) as gf, sum(lics_tot) as gt"></dsfr-data-source>
-  <!-- Le dernier millésime n'est pas écrit en dur : l'original le lit
-       (`max(annee)`) puis l'injecte en refine ; ici, une jointure INNER sur
-       la source à une ligne `s-last` ne garde que les lignes de cette année. -->
-  <dsfr-data-source id="s-last" lazy api-type="opendatasoft"
-    base-url="https://data.sports.gouv.fr" dataset-id="clubs_dep"
-    select="max(year(annee)) as an" limit="1"></dsfr-data-source>
-  <dsfr-data-source id="s-t-clubs" lazy api-type="opendatasoft" require-where fetch-mode="export"
-    base-url="https://data.sports.gouv.fr" dataset-id="clubs_dep"
-    where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    select="year(annee) as an, dep, dep_l, n_actifs, n_actifs_pop, pop, n_actifs * 100000 as n_k"
-    max-records="500"></dsfr-data-source>
-  <dsfr-data-source id="s-clubs-fr" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="clubs_dep"
-    where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    group-by="year(annee) as an" select="sum(n_actifs) * 100000 as n_k, sum(pop) as pop"></dsfr-data-source>
-
-  <!-- Onglet 4 -->
-  <dsfr-data-source id="s-shn" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="msjva-portraits-de-federations-shn-2024"
-    where="categories in ('Elite','Reconversion','Relève','Sénior')"
-    select="categories, femmes, hommes" order-by="categories:asc"></dsfr-data-source>
-  <dsfr-data-source id="s-ans" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="dispositif-ans"
-    where="total = 'non' and libelle is not null" select="libelle, dev_htp, valeur"
-    order-by="dev_htp:asc"></dsfr-data-source>
-
-  <!-- Onglet 5 : la fédération de comparaison, et la population par type de commune. -->
-  <dsfr-data-source id="s-c-ind" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="indicateurs_cles_fede"
-    select="code_fede_2024, federation, lics_tot_semidef, lics_tot_def, pop_fr, pct_f_semidef,
-            pct_qpv_def, pct_zrr_tot_def, med_age_semidef, clubsepa_actifs_semidef,
-            millesime_semidef, millesime_def, pct_urbain_dense_def, pct_urbain_densinter_def,
-            pct_rural_periurbain_def, pct_rural_nonperiurbain_def"></dsfr-data-source>
-  <dsfr-data-source id="s-c-histo" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_histo"
-    where="annee >= date'2016'" select="year(annee) as an, lics_100_2016 as v"
-    order-by="an:asc" max-records="50"></dsfr-data-source>
-  <dsfr-data-source id="s-c-rr-a" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_clubs_dep_ruralurbain"
-    select="sum(n_cc_lics) as ncl, sum(n_cc_tot) as nct" limit="1"></dsfr-data-source>
-  <dsfr-data-source id="s-c-rr-b" lazy api-type="opendatasoft" require-where
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_clubs_dep_ruralurbain"
-    select="sum(n_cc_lics) as ncl, sum(n_cc_tot) as nct" limit="1"></dsfr-data-source>
-  <!-- La population par type de commune ne dépend pas de la fédération
-       (vérifié : mêmes sommes pour 101, 111 et 503) : une fédération
-       quelconque couvrant les 345 cellules département × type sert de base. -->
-  <dsfr-data-source id="s-pop-typo" lazy api-type="opendatasoft"
-    base-url="https://data.sports.gouv.fr" dataset-id="lics_clubs_dep_ruralurbain"
-    where="code_fede_ref = 101" group-by="typo" select="sum(pop_22) as p"
-    order-by="typo:asc"></dsfr-data-source>
-
-  <!-- ====================== Onglets ====================== -->
-  <div class="fr-container fr-mb-8w">
-    <!-- Famille D — portrait d'une entite. Pas de colonne de filtres : le
-         selecteur d'entite est le SEUL levier de la page, et il merite donc le
-         bandeau. C'est ce qui distingue un portrait d'un tableau de bord --
-         ici, on ne croise pas des criteres, on choisit un sujet. -->
-    </div>
-    <section class="odv-bandeau">
-      <div class="fr-container">
-        <div class="odv-bandeau__recherche">
-        <div class="fr-select-group fr-mb-2w">
-        <label class="fr-label" for="sel-fede">Fédération</label>
-        <select class="fr-select" id="sel-fede">
+  <!-- Famille D — portrait. Le sélecteur d'entité est le seul levier : il
+       prend le bandeau, avant le titre qu'il détermine. -->
+  <section class="odv-bandeau" aria-label="Choisir une fédération">
+    <div class="fr-container">
+      <div class="odv-bandeau__recherche">
+        <div class="fr-select-group fr-mb-0">
+          <label class="fr-label" for="sel-fede">Fédération sportive agréée
+            <span class="fr-hint-text">120 fédérations. Le portrait se recalcule, le lien de la page aussi.</span></label>
+          <select class="fr-select" id="sel-fede">
         <option value="101" selected>101 — Fédération Française d'Athlétisme</option>
         <option value="102">102 — Fédération Française d'Aviron</option>
         <option value="103">103 — Fédération Française de Badminton</option>
@@ -399,969 +358,372 @@
         <option value="603">603 — Fédération Française des Clubs Universitaires</option>
         <option value="604">604 — Union Nationale du Sport Scolaire (UNSS)</option>
         <option value="605">605 — Union Sportive de l'Enseignement du Premier Degré</option>
-        </select>
-        <p class="fr-hint-text">Lien profond : <code>?refine.code_fs=111</code> ouvre le portrait
-        de la Fédération Française de Football — l'URL de l'original, qui chez lui n'a aucun effet.</p>
-        </div>
-        </div>
-        <p class="fr-text--sm fr-mb-0 fr-mt-2w">Un seul levier pilote toute la page : il mérite le bandeau. Choisissez une fédération — les trente indicateurs ci-dessous, et leur référence nationale, se recalculent ensemble.</p>
-      </div>
-    </section>
-    <div class="fr-container">
-
-    <div class="fr-tabs">
-      <ul class="fr-tabs__list" role="tablist" aria-label="Portrait de la fédération">
-        <li role="presentation"><button type="button" id="tab-licences" class="fr-tabs__tab" tabindex="0" role="tab" aria-selected="true" aria-controls="onglet-licences">Licences et clubs</button></li>
-        <li role="presentation"><button type="button" id="tab-territoire" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-territoire">Mon territoire</button></li>
-        <li role="presentation"><button type="button" id="tab-fiche" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-fiche">Fiche signalétique</button></li>
-        <li role="presentation"><button type="button" id="tab-structuration" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-structuration">Structuration</button></li>
-        <li role="presentation"><button type="button" id="tab-comparer" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-comparer">Me comparer</button></li>
-      </ul>
-
-      <!-- ─────────────── 1. Licences et clubs ─────────────── -->
-      <div id="onglet-licences" class="fr-tabs__panel fr-tabs__panel--selected" role="tabpanel" aria-labelledby="tab-licences" tabindex="0">
-
-        <dsfr-data-repeat source="n-ind">
-          <template>
-            <p class="fr-h3 fr-mb-3w"><span class="fr-text-title--blue-france">{{lics_tot_semidef:number}}</span>
-              licences sportives annuelles en {{millesime_semidef}}</p>
-          </template>
-        </dsfr-data-repeat>
-
-        <h2 class="fr-h5">Évolution des licences sportives annuelles (base 100 en 2016)</h2>
-        <div class="odv-viz" data-code="Évolution des licences sportives annuelles (base 100 en 2016)">
-        <dsfr-data-chart id="g-base100" source="n-h" type="line" label-field="an"
-          value-field="v_fede:Fédération sélectionnée"
-          value-fields="v_gp:Son groupe de fédérations, v_all:Ensemble des fédérations"></dsfr-data-chart>
-        <dsfr-data-a11y for="g-base100" source="n-h" table download filename="licences-base100.csv"
-          label-field="an" value-field="v_fede, v_gp, v_all"></dsfr-data-a11y>
-        </div>
-
-        <div class="fr-grid-row fr-grid-row--gutters fr-mt-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Licences annuelles pour 1 000 habitants, par département</h2>
-        <p class="odv-lecture">Une carte de <strong>taux</strong>&nbsp;: elle dit où la fédération est implantée relativement à la population. Le résumé national sous le titre est <strong>pondéré</strong> — la moyenne de 101 pourcentages donnerait à la Lozère le poids du Nord.</p>
-            <div class="odv-viz" data-code="Licences pour 1 000 habitants">
-            <dsfr-data-chart id="g-carte-hab" source="n-dep" type="map" code-field="dep"
-              value-field="lics_pop_aff" name="Licences pour 1 000 habitants"
-              map-summary="weighted" map-summary-weight="pop"
-              map-summary-field="lics_pop"></dsfr-data-chart>
-            <dsfr-data-a11y for="g-carte-hab" source="n-dep" table download filename="licences-par-departement.csv"
-              label-field="dep_name" value-field="lics_pop_aff, lics"></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Les dix départements les plus licenciés, pour 1 000 habitants</h2>
-            <div class="odv-viz" data-code="Licences pour 1 000 habitants (2)">
-            <dsfr-data-chart id="g-top10" source="q-dep-top" type="bar" horizontal
-              label-field="dep_name" value-field="lics_pop" name="Licences pour 1 000 habitants"></dsfr-data-chart>
-            <dsfr-data-a11y for="g-top10" source="q-dep-top" table label-field="dep_name" value-field="lics_pop"></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Total des licences annuelles, par département</h2>
-        <p class="odv-lecture">La même donnée, mais en <strong>volumes</strong>. Le résumé n'est plus une moyenne mais une <strong>somme</strong>&nbsp;: la moyenne de 101 nombres de licenciés ne mesurerait rien.</p>
-            <div class="odv-viz" data-code="Licences annuelles">
-            <dsfr-data-chart id="g-carte-tot" source="n-dep" type="map" code-field="dep"
-              value-field="lics" name="Licences annuelles"
-              map-summary="sum"></dsfr-data-chart>
-            </div>
-          </div>
-        </div>
-
-        <dsfr-data-repeat source="n-ind" class="fr-mt-4w">
-          <template>
-            <div class="fr-grid-row fr-grid-row--gutters fede-grille">
-            <div class="fr-col-12 fr-col-md-4"><div class="fede-boite">
-              <p class="fede-boite__titre">Licences annuelles pour 1 000 habitants en {{millesime_def}}</p>
-              <p class="fede-boite__chiffre">{{lic1000:number:1}}</p>
-            </div></div>
-            <div class="fr-col-12 fr-col-md-4"><div class="fede-boite">
-              <p class="fede-boite__titre">Part des licences annuelles en QPV* en {{millesime_def}}</p>
-              <p class="fede-boite__chiffre">{{qpv:number:1}} %</p>
-              <p class="fede-boite__groupe">{{g_qpv100:number:1}} % pour les fédérations {{g_lib}}</p>
-              <p class="fr-text--xs fr-mb-0 fr-mt-1w">* Quartiers prioritaires de la politique de la ville (géographie 2024)</p>
-            </div></div>
-            <div class="fr-col-12 fr-col-md-4"><div class="fede-boite">
-              <p class="fede-boite__titre">Part des licences annuelles en ZRR* en {{millesime_def}}</p>
-              <p class="fede-boite__chiffre">{{zrr:number:1}} %</p>
-              <p class="fede-boite__groupe">{{g_zrr100:number:1}} % pour les fédérations {{g_lib}}</p>
-              <p class="fr-text--xs fr-mb-0 fr-mt-1w">* Zones de revitalisation rurale</p>
-            </div></div>
-            </div>
-          </template>
-        </dsfr-data-repeat>
-
-        <h2 class="fr-h5 fr-mt-6w">Taux de féminisation</h2>
-        <div class="odv-viz" data-code="Taux de féminisation">
-        <dsfr-data-chart id="g-fem" source="n-ind" type="bar" horizontal label-field="lib_fem"
-          value-field="fem:Fédération sélectionnée" value-fields="g_fem:Son groupe de fédérations"
-          unit-tooltip="%"></dsfr-data-chart>
-        <dsfr-data-a11y for="g-fem" source="n-ind" table label-field="lib_fem" value-field="fem, g_fem"></dsfr-data-a11y>
-        </div>
-
-        <h2 class="fr-h5 fr-mt-6w">Licences annuelles par groupe d'âges — part de chaque tranche dans les licences de la fédération et du groupe</h2>
-        <div class="fr-grid-row fr-grid-row--gutters">
-          <div class="fr-col-12 fr-col-md-6">
-            <h3 class="fr-h6">Femmes</h3>
-            <div class="odv-viz" data-code="Femmes">
-            <dsfr-data-chart id="g-pyr-f" source="n-pyr" type="bar" horizontal label-field="trage"
-              value-field="pf:Fédération sélectionnée" value-fields="pgf:Son groupe de fédérations"
-              unit-tooltip="%"></dsfr-data-chart>
-            <dsfr-data-a11y for="g-pyr-f" source="n-pyr" table label-field="trage" value-field="f_F, pf, pgf"></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-md-6">
-            <h3 class="fr-h6">Hommes</h3>
-            <div class="odv-viz" data-code="Hommes">
-            <dsfr-data-chart id="g-pyr-h" source="n-pyr" type="bar" horizontal label-field="trage"
-              value-field="ph:Fédération sélectionnée" value-fields="pgh:Son groupe de fédérations"
-              unit-tooltip="%"></dsfr-data-chart>
-            <dsfr-data-a11y for="g-pyr-h" source="n-pyr" table label-field="trage" value-field="f_H, ph, pgh"></dsfr-data-a11y>
-            </div>
-          </div>
-        </div>
-
-        <dsfr-data-repeat source="n-ind" class="fr-mt-4w">
-          <template>
-            <div class="fr-grid-row fr-grid-row--gutters fede-grille">
-            <div class="fr-col-12 fr-col-md-6"><div class="fede-boite">
-              <p class="fede-boite__titre">Âge médian des détenteurs de licences annuelles en {{millesime_semidef}}</p>
-              <p class="fede-boite__chiffre">{{med_age_semidef}} ans</p>
-              <p class="fede-boite__groupe">{{g_age}} ans pour les fédérations {{g_lib}}</p>
-            </div></div>
-            <div class="fr-col-12 fr-col-md-6"><div class="fede-boite">
-              <p class="fede-boite__titre">Taille médiane des établissements sportifs actifs en {{millesime_semidef}}</p>
-              <p class="fede-boite__chiffre">{{med_taille_semidef:number}} licences annuelles</p>
-              <p class="fede-boite__groupe">{{g_taille:number}} pour les fédérations {{g_lib}}</p>
-            </div></div>
-            </div>
-          </template>
-        </dsfr-data-repeat>
-
-        <dsfr-data-repeat source="n-ind" class="fr-mt-6w">
-          <template>
-            <p class="fr-h4 fr-mb-2w"><span class="fr-text-title--blue-france">{{clubsepa_actifs_semidef:number}}</span>
-              établissements sportifs actifs en {{millesime_semidef}}</p>
-          </template>
-        </dsfr-data-repeat>
-        <h2 class="fr-h5">Évolution des établissements sportifs actifs</h2>
-        <p class="fr-text--sm">Club : personne morale affiliée à une fédération. Établissement
-          professionnel agréé (EPA) : établissement sportif professionnel du secteur privé ou
-          commercial, agréé par la fédération.</p>
-        <div class="odv-viz" data-code="Évolution des établissements sportifs actifs">
-        <dsfr-data-chart id="g-clubs" source="s-clubs" type="bar" stacked label-field="an"
-          value-field="clubs:Clubs actifs" value-fields="epa:EPA actifs"></dsfr-data-chart>
-        <dsfr-data-a11y for="g-clubs" source="s-clubs" table label-field="an" value-field="clubs, epa"></dsfr-data-a11y>
-        </div>
-
-        <p class="fr-text--xs fr-mt-4w">Sources : <code>indicateurs_cles_fede</code>,
-          <code>lics_histo</code>, <code>lics_dep</code>, <code>lics_dep_age_sexe</code>,
-          <code>clubs_dep</code> — data.sports.gouv.fr, INJEP-MEDES.</p>
-      </div>
-
-      <!-- ─────────────── 2. Mon territoire ─────────────── -->
-      <div id="onglet-territoire" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-territoire" tabindex="0">
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-3w">
-          <div class="fr-col-12 fr-col-md-6">
-            <div class="fr-select-group">
-              <label class="fr-label" for="sel-reg">Région</label>
-              <select class="fr-select" id="sel-reg">
-                <option value="">France entière</option>
-                <option value="84">Auvergne-Rhône-Alpes</option>
-                <option value="27">Bourgogne-Franche-Comté</option>
-                <option value="53">Bretagne</option>
-                <option value="24">Centre-Val de Loire</option>
-                <option value="94">Corse</option>
-                <option value="44">Grand Est</option>
-                <option value="01">Guadeloupe</option>
-                <option value="03">Guyane</option>
-                <option value="32">Hauts-de-France</option>
-                <option value="11">Île-de-France</option>
-                <option value="04">La Réunion</option>
-                <option value="02">Martinique</option>
-                <option value="06">Mayotte</option>
-                <option value="28">Normandie</option>
-                <option value="75">Nouvelle-Aquitaine</option>
-                <option value="76">Occitanie</option>
-                <option value="52">Pays de la Loire</option>
-                <option value="93">Provence-Alpes-Côte d'Azur</option>
-              </select>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-md-6">
-            <div class="fr-select-group">
-              <label class="fr-label" for="sel-dep">Département</label>
-              <select class="fr-select" id="sel-dep">
-                <option value="">Tous</option>
-                <option value="01">01 — Ain</option>
-                <option value="02">02 — Aisne</option>
-                <option value="03">03 — Allier</option>
-                <option value="04">04 — Alpes-de-Haute-Provence</option>
-                <option value="05">05 — Hautes-Alpes</option>
-                <option value="06">06 — Alpes-Maritimes</option>
-                <option value="07">07 — Ardèche</option>
-                <option value="08">08 — Ardennes</option>
-                <option value="09">09 — Ariège</option>
-                <option value="10">10 — Aube</option>
-                <option value="11">11 — Aude</option>
-                <option value="12">12 — Aveyron</option>
-                <option value="13">13 — Bouches-du-Rhône</option>
-                <option value="14">14 — Calvados</option>
-                <option value="15">15 — Cantal</option>
-                <option value="16">16 — Charente</option>
-                <option value="17">17 — Charente-Maritime</option>
-                <option value="18">18 — Cher</option>
-                <option value="19">19 — Corrèze</option>
-                <option value="21">21 — Côte-d'Or</option>
-                <option value="22">22 — Côtes-d'Armor</option>
-                <option value="23">23 — Creuse</option>
-                <option value="24">24 — Dordogne</option>
-                <option value="25">25 — Doubs</option>
-                <option value="26">26 — Drôme</option>
-                <option value="27">27 — Eure</option>
-                <option value="28">28 — Eure-et-Loir</option>
-                <option value="29">29 — Finistère</option>
-                <option value="2A">2A — Corse-du-Sud</option>
-                <option value="2B">2B — Haute-Corse</option>
-                <option value="30">30 — Gard</option>
-                <option value="31">31 — Haute-Garonne</option>
-                <option value="32">32 — Gers</option>
-                <option value="33">33 — Gironde</option>
-                <option value="34">34 — Hérault</option>
-                <option value="35">35 — Ille-et-Vilaine</option>
-                <option value="36">36 — Indre</option>
-                <option value="37">37 — Indre-et-Loire</option>
-                <option value="38">38 — Isère</option>
-                <option value="39">39 — Jura</option>
-                <option value="40">40 — Landes</option>
-                <option value="41">41 — Loir-et-Cher</option>
-                <option value="42">42 — Loire</option>
-                <option value="43">43 — Haute-Loire</option>
-                <option value="44">44 — Loire-Atlantique</option>
-                <option value="45">45 — Loiret</option>
-                <option value="46">46 — Lot</option>
-                <option value="47">47 — Lot-et-Garonne</option>
-                <option value="48">48 — Lozère</option>
-                <option value="49">49 — Maine-et-Loire</option>
-                <option value="50">50 — Manche</option>
-                <option value="51">51 — Marne</option>
-                <option value="52">52 — Haute-Marne</option>
-                <option value="53">53 — Mayenne</option>
-                <option value="54">54 — Meurthe-et-Moselle</option>
-                <option value="55">55 — Meuse</option>
-                <option value="56">56 — Morbihan</option>
-                <option value="57">57 — Moselle</option>
-                <option value="58">58 — Nièvre</option>
-                <option value="59">59 — Nord</option>
-                <option value="60">60 — Oise</option>
-                <option value="61">61 — Orne</option>
-                <option value="62">62 — Pas-de-Calais</option>
-                <option value="63">63 — Puy-de-Dôme</option>
-                <option value="64">64 — Pyrénées-Atlantiques</option>
-                <option value="65">65 — Hautes-Pyrénées</option>
-                <option value="66">66 — Pyrénées-Orientales</option>
-                <option value="67">67 — Bas-Rhin</option>
-                <option value="68">68 — Haut-Rhin</option>
-                <option value="69">69 — Rhône</option>
-                <option value="70">70 — Haute-Saône</option>
-                <option value="71">71 — Saône-et-Loire</option>
-                <option value="72">72 — Sarthe</option>
-                <option value="73">73 — Savoie</option>
-                <option value="74">74 — Haute-Savoie</option>
-                <option value="75">75 — Paris</option>
-                <option value="76">76 — Seine-Maritime</option>
-                <option value="77">77 — Seine-et-Marne</option>
-                <option value="78">78 — Yvelines</option>
-                <option value="79">79 — Deux-Sèvres</option>
-                <option value="80">80 — Somme</option>
-                <option value="81">81 — Tarn</option>
-                <option value="82">82 — Tarn-et-Garonne</option>
-                <option value="83">83 — Var</option>
-                <option value="84">84 — Vaucluse</option>
-                <option value="85">85 — Vendée</option>
-                <option value="86">86 — Vienne</option>
-                <option value="87">87 — Haute-Vienne</option>
-                <option value="88">88 — Vosges</option>
-                <option value="89">89 — Yonne</option>
-                <option value="90">90 — Territoire de Belfort</option>
-                <option value="91">91 — Essonne</option>
-                <option value="92">92 — Hauts-de-Seine</option>
-                <option value="93">93 — Seine-Saint-Denis</option>
-                <option value="94">94 — Val-de-Marne</option>
-                <option value="95">95 — Val-d'Oise</option>
-                <option value="971">971 — Guadeloupe</option>
-                <option value="972">972 — Martinique</option>
-                <option value="973">973 — Guyane</option>
-                <option value="974">974 — La Réunion</option>
-                <option value="976">976 — Mayotte</option>
-              </select>
-              <p class="fr-hint-text">Les deux se combinent en « et ». La localisation des licences
-                se fait au lieu de résidence, pas de pratique.</p>
-            </div>
-          </div>
-        </div>
-
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="s-t-lic" value="lics:sum" format="nombre"
-            label="licences sportives annuelles sur le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-t-lic" value="lics_k:sum / pop:sum" format="decimal" decimals="1"
-            label="licences annuelles pour 1 000 habitants sur le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-dep" value="lics_k:sum / pop:sum" format="decimal" decimals="1"
-            label="licences annuelles pour 1 000 habitants en France"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <div class="fr-grid-row fr-grid-row--gutters">
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Licences annuelles pour 1 000 habitants</h2>
-            <div class="odv-viz" data-code="Licences pour 1 000 habitants (3)">
-            <dsfr-data-chart id="g-t-carte-hab" source="n-t-lic" type="map" code-field="dep"
-              value-field="lics_pop_aff" name="Licences pour 1 000 habitants"
-              map-summary="weighted" map-summary-weight="pop"
-              map-summary-field="lics_pop"></dsfr-data-chart>
-            <dsfr-data-a11y for="g-t-carte-hab" source="n-t-lic" table download filename="licences-territoire.csv"
-              label-field="dep_name" value-field="lics_pop_aff, lics"></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Total des licences annuelles</h2>
-            <div class="odv-viz" data-code="Licences annuelles (2)">
-            <dsfr-data-chart id="g-t-carte-tot" source="n-t-lic" type="map" code-field="dep"
-              value-field="lics" name="Licences annuelles"
-              map-summary="sum"></dsfr-data-chart>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Répartition des licences par type de communes</h2>
-            <div class="odv-viz" data-code="Répartition des licences par type de communes">
-            <dsfr-data-chart id="g-t-typo-lic" source="n-t-rr" type="bar" horizontal label-field="typo"
-              value-field="part_lic:Part des licences annuelles" value-fields="part_pop:Part de la population"
-              unit-tooltip="%"></dsfr-data-chart>
-            <dsfr-data-a11y for="g-t-typo-lic" source="n-t-rr" table label-field="typo" value-field="part_lic, part_pop"></dsfr-data-a11y>
-            </div>
-          </div>
-        </div>
-
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-my-4w">
-          <dsfr-data-kpi source="s-t-rr" value="ncl:sum / nct:sum" format="pourcentage" decimals="1"
-            label="des communes comptent au moins une licence annuelle"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-t-age" value="med_age:max" format="nombre" unit="ans"
-            label="âge médian des licenciés"
-            lines='[{"value":"right_med_age:max","format":"nombre","unit":"ans","suffix":"pour son groupe de fédérations","color":"rouge"}]'></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-t-sexe" value="f:sum / t:sum" format="pourcentage" decimals="1"
-            label="des licences annuelles sont féminines"
-            lines='[{"value":"gf:sum / gt:sum","decimals":1,"suffix":"pour son groupe de fédérations","color":"rouge"}]'></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <hr>
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-my-4w">
-          <dsfr-data-kpi source="j-t-clubs" value="n_actifs:sum" format="nombre"
-            label="établissements sportifs actifs sur le territoire (dernier millésime)"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-t-clubs" value="n_k:sum / pop:sum" format="decimal" decimals="1"
-            label="établissements actifs pour 100 000 habitants sur le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-clubs-fr" value="n_k:sum / pop:sum" format="decimal" decimals="1"
-            label="établissements actifs pour 100 000 habitants en France"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <div class="fr-grid-row fr-grid-row--gutters">
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Établissements sportifs actifs</h2>
-            <div class="odv-viz" data-code="Établissements sportifs actifs">
-            <dsfr-data-chart id="g-t-carte-netab" source="n-t-clubs" type="map" code-field="dep"
-              value-field="n_actifs" name="Établissements sportifs actifs"
-              map-summary="sum"></dsfr-data-chart>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Établissements sportifs actifs pour 100 000 habitants</h2>
-            <div class="odv-viz" data-code="Établissements pour 100 000 habitants">
-            <dsfr-data-chart id="g-t-carte-etab" source="n-t-clubs" type="map" code-field="dep"
-              value-field="n_actifs_pop_aff" name="Établissements pour 100 000 habitants"
-              map-summary="weighted" map-summary-weight="pop"
-              map-summary-field="n_actifs_pop"></dsfr-data-chart>
-            <dsfr-data-a11y for="g-t-carte-etab" source="n-t-clubs" table label-field="dep_l" value-field="n_actifs, n_actifs_pop"></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <h2 class="fr-h5">Répartition des établissements actifs par type de communes</h2>
-            <div class="odv-viz" data-code="Répartition des établissements actifs par type de communes">
-            <dsfr-data-chart id="g-t-typo-etab" source="n-t-rr" type="bar" horizontal label-field="typo"
-              value-field="part_c:Part des établissements actifs" value-fields="part_pop:Part de la population"
-              unit-tooltip="%"></dsfr-data-chart>
-            <dsfr-data-a11y for="g-t-typo-etab" source="n-t-rr" table label-field="typo" value-field="part_c, part_pop"></dsfr-data-a11y>
-            </div>
-            <dsfr-data-kpi-group cols="1" class="fr-mt-3w">
-              <dsfr-data-kpi source="s-t-rr" value="ncc:sum / nct:sum" format="pourcentage" decimals="1"
-                label="des communes comptent au moins un établissement sportif actif"></dsfr-data-kpi>
-            </dsfr-data-kpi-group>
-          </div>
-        </div>
-        <p class="fr-text--xs fr-mt-4w">Sources : <code>lics_dep</code>, <code>lics_clubs_dep_ruralurbain</code>
-          (2022, zonage 2023), <code>lics_dep_sexe</code>, <code>lics_distr_age</code>, <code>clubs_dep</code>.</p>
-      </div>
-
-      <!-- ─────────────── 3. Fiche signalétique ─────────────── -->
-      <div id="onglet-fiche" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-fiche" tabindex="0">
-        <!-- Celui-ci RESTE un `dsfr-data-display`, et c'est la limite documentee de
-             `repeat` : son gabarit porte un `{{#if site}}` qui enjambe deux elements
-             freres. `display` rend par `innerHTML` et le tolere ; `repeat` rend noeud
-             par noeud et le refuse -- en le DISANT en console, ce qui nous a evite de
-             livrer un bloc muet. Le compteur « N resultat(s) » subsiste donc ici seul,
-             et c'est le point residuel de dsfr-data#925. -->
-        <dsfr-data-display source="n-fede" class="fede-sans-compteur">
-          <template>
-            <h2 class="fr-h3">{{federations_sportives}}</h2>
-            <p>{{adresses}}</p>
-            {{#if site}}<p><a class="fr-link fr-icon-arrow-right-line fr-link--icon-right" href="{{site:url}}" target="_blank" rel="noopener external">Site internet de la fédération</a></p>{{/if}}
-            <div class="fr-grid-row fr-grid-row--gutters fr-mt-3w fede-grille">
-              <div class="fr-col-12 fr-col-md-4"><div class="fede-boite">
-                <p class="fede-boite__titre">Année d'obtention de l'agrément</p>
-                <p class="fede-boite__chiffre">{{an_agrement}}</p></div></div>
-              <div class="fr-col-12 fr-col-md-4"><div class="fede-boite">
-                <p class="fede-boite__titre">Saisonnalité</p>
-                <p class="fede-boite__chiffre">{{saisonnalite}}</p></div></div>
-              <div class="fr-col-12 fr-col-md-4"><div class="fede-boite">
-                <p class="fede-boite__titre">Délégation parasportive obtenue en</p>
-                <p class="fede-boite__chiffre">{{para}}</p></div></div>
-            </div>
-            <h3 class="fr-h6 fr-mt-4w">Disciplines délégataires</h3>
-            <p>{{disciplines_deleguees|—}}</p>
-          </template>
-        </dsfr-data-display>
-        <dsfr-data-repeat source="n-ind">
-          <template><p class="fr-mt-2w">Groupement : <strong>fédérations {{g_lib}}</strong></p></template>
-        </dsfr-data-repeat>
-        <p class="fr-text--xs fr-mt-4w">Source : <code>msjva-portraits-de-federations-base-2024</code>.</p>
-      </div>
-
-      <!-- ─────────────── 4. Structuration ─────────────── -->
-      <div id="onglet-structuration" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-structuration" tabindex="0">
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="s-fede" value="presidence:first" format="nombre" heading="Présidence"
-            label="sexe de la présidence"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-fede" value="conseillers_techniques_sportifs:max" format="nombre"
-            label="conseillers techniques sportifs"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-fede" value="sportifs_haut_niveau:max" format="nombre"
-            label="sportifs de haut niveau listés"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <h2 class="fr-h5">Sportifs de haut niveau : répartition par sexe dans les quatre catégories principales</h2>
-        <div class="odv-viz" data-code="Sportifs de haut niveau : répartition par sexe dans les quatre catégor">
-        <dsfr-data-chart id="g-shn" source="s-shn" type="bar" stacked label-field="categories"
-          value-field="femmes:Femmes" value-fields="hommes:Hommes"></dsfr-data-chart>
-        <dsfr-data-a11y for="g-shn" source="s-shn" table label-field="categories" value-field="femmes, hommes"></dsfr-data-a11y>
-        </div>
-
-        <h2 class="fr-h5 fr-mt-6w">Financements de l'Agence nationale du sport</h2>
-        <dsfr-data-kpi-group cols="1" class="fr-mb-3w">
-          <dsfr-data-kpi source="s-fede" value="ans_total:max" format="euro" decimals="0"
-            label="financés par l'ANS en 2024"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <div class="odv-viz" data-code="Financements de l'Agence nationale du sport">
-        <dsfr-data-chart id="g-ans" source="n-ans" type="bar" horizontal stacked label-field="libelle"
-          series-field="dev_htp" value-field="valeur" unit-tooltip="€"></dsfr-data-chart>
-        <dsfr-data-a11y for="g-ans" source="n-ans" table label-field="libelle" value-field="dev_htp, valeur"></dsfr-data-a11y>
-        </div>
-
-        <h2 class="fr-h5 fr-mt-6w">Dispositifs du ministère chargé des sports, en 2024</h2>
-        <dsfr-data-kpi-group cols="4" gap="md">
-          <dsfr-data-kpi source="s-fede" value="pass_sports:max" format="nombre" label="Pass'Sports activés"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-fede" value="handiguide:max" format="nombre" label="structures référencées Handiguide"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-fede" value="mss:max" format="nombre" label="structures habilitées Maisons Sport-Santé"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-fede" value="mss_partenariats:max" format="nombre" label="partenariats des Maisons Sport-Santé"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <p class="fr-text--xs fr-mt-4w">Sources : <code>msjva-portraits-de-federations-base-2024</code>,
-          <code>msjva-portraits-de-federations-shn-2024</code>, <code>dispositif-ans</code>.</p>
-      </div>
-
-      <!-- ─────────────── 5. Me comparer ─────────────── -->
-      <div id="onglet-comparer" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-comparer" tabindex="0">
-        <div class="fr-select-group fr-mb-3w">
-          <label class="fr-label" for="sel-comp">Fédération ou groupe de comparaison</label>
-          <select class="fr-select" id="sel-comp">
-            <option value="0" selected>0. Toutes les fédérations</option>
-            <option value="1">1. Fédérations olympiques</option>
-            <option value="2">2. Fédérations délégataires non-olympiques</option>
-            <option value="4">4. Fédérations affinitaires</option>
-            <option value="5">5. Fédérations para-sportives</option>
-            <option value="6">6. Fédérations scolaires</option>
-            <option value="101">101 — Fédération Française d'Athlétisme</option>
-            <option value="102">102 — Fédération Française d'Aviron</option>
-            <option value="103">103 — Fédération Française de Badminton</option>
-            <option value="105">105 — Fédération Française de Basketball</option>
-            <option value="106">106 — Fédération Française de Boxe</option>
-            <option value="107">107 — Fédération Française de Canoë-Kayak et Sports de Pagaie</option>
-            <option value="108">108 — Fédération Française de Cyclisme</option>
-            <option value="109">109 — Fédération Française d'Équitation</option>
-            <option value="110">110 — Fédération Française d'Escrime</option>
-            <option value="111">111 — Fédération Française de Football</option>
-            <option value="112">112 — Fédération Française des Sports de Glace</option>
-            <option value="113">113 — Fédération Française de Gymnastique</option>
-            <option value="114">114 — Fédération Française d'Haltérophilie, Musculation</option>
-            <option value="115">115 — Fédération Française de Handball</option>
-            <option value="116">116 — Fédération Française de Hockey</option>
-            <option value="117">117 — Fédération Française de Judo, Jujitsu, Kendo et Disciplines Associées</option>
-            <option value="118">118 — Fédération Française de Lutte</option>
-            <option value="119">119 — Fédération Française de Natation</option>
-            <option value="120">120 — Fédération Française de Pentathlon Moderne</option>
-            <option value="121">121 — Fédération Française de Ski</option>
-            <option value="122">122 — Fédération Française de Taekwondo et Disciplines Associées</option>
-            <option value="123">123 — Fédération Française de Tennis</option>
-            <option value="124">124 — Fédération Française de Tennis de Table</option>
-            <option value="125">125 — Fédération Française de Tir</option>
-            <option value="126">126 — Fédération Française de Tir à l'Arc</option>
-            <option value="127">127 — Fédération Française de Triathlon et Disciplines Enchainées</option>
-            <option value="128">128 — Fédération Française de Voile</option>
-            <option value="129">129 — Fédération Française de Volley</option>
-            <option value="131">131 — Fédération Française de Hockey sur Glace</option>
-            <option value="132">132 — Fédération Française de Golf</option>
-            <option value="133">133 — Fédération Française de Rugby</option>
-            <option value="135">135 — Fédération Française de la Montagne et de l'Escalade</option>
-            <option value="136">136 — Fédération Française de Roller et Skateboard</option>
-            <option value="137">137 — Fédération Française de Surf</option>
-            <option value="138">138 — Fédération Française de Baseball, Softball</option>
-            <option value="139">139 — Fédération Française de Danse</option>
-            <option value="140">140 — Fédération Française de Football Américain</option>
-            <option value="141">141 — Fédération Française de Squash</option>
-            <option value="201">201 — Fédération Française d'Aéromodélisme</option>
-            <option value="202">202 — Fédération Française Aéronautique</option>
-            <option value="203">203 — Fédération Française d'Aérostation</option>
-            <option value="204">204 — Fédération Française d'Aïkido, d'Aïkibudo et Affinitaires</option>
-            <option value="205">205 — Fédération Française d'Aïkido et de Budo</option>
-            <option value="206">206 — Fédération Française du Sport Automobile</option>
-            <option value="207">207 — Fédération Française de Jeu de Balle au Tambourin</option>
-            <option value="208">208 — Fédération Française de Ballon au Poing</option>
-            <option value="209">209 — Fédération Française de Ball-Trap</option>
-            <option value="210">210 — Fédération Française de Billard</option>
-            <option value="211">211 — Fédération Française du Sport Boules</option>
-            <option value="212">212 — Fédération Française de Savate, Boxe Française et Disciplines Associées</option>
-            <option value="213">213 — Fédération Française de Bowling et de Sport de Quilles</option>
-            <option value="214">214 — Fédération Française de Char à Voile</option>
-            <option value="215">215 — Fédération Française de Course Camarguaise</option>
-            <option value="216">216 — Fédération Française de la Course Landaise</option>
-            <option value="217">217 — Fédération Française de Course d'Orientation</option>
-            <option value="218">218 — Fédération Française de Cyclotourisme</option>
-            <option value="220">220 — Fédération Française des Échecs</option>
-            <option value="221">221 — Fédération Française d'Études et Sports Sous-Marins</option>
-            <option value="224">224 — Fédération Française d’hélicoptère</option>
-            <option value="226">226 — Fédération Française de Javelot Tir sur Cible</option>
-            <option value="227">227 — Fédération Française de Jeu de Paume</option>
-            <option value="228">228 — Fédération Française de Joute et Sauvetage Nautique</option>
-            <option value="229">229 — Fédération Française de Karaté et Disciplines Associées</option>
-            <option value="231">231 — Fédération Française de Longue Paume</option>
-            <option value="233">233 — Fédération Française de Motocyclisme</option>
-            <option value="234">234 — Fédération Française Motonautique</option>
-            <option value="237">237 — Fédération Française de Parachutisme</option>
-            <option value="241">241 — Fédération Française de Pelote Basque</option>
-            <option value="242">242 — Fédération Française de Pétanque et Jeu Provençal</option>
-            <option value="243">243 — Fédération Française de Planeur Ultraléger Motorisé</option>
-            <option value="244">244 — Fédération Française de Pulka et Traineau à Chiens</option>
-            <option value="245">245 — Fédération Française de la Randonnée Pédestre</option>
-            <option value="248">248 — Fédération Française de Rugby à XIII</option>
-            <option value="249">249 — Fédération Française de Sauvetage et de Secourisme</option>
-            <option value="250">250 — Fédération Française de Ski Nautique et de Wakeboard</option>
-            <option value="251">251 — Fédération Française de Spéléologie</option>
-            <option value="254">254 — Fédération des Arts Énergétiques et Martiaux Chinois</option>
-            <option value="255">255 — Fédération Française des Sports de Traîneau, de Ski VTT Joëring et de Canicross</option>
-            <option value="256">256 — Fédération Française Sportive de Twirling Bâton</option>
-            <option value="257">257 — Fédération Française de Vol en Planeur</option>
-            <option value="258">258 — Fédération Française de Vol Libre</option>
-            <option value="260">260 — Fédération Française de Polo</option>
-            <option value="261">261 — Fédération Française de Kick Boxing, Muay Thaï et Disciplines Associées</option>
-            <option value="263">263 — Fédération de Double Dutch</option>
-            <option value="264">264 — Fédération Française de Flying Disc</option>
-            <option value="265">265 — Fédération Française de Pêche Sportive en Apnée</option>
-            <option value="266">266 — Fédération Française de Force</option>
-            <option value="267">267 — Fédération Française des Pêches Sportives</option>
-            <option value="268">268 — Fédération de Boxe Américaine et Disciplines Associées</option>
-            <option value="269">269 — Fédération de Voitures Radio Commandées</option>
-            <option value="270">270 — Fédération Française des Sports et Loisirs Canins</option>
-            <option value="271">271 — Fédération Française des Clubs Alpins et de Montagne</option>
-            <option value="402">402 — Fédération Française d'Éducation Physique et de Gymnastique Volontaire</option>
-            <option value="403">403 — Fédération Française Sports Pour Tous</option>
-            <option value="404">404 — Fédération Française de la Retraite Sportive</option>
-            <option value="405">405 — Fédération Française du Sport Travailliste</option>
-            <option value="406">406 — Fédération des Clubs de la Défense</option>
-            <option value="407">407 — Fédération Nationale du Sport en Milieu Rural</option>
-            <option value="408">408 — Fédération Sportive et Culturelle de France</option>
-            <option value="409">409 — Fédération Française Maccabi</option>
-            <option value="410">410 — Fédération Sportive et Gymnique du Travail</option>
-            <option value="411">411 — Fédération Sportive de la Police Nationale</option>
-            <option value="413">413 — Union Française des Œuvres Laïques d'Éducation Physique (UFOLEP)</option>
-            <option value="415">415 — Fédération Française Omnisports des Personnels de l'Éducation Nationale</option>
-            <option value="417">417 — Union Nationale Sportive Léo Lagrange</option>
-            <option value="418">418 — Fédération Française du Sport d'Entreprise</option>
-            <option value="420">420 — Fédération Sportive des ASPTT</option>
-            <option value="421">421 — Fédération Française des Sports Populaires</option>
-            <option value="422">422 — Fédération Française des Clubs Omnisports</option>
-            <option value="423">423 — Fédération Nationale des Offices Municipaux des Sports</option>
-            <option value="424">424 — UCPA Sport Loisirs</option>
-            <option value="425">425 — UCPA Sport Vacances</option>
-            <option value="426">426 — Fédération Sportive LGBT+</option>
-            <option value="501">501 — Fédération Française Handisport</option>
-            <option value="503">503 — Fédération Française du Sport Adapté</option>
-            <option value="601">601 — Fédération Française du Sport Universitaire</option>
-            <option value="602">602 — Fédération Sportive Educative de l'Enseignement Catholique (UGSEL)</option>
-            <option value="603">603 — Fédération Française des Clubs Universitaires</option>
-            <option value="604">604 — Union Nationale du Sport Scolaire (UNSS)</option>
-            <option value="605">605 — Union Sportive de l'Enseignement du Premier Degré</option>
           </select>
-          <p class="fr-hint-text">La fédération de référence est celle du sélecteur du haut de page.</p>
         </div>
-
-        <div class="fr-grid-row fr-grid-row--gutters">
-          <div class="fr-col-12 fr-col-md-6">
-            <dsfr-data-repeat source="n-ind">
-              <template>
-                <h2 class="fr-h5">{{federation}}</h2>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Licences annuelles en {{millesime_semidef}}</p><p class="fede-boite__chiffre">{{lics_tot_semidef:number}}</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Licences annuelles pour 1 000 habitants en {{millesime_def}}</p><p class="fede-boite__chiffre">{{lic1000:number:1}}</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Taux de féminisation en {{millesime_semidef}}</p><p class="fede-boite__chiffre">{{fem:number:1}} %</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Âge médian en {{millesime_semidef}}</p><p class="fede-boite__chiffre">{{med_age_semidef}} ans</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Part des licences en QPV / en ZRR en {{millesime_def}}</p><p class="fede-boite__chiffre">{{qpv:number:1}} % / {{zrr:number:1}} %</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Établissements sportifs actifs en {{millesime_semidef}}</p><p class="fede-boite__chiffre">{{clubsepa_actifs_semidef:number}}</p></div>
-              </template>
-            </dsfr-data-repeat>
-            <dsfr-data-kpi-group cols="1">
-              <dsfr-data-kpi source="s-c-rr-a" value="ncl:sum / nct:sum" format="pourcentage" decimals="1"
-                label="des communes comptent au moins une licence annuelle (2022)"></dsfr-data-kpi>
-            </dsfr-data-kpi-group>
-            <h3 class="fr-h6 fr-mt-3w">Évolution des licences (base 100 en 2016)</h3>
-            <div class="odv-viz" data-code="Évolution des licences (base 100 en 2016)">
-            <dsfr-data-chart id="g-c-a" source="n-h" type="line" label-field="an" value-field="v_fede:Licences, base 100"></dsfr-data-chart>
-            </div>
-            <h3 class="fr-h6 fr-mt-3w">Licences et population par type de communes (2023)</h3>
-            <div class="odv-viz" data-code="Licences et population par type de communes (2023)">
-            <dsfr-data-chart id="g-c-typo-a" source="n-c-typo-a" type="bar" horizontal label-field="typo"
-              value-field="part_lic:Part des licences" value-fields="part_pop:Part de la population" unit-tooltip="%"></dsfr-data-chart>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-md-6">
-            <dsfr-data-repeat source="n-c-ind">
-              <template>
-                <h2 class="fr-h5">{{federation}}</h2>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Licences annuelles en {{millesime_semidef}}</p><p class="fede-boite__chiffre">{{lics_tot_semidef:number}}</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Licences annuelles pour 1 000 habitants en {{millesime_def}}</p><p class="fede-boite__chiffre">{{lic1000:number:1}}</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Taux de féminisation en {{millesime_semidef}}</p><p class="fede-boite__chiffre">{{fem:number:1}} %</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Âge médian en {{millesime_semidef}}</p><p class="fede-boite__chiffre">{{med_age_semidef}} ans</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Part des licences en QPV / en ZRR en {{millesime_def}}</p><p class="fede-boite__chiffre">{{qpv:number:1}} % / {{zrr:number:1}} %</p></div>
-                <div class="fede-boite fr-mb-2w"><p class="fede-boite__titre">Établissements sportifs actifs en {{millesime_semidef}}</p><p class="fede-boite__chiffre">{{clubsepa_actifs_semidef:number}}</p></div>
-              </template>
-            </dsfr-data-repeat>
-            <dsfr-data-kpi-group cols="1">
-              <dsfr-data-kpi source="s-c-rr-b" value="ncl:sum / nct:sum" format="pourcentage" decimals="1"
-                label="des communes comptent au moins une licence annuelle (2022)"></dsfr-data-kpi>
-            </dsfr-data-kpi-group>
-            <p class="fr-hint-text">« — » pour un groupe : <code>lics_clubs_dep_ruralurbain</code>
-              n'a aucune ligne de groupe (aucun code inférieur à 100).</p>
-            <h3 class="fr-h6 fr-mt-3w">Évolution des licences (base 100 en 2016)</h3>
-            <div class="odv-viz" data-code="Évolution des licences (base 100 en 2016) (2)">
-            <dsfr-data-chart id="g-c-b" source="n-c-h" type="line" label-field="an" value-field="v:Licences, base 100"></dsfr-data-chart>
-            </div>
-            <h3 class="fr-h6 fr-mt-3w">Licences et population par type de communes (2023)</h3>
-            <div class="odv-viz" data-code="Licences et population par type de communes (2023) (2)">
-            <dsfr-data-chart id="g-c-typo-b" source="n-c-typo-b" type="bar" horizontal label-field="typo"
-              value-field="part_lic:Part des licences" value-fields="part_pop:Part de la population" unit-tooltip="%"></dsfr-data-chart>
-            </div>
-          </div>
-        </div>
-        <p class="fr-text--xs fr-mt-4w">Sources : <code>indicateurs_cles_fede</code>, <code>lics_histo</code>,
-          <code>lics_clubs_dep_ruralurbain</code>.</p>
       </div>
     </div>
+  </section>
+
+  <div class="fr-container fr-mb-8w">
+
+    <!-- ====================== 1. L'accroche ====================== -->
+    <p class="fr-badge fr-badge--info fr-mb-2v">Portrait de fédération · licences 2024</p>
+    <dsfr-data-repeat source="n-moi">
+      <template>
+        <h1>{{titre}}</h1>
+        <!-- Chaque phrase n'est écrite que si sa valeur est publiée : un bloc
+             {{#if}} doit tenir dans un seul nœud texte, d'où l'absence de
+             <strong> après le premier. -->
+        <p class="fr-text--lead">
+          En {{millesime_semidef}}, {{art}}{{federation}}{{#if a_lics}} compte {{lics:number}} licences,
+          {{part_aff:number}}&nbsp;% de celles des fédérations {{gp}}.{{/if}}{{#unless a_lics}} ne déclare aucune licence au recensement.{{/unless}}{{#if sf}} Les femmes en détiennent
+          {{pct_f:number:1}}&nbsp;%, {{abs_ecart_f:number:1}} {{pts}} {{sens_f}} que dans son groupe
+          ({{g_pct_f:number:1}}&nbsp;%).{{/if}}{{#if se}} Depuis 2019, ses licences ont {{sens_e}} de
+          {{abs_e5:number:1}}&nbsp;% (groupe&nbsp;: {{sens_ge}}{{abs_ge5:number:1}}&nbsp;%).{{/if}}{{#if sa}} L'âge
+          médian de ses licenciés est de {{age}}&nbsp;ans, contre {{g_age}} dans le groupe.{{/if}}
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
+      <summary><h2 class="fr-callout__title fr-text--md">Les jeux utilisés, et comment le titre est choisi</h2></summary>
+      <p class="fr-callout__text fr-text--sm">
+        Quatre jeux de <code>data.sports.gouv.fr</code> (INJEP-MEDES, recensement des licences
+        et clubs auprès des fédérations agréées)&nbsp;: <code>indicateurs_cles_fede</code> (une ligne
+        par fédération et par groupe, saison 2024 semi-définitive), <code>lics_histo</code>
+        (licences 2002-2024 et indice base 100 en 2016, publié), <code>lics_dep</code> (licences et
+        licences pour 1&nbsp;000 habitants par département, 2024) et
+        <code>msjva-portraits-de-federations-base-2024</code> (fiche du ministère).
+      </p>
+      <p class="fr-callout__text fr-text--sm fr-mt-2w">
+        <strong>Le titre est calculé.</strong> Parmi les fédérations de son groupe, la fédération
+        choisie est classée sur trois indicateurs — part des femmes dans les licences, évolution
+        des licences de 2019 à 2024, âge médian des licenciés. Le titre retient celui où elle est
+        la plus à l'écart&nbsp;: le rang compté depuis le bout le plus proche (tête ou queue),
+        rapporté au nombre de fédérations classées. Si aucun rang ne la place dans le premier ou
+        le dernier tiers, le titre le dit («&nbsp;un profil proche du milieu&nbsp;»)&nbsp;; dans un
+        groupe de cinq fédérations ou moins, il donne son poids dans le groupe. Une licence n'est pas une personne&nbsp;: un
+        pratiquant peut en détenir plusieurs, dans plusieurs fédérations.
+      </p>
+    </details>
+
+    <dsfr-data-repeat source="n-moi">
+      <template>
+        <dsfr-data-kpi-group per-row="4" class="fr-mb-6w">
+          <dsfr-data-kpi source="n-moi" value="lics" format="nombre"
+            heading="Licences en {{millesime_semidef}}"
+            lines='[{"value":"g_lics:first","format":"nombre","prefix":"groupe : "}]'></dsfr-data-kpi>
+          <dsfr-data-kpi source="n-moi" value="pct_f" format="decimal" decimals="1" unit="%"
+            heading="Part des femmes"
+            lines='[{"value":"g_pct_f:first","format":"decimal","decimals":1,"prefix":"groupe : ","suffix":" %"}]'
+            label="{{lab_f}}"></dsfr-data-kpi>
+          <dsfr-data-kpi source="n-moi" value="e5" format="decimal" decimals="1" unit="%"
+            heading="Évolution des licences, 2019-2024"
+            lines='[{"value":"g_e5:first","format":"decimal","decimals":1,"sign":true,"prefix":"groupe : ","suffix":" %"}]'
+            label="{{lab_e}}"></dsfr-data-kpi>
+          <dsfr-data-kpi source="n-moi" value="age" format="nombre" unit="ans"
+            heading="Âge médian des licenciés"
+            lines='[{"value":"g_age:first","format":"nombre","prefix":"groupe : ","suffix":" ans"}]'
+            label="{{lab_a}}"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+      </template>
+    </dsfr-data-repeat>
+
+    <!-- ====================== 2. La preuve : parmi ses pairs ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-pairs">
+      <dsfr-data-repeat source="n-moi">
+        <template>
+          <h2 class="fr-h3" id="t-pairs">Parmi les {{npairs}} fédérations {{gp}}, où elle se place</h2>
+          <p class="odv-lecture">Chaque barre est une fédération du groupe, de la plus haute à la
+            plus basse&nbsp;; la barre en couleur est celle de {{art}}{{federation_court}}. Part des femmes&nbsp;:
+            <strong>{{lab_f}}</strong>. Évolution des licences depuis 2019&nbsp;: <strong>{{lab_e}}</strong>.
+            Âge médian&nbsp;: <strong>{{lab_a}}</strong>.</p>
+        </template>
+      </dsfr-data-repeat>
+      <!-- Les emplacements sont hors du répéteur pour réserver leur hauteur
+           dès le chargement ; seul le graphique y est répété, parce que son
+           `highlight-index` vient du rang calculé. -->
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-4">
+              <div class="odv-chart-slot">
+                <dsfr-data-repeat source="n-moi">
+                  <template>
+                  <dsfr-data-chart id="g-pairs-f" source="q-f-d" type="bar"
+                    label-field="federation_court" value-field="pf_aff:Part des femmes (%)" unit-tooltip=" %"
+                    selected-palette="neutral" highlight-index="[{{if0}}]"
+                    databox databox-title="Part des femmes{{#if sf}} : {{pct_f:number:1}} %, {{ordf}} sur {{nf}}{{/if}}"
+                    databox-source="INJEP-MEDES — indicateurs_cles_fede, via data.sports.gouv.fr"
+                    databox-date="Saison {{millesime_semidef}}" heading-level="3"></dsfr-data-chart>
+                  <dsfr-data-a11y for="g-pairs-f" source="q-f-d" table download
+                    label-field="federation_court" value-field="pf_aff, rfd"
+                    description="Barres triées de la plus féminisée à la moins féminisée des {{nf}} fédérations {{gp}} renseignées ; celle de {{art}}{{federation_court}} est en couleur ({{lab_f}})."></dsfr-data-a11y>
+                  </template>
+                </dsfr-data-repeat>
+              </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-4">
+              <div class="odv-chart-slot">
+                <dsfr-data-repeat source="n-moi">
+                  <template>
+                  <dsfr-data-chart id="g-pairs-e" source="q-e-d" type="bar"
+                    label-field="federation_court" value-field="e5_aff:Évolution 2019-2024 (%)" unit-tooltip=" %"
+                    selected-palette="neutral" highlight-index="[{{ie0}}]"
+                    databox databox-title="Évolution des licences depuis 2019{{#if se}} : {{e5:number:1}} %, {{orde}} sur {{ne}}{{/if}}"
+                    databox-source="INJEP-MEDES — indicateurs_cles_fede, via data.sports.gouv.fr"
+                    databox-date="2019 à {{millesime_semidef}}" heading-level="3"></dsfr-data-chart>
+                  <dsfr-data-a11y for="g-pairs-e" source="q-e-d" table download
+                    label-field="federation_court" value-field="e5_aff, red"
+                    description="Barres triées de la plus forte à la plus faible évolution des licences entre 2019 et 2024, pour les {{ne}} fédérations {{gp}} renseignées ; axe partant de zéro, barres négatives pour les reculs ; celle de {{art}}{{federation_court}} est en couleur ({{lab_e}})."></dsfr-data-a11y>
+                  </template>
+                </dsfr-data-repeat>
+              </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-4">
+              <div class="odv-chart-slot">
+                <dsfr-data-repeat source="n-moi">
+                  <template>
+                  <dsfr-data-chart id="g-pairs-a" source="q-a-d" type="bar"
+                    label-field="federation_court" value-field="age:Âge médian (ans)" unit-tooltip=" ans"
+                    selected-palette="neutral" highlight-index="[{{ia0}}]"
+                    databox databox-title="Âge médian{{#if sa}} : {{age}} ans, {{orda}} plus âgé sur {{na}}{{/if}}"
+                    databox-source="INJEP-MEDES — indicateurs_cles_fede, via data.sports.gouv.fr"
+                    databox-date="Saison {{millesime_semidef}}" heading-level="3"></dsfr-data-chart>
+                  <dsfr-data-a11y for="g-pairs-a" source="q-a-d" table download
+                    label-field="federation_court" value-field="age, rad"
+                    description="Barres triées du public le plus âgé au plus jeune des {{na}} fédérations {{gp}} renseignées ; celle de {{art}}{{federation_court}} est en couleur ({{lab_a}}). Les ex aequo sont nombreux : l'âge médian est publié en années entières."></dsfr-data-a11y>
+                  </template>
+                </dsfr-data-repeat>
+              </div>
+        </div>
+      </div>
+      <p class="fr-text--sm fr-hint-text">Rangs «&nbsp;de compétition&nbsp;»&nbsp;: à égalité de
+        valeur, la fédération partage le meilleur rang et sa barre est placée en tête des ex
+        aequo. Une fédération sans valeur publiée n'est pas classée&nbsp;: le «&nbsp;sur N&nbsp;» de
+        chaque rang ne compte que les fédérations renseignées.</p>
+    </section>
+
+    <!-- ====================== 3. La nuance : le temps ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-temps">
+      <dsfr-data-repeat source="n-moi">
+        <template>
+          <h2 class="fr-h3" id="t-temps">{{#if se}}Depuis 2019, ses licences ont {{sens_e}} de {{abs_e5:number:1}}&nbsp;% ; celles de son groupe, {{sens_ge}}{{abs_ge5:number:1}}&nbsp;%{{/if}}{{#unless se}}Ses licences depuis 2016, face à celles de son groupe{{/unless}}</h2>
+        </template>
+      </dsfr-data-repeat>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-8">
+          <div class="odv-chart-slot">
+            <!-- Palette par défaut, et non color-map : sur une courbe, color-map
+                 recolore le trait et la légende mais pas les points (BUG-033), et
+                 selected-palette="neutral" + highlight-index grise les trois
+                 courbes sans en distinguer aucune (vérifié le 2026-09-27). -->
+            <dsfr-data-chart id="g-temps" source="n-histo" type="line"
+              label-field="annee" value-field="v" series-field="serie"
+              selected-palette="categorical"
+              reference-lines='[{"axis":"x","value":"2019","label":"2019","dash":true}]'
+              databox databox-title="Licences, indice base 100 en 2016"
+              databox-source="INJEP-MEDES — lics_histo, via data.sports.gouv.fr"
+              databox-date="2016 à 2024" heading-level="3"></dsfr-data-chart>
+            <dsfr-data-a11y for="g-temps" source="n-histo" table download
+              label-field="annee" value-field="v" series-field="serie"
+              description="Trois courbes, indice 100 en 2016 : la fédération choisie, son groupe et l'ensemble des fédérations, de 2016 à 2024. Un trait vertical marque 2019, point de départ de l'évolution sur cinq ans citée dans le titre. L'axe ne part pas de zéro."></dsfr-data-a11y>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-4">
+          <p class="fr-text--sm">La courbe de la fédération est comparée à deux références
+            publiées par le jeu, à <strong>champ constant</strong>&nbsp;: les seules fédérations
+            présentes de 2016 à 2024, pour qu'une fusion ou un agrément nouveau ne se lise pas comme
+            une croissance. La fédération choisie fait partie de son groupe&nbsp;: plus elle pèse
+            dans le groupe (le football fait près du quart des licences olympiques), plus les deux
+            courbes se ressemblent.</p>
+          <p class="fr-text--sm">Le creux de 2020-2021 est commun à presque toutes les
+            fédérations&nbsp;: c'est la crise sanitaire. C'est pourquoi l'évolution retenue pour le
+            classement part de 2019, dernière saison qui la précède.</p>
+          <p class="fr-text--sm fr-hint-text">Une fédération agréée après 2016 n'a pas d'indice sur
+            toute la période&nbsp;: sa courbe commence plus tard, ou manque.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================== 4. Géographie ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-geo">
+      <dsfr-data-repeat source="q-dep-top">
+        <template>
+          <h2 class="fr-h3" id="t-geo">Sa plus forte implantation, {{dep_name}}&nbsp;: {{lics_pop:number:1}} {{mot}} pour 1&nbsp;000 habitants, {{is:number:1}} fois le taux national</h2>
+          <p class="odv-lecture">Rapportées à la population, les licences de la fédération se
+            répartissent inégalement&nbsp;: {{lics_pop_fr:number:2}} pour 1&nbsp;000 habitants en
+            France (101 départements), <strong>{{lics_pop:number:1}}</strong> pour le
+            département en tête, {{dep_name}} ({{lics:number}} licences).</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="fr-grid-row fr-grid-row--gutters">
+        <div class="fr-col-12 fr-col-lg-7">
+          <div class="odv-chart-slot">
+            <dsfr-data-chart id="g-carte" source="n-dep" type="map"
+              code-field="dep" value-field="taux" name="Licences pour 1 000 habitants"
+              selected-palette="sequentialAscending"
+              map-summary="weighted" map-summary-weight="pop" map-summary-field="lics_pop"
+              databox databox-title="Licences pour 1 000 habitants, par département"
+              databox-source="INJEP-MEDES — lics_dep, via data.sports.gouv.fr"
+              databox-date="Saison 2024" heading-level="3"></dsfr-data-chart>
+            <dsfr-data-a11y for="g-carte" source="n-dep" table download
+              label-field="dep_name" value-field="taux, lics, indice"
+              description="Carte des départements colorée selon le nombre de licences de la fédération pour 1 000 habitants en 2024. Le chiffre affiché sous le titre est le taux national, pondéré par la population des départements."></dsfr-data-a11y>
+          </div>
+        </div>
+        <div class="fr-col-12 fr-col-lg-5">
+          <dsfr-data-list source="n-dep"
+            columns="dep_name:Département, lics:Licences, taux:Pour 1 000 hab., indice:Rapport au taux national"
+            sort="taux:desc" search count-label="département" export="csv" pagination="10"></dsfr-data-list>
+          <p class="fr-text--sm fr-hint-text fr-mt-2w">Un département peu peuplé monte vite dans ce
+            classement&nbsp;: pour une petite fédération, quelques dizaines de licences y suffisent.
+            Lire le taux avec l'effectif.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================== 5. La fédération en bref ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-fiche">
+      <h2 class="fr-h3" id="t-fiche">La fédération en bref</h2>
+      <dsfr-data-repeat source="n-fiche" empty="Aucune fiche publiée par le ministère pour cette fédération.">
+        <template>
+          <div class="fr-table fr-table--bordered">
+            <table>
+              <caption>{{federations_sportives}} — fiche du ministère chargé des sports, {{annee}}</caption>
+              <tbody>
+                <tr><th scope="row">Siège</th><td>{{adresses|—}}</td></tr>
+                <tr><th scope="row">Site internet</th><td>{{sites_internet|—}}</td></tr>
+                <tr><th scope="row">Agrément</th><td>{{an_agrement|—}}</td></tr>
+                <tr><th scope="row">Saisonnalité</th><td>{{saisonnalite|—}}</td></tr>
+                <tr><th scope="row">Présidence</th><td>{{presidence|—}}</td></tr>
+                <tr><th scope="row">Sportifs de haut niveau listés</th><td>{{sportifs_haut_niveau:number|—}}</td></tr>
+                <tr><th scope="row">Conseillers techniques sportifs</th><td>{{conseillers_techniques_sportifs:number|—}}</td></tr>
+                <tr><th scope="row">Financements de l'Agence nationale du sport</th><td>{{ans_total:number|—}} €</td></tr>
+                <tr><th scope="row">Pass'Sports activés</th><td>{{pass_sports:number|—}}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </dsfr-data-repeat>
+    </section>
+
+    <!-- ====================== 6. Ce qu'on ne montre pas ====================== -->
+    <section class="fr-mb-6w" aria-labelledby="t-hors">
+      <h2 class="fr-h3" id="t-hors">Ce que cette page ne montre pas, et pourquoi</h2>
+      <ul>
+        <li><strong>Un classement toutes disciplines.</strong> Comparer le football au tir à l'arc
+          ne classe pas des politiques, mais des sports. Les rangs sont pris dans le groupe de la
+          fédération, celui que le ministère utilise pour la comparer.</li>
+        <li><strong>Les rangs dans les petits groupes.</strong> En 2024, le groupe para-sportif
+          compte deux fédérations, le groupe scolaire cinq&nbsp;: «&nbsp;la plus féminisée des
+          deux&nbsp;» serait exact, mais ne dirait rien. Dans un groupe de cinq fédérations ou moins,
+          le titre donne donc le poids de la fédération dans son groupe&nbsp;; les rangs restent
+          affichés, avec la taille du groupe.</li>
+        <li><strong>La pyramide des âges, les quartiers prioritaires, les zones rurales, les
+          clubs, le détail des financements et le comparateur</strong> de l'original. Ils restent
+          dans les jeux cités&nbsp;; ils ne disent pas ce qui distingue la fédération, et chacun
+          coûtait des requêtes à chaque changement de fédération.</li>
+        <li><strong>L'âge médian d'un groupe</strong> est celui de toutes ses licences réunies&nbsp;:
+          chez les olympiques en 2024, le football (près d'un quart des licences, âge médian de
+          15 ans) le tire vers le bas. C'est la valeur publiée par le jeu, pas une moyenne des fédérations.</li>
+        <li><strong>La saison 2024 est semi-définitive</strong> dans <code>indicateurs_cles_fede</code>&nbsp;;
+          les parts de quartiers prioritaires et de zones rurales, non reprises ici, sont celles
+          de 2023 (définitives).</li>
+      </ul>
+    </section>
   </div>
 
-  <!-- ====================== Transformations ====================== -->
-  <!-- La fédération et son groupe sur une ligne : le « groupe de référence »
-       de l'original, sans recopier le groupe dans douze contextes. -->
-  <dsfr-data-join id="j-ind" left="s-ind" right="s-ind-gp" on="fede_gp" type="inner"></dsfr-data-join>
-  <dsfr-data-normalize id="n-ind" source="j-ind"
-    compute="lic1000 = lics_tot_def / pop_fr * 1000; qpv = pct_qpv_def * 100; zrr = pct_zrr_tot_def * 100;
-             fem = round(pct_f_semidef * 100, 1); g_fem = round(g_pct_f * 100, 1);
-             g_qpv100 = g_qpv * 100; g_zrr100 = g_zrr * 100; lib_fem = 'Licences annuelles'"></dsfr-data-normalize>
-
-  <dsfr-data-join id="j-h1" left="s-histo" right="s-histo-gp" on="an,fede_gp" type="left"></dsfr-data-join>
-  <dsfr-data-join id="j-h2" left="j-h1" right="s-histo-all" on="an" type="left"></dsfr-data-join>
-  <dsfr-data-normalize id="n-h" source="j-h2" round="v_fede:2, v_gp:2, v_all:2"></dsfr-data-normalize>
-
-  <dsfr-data-normalize id="n-dep" source="s-dep" compute="lics_pop_aff = round(lics_pop, 2)"></dsfr-data-normalize>
-  <dsfr-data-query id="q-dep-top" source="n-dep" limit="10"></dsfr-data-query>
-
-  <!-- Pyramide : replier le sexe en colonnes, apparier fédération et groupe
-       par tranche, puis rapporter chaque tranche au total de licences. -->
-  <dsfr-data-pivot id="p-pyr" source="s-pyr" row="fede_gp, trage_full, trage" column="sexe"
-    value="n" column-format="f_{value}"></dsfr-data-pivot>
-  <dsfr-data-pivot id="p-pyr-gp" source="s-pyr-gp" row="fede_gp, trage_full" column="sexe"
-    value="n" column-format="g_{value}"></dsfr-data-pivot>
-  <dsfr-data-join id="j-pyr1" left="p-pyr" right="p-pyr-gp" on="fede_gp,trage_full" type="left"></dsfr-data-join>
-  <dsfr-data-join id="j-pyr2" left="j-pyr1" right="n-ind" on="fede_gp" type="left"></dsfr-data-join>
-  <dsfr-data-normalize id="n-pyr" source="j-pyr2"
-    compute="pf = round(f_F / lics_tot_semidef * 100, 2); ph = round(f_H / lics_tot_semidef * 100, 2);
-             pgf = round(g_F / g_lics * 100, 2); pgh = round(g_H / g_lics * 100, 2)"></dsfr-data-normalize>
-
-  <!-- Onglet 2 -->
-  <dsfr-data-normalize id="n-t-lic" source="s-t-lic" compute="lics_pop_aff = round(lics_pop, 2)"></dsfr-data-normalize>
-  <dsfr-data-join id="j-t-clubs" left="s-t-clubs" right="s-last" on="an" type="inner"></dsfr-data-join>
-  <dsfr-data-normalize id="n-t-clubs" source="j-t-clubs" compute="n_actifs_pop_aff = round(n_actifs_pop, 2)"></dsfr-data-normalize>
-  <dsfr-data-join id="j-clubs-fr" left="s-clubs-fr" right="s-last" on="an" type="inner"></dsfr-data-join>
-  <!-- AM-078 consommé (0.33.0, dsfr-data#946). Une part du total tenait ici en
-       une source d'agrégat supplémentaire (``), deux clés constantes
-       (`compute="k = 1"`), une jointure et une division : cinq composants pour
-       trois pourcentages. `share_percent` donne la part en un terme d'agrégat,
-       son dénominateur étant le total des lignes de SORTIE — ce qui est
-       exactement ce que la jointure allait chercher.
-       ⚠️ Une part n'est jamais déléguée au serveur : le regroupement redescend
-       côté client. Sans risque ici — `s-t-rr` rend quatre lignes, une par
-       typologie de commune. -->
-  <dsfr-data-query id="n-t-rr-brut" source="s-t-rr" group-by="typo"
-    aggregate="l:sum, l__sum:share_percent:pl, p:sum, p__sum:share_percent:pp, c:sum, c__sum:share_percent:pc"
-    order-by="typo:asc"></dsfr-data-query>
-  <dsfr-data-normalize id="n-t-rr" source="n-t-rr-brut"
-    compute="part_lic = round(pl, 1); part_pop = round(pp, 1); part_c = round(pc, 1)"></dsfr-data-normalize>
-  <!-- Âge médian : la maille la plus fine que le filtre laisse passer
-       (France < région < département), puis la ligne du groupe à la même maille. -->
-  <dsfr-data-normalize id="n-t-age" source="s-t-age"
-    compute="rang = when niveau = 'France' then 0 when niveau = 'Région' then 1 else 2"></dsfr-data-normalize>
-  <dsfr-data-query id="q-t-age" source="n-t-age" order-by="rang:asc" limit="1"></dsfr-data-query>
-  <dsfr-data-join id="j-t-age" left="q-t-age" right="s-t-age-gp" on="fede_gp,niveau" type="left"></dsfr-data-join>
-  <dsfr-data-join id="j-t-sexe" left="s-t-sexe" right="s-t-sexe-gp" on="fede_gp" type="left"></dsfr-data-join>
-
-  <!-- Onglet 3 -->
-  <dsfr-data-normalize id="n-fede" source="s-fede"
-    compute="an_agrement = year(dates_agrement);
-             para = when is_null(annees_delegation_disciplines_para_sport) then 'Non' else year(annees_delegation_disciplines_para_sport);
-             site = when is_null(sites_internet) then '' else concat('https://', sites_internet)"></dsfr-data-normalize>
-
-  <!-- Onglet 4 -->
-  <dsfr-data-normalize id="n-ans" source="s-ans"
-    replace-fields="dev_htp:DEV:ANS Développement | dev_htp:HTP:ANS Haute performance"></dsfr-data-normalize>
-
-  <!-- Onglet 5 -->
-  <dsfr-data-normalize id="n-c-ind" source="s-c-ind"
-    compute="lic1000 = lics_tot_def / pop_fr * 1000; qpv = pct_qpv_def * 100; zrr = pct_zrr_tot_def * 100;
-             fem = pct_f_semidef * 100"></dsfr-data-normalize>
-  <dsfr-data-normalize id="n-c-h" source="s-c-histo" round="v:2"></dsfr-data-normalize>
-  <!-- Même geste pour la part de population du comparateur (AM-078). -->
-  <dsfr-data-query id="n-pop-brut" source="s-pop-typo" group-by="typo"
-    aggregate="p:sum, p__sum:share_percent:pp" order-by="typo:asc"></dsfr-data-query>
-  <dsfr-data-normalize id="n-pop" source="n-pop-brut"
-    compute="part_pop = round(pp, 1)"></dsfr-data-normalize>
-  <dsfr-data-unpivot id="u-c-a" source="n-ind" var-name="typo" value-name="pct"
-    value-cols="pct_urbain_dense_def:1.Urbain dense, pct_urbain_densinter_def:2.Urbain intermédiaire, pct_rural_periurbain_def:3.Rural périurbain, pct_rural_nonperiurbain_def:4.Rural non périurbain"></dsfr-data-unpivot>
-  <dsfr-data-join id="j-c-typo-a" left="u-c-a" right="n-pop" on="typo" type="left"></dsfr-data-join>
-  <dsfr-data-normalize id="n-c-typo-a" source="j-c-typo-a" compute="part_lic = round(pct * 100, 1)"></dsfr-data-normalize>
-  <dsfr-data-unpivot id="u-c-b" source="n-c-ind" var-name="typo" value-name="pct"
-    value-cols="pct_urbain_dense_def:1.Urbain dense, pct_urbain_densinter_def:2.Urbain intermédiaire, pct_rural_periurbain_def:3.Rural périurbain, pct_rural_nonperiurbain_def:4.Rural non périurbain"></dsfr-data-unpivot>
-  <dsfr-data-join id="j-c-typo-b" left="u-c-b" right="n-pop" on="typo" type="left"></dsfr-data-join>
-  <dsfr-data-normalize id="n-c-typo-b" source="j-c-typo-b" compute="part_lic = round(pct * 100, 1)"></dsfr-data-normalize>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
       <details class="odv-technique">
-        <summary>Analyse de reproduction — Portrait de fédération — ce que la reproduction a coûté</summary>
+        <summary>Analyse de reproduction — Portrait de fédération — ce que la recréation a coûté</summary>
 
     <div class="fr-container">
-      <p class="fr-text--sm fr-mb-4w">
-        Cible d'origine :
-        <a href="https://data.sports.gouv.fr/pages/portrait-federation/?refine.code_fs=101" target="_blank" rel="noopener external">une page AngularJS de <code>data.sports.gouv.fr</code></a>,
-        <strong>327 Ko de template</strong> (dont l'essentiel en six copies d'une carte SVG
-        départementale) pour cinq onglets, <strong>59 contextes sur 13 jeux</strong>.
-        Fiche d'audit : <code>docs/portail-sports/portrait-federation.md</code>.
-        Les cinq onglets sont reproduits ; tous les chiffres de la fédération 101 (athlétisme) et
-        de la 111 (football) ont été recoupés à l'API, onglet par onglet.
+      <p class="fr-text--lead">
+        Page d'origine&nbsp;: <a href="https://data.sports.gouv.fr/pages/portrait-federation/?refine.code_fs=101"
+        target="_blank" rel="noopener external">portrait-federation</a> — cinq onglets, 59 contextes sur
+        13 jeux, 169 requêtes pour une visite complète. Reproduite une première fois ici en fiche
+        (28 requêtes au chargement), recréée le 27/09/2026 en page qui dit d'abord ce qui distingue
+        la fédération de son groupe&nbsp;: <strong>3 requêtes au chargement, 5 après défilement
+        complet, 3 par changement de fédération</strong> (mesuré au navigateur). Fiche d'audit&nbsp;:
+        <code>docs/portail-sports/portrait-federation.md</code>.
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Une clé, la même partout.</strong> Onze des treize jeux portent la
-              fédération sous <code>code_fede_ref</code>, avec un code identique à
-              <code>code_fs</code> et <code>code_fede_2024</code> (vérifié sur les 126 lignes
-              d'<code>indicateurs_cles_fede</code>), et écrivent les départements
-              <code>01</code>…<code>976</code> sans exception. Un
-              <code>dsfr-data-context-filter</code> pilote quatorze sources ; un second contexte,
-              sur le même <code>&lt;select&gt;</code>, couvre les deux jeux du ministère qui n'ont
-              que <code>code_fs</code>. C'est l'inverse exact du portail des équipements, où la
-              même clé changeait de nom quatre fois.</li>
-            <li><strong>Le groupe de référence est une jointure, pas un paramètre.</strong>
-              L'original lit le groupe de la fédération (<code>kpifede</code>), le range dans
-              <code>variables.groupefede</code>, puis le recopie en <code>refine.fede_gp</code> dans
-              huit contextes. Ici, les six lignes de groupe (<code>code_fede_ref = 'TOT'</code>)
-              sont chargées une fois et <code>dsfr-data-join on="fede_gp"</code> les apparie à la
-              ligne de la fédération. Le même motif sert la pyramide (jointure sur
-              <code>fede_gp, trage_full</code>) et l'âge médian par territoire (jointure sur
-              <code>fede_gp, niveau</code>).</li>
-            <li><strong>Le lien profond marche — celui de l'original, justement.</strong>
-              <code>url-param-map="refine.code_fs:code_fede_ref"</code> fait de
-              <code>?refine.code_fs=111</code> un portrait du football. Sur l'original, la même
-              URL affiche l'athlétisme : le sélecteur s'initialise à <code>['101']</code> sans lire
-              l'URL, et le contexte synchronisé n'écrit que dans un sens (vérifié au navigateur).</li>
-            <li><strong>La dernière année sans l'écrire.</strong> L'original lit
-              <code>max(annee)</code> et l'injecte en <code>refine</code>. Une source d'une ligne
-              (<code>max(year(annee)) as an</code>) et une jointure <code>inner</code> ne gardent que
-              les lignes du dernier millésime : aucune année en dur dans la page.</li>
-            <li><strong>Trois chiffres faux de l'original, justes ici sans effort.</strong>
-              « 15 ans pour les fédérations olympiques » (onglet 1) et « 22 ans » (onglet 2) pour
-              un âge médian qui vaut <strong>16 ans</strong> ; en Bretagne, « 21 ans » pour 16, et
-              une part féminine de 48,1&nbsp;% qui est la valeur <em>nationale</em> — la vraie est
-              <strong>48,8&nbsp;%</strong>. Les deux premiers viennent de <code>ods-results</code>
-              qui lit la première ligne d'un contexte mal filtré, le troisième d'un
-              <code>ng-if</code> dupliqué. La jointure ne peut pas lire « la première ligne venue ».</li>
-            <li><strong>28 requêtes au chargement pour les cinq onglets</strong>, contre 73 pour le
-              seul premier onglet de l'original et 169 une fois les cinq ouverts (mesuré). Mais
-              moins de requêtes n'a pas donné une page plus rapide : la reproduction atteint le repos
-              réseau en 2,0&nbsp;s, l'original en 1,0&nbsp;s — le temps de charger les bundles CDN
-              et de tout demander d'emblée plutôt qu'onglet par onglet.</li>
+            <li><strong>Tout le classement tient dans une requête.</strong>
+              <code>indicateurs_cles_fede</code> a 126 lignes&nbsp;: chargé entier
+              (<code>fetch-mode="export"</code>), il sert les rangs, le groupe et les phrases sans
+              être refiltré. La fédération choisie n'est lue qu'une fois, dans son historique, qui
+              porte aussi son groupe (<code>fede_gp</code>)&nbsp;: une jointure <code>inner</code>
+              sur ce champ donne ses pairs.</li>
+            <li><strong>Un titre qui choisit son sujet.</strong> <code>compute</code> et ses
+              <code>when</code> classent les trois rangs et écrivent le titre, le chapeau et les
+              libellés&nbsp;; <code>dsfr-data-repeat</code> les rend et interpole
+              <code>highlight-index="[{{if0}}]"</code>, si bien que la barre en couleur suit la
+              fédération. Football, golf, athlétisme, UNSS, Double Dutch et une fédération sans
+              licence déclarée ont chacun leur titre juste (vérifié au navigateur, rangs recalculés
+              à l'API).</li>
+            <li><strong>Les séries nommées par la donnée.</strong> <code>dsfr-data-concat
+              origin-field="serie"</code> empile la fédération, son groupe et l'ensemble&nbsp;: plus
+              de pivots ni de légende littérale (AM-074).</li>
+            <li><strong>Ne charger que ce qu'on regarde.</strong> <code>lazy</code> (avec
+              <code>lazy-target</code> sur la carte) diffère la géographie et la fiche du ministère
+              jusqu'à leur approche.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Une part du total coûtait cinq composants — elle en coûte zéro.</strong>
-              Chacune des deux répartitions de cette page demandait une seconde source d'agrégat
-              pour le total, une clé constante (<code>compute="k = 1"</code>) des deux côtés, une
-              jointure et une division. <code>share_percent</code>
-              (<code>dsfr-data-query</code>, 0.33.0) donne la part en un terme d'agrégat, son
-              dénominateur étant le total des lignes de sortie — précisément ce que la jointure
-              allait chercher. <strong>Huit composants retirés</strong> (deux sources, quatre
-              normalisations, deux jointures) et deux requêtes d'API en moins à chaque changement
-              de fédération, <strong>à pourcentages rigoureusement identiques</strong> : 33,4 /
-              36,0 / 19,8 / 10,7 avant comme après. <em>Ce qui reste vrai</em> : une part n'est
-              jamais déléguée au serveur, le regroupement redescend côté client — sans risque ici,
-              quatre lignes, mais à surveiller sur un jeu volumineux (AM-078).</li>
-            <li><strong>Le résumé «&nbsp;en France&nbsp;» des cartes était faux de trois façons.
-              Les trois sont réglées.</strong> Sous la carte des licences pour 1&nbsp;000 habitants,
-              la page affichait <strong>4,61</strong> — la moyenne non pondérée des 101 départements —
-              pour un taux national de <strong>4,54</strong> ; sous celle des établissements pour
-              100&nbsp;000 habitants, <strong>4,18</strong> pour <strong>3,59</strong> (LIM-014).
-              <code>map-summary-weight="pop"</code> (0.29.0) a rendu
-              Σ(valeur&nbsp;×&nbsp;population)&nbsp;/&nbsp;Σ(population) et réglé le premier défaut.
-              <br><br>
-              <strong>Le deuxième était un piège de composition</strong>&nbsp;: le résumé portait sur
-              la colonne <em>affichée</em>, et <code>dsfr-data-normalize round="…"</code> réécrit la
-              colonne <em>dans la donnée</em>. Le résumé pondérait donc des valeurs arrondies —
-              4,5331 au lieu de 4,5368 quand l'arrondi était au dixième. La page s'en tirait en
-              arrondissant au centième, c'est-à-dire par chance. <code>map-summary-field</code>
-              (0.33.0) désigne la colonne de <em>calcul</em>&nbsp;: la page dérive désormais une
-              colonne d'affichage par <code>compute</code> et laisse la brute intacte. C'est juste
-              par construction, plus par précision d'affichage (PG-031).
-              <br><br>
-              <strong>Le troisième restait ouvert&nbsp;: une carte de volumes.</strong> Sous les
-              licences annuelles, la page affichait <strong>3&nbsp;074,06</strong> — la moyenne
-              arithmétique de 101 nombres de licenciés, un chiffre qui ne mesure rien.
-              <code>map-summary="sum"</code> (0.33.0) affiche <strong>310&nbsp;480</strong>, et
-              <strong>2&nbsp;454</strong> sous la carte des établissements actifs au lieu de 24,3.
-              Recalculé à l'API avec le filtre exact de la page&nbsp;: 101 départements,
-              310&nbsp;480 licences, taux pondéré 4,5368 — identique au chiffre près (AM-079).
-              <br><br>
-              <em>Ce qui reste vrai, et qu'il faut savoir lire</em>&nbsp;: le résumé porte sur les
-              lignes <strong>dessinées</strong>, pas sur le jeu. Cette page écarte volontairement
-              l'étranger et six collectivités&nbsp;; l'API en compte donc 313&nbsp;957 là où la
-              carte en résume 310&nbsp;480, et les deux sont justes. Le libellé «&nbsp;en
-              France&nbsp;» est écrit par DSFR&nbsp;Chart&nbsp;: il reste quand la carte ne couvre
-              que la Bretagne.</li>
-            <li><strong>Deux contextes sur un même sélecteur : l'ordre du document compte.</strong>
-              Un filtre lit la valeur de son contrôle à son montage, et le pré-remplissage depuis
-              l'URL n'émet aucun événement. Déclaré avant le contexte synchronisé,
-              <code>ctx-fs</code> lit 101 quand l'URL demande 111 : les indicateurs parlent du
-              football, la fiche de l'athlétisme, sans un message (vérifié en inversant les deux
-              balises ; PG-029).</li>
-            <li><strong>Quatre listes écrites à la main</strong> — 120 fédérations, 126 cibles de
-              comparaison, 18 régions, 101 départements. La voie native pour un sélecteur peuplé depuis
-              la donnée existe pourtant&nbsp;: <code>dsfr-data-facets context="…"</code> (0.23.0, AM-043
-              corrigé). Elle ne sert pas ici pour deux raisons, lues au JSDoc et au schéma des jeux.
-              Une facette de contexte diffuse <em>un</em> nom de champ, qui doit exister sur toutes
-              les sources visées&nbsp;; or deux jeux n'ont que <code>code_fs</code> (AM-056). Et une
-              facette affiche la valeur qu'elle filtre&nbsp;: sur <code>code_fede_ref</code>, elle
-              proposerait « 101 », pas « Fédération française d'athlétisme » — aucun attribut n'associe
-              un libellé à une valeur, et le champ nom s'appelle <code>federation</code>,
-              <code>federations_sportives</code> ou n'existe pas selon le jeu (AM-081).</li>
-            <li><strong>« 1 resultat » au-dessus de chaque fiche.</strong>
-              <code>dsfr-data-display</code> rend toujours un compteur, non accentué, sans attribut
-              pour s'en passer ; sur un gabarit qui met en forme <em>une</em> ligne, c'est du bruit.
-              Masqué ici par une règle locale. Vérifié dans le bundle publié 0.29.0 : inchangé
-              (AM-077).</li>
-            <li><strong>Les légendes ne nomment pas la fédération.</strong> Les noms de série sont
-              des littéraux ; il faudrait des lignes empilées (une par série) pour qu'ils viennent
-              de la donnée, donc une union (AM-074). La légende dit « Fédération sélectionnée », le
-              nom est écrit au-dessus.</li>
-            <li><strong>Un avertissement signalé la veille, corrigé le lendemain.</strong> Le nouvel
-              avertissement des jointures <code>inner</code> partait sur la jointure du dernier
-              millésime, dont retirer les autres années est précisément la fonction (« 202 ligne(s)
-              gauche sur 303 sans correspondance »). Relevé le 2026-09-11 contre la version en
-              préparation, déposé en <a href="https://github.com/bmatge/dsfr-data/issues/816"
-              target="_blank" rel="noopener external">#816</a>, corrigé par #817 dans la 0.29.0 :
-              une jointure-filtre contre une source d'une ligne n'avertit plus. Vérifié en page —
-              zéro message console (AM-080).</li>
+            <li><strong>Il n'y a pas de rang.</strong> Il se fabrique par un cumul de 1 dans l'ordre
+              trié (<code>aggregate="un:running_sum:rfd"</code>), deux fois (depuis la tête, depuis
+              la queue), avec une clé de tri augmentée d'un epsilon pour que la fédération passe en
+              tête de ses ex aequo — l'âge médian est entier, les égalités y sont fréquentes. Trois
+              requêtes client par indicateur, cinq jointures pour réunir le tout&nbsp;: une vingtaine
+              de balises pour trois rangs (AM-091).</li>
+            <li><strong>Pas de projection de colonnes.</strong> <code>dsfr-data-concat</code> exige
+              le même schéma&nbsp;; chaque branche passe par un <code>group-by="an"</code> dont le
+              seul rôle est de ne garder que deux colonnes.</li>
+            <li><strong>La courbe perd son contraste.</strong> <code>color-map</code> laisse les
+              points à la palette par défaut (BUG-033), et
+              <code>selected-palette="neutral"</code> + <code>highlight-index</code> grise les trois
+              courbes sans en distinguer aucune. La page garde la palette par défaut&nbsp;: juste,
+              mais la fédération n'est pas mise en avant.</li>
+            <li><strong>Douze avertissements #765</strong> en console, tous sur des calculs voulus
+              côté client (AM-094)&nbsp;; et l'année s'écrit «&nbsp;2,024&nbsp;» dans l'infobulle
+              de la courbe (BUG-024).</li>
           </ul>
         </div>
-      </div>
-
-      <h3 class="fr-h6">Onglet par onglet</h3>
-      <div class="fr-table fr-table--bordered fr-mb-4w">
-        <table>
-          <caption>Blocs visuels — original / reproduction</caption>
-          <thead><tr><th scope="col">Onglet</th><th scope="col">Original</th><th scope="col">Ici</th><th scope="col">Statut</th></tr></thead>
-          <tbody>
-            <tr><td>Licences et clubs</td><td>7 graphiques (dont 2 cartes en bascule, une pyramide) + 7 chiffres</td><td>8 graphiques (pyramide en deux histogrammes) + 7 chiffres</td><td>Reproduit</td></tr>
-            <tr><td>Mon territoire</td><td>4 cartes en bascule, 2 répartitions + 10 chiffres</td><td>4 cartes, 2 répartitions + 10 chiffres</td><td>Reproduit, trois chiffres corrigés</td></tr>
-            <tr><td>Fiche signalétique</td><td>fiche (8 rubriques)</td><td>fiche (8 rubriques)</td><td>Reproduit</td></tr>
-            <tr><td>Structuration</td><td>2 graphiques + 8 chiffres</td><td>2 graphiques + 8 chiffres</td><td>Reproduit</td></tr>
-            <tr><td>Me comparer</td><td>2 × (2 graphiques + 8 chiffres)</td><td>2 × (2 graphiques + 7 boîtes, QPV et ZRR réunis)</td><td>Reproduit</td></tr>
-          </tbody>
-        </table>
       </div>
 
       <div class="fr-table fr-table--bordered">
         <table>
           <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
           <thead>
-            <tr><th scope="col">Page AngularJS d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            <tr><th scope="col">Page d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>1 <code>ods-dataset-context</code>, 59 contextes sur 13 jeux</td><td>28 <code>dsfr-data-source</code>, 3 <code>dsfr-data-context</code></td><td>Équivalent</td></tr>
-            <tr><td><code>ods-select</code> + <code>selectedFede</code> recopié dans 30 <code>refine</code></td><td>un <code>&lt;select&gt;</code>, deux <code>dsfr-data-context-filter</code> (<code>code_fede_ref</code>, <code>code_fs</code>)</td><td>Natif — attention à l'ordre des contextes</td></tr>
-            <tr><td><code>refine.fede_gp = variables.groupefede</code> ×8</td><td><code>dsfr-data-join on="fede_gp"</code> sur les lignes <code>TOT</code></td><td>Meilleur : rien à recopier, rien à désynchroniser</td></tr>
-            <tr><td><code>dummycontext-urlsync</code> (sans effet à l'ouverture)</td><td><code>url-sync</code> + <code>url-param-map</code></td><td>Meilleur : le lien profond marche</td></tr>
-            <tr><td>3 <code>ods-chart-query</code> spline, base 100</td><td><code>dsfr-data-chart type="line"</code> sur deux jointures</td><td>Équivalent, légende littérale</td></tr>
-            <tr><td>6 cartes SVG <code>georef-svg</code> + <code>ods-color-gradient</code></td><td>6 <code>dsfr-data-chart type="map"</code></td><td>Équivalent ; résumé pondéré depuis la 0.29.0 (#795)</td></tr>
-            <tr><td>top 10 en barres HTML (<code>ods-subaggregation</code>)</td><td>source triée + <code>dsfr-data-query limit="10"</code></td><td>Natif</td></tr>
-            <tr><td>pyramide HTML (7 analyses, <code>ng-repeat</code>, largeurs calculées)</td><td>2 <code>pivot</code>, 2 <code>join</code>, <code>compute</code>, 2 histogrammes</td><td>Contourné, écart de forme assumé</td></tr>
-            <tr><td>répartition par type de communes (<code>analysis</code> + <code>analysisTot</code>)</td><td>2 sources, 2 <code>normalize</code> à clé constante, <code>join</code>, <code>compute</code></td><td><strong>Coûteux</strong> : aucune part du total</td></tr>
-            <tr><td><code>max(annee)</code> injecté en <code>refine</code></td><td>jointure <code>inner</code> sur <code>max(year(annee))</code></td><td>Natif ; l'alerte de la 0.29 sur ce motif a été corrigée (#817)</td></tr>
-            <tr><td>âge médian, 3 <code>ng-if</code> × 3 paramètres par maille</td><td><code>compute rang</code> + <code>query order-by limit="1"</code> + <code>join</code></td><td>Natif, et juste</td></tr>
-            <tr><td><code>ods-results</code> (fiche), <code>| date:"yyyy"</code></td><td><code>dsfr-data-display</code> + <code>compute year()</code></td><td>Natif (compteur parasite)</td></tr>
-            <tr><td>barres ANS colorées par <code>ng-class</code></td><td><code>series-field="dev_htp"</code> + <code>replace-fields</code></td><td>Natif</td></tr>
-            <tr><td>2 <code>ods-chart</code> empilés (SHN, établissements)</td><td><code>dsfr-data-chart stacked</code></td><td>Natif</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code> sous chaque graphique</td><td>Meilleur : l'original n'a aucun tableau équivalent</td></tr>
+            <tr><td><code>ods-select</code> + <code>selectedFede</code> recopié dans 30 <code>refine</code></td><td>un <code>&lt;select&gt;</code>, deux <code>dsfr-data-context</code> (<code>code_fede_ref</code>, <code>code_fs</code>), <code>url-sync</code></td><td>Meilleur&nbsp;: le lien <code>?refine.code_fs=111</code> ouvre le football</td></tr>
+            <tr><td><code>refine.fede_gp = variables.groupefede</code> ×8</td><td><code>dsfr-data-join on="fede_gp"</code> sur l'historique</td><td>Natif</td></tr>
+            <tr><td>—</td><td><code>running_sum</code> + <code>compute when</code> + <code>repeat</code>&nbsp;: rangs, titre, chapeau</td><td>Le récit, absent de l'original&nbsp;; rang contourné</td></tr>
+            <tr><td>3 <code>ods-chart-query</code> spline, base 100</td><td><code>dsfr-data-concat</code> + <code>type="line" series-field</code></td><td>Natif, sans contraste (BUG-033)</td></tr>
+            <tr><td>carte SVG + <code>ods-color-gradient</code>, top 10</td><td><code>type="map" map-summary="weighted"</code> + <code>dsfr-data-list</code> triable</td><td>Natif</td></tr>
+            <tr><td><code>ods-results</code> (fiche)</td><td><code>dsfr-data-repeat</code> sur une table DSFR</td><td>Natif</td></tr>
+            <tr><td>pyramide, QPV, ZRR, clubs, ANS, comparateur</td><td>—</td><td>Écartés&nbsp;: ils ne distinguent pas la fédération (dit en page)</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>complète</strong>, et c'est la page du banc où le modèle de
-          <code>dsfr-data</code> a le plus nettement l'avantage : un portail aux clés propres, où la
-          seule vraie difficulté de l'original — faire suivre le groupe de la fédération à huit
-          contextes — devient une jointure. C'est aussi là que l'original se trompait :
-          trois de ses chiffres lisaient « la première ligne » d'un contexte qu'il avait mal
-          refiltré. Le motif déclaratif ne l'autorise pas.</p>
-        <p>Ce qui reste coûteux se nomme en une ligne : <strong>une part du total</strong> (trois
-          fois quatre composants, AM-078), <strong>le résumé d'une carte de volumes</strong> — celui
-          des taux est juste depuis la 0.29.0 (#795), mais une somme ne s'exprime toujours pas
-          (AM-079) — et un <strong>compteur</strong> qu'on ne peut pas retirer d'une fiche (AM-077).
-          Et un piège silencieux à documenter : deux contextes sur un même contrôle dépendent de
-          leur ordre dans la page (PG-029).</p>
-        <p class="fr-text--sm fr-mb-0"><strong>Montée en 0.29.0 (lot 20).</strong> Deux des quatre
-          réserves écrites la veille sont tombées en vingt-quatre heures : le résumé pondéré des
-          cartes de taux, et l'avertissement de jointure-filtre relevé ici, déposé en #816 et corrigé
-          par #817. Les 20 KPI de la page sont inchangés, vérifiés avant et après sur deux
-          fédérations.</p>
+        <p><strong>Un générateur de portrait peut écrire son propre titre.</strong> La page choisit,
+          pour chacune des 120 fédérations, l'indicateur où elle s'écarte le plus de son groupe, et
+          le dit avant qu'on ait cliqué — avec 3 requêtes au lieu de 28, et sans script. Le prix est
+          dans le rang&nbsp;: la bibliothèque ne le calcule pas, et le fabriquer coûte une vingtaine
+          de balises là où une fonction suffirait.</p>
       </div>
     </div>
-  
+
       </details></section>
 
 </main>
@@ -1371,11 +733,6 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<!-- Bundle `core` (446 Ko) et non `esm` (551 Ko) : cette page n'a aucune
-     <dsfr-data-map> Leaflet. Verifie le 2026-09-19 sur les noms d'elements du
-     paquet publie 0.31.0 : `core` definit tout ce que la page emploie, les
-     cartes DSFR Chart (map-chart) comprises ; il ne lui manque que les enfants
-     de la carte Leaflet (map-layer, map-popup, map-legend, map-inset...). -->
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>

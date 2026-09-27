@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Portrait de territoires — data.sports.gouv.fr — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du « Portrait de territoires » de data.sports.gouv.fr : six onglets, vingt-neuf jeux, un territoire choisi une fois et un territoire de comparaison.">
+  <meta name="description" content="Un territoire, et ce qui le distingue de la France : licences sportives pour 1 000 habitants, clubs, équipements, part des femmes, rang parmi ses pairs — et la nuance que la licence ne dit pas, la pratique sportive régulière. Cinq requêtes au chargement, aucune au changement de territoire.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -12,24 +12,171 @@
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/utility/utility.min.css">
+  <!-- La feuille de DSFR Chart n'est pas optionnelle : sans elle, l'infobulle
+       de la carte rend son HTML sans aucun style (piège payé, CLAUDE.md). -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
   <link rel="stylesheet" href="/assets/demo.css">
-  <script src="/assets/cles.js"></script>
-  <style>
-    /* Le nom du territoire : deux dsfr-data-display côte à côte dans une phrase. */
-    .odv-territoire__ligne { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
-    .odv-territoire__nom { color: var(--text-title-blue-france); font-weight: 700; }
-    /* dsfr-data-display écrit toujours « 1 resultat » au-dessus de son gabarit ;
-       dans une phrase, ce compteur n'a pas de sens. */
-    .odv-territoire__ligne .dsfr-data-display > p[role="status"],
-    .odv-territoire__ligne .dsfr-data-status--idle > .fr-icon-filter-line { display: none; }
-  </style>
 </head>
 <body>
 <div id="site-header"></div>
 
 <main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       LE PIPELINE — cinq requêtes, puis plus aucune.
+
+       L'original tire 68 requêtes au chargement et 174 pour une visite
+       complète (fiche d'audit) ; la reproduction précédente 61 au chargement
+       et 22 à chaque choix de territoire. Ici, chaque jeu est agrégé PAR
+       DÉPARTEMENT côté serveur (≈ 110 lignes par requête) et chargé UNE fois ;
+       régions et France se recalculent dans le navigateur en sommant les
+       départements, et le choix d'un territoire filtre des lignes déjà là
+       (une facette locale) : changer de territoire ne coûte aucune requête.
+
+       Quota data.sports.gouv.fr : 5 000 requêtes par jour et par IP en
+       anonyme — une raison de plus de ne pas refaire la requête au choix.
+       ========================================================================== -->
+
+  <!-- 1. Licences 2024 et population, UNE requête. `lics_dep` porte la
+       population du département sur chaque ligne de fédération (une ligne par
+       fédération × département) : `max(pop)` la lit une fois par département
+       au lieu de la sommer 117 fois. L'alias n'est PAS `pop` : un alias qui
+       porte le nom d'un champ masque ce champ dans le `where` (« Null filter
+       expected a field », HTTP 400, vérifié à l'API).
+       `fetch-mode="export"` sur les quatre jeux regroupés : 101 à 110 lignes,
+       et le mode `records` les lit par pages de 100, soit deux requêtes. Vérifié à l'API : identique, département
+       par département, à `pop_dep_age_sexe` 2024 (101 sur 101).
+       `pop is not null` écarte les lignes sans population : licences à
+       l'étranger (ETR), collectivités d'outre-mer (975 à 988), non renseigné
+       (NR) — 148 226 licences sur 17 161 064, dites en page. -->
+  <dsfr-data-source id="src-lic" api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
+    dataset-id="lics_dep" where="pop is not null"
+    group-by="dep, dep_name, newreg, reg_name" select="sum(lics) as lics, max(pop) as habitants"
+    fetch-mode="export" max-records="200"></dsfr-data-source>
+  <!-- 2. Licences féminines. Clé unique côté droit (group-by dep) : PG-001. -->
+  <dsfr-data-source id="src-fem" api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
+    dataset-id="lics_dep_sexe" group-by="dep" select="sum(lics_f) as lics_f, sum(lics_tot) as lics_t"
+    fetch-mode="export" max-records="200"></dsfr-data-source>
+  <!-- 3. Clubs et établissements actifs en 2024 (`annee` est une date). -->
+  <dsfr-data-source id="src-clubs" api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
+    dataset-id="clubs_dep" where="year(annee) = 2024" group-by="dep" select="sum(n_actifs) as clubs"
+    fetch-mode="export" max-records="200"></dsfr-data-source>
+  <!-- 4. Équipements sportifs (recensement RES). Une ligne sans département
+       (12 équipements) : elle ne s'apparie à rien et sort à la jointure. -->
+  <dsfr-data-source id="src-es" api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
+    dataset-id="data-es-par-commune" group-by="dep_code_filled" select="sum(nb_equip) as equip"
+    fetch-mode="export" max-records="200"></dsfr-data-source>
+  <!-- 5. Pratique sportive régulière des 15 ans et plus : une ENQUÊTE,
+       publiée par région seulement, 18 lignes. PACA et Corse y sont fusionnées
+       (« PACA Corse »), Guadeloupe et Martinique aussi (« Antilles ») ;
+       Mayotte n'y est pas. `reg_code` est unique (vérifié) : 18 codes pour
+       18 lignes, la ligne France porte `FR`. -->
+  <dsfr-data-source id="src-prat" api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
+    dataset-id="prat_reg_sexe" select="reg_code, territoire, part_prat_reg, annees"
+    max-records="50"></dsfr-data-source>
+
+  <!-- Trois jointures sur le département. Aucune ne peut dupliquer : chaque
+       côté droit est regroupé par département. `left` : un département sans
+       club ni équipement garderait sa ligne (aucun ne l'est, 101 sur 101). -->
+  <dsfr-data-join id="j-fem" left="src-lic" right="src-fem" on="dep"></dsfr-data-join>
+  <dsfr-data-join id="j-clubs" left="j-fem" right="src-clubs" on="dep"></dsfr-data-join>
+  <dsfr-data-join id="j-dep" left="j-clubs" right="src-es" on="dep=dep_code_filled"></dsfr-data-join>
+
+  <!-- Trois mailles, un seul schéma. On ne somme JAMAIS des ratios : régions
+       et France sont des SOMMES de départements, et chaque ratio se calcule
+       après, sur ces sommes. -->
+  <dsfr-data-normalize id="n-dep" source="j-dep"
+    compute="code = 'D' + dep; nom = dep_name + ' (' + dep + ')'; nom_court = dep_name; niveau = 'dep'; pop = habitants;
+             maille = 'Département'; geo = dep; reg = newreg; k = 'FR'"></dsfr-data-normalize>
+  <dsfr-data-query id="q-reg" source="j-dep" group-by="newreg, reg_name"
+    aggregate="lics:sum:lics, habitants:sum:pop, lics_f:sum:lics_f, lics_t:sum:lics_t, clubs:sum:clubs, equip:sum:equip"></dsfr-data-query>
+  <dsfr-data-normalize id="n-reg" source="q-reg"
+    compute="code = 'R' + newreg; nom = 'Région ' + reg_name; nom_court = reg_name; niveau = 'reg';
+             maille = 'Région'; geo = newreg; reg = newreg; k = 'FR';
+             dep = null; dep_name = null; habitants = pop"></dsfr-data-normalize>
+  <dsfr-data-query id="q-fr" source="j-dep"
+    aggregate="lics:sum:lics, habitants:sum:pop, lics_f:sum:lics_f, lics_t:sum:lics_t, clubs:sum:clubs, equip:sum:equip"></dsfr-data-query>
+  <dsfr-data-normalize id="n-fr" source="q-fr"
+    compute="code = 'FR'; nom = 'France entière'; nom_court = 'France'; niveau = 'fr';
+             maille = 'France'; geo = ''; reg = 'FR'; k = 'FR';
+             dep = null; dep_name = null; newreg = null; reg_name = null; habitants = pop"></dsfr-data-normalize>
+  <!-- `dsfr-data-concat` exige des schémas identiques (et le dit) : les
+       colonnes propres à une maille sont posées à null sur les autres. -->
+  <dsfr-data-concat id="tous" sources="n-fr, n-reg, n-dep"></dsfr-data-concat>
+
+  <!-- La pratique déclarée, rattachée à la région de chaque ligne : un
+       département reçoit la valeur de SA RÉGION, et la page le dit. -->
+  <dsfr-data-join id="j-prat" left="tous" right="src-prat" on="reg=reg_code"></dsfr-data-join>
+
+  <!-- La référence France posée sur chaque ligne (jointure sur une clé
+       constante, côté droit : une seule ligne), préfixée `fr_`. -->
+  <dsfr-data-query id="ref-fr" source="j-prat" where="niveau:eq:fr"></dsfr-data-query>
+  <dsfr-data-join id="j-ref" left="j-prat" right="ref-fr" on="k" prefix-right="fr_"></dsfr-data-join>
+
+  <!-- Tous les indicateurs, et les phrases qui les disent. Les écarts sont
+       des écarts RELATIFS à la France (en %), sauf la part des femmes, qui est
+       déjà une part : son écart est en points. -->
+  <dsfr-data-normalize id="t" source="j-ref"
+    compute="lpm = lics / pop * 1000; fr_lpmv = fr_lics / fr_pop * 1000;
+             cl = clubs / pop * 10000; fr_clv = fr_clubs / fr_pop * 10000;
+             eq = equip / pop * 10000; fr_eqv = fr_equip / fr_pop * 10000;
+             pf = lics_f / lics_t * 100; fr_pfv = fr_lics_f / fr_lics_t * 100;
+             e_lpm = round((lpm / fr_lpmv - 1) * 100, 0);
+             e_cl = round((cl / fr_clv - 1) * 100, 0);
+             e_eq = round((eq / fr_eqv - 1) * 100, 0);
+             e_pf = round(pf - fr_pfv, 1);
+             lpm_a = round(lpm, 0); cl_a = round(cl, 1); eq_a = round(eq, 1); pf_a = round(pf, 1);
+             t_lpm = when e_lpm &gt;= 1 then e_lpm + ' % de plus qu’en France' when e_lpm &lt;= -1 then abs(e_lpm) + ' % de moins qu’en France' else 'autant qu’en France';
+             t_cl = when e_cl &gt;= 1 then e_cl + ' % de plus qu’en France' when e_cl &lt;= -1 then abs(e_cl) + ' % de moins qu’en France' else 'autant qu’en France';
+             t_eq = when e_eq &gt;= 1 then e_eq + ' % de plus qu’en France' when e_eq &lt;= -1 then abs(e_eq) + ' % de moins qu’en France' else 'autant qu’en France';
+             t_pf = when e_pf &gt;= 0.1 then replace(concat(e_pf), '.', ',') + (when e_pf &gt;= 2 then ' points' else ' point') + ' de plus qu’en France'
+                    when e_pf &lt;= -0.1 then replace(concat(abs(e_pf)), '.', ',') + (when e_pf &lt;= -2 then ' points' else ' point') + ' de moins qu’en France'
+                    else 'autant qu’en France';
+             t_prat = when is_null(part_prat_reg) then 'non mesurée par l’enquête'
+                      when part_prat_reg &gt; fr_part_prat_reg then 'plus qu’en France (' + fr_part_prat_reg + ' %)'
+                      when part_prat_reg &lt; fr_part_prat_reg then 'moins qu’en France (' + fr_part_prat_reg + ' %)'
+                      else 'autant qu’en France (' + fr_part_prat_reg + ' %)';
+             pairs = when niveau = 'reg' then 'pairs-reg' else 'pairs-dep';
+             carte = when niveau = 'reg' then 'map-reg' else 'map';
+             mailles = when niveau = 'reg' then 'régions' else 'départements';
+             maille_carte = when niveau = 'reg' then 'région' else 'département';
+             ext = when niveau = 'reg' then 'reg' else 'dep'"></dsfr-data-normalize>
+
+  <!-- Les pairs de chaque maille, et leurs extrêmes.
+       Chaque phrase est rendue par UN répéteur sur UNE ligne qui porte tous
+       ses chiffres : un répéteur imbriqué au milieu d'une phrase rend un bloc
+       (`div`) et casse la ligne. Les extrêmes sont donc JOINTS en une ligne de
+       synthèse par maille (clé constante `k`, colonnes renommées h_ / b_ / m_ pour ne pas se heurter). -->
+  <dsfr-data-query id="pairs-dep" source="t" where="niveau:eq:dep" order-by="lpm:desc"></dsfr-data-query>
+  <dsfr-data-query id="pairs-reg" source="t" where="niveau:eq:reg" order-by="lpm:desc"></dsfr-data-query>
+  <dsfr-data-query id="ext-dep" source="pairs-dep" group-by="k" aggregate="lpm:max:haut, lpm:min:bas"></dsfr-data-query>
+  <dsfr-data-query id="ext-dep-h" source="pairs-dep" group-by="k, nom_court" aggregate="lpm:max:h_lpm, lpm_a:max:h_lpm_a"
+    order-by="h_lpm:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="ext-dep-h-n" source="ext-dep-h" rename="nom_court:h_nom_court"></dsfr-data-normalize>
+  <dsfr-data-query id="ext-dep-b" source="pairs-dep" group-by="k, nom_court" aggregate="lpm:max:b_lpm, lpm_a:max:b_lpm_a"
+    order-by="b_lpm:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="ext-dep-b-n" source="ext-dep-b" rename="nom_court:b_nom_court"></dsfr-data-normalize>
+  <dsfr-data-join id="sd-1" left="ext-dep" right="ext-dep-h-n" on="k"></dsfr-data-join>
+  <dsfr-data-join id="sd-2" left="sd-1" right="ext-dep-b-n" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="syn-dep" source="sd-2" compute="ratio = haut / bas"></dsfr-data-normalize>
+  <dsfr-data-query id="ext-reg" source="pairs-reg" group-by="k" aggregate="lpm:max:haut, lpm:min:bas"></dsfr-data-query>
+  <dsfr-data-query id="ext-reg-h" source="pairs-reg" group-by="k, nom_court" aggregate="lpm:max:h_lpm, lpm_a:max:h_lpm_a"
+    order-by="h_lpm:desc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="ext-reg-h-n" source="ext-reg-h" rename="nom_court:h_nom_court"></dsfr-data-normalize>
+  <dsfr-data-query id="ext-reg-b" source="pairs-reg" group-by="k, nom_court" aggregate="lpm:max:b_lpm, lpm_a:max:b_lpm_a"
+    order-by="b_lpm:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="ext-reg-b-n" source="ext-reg-b" rename="nom_court:b_nom_court"></dsfr-data-normalize>
+  <!-- La région de métropole la moins licenciée : le paradoxe de la nuance.
+       La métropole se désigne par exclusion des cinq régions d'outre-mer. -->
+  <dsfr-data-query id="metro-bas" source="pairs-reg" where="geo:notin:01|02|03|04|06"
+    order-by="lpm:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="metro-bas-q" source="metro-bas" group-by="k, nom_court" aggregate="lpm_a:max:m_lpm_a"></dsfr-data-query>
+  <dsfr-data-normalize id="metro-bas-n" source="metro-bas-q" rename="nom_court:m_nom_court"></dsfr-data-normalize>
+  <dsfr-data-join id="sr-1" left="ext-reg" right="ext-reg-h-n" on="k"></dsfr-data-join>
+  <dsfr-data-join id="sr-2" left="sr-1" right="ext-reg-b-n" on="k"></dsfr-data-join>
+  <dsfr-data-join id="sr-3" left="sr-2" right="metro-bas-n" on="k"></dsfr-data-join>
+  <dsfr-data-normalize id="syn-reg" source="sr-3" compute="ratio = haut / bas"></dsfr-data-normalize>
 
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
@@ -43,1321 +190,324 @@
     </nav>
 
     <h1>Portrait de territoires</h1>
-    <p class="fr-text--lead">
-      Le visage sportif d'une région ou d'un département — licences, équipements, formations,
-      volontariat, dispositifs de l'État — et sa comparaison avec la France ou avec un autre
-      territoire. Reproduction de
-      <a href="https://data.sports.gouv.fr/pages/portrait-territoire/" target="_blank" rel="noopener external">la page de data.sports.gouv.fr</a>,
+    <p class="fr-text--lead fr-mb-2w">
+      Ce qui distingue un territoire de la France, en sport&nbsp;: combien de ses habitants
+      prennent une licence, combien de clubs et d'équipements il leur offre, quelle place y
+      tiennent les femmes — et son rang parmi ses pairs. Recréation du
+      <a href="https://data.sports.gouv.fr/pages/portrait-territoire/" target="_blank" rel="noopener external">portrait de data.sports.gouv.fr</a>,
       sur ses propres jeux, lus en direct.
     </p>
-
-    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Vingt-neuf jeux, une clé géographique qui porte onze noms</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        L'original déclare <strong>cent deux contextes</strong> sur vingt-huit jeux de
-        <code>data.sports.gouv.fr</code> et un d'<code>equipements.sports.gouv.fr</code>, et recopie
-        le territoire choisi dans chacun par une affectation AngularJS de 96 paramètres (33 de plus
-        pour le territoire de comparaison). Le
-        département s'appelle <code>dep</code>, <code>dep_code</code>, <code>dep_code_filled</code>,
-        <code>codedepartement</code> ou <code>departement_code_complet</code> selon le jeu ; la
-        région <code>newreg</code>, <code>reg_code</code>, <code>reg</code> (un entier),
-        <code>coderegion</code>, <code>region_depeta</code> ou <code>region_code</code>. Ici, un
-        <code>dsfr-data-context-filter</code> par nom de clé, tous branchés sur les deux mêmes
-        listes.
-      </p>
-    </details>
   </div>
 
-  <!-- ==========================================================================
-       SOURCES — trois familles.
-       t-*  : le territoire choisi, abonnées au contexte `ctx`
-       f-*  : la France, jamais filtrées (les « … en France » de l'original)
-       c-*  : le territoire de comparaison (onglet « Me comparer »), contexte `ctx2`
-       s-*  : les petits jeux régionaux chargés entiers (18 à 209 lignes), filtrés
-              par JOINTURE sur la région du territoire choisi — voir t-reg.
-       ========================================================================== -->
-
-  <!-- Les jeux régionaux, chargés entiers : 18, 144, 21 et 209 lignes.
-       ⚠️ ILS DOIVENT ÊTRE DÉCLARÉS AVANT t-reg. Chacun est joint à t-reg, qui
-       attend un filtre (`require-where`) : une jointure dont une entrée est en
-       attente affiche l'état du DERNIER événement reçu de ses deux entrées. Si
-       le « chargement » de l'autre entrée arrive après l'« attente » de t-reg,
-       l'afficheur reste sur « Chargement… » indéfiniment. Déclarés après t-reg,
-       ces quatre jeux figeaient cinq KPI et deux graphiques (constaté, 0.28.0
-       et 0.29 construite). -->
-  <dsfr-data-source id="s-prat" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="prat_reg_sexe" max-records="50"></dsfr-data-source>
-  <dsfr-data-source id="s-pcs" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="prat_reg_pcs_cat" where="categorie != 'ensemble'"
-    select="reg_code, categorie, valeur" order-by="categorie:asc" max-records="300"></dsfr-data-source>
-  <dsfr-data-source id="s-bpj" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="bpjeps_dipl_emploi" max-records="50"></dsfr-data-source>
-  <!-- BPJEPS : le taux est publié en TEXTE, virgule décimale (« 84,3 »), et
-       « n.d » quand il manque. Deux passes : la virgule devient un point,
-       puis la colonne devient un nombre. (Pour la France seulement : côté
-       région, la même normalisation est posée après la jointure.) -->
-  <dsfr-data-normalize id="s-bpj-t" source="s-bpj" compute="taux = replace(taux_emploi_sortants, ',', '.')"></dsfr-data-normalize>
-  <dsfr-data-normalize id="s-bpj-n" source="s-bpj-t" numeric="taux"></dsfr-data-normalize>
-  <dsfr-data-source id="s-bpjm" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="bpjeps_dipl_mention" select="reg_code, mention, nb_dipl" max-records="300"></dsfr-data-source>
-
-  <!-- Le référentiel qui dit dans quelle région on est. Filtré par la région OU
-       par le département, il rend UNE ligne : la région du territoire. C'est ce
-       qui permet d'afficher la pratique sportive et le BPJEPS — publiés par
-       région seulement — quand on n'a choisi qu'un département : l'original le
-       fait par une affectation (`selectedReg = item.newreg`) au clic. Ici, une
-       jointure `inner` sur ce référentiel. `require-where` : sans territoire, il
-       n'y a pas de région à désigner. -->
-  <dsfr-data-source id="t-reg" api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="portrait_territoires_base" group-by="reg_code, reg_nom" select="count(*) as n"
-    max-records="30" require-where></dsfr-data-source>
-  <dsfr-data-source id="t-dep" api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="portrait_territoires_base" group-by="dep_code, dep_nom" select="count(*) as n"
-    max-records="200" require-where></dsfr-data-source>
-
-  <!-- Onglet 1 — licences. L'exclusion des « départements » ETR, COM, NR et des
-       collectivités d'outre-mer est celle de l'original (`exclude.dep`). -->
-  <dsfr-data-source id="t-lic" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="lics_dep" where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    group-by="dep" select="sum(lics) as lics, sum(lics) * 1000 as lics_k" max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="t-pop" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="pop_dep_age_sexe" where="annee = '2024'"
-    group-by="dep" select="sum(pop) as pop" max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="t-age" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="lics_dep_age_sexe" group-by="sexe, trage_full, trage" select="sum(lics) as lics"
-    max-records="60"></dsfr-data-source>
-  <dsfr-data-source id="t-popage" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="pop_dep_age_sexe" where="annee = '2024'"
-    group-by="trage" select="sum(pop) as pop" max-records="30"></dsfr-data-source>
-  <dsfr-data-source id="t-fede" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="lics_dep" where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    group-by="federation_court" select="sum(lics) as lics" order-by="lics:desc" limit="10"></dsfr-data-source>
-  <dsfr-data-source id="t-clubs" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="clubs_dep" where="year(annee) = 2024 and not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    select="sum(n_actifs) as n" limit="1"></dsfr-data-source>
-
-  <!-- Onglet 2 — équipements. -->
-  <dsfr-data-source id="t-es" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="data-es-par-commune" group-by="dep_code_filled"
-    select="sum(nb_equip) as n, sum(nb_equip) * 10000 as n10k, sum(nb_equip) * 100 as n100, sum(surface) as surface"
-    max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="t-refgeo" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="ref-geo-dataes" group-by="codedepartement" select="sum(population) as pop"
-    max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="t-es-type" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="data-es-par-commune-type-equip" group-by="equip_type_famille"
-    select="sum(nb_equip) as n" order-by="n:desc" limit="10"></dsfr-data-source>
-  <dsfr-data-source id="t-carte" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="data-es-territoires" where="coordonnees is not null"
-    select="numero_de_l_equipement_sportif, nom_de_l_installation_sportive, nom_de_l_equipement_sportif, type_d_equipement_sportif, commune_nom, coordonnees"
-    fetch-mode="export" max-records="45000" require-where></dsfr-data-source>
-
-  <!-- Onglet 3 — enseignement. -->
-  <dsfr-data-source id="t-sss" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="sections-sportives-scolaires" select="count(*) as n" limit="1"></dsfr-data-source>
-  <dsfr-data-source id="t-ses" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="sections-excellence-sportive" select="count(*) as n" limit="1"></dsfr-data-source>
-  <dsfr-data-source id="t-staps-i" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="mesr_sies_staps_inscrits" select="sum(inscrits) as n" limit="1"></dsfr-data-source>
-  <dsfr-data-source id="t-staps-d" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="mesr_sies_staps_diplomes" select="sum(diplomes) as n" limit="1"></dsfr-data-source>
-
-  <!-- Onglet 4 — volontariat. -->
-  <dsfr-data-source id="t-sc" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="sc_missions" where="annee = '2024'"
-    select="sum(nb_missions) as m, sum(nb_missions_sport) as ms" limit="1"></dsfr-data-source>
-
-  <!-- Onglet 5 — dispositifs de l'État. -->
-  <dsfr-data-source id="t-base" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="portrait_territoires_base"
-    select="sum(psp_inscrits) as psp, sum(handiguide) as hg, sum(mss) as mss, sum(aq_interventions) as aq, sum(aq_enfants) as aqe, sum(srav_attestations_2025) as srav"
-    limit="1"></dsfr-data-source>
-  <dsfr-data-source id="t-psp" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="passsport_fede" group-by="psp_federations_court" select="sum(psp_inscrits) as n"
-    order-by="n:desc" limit="10"></dsfr-data-source>
-  <dsfr-data-source id="t-srav" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="portrait_territoires_base_annees" where="year(annee_attestation_srav) >= 2020"
-    group-by="year(annee_attestation_srav) as annee" select="sum(nb_attestation_srav) as n"
-    order-by="annee:asc" max-records="20"></dsfr-data-source>
-
-  <!-- Le contexte du territoire choisi. Une balise par nom de clé : l'original
-       fait la même chose en recopiant le choix dans 96 paramètres de contexte. -->
-  <dsfr-data-context id="ctx" url-sync
-    sources="t-reg t-dep t-lic t-pop t-age t-popage t-fede t-clubs
-             t-es t-refgeo t-es-type t-carte t-sss t-ses t-staps-i t-staps-d t-sc t-base t-psp t-srav">
-    <dsfr-data-context-filter ui="sel-reg" field="newreg" label="Région"
-      apply-to="t-lic t-pop t-age t-popage t-fede t-clubs"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-reg" field="reg_code"
-      apply-to="t-reg t-es t-es-type t-sss t-ses t-base t-psp t-srav"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-reg" field="coderegion" apply-to="t-refgeo"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-reg" field="region_code" apply-to="t-carte"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-reg" field="region_depeta" apply-to="t-staps-i t-staps-d"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-reg" field="reg" apply-to="t-sc"></dsfr-data-context-filter>
-
-    <dsfr-data-context-filter ui="sel-dep" field="dep" label="Département"
-      apply-to="t-lic t-pop t-age t-popage t-fede t-clubs t-sc"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-dep" field="dep_code"
-      apply-to="t-reg t-dep t-sss t-ses t-staps-i t-staps-d t-base t-psp t-srav"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-dep" field="dep_code_filled" apply-to="t-es t-es-type"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-dep" field="codedepartement" apply-to="t-refgeo"></dsfr-data-context-filter>
-    <dsfr-data-context-filter ui="sel-dep" field="departement_code_complet" apply-to="t-carte"></dsfr-data-context-filter>
-  </dsfr-data-context>
-
-  <!-- La France : les mêmes requêtes, hors contexte. -->
-  <dsfr-data-source id="f-lic" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="lics_dep" where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    group-by="dep" select="sum(lics) as lics, sum(lics) * 1000 as lics_k" max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="f-pop" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="pop_dep_age_sexe" where="annee = '2024'"
-    group-by="dep" select="sum(pop) as pop" max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="f-age" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="lics_dep_age_sexe" group-by="sexe, trage_full, trage" select="sum(lics) as lics"
-    max-records="60"></dsfr-data-source>
-  <dsfr-data-source id="f-popage" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="pop_dep_age_sexe" where="annee = '2024'"
-    group-by="trage" select="sum(pop) as pop" max-records="30"></dsfr-data-source>
-  <dsfr-data-source id="f-fede" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="lics_dep" where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    group-by="federation_court" select="sum(lics) as lics" order-by="lics:desc" limit="10"></dsfr-data-source>
-  <dsfr-data-source id="f-clubs" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="clubs_dep" where="year(annee) = 2024 and not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-    select="sum(n_actifs) as n" limit="1"></dsfr-data-source>
-  <dsfr-data-source id="f-es" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="data-es-par-commune" group-by="dep_code_filled"
-    select="sum(nb_equip) as n, sum(nb_equip) * 10000 as n10k, sum(nb_equip) * 100 as n100, sum(surface) as surface"
-    max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="f-refgeo" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="ref-geo-dataes" group-by="codedepartement" select="sum(population) as pop"
-    max-records="200"></dsfr-data-source>
-  <dsfr-data-source id="f-sc" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="sc_missions" where="annee = '2024'"
-    select="sum(nb_missions) as m, sum(nb_missions_sport) as ms" limit="1"></dsfr-data-source>
-  <dsfr-data-source id="f-base" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="portrait_territoires_base"
-    select="sum(psp_inscrits) as psp, sum(handiguide) as hg, sum(mss) as mss, sum(aq_interventions) as aq, sum(aq_enfants) as aqe, sum(srav_attestations_2025) as srav"
-    limit="1"></dsfr-data-source>
-  <dsfr-data-source id="f-psp" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-    dataset-id="passsport_fede" group-by="psp_federations_court" select="sum(psp_inscrits) as n"
-    order-by="n:desc" limit="10"></dsfr-data-source>
-
-  <!-- Famille D — portrait d'une entite. Le selecteur est le SEUL levier de la
-       page : il merite le bandeau pleine largeur. On ne le DEPLACE PAS pour
-       autant -- ses onze `dsfr-data-context-filter` lisent leur controle au
-       montage (PG-029), et un premier essai qui separait les deux selecteurs
-       laissait les 73 KPI sur « Choisissez un filtre », sans une erreur. Le
-       bloc reste donc EXACTEMENT a sa place dans le document ; seul son
-       habillage change. -->
+  <!-- ===== Le seul levier de la page ===== -->
   <section class="odv-bandeau">
     <div class="fr-container">
-      <p class="fr-text--sm fr-mb-2w">Un seul levier pilote toute la page&nbsp;: choisissez un
-        territoire, et <strong>vingt-neuf jeux de données</strong> s'y accordent d'un coup —
-        chaque chiffre mis en regard de sa référence nationale.</p>
-
-    <!-- ===== Le choix du territoire ===== -->
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-2w">
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-reg">Région</label>
-          <select class="fr-select" id="sel-reg">
-            <option value="">France entière</option>
-            <option value="01">Guadeloupe</option>
-            <option value="02">Martinique</option>
-            <option value="03">Guyane</option>
-            <option value="04">La Réunion</option>
-            <option value="06">Mayotte</option>
-            <option value="11">Île-de-France</option>
-            <option value="24">Centre-Val de Loire</option>
-            <option value="27">Bourgogne-Franche-Comté</option>
-            <option value="28">Normandie</option>
-            <option value="32">Hauts-de-France</option>
-            <option value="44">Grand Est</option>
-            <option value="52">Pays de la Loire</option>
-            <option value="53">Bretagne</option>
-            <option value="75">Nouvelle-Aquitaine</option>
-            <option value="76">Occitanie</option>
-            <option value="84">Auvergne-Rhône-Alpes</option>
-            <option value="93">Provence-Alpes-Côte d&#x27;Azur</option>
-            <option value="94">Corse</option>
-          </select>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-md-6">
-        <div class="fr-select-group">
-          <label class="fr-label" for="sel-dep">Département</label>
-          <select class="fr-select" id="sel-dep">
-            <option value="">Tous</option>
-            <option value="01">01 — Ain</option>
-            <option value="02">02 — Aisne</option>
-            <option value="03">03 — Allier</option>
-            <option value="04">04 — Alpes-de-Haute-Provence</option>
-            <option value="05">05 — Hautes-Alpes</option>
-            <option value="06">06 — Alpes-Maritimes</option>
-            <option value="07">07 — Ardèche</option>
-            <option value="08">08 — Ardennes</option>
-            <option value="09">09 — Ariège</option>
-            <option value="10">10 — Aube</option>
-            <option value="11">11 — Aude</option>
-            <option value="12">12 — Aveyron</option>
-            <option value="13">13 — Bouches-du-Rhône</option>
-            <option value="14">14 — Calvados</option>
-            <option value="15">15 — Cantal</option>
-            <option value="16">16 — Charente</option>
-            <option value="17">17 — Charente-Maritime</option>
-            <option value="18">18 — Cher</option>
-            <option value="19">19 — Corrèze</option>
-            <option value="21">21 — Côte-d&#x27;Or</option>
-            <option value="22">22 — Côtes-d&#x27;Armor</option>
-            <option value="23">23 — Creuse</option>
-            <option value="24">24 — Dordogne</option>
-            <option value="25">25 — Doubs</option>
-            <option value="26">26 — Drôme</option>
-            <option value="27">27 — Eure</option>
-            <option value="28">28 — Eure-et-Loir</option>
-            <option value="29">29 — Finistère</option>
-            <option value="2A">2A — Corse-du-Sud</option>
-            <option value="2B">2B — Haute-Corse</option>
-            <option value="30">30 — Gard</option>
-            <option value="31">31 — Haute-Garonne</option>
-            <option value="32">32 — Gers</option>
-            <option value="33">33 — Gironde</option>
-            <option value="34">34 — Hérault</option>
-            <option value="35">35 — Ille-et-Vilaine</option>
-            <option value="36">36 — Indre</option>
-            <option value="37">37 — Indre-et-Loire</option>
-            <option value="38">38 — Isère</option>
-            <option value="39">39 — Jura</option>
-            <option value="40">40 — Landes</option>
-            <option value="41">41 — Loir-et-Cher</option>
-            <option value="42">42 — Loire</option>
-            <option value="43">43 — Haute-Loire</option>
-            <option value="44">44 — Loire-Atlantique</option>
-            <option value="45">45 — Loiret</option>
-            <option value="46">46 — Lot</option>
-            <option value="47">47 — Lot-et-Garonne</option>
-            <option value="48">48 — Lozère</option>
-            <option value="49">49 — Maine-et-Loire</option>
-            <option value="50">50 — Manche</option>
-            <option value="51">51 — Marne</option>
-            <option value="52">52 — Haute-Marne</option>
-            <option value="53">53 — Mayenne</option>
-            <option value="54">54 — Meurthe-et-Moselle</option>
-            <option value="55">55 — Meuse</option>
-            <option value="56">56 — Morbihan</option>
-            <option value="57">57 — Moselle</option>
-            <option value="58">58 — Nièvre</option>
-            <option value="59">59 — Nord</option>
-            <option value="60">60 — Oise</option>
-            <option value="61">61 — Orne</option>
-            <option value="62">62 — Pas-de-Calais</option>
-            <option value="63">63 — Puy-de-Dôme</option>
-            <option value="64">64 — Pyrénées-Atlantiques</option>
-            <option value="65">65 — Hautes-Pyrénées</option>
-            <option value="66">66 — Pyrénées-Orientales</option>
-            <option value="67">67 — Bas-Rhin</option>
-            <option value="68">68 — Haut-Rhin</option>
-            <option value="69">69 — Rhône</option>
-            <option value="70">70 — Haute-Saône</option>
-            <option value="71">71 — Saône-et-Loire</option>
-            <option value="72">72 — Sarthe</option>
-            <option value="73">73 — Savoie</option>
-            <option value="74">74 — Haute-Savoie</option>
-            <option value="75">75 — Paris</option>
-            <option value="76">76 — Seine-Maritime</option>
-            <option value="77">77 — Seine-et-Marne</option>
-            <option value="78">78 — Yvelines</option>
-            <option value="79">79 — Deux-Sèvres</option>
-            <option value="80">80 — Somme</option>
-            <option value="81">81 — Tarn</option>
-            <option value="82">82 — Tarn-et-Garonne</option>
-            <option value="83">83 — Var</option>
-            <option value="84">84 — Vaucluse</option>
-            <option value="85">85 — Vendée</option>
-            <option value="86">86 — Vienne</option>
-            <option value="87">87 — Haute-Vienne</option>
-            <option value="88">88 — Vosges</option>
-            <option value="89">89 — Yonne</option>
-            <option value="90">90 — Territoire de Belfort</option>
-            <option value="91">91 — Essonne</option>
-            <option value="92">92 — Hauts-de-Seine</option>
-            <option value="93">93 — Seine-Saint-Denis</option>
-            <option value="94">94 — Val-de-Marne</option>
-            <option value="95">95 — Val-d&#x27;Oise</option>
-            <option value="971">971 — Guadeloupe</option>
-            <option value="972">972 — Martinique</option>
-            <option value="973">973 — Guyane</option>
-            <option value="974">974 — La Réunion</option>
-            <option value="976">976 — Mayotte</option>
-          </select>
-          <p class="fr-hint-text">Un département suffit : sa région est retrouvée pour les indicateurs publiés par région.</p>
-        </div>
-      </div>
-    </div
+      <!-- Une facette LOCALE sur les lignes déjà chargées : 1 France, 18 régions,
+           101 départements, libellés par leur nom (`value-labels`), filtrant par
+           leur code (`D33`, `R75`, `FR`), qui est aussi le paramètre d'URL
+           `?territoire=`. Les régions sont préfixées « Région » : le tri
+           alphabétique les regroupe. Pas de `dsfr-data-context` : le code
+           n'existe dans aucun jeu, il est calculé en aval (AM-056 ne se pose
+           donc plus : il n'y a plus onze noms de clé à diffuser). -->
+      <dsfr-data-facets id="choix" source="t" fields="code" display="code:select"
+        labels="code:Territoire" value-labels="code:nom" default="code:FR"
+        sort="code:alpha:asc" hide-counts no-reset
+        url-params url-sync url-param-map="territoire:code"></dsfr-data-facets>
+      <p class="fr-hint-text fr-mt-1w fr-mb-0">France entière, une des 18 régions ou un des
+        101 départements. Changer de territoire ne recharge rien&nbsp;: tout est déjà là.</p>
     </div>
   </section>
 
-  <div class="fr-container fr-mb-8w">>
+  <dsfr-data-query id="choix-t" source="choix" where="niveau:neq:fr"></dsfr-data-query>
+  <dsfr-data-query id="choix-fr" source="choix" where="niveau:eq:fr"></dsfr-data-query>
 
-    <div class="odv-territoire fr-mb-4w">
-      <div class="odv-territoire__ligne fr-text--lg">
-        <strong>Territoire :</strong>
-        <dsfr-data-display source="t-reg" cols="1" idle-message="France entière">
-          <template><span class="odv-territoire__nom">{{reg_nom}}</span></template>
-        </dsfr-data-display>
-        <dsfr-data-display source="t-dep" cols="1" idle-message="(tous départements)">
-          <template><span class="odv-territoire__nom">› {{dep_nom}} ({{dep_code}})</span></template>
-        </dsfr-data-display>
-      </div>
-    </div>
+  <div class="fr-container fr-mb-8w">
 
-    <!-- ===== Les six onglets ===== -->
-    <div class="fr-tabs">
-      <ul class="fr-tabs__list" role="tablist" aria-label="Thèmes du portrait de territoire">
-        <li role="presentation"><button id="tab-licences" class="fr-tabs__tab" tabindex="0" role="tab" aria-selected="true" aria-controls="onglet-licences">Licences et pratiques sportives</button></li>
-        <li role="presentation"><button id="tab-equipements" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-equipements">Équipements sportifs</button></li>
-        <li role="presentation"><button id="tab-enseignement" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-enseignement">Enseignement et diplômes</button></li>
-        <li role="presentation"><button id="tab-volontariat" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-volontariat">Volontariat sportif</button></li>
-        <li role="presentation"><button id="tab-dispositifs" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-dispositifs">Dispositifs État</button></li>
-        <li role="presentation"><button id="tab-comparer" class="fr-tabs__tab" tabindex="-1" role="tab" aria-selected="false" aria-controls="onglet-comparer">Me comparer</button></li>
-      </ul>
-
-      <!-- ─────────────── 1. Licences et pratiques sportives ─────────────── -->
-      <div id="onglet-licences" class="fr-tabs__panel fr-tabs__panel--selected" role="tabpanel" aria-labelledby="tab-licences" tabindex="0">
-        <h2 class="fr-h4">Licences sportives annuelles, en 2024</h2>
-        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-2w">
-          <dsfr-data-kpi source="j-lic" value="lics:sum" format="nombre"
-            heading="Licences sportives annuelles" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-clubs" value="n:max" format="nombre"
-            heading="Établissements sportifs actifs" label="clubs et établissements"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-lic" value="lics:sum" format="nombre"
-            heading="Licences — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-clubs" value="n:max" format="nombre"
-            heading="Établissements actifs — France" label="référence nationale"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-1w">
-          <dsfr-data-kpi source="t-age" value="lics:sum{trage:in:0 à 4 ans|5 à 9 ans|10 à 14 ans|15 à 19 ans} / lics:sum" format="pourcentage" decimals="1"
-            heading="Part des licences des moins de 20 ans" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-lic" value="lics_k:sum / pop:sum" format="nombre" decimals="1"
-            heading="Licences pour 1 000 habitants" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-age" value="lics:sum{sexe:eq:F} / lics:sum" format="pourcentage" decimals="1"
-            heading="Part des licences féminines" label="dans le territoire"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="f-age" value="lics:sum{trage:in:0 à 4 ans|5 à 9 ans|10 à 14 ans|15 à 19 ans} / lics:sum" format="pourcentage" decimals="1"
-            heading="Moins de 20 ans — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="jf-lic" value="lics_k:sum / pop:sum" format="nombre" decimals="1"
-            heading="Pour 1 000 habitants — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-age" value="lics:sum{sexe:eq:F} / lics:sum" format="pourcentage" decimals="1"
-            heading="Licences féminines — France" label="référence nationale"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <h3 class="fr-h5">Par groupe d'âges : part de chaque tranche dans les licences de chaque sexe</h3>
-        <p class="fr-text--sm fr-mb-2w">
-          L'original dessine une pyramide en <code>div</code> dont chaque barre mesure
-          <code>effectif / total du sexe × 400 %</code>. La même donnée ici, en deux graphiques —
-          femmes, hommes — qui mettent le territoire et la France côte à côte, tranche par tranche.
-        </p>
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-viz" data-code="Licences féminines par tranche d'âge">
-            <dsfr-data-chart id="g-pyr-f" source="pyr-f" type="bar" horizontal
-              label-field="trage" value-field="part" value-fields="right_part"
-              name='["Territoire","France"]' unit-tooltip="% des licenciées" heading-level="4"
-              databox databox-title="Licences féminines par tranche d'âge"
-              databox-source="Ministère des Sports — lics_dep_age_sexe, 2024" databox-download></dsfr-data-chart>
-            <dsfr-data-a11y for="g-pyr-f" source="pyr-f" table download
-              label-field="trage" value-field="part, right_part"></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-viz" data-code="Licences masculines par tranche d'âge">
-            <dsfr-data-chart id="g-pyr-h" source="pyr-h" type="bar" horizontal
-              label-field="trage" value-field="part" value-fields="right_part"
-              name='["Territoire","France"]' unit-tooltip="% des licenciés" heading-level="4"
-              databox databox-title="Licences masculines par tranche d'âge"
-              databox-source="Ministère des Sports — lics_dep_age_sexe, 2024" databox-download></dsfr-data-chart>
-            <dsfr-data-a11y for="g-pyr-h" source="pyr-h" table download
-              label-field="trage" value-field="part, right_part"></dsfr-data-a11y>
-            </div>
-          </div>
-        </div>
-
-        <h3 class="fr-h5">La population, en 2024</h3>
-        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="t-popage" value="pop:sum{trage:in:0 à 4 ans|5 à 9 ans|10 à 14 ans|15 à 19 ans} / pop:sum" format="pourcentage" decimals="1"
-            heading="Population de moins de 20 ans" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-popage" value="pop:sum{trage:in:0 à 4 ans|5 à 9 ans|10 à 14 ans|15 à 19 ans} / pop:sum" format="pourcentage" decimals="1"
-            heading="Moins de 20 ans — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-popage" value="pop:sum{trage:in:65 à 69 ans|70 à 74 ans|75 à 79 ans|80 ans et plus} / pop:sum" format="pourcentage" decimals="1"
-            heading="Population de 65 ans et plus" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-popage" value="pop:sum{trage:in:65 à 69 ans|70 à 74 ans|75 à 79 ans|80 ans et plus} / pop:sum" format="pourcentage" decimals="1"
-            heading="65 ans et plus — France" label="référence nationale"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <h3 class="fr-h5">Les dix premières fédérations en nombre de licences annuelles, en 2024</h3>
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <p class="fr-text--sm fr-text--bold fr-mb-1w">Dans le territoire</p>
-            <div class="odv-viz" data-code="Graphique">
-            <dsfr-data-podium source="t-fede" label-field="federation_court" value-field="lics"
-              value-unit="licences" max-items="10"></dsfr-data-podium>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <p class="fr-text--sm fr-text--bold fr-mb-1w">En France</p>
-            <div class="odv-viz" data-code="Graphique (2)">
-            <dsfr-data-podium source="f-fede" label-field="federation_court" value-field="lics"
-              value-unit="licences" max-items="10" selected-palette="neutral"></dsfr-data-podium>
-            </div>
-          </div>
-        </div>
-
-        <h3 class="fr-h5">Pratique sportive régulière des 15 ans et plus, en 2024-2025</h3>
-        <p class="fr-text--sm fr-mb-2w">
-          Publiée <strong>par région seulement</strong> (Provence-Alpes-Côte d'Azur et la Corse
-          réunies, la Guadeloupe et la Martinique aussi, et rien pour Mayotte) : un département
-          affiche la valeur de sa région.
-        </p>
-        <dsfr-data-kpi-group cols="2" gap="md" class="fr-mb-2w">
-          <dsfr-data-kpi source="j-prat" value="part_prat_reg:max" format="nombre" unit="%"
-            heading="Pratique régulière dans la région" label="des 15 ans et plus"
-            idle-message="Choisissez une région ou un département"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-prat" where="reg_code:eq:FR" value="part_prat_reg:max" format="nombre" unit="%"
-            heading="Pratique régulière — France" label="des 15 ans et plus"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="j-prat" value="part_prat_reg_hommes:max" format="nombre" unit="%"
-            heading="Hommes — région" label="pratique régulière"
-            idle-message="Choisissez une région ou un département"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-prat" value="part_prat_reg_femmes:max" format="nombre" unit="%"
-            heading="Femmes — région" label="pratique régulière"
-            idle-message="Choisissez une région ou un département"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-prat" where="reg_code:eq:FR" value="part_prat_reg_hommes:max" format="nombre" unit="%"
-            heading="Hommes — France" label="pratique régulière"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-prat" where="reg_code:eq:FR" value="part_prat_reg_femmes:max" format="nombre" unit="%"
-            heading="Femmes — France" label="pratique régulière"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-viz" data-code="Pratique régulière par catégorie socioprofessionnelle — région">
-            <dsfr-data-chart id="g-pcs-r" source="j-pcs-r" type="bar" horizontal
-              label-field="categorie" value-field="valeur" name="Région"
-              unit-tooltip="%" heading-level="4"
-              idle-message="Choisissez une région ou un département"
-              databox databox-title="Pratique régulière par catégorie socioprofessionnelle — région"
-              databox-source="INJEP — prat_reg_pcs_cat, 2024-2025" databox-download></dsfr-data-chart>
-            <dsfr-data-a11y for="g-pcs-r" source="j-pcs-r" table download
-              label-field="categorie" value-field="valeur"></dsfr-data-a11y>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <div class="odv-viz" data-code="Pratique régulière par catégorie socioprofessionnelle — France">
-            <dsfr-data-chart id="g-pcs-f" source="s-pcs-fr" type="bar" horizontal
-              label-field="categorie" value-field="valeur" name="France"
-              unit-tooltip="%" heading-level="4"
-              databox databox-title="Pratique régulière par catégorie socioprofessionnelle — France"
-              databox-source="INJEP — prat_reg_pcs_cat, 2024-2025" databox-download></dsfr-data-chart>
-            <dsfr-data-a11y for="g-pcs-f" source="s-pcs-fr" table download
-              label-field="categorie" value-field="valeur"></dsfr-data-a11y>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ─────────────── 2. Équipements sportifs ─────────────── -->
-      <div id="onglet-equipements" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-equipements" tabindex="0">
-        <h2 class="fr-h4">Équipements sportifs</h2>
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-1w">
-          <dsfr-data-kpi source="j-es" value="n:sum" format="nombre"
-            heading="Équipements sportifs" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-es" value="n10k:sum / pop:sum" format="nombre" decimals="1"
-            heading="Pour 10 000 habitants" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-es" value="n100:sum / surface:sum" format="nombre" decimals="2"
-            heading="Par km²" label="dans le territoire"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="jf-es" value="n:sum" format="nombre"
-            heading="Équipements — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="jf-es" value="n10k:sum / pop:sum" format="nombre" decimals="1"
-            heading="Pour 10 000 habitants — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-es" value="n100:sum / surface:sum" format="nombre" decimals="2"
-            heading="Par km² — France" label="référence nationale"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <h3 class="fr-h5">Les équipements sur la carte</h3>
-        <div class="odv-viz" data-code="Équipements sportifs du territoire">
-        <dsfr-data-map id="carte-es" name="Équipements sportifs du territoire"
-          height="560px" tiles="ign-plan" tiles-style="muted"
-          center="46.6,2.3" zoom="5" fit-bounds fit-max-zoom="13"
-          idle-message="Choisissez une région ou un département : la carte ne charge rien avant (333 635 équipements au national).">
-          <dsfr-data-map-layer id="couche-es" source="t-carte" type="circle"
-            geo-field="coordonnees" radius="5" fill-opacity="0.85" color="#e1000f"
-            label="Équipements sportifs" tooltip-field="nom_de_l_installation_sportive"
-            cluster cluster-radius="45" max-items="45000"></dsfr-data-map-layer>
-          <dsfr-data-map-popup mode="panel-right" title-field="nom_de_l_installation_sportive" width="340px">
-            <template>
-              <p class="fr-text--sm fr-mb-1v">{{nom_de_l_equipement_sportif|}}</p>
-              <p class="fr-badge fr-badge--sm fr-mb-2v">{{type_d_equipement_sportif}}</p>
-              <p class="fr-text--sm fr-mb-0"><strong>{{commune_nom}}</strong> — n° {{numero_de_l_equipement_sportif}}</p>
-            </template>
-          </dsfr-data-map-popup>
-        </dsfr-data-map>
-        <dsfr-data-a11y source="t-carte" for="carte-es" table download
-          filename="equipements-territoire.csv" label="Données de la carte"
-          label-field="nom_de_l_installation_sportive"
-          value-field="nom_de_l_equipement_sportif, type_d_equipement_sportif, commune_nom"></dsfr-data-a11y>
-        </div>
-
-        <h3 class="fr-h5 fr-mt-4w">Les dix premières familles d'équipements</h3>
-        <div class="odv-viz" data-code="Les dix premières familles d'équipements sportifs">
-        <dsfr-data-chart id="g-es-type" source="t-es-type" type="bar" horizontal
-          label-field="equip_type_famille" value-field="n" name="Équipements"
-          unit-tooltip="équipements" heading-level="4"
-          databox databox-title="Les dix premières familles d'équipements sportifs"
-          databox-source="Data ES — data-es-par-commune-type-equip" databox-download></dsfr-data-chart>
-        <dsfr-data-a11y for="g-es-type" source="t-es-type" table download></dsfr-data-a11y>
-        </div>
-      </div>
-
-      <!-- ─────────────── 3. Enseignement et diplômes ─────────────── -->
-      <div id="onglet-enseignement" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-enseignement" tabindex="0">
-        <h2 class="fr-h4">BPJEPS Sport — insertion des diplômés à un an, en 2023-2024</h2>
-        <p class="fr-text--sm fr-mb-2w">Publié par région seulement ; un département affiche la valeur de sa région.</p>
-        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="j-bpj" value="taux:max" format="nombre" decimals="1" unit="%"
-            heading="Insertion à un an — région" label="diplômés BPJEPS Sport"
-            idle-message="Choisissez une région ou un département"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-bpj" value="nb_dipl:sum" format="nombre"
-            heading="Diplômes délivrés — région" label="BPJEPS Sport"
-            idle-message="Choisissez une région ou un département"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-bpj-n" where="reg_code:eq:FR" value="taux:max" format="nombre" decimals="1" unit="%"
-            heading="Insertion à un an — France" label="diplômés BPJEPS Sport"></dsfr-data-kpi>
-          <dsfr-data-kpi source="s-bpj-n" where="reg_code:eq:FR" value="nb_dipl:sum" format="nombre"
-            heading="Diplômes délivrés — France" label="BPJEPS Sport"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <h3 class="fr-h5">Les cinq premières mentions BPJEPS en nombre de diplômés</h3>
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <p class="fr-text--sm fr-text--bold fr-mb-1w">Dans la région</p>
-            <div class="odv-viz" data-code="Graphique (3)">
-            <dsfr-data-podium source="j-bpjm" label-field="mention" value-field="nb_dipl"
-              value-unit="diplômés" max-items="5"
-              idle-message="Choisissez une région ou un département"></dsfr-data-podium>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <p class="fr-text--sm fr-text--bold fr-mb-1w">En France</p>
-            <div class="odv-viz" data-code="Graphique (4)">
-            <dsfr-data-podium source="s-bpjm-fr" label-field="mention" value-field="nb_dipl"
-              value-unit="diplômés" max-items="5" selected-palette="neutral"></dsfr-data-podium>
-            </div>
-          </div>
-        </div>
-
-        <h2 class="fr-h4">Sections sportives scolaires et sections d'excellence sportive</h2>
-        <dsfr-data-kpi-group cols="2" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="t-sss" value="n:max" format="nombre"
-            heading="Établissements avec section sportive scolaire" label="rentrée 2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-ses" value="n:max" format="nombre"
-            heading="Établissements avec section d'excellence sportive" label="rentrée 2022"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <h2 class="fr-h4">Filière universitaire STAPS</h2>
-        <dsfr-data-kpi-group cols="2" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="t-staps-i" value="n:max" format="nombre"
-            heading="Étudiants inscrits en STAPS" label="rentrée 2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-staps-d" value="n:max" format="nombre"
-            heading="Diplômés en STAPS" label="session 2024"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-      </div>
-
-      <!-- ─────────────── 4. Volontariat sportif ─────────────── -->
-      <div id="onglet-volontariat" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-volontariat" tabindex="0">
-        <h2 class="fr-h4">Missions de Service Civique, en 2024</h2>
-        <p class="odv-lecture">Choisissez un territoire dans la liste&nbsp;: <strong>vingt-neuf jeux de données</strong> s'y accordent d'un coup, et chaque chiffre est mis en regard de sa référence nationale.</p>
-        <div class="fr-alert fr-alert--warning fr-alert--sm fr-mb-2w">
-          <p class="fr-text--sm">
-            <strong>Vide pour les régions d'outre-mer choisies par la liste Région.</strong> Ce jeu
-            publie la région en nombre entier (1, 75), les autres en texte (« 01 », « 75 ») : le filtre
-            demande <code>reg = "01"</code> et ne trouve rien pour la Guadeloupe, sans erreur.
-            Choisir le département (971) fonctionne.
+    <!-- ======================================================================
+         1. L'ESSENTIEL — le titre-message et le chapeau, calculés.
+         ====================================================================== -->
+    <section id="essentiel" class="fr-mt-6w">
+      <dsfr-data-join id="fr-acc" left="choix-fr" right="syn-reg" on="k"></dsfr-data-join>
+      <dsfr-data-repeat source="fr-acc" key-field="code">
+        <template>
+          <h2 class="fr-h2">En France, {{lpm_a:number}} licences sportives pour 1&nbsp;000 habitants</h2>
+          <p class="fr-text--lead">
+            {{lics:number}} licences en 2024 pour {{pop:number}} habitants, dans
+            {{clubs:number}} clubs et établissements actifs. La moyenne cache des écarts du
+            simple au presque triple entre départements. En tête des régions&nbsp;:
+            {{h_nom_court}} ({{h_lpm_a:number}} pour 1&nbsp;000)&nbsp;; dernière de métropole&nbsp;:
+            {{m_nom_court}} ({{m_lpm_a:number}})&nbsp;; les régions d'outre-mer plus bas encore,
+            jusqu'à {{b_nom_court}} ({{b_lpm_a:number}}). Choisissez un territoire pour le
+            situer.
           </p>
-        </div>
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-1w">
-          <dsfr-data-kpi source="t-sc" value="m:max" format="nombre"
-            heading="Missions de Service Civique" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-sc" value="ms:max" format="nombre"
-            heading="Dont dans le domaine du sport" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-sc" value="ms:sum / m:sum" format="pourcentage" decimals="0"
-            heading="Part du sport" label="parmi l'ensemble des missions"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="f-sc" value="m:max" format="nombre"
-            heading="Missions — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-sc" value="ms:max" format="nombre"
-            heading="Dans le sport — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-sc" value="ms:sum / m:sum" format="pourcentage" decimals="0"
-            heading="Part du sport — France" label="référence nationale"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
+        </template>
+      </dsfr-data-repeat>
+
+      <!-- Le territoire choisi. Le rang = nombre de pairs au-dessus, plus un :
+           une query par indicateur (regroupée sur la clé constante `k`, pour
+           être jointe), calculée dans le navigateur sur les 120 lignes déjà
+           là. Une query sans ligne (le premier) ne rend rien : la jointure
+           `left` garde la ligne, et `is_null` en fait « 1er ». Tout est joint
+           en UNE ligne, rendue par UN répéteur : titre, chapeau, tableau. -->
+      <dsfr-data-repeat source="choix-t" key-field="code">
+        <template>
+          <dsfr-data-query id="rl-{{$uid}}" source="t" where="niveau:eq:{{niveau}}, lpm:gt:{{lpm}}" group-by="k" aggregate="code:count:n_lpm"></dsfr-data-query>
+          <dsfr-data-query id="rc-{{$uid}}" source="t" where="niveau:eq:{{niveau}}, cl:gt:{{cl}}" group-by="k" aggregate="code:count:n_cl"></dsfr-data-query>
+          <dsfr-data-query id="re-{{$uid}}" source="t" where="niveau:eq:{{niveau}}, eq:gt:{{eq}}" group-by="k" aggregate="code:count:n_eq"></dsfr-data-query>
+          <dsfr-data-query id="rp-{{$uid}}" source="t" where="niveau:eq:{{niveau}}, pf:gt:{{pf}}" group-by="k" aggregate="code:count:n_pf"></dsfr-data-query>
+          <dsfr-data-query id="rn-{{$uid}}" source="t" where="niveau:eq:{{niveau}}" group-by="k" aggregate="code:count:n_pairs"></dsfr-data-query>
+          <dsfr-data-join id="j1-{{$uid}}" left="choix-t" right="rl-{{$uid}}" on="k"></dsfr-data-join>
+          <dsfr-data-join id="j2-{{$uid}}" left="j1-{{$uid}}" right="rc-{{$uid}}" on="k"></dsfr-data-join>
+          <dsfr-data-join id="j3-{{$uid}}" left="j2-{{$uid}}" right="re-{{$uid}}" on="k"></dsfr-data-join>
+          <dsfr-data-join id="j4-{{$uid}}" left="j3-{{$uid}}" right="rp-{{$uid}}" on="k"></dsfr-data-join>
+          <dsfr-data-join id="j5-{{$uid}}" left="j4-{{$uid}}" right="rn-{{$uid}}" on="k"></dsfr-data-join>
+          <dsfr-data-normalize id="fiche-{{$uid}}" source="j5-{{$uid}}"
+            compute="r_lpm = when is_null(n_lpm) then '1er' else (n_lpm + 1) + 'e';
+                     r_cl = when is_null(n_cl) then '1er' else (n_cl + 1) + 'e';
+                     r_eq = when is_null(n_eq) then '1er' else (n_eq + 1) + 'e';
+                     r_pf = when is_null(n_pf) then '1er' else (n_pf + 1) + 'e'"></dsfr-data-normalize>
+          <dsfr-data-repeat source="fiche-{{$uid}}" key-field="code">
+            <template>
+              <h2 class="fr-h2">{{nom}}&nbsp;: {{lpm_a:number}} licences sportives pour 1&nbsp;000 habitants, {{t_lpm}}</h2>
+              <p class="fr-text--lead">
+                {{r_lpm}} des {{n_pairs}} {{mailles}} pour la licence ({{lics:number}} licences en
+                2024). Ses clubs&nbsp;: <strong>{{cl_a:number:1}}</strong> pour 10&nbsp;000
+                habitants, {{t_cl}}. Ses équipements sportifs&nbsp;:
+                <strong>{{eq_a:number:1}}</strong> pour 10&nbsp;000 habitants, {{t_eq}}. Les
+                femmes y portent <strong>{{pf_a:number:1}}&nbsp;%</strong> des licences, {{t_pf}}.
+              </p>
+              <div class="fr-table fr-table--bordered fr-mt-4w">
+                <table>
+                  <caption>Quatre indicateurs, quatre rangs&nbsp;: où {{nom}} s'écarte de la France (2024, rang parmi les {{n_pairs}} {{mailles}})</caption>
+                  <thead>
+                    <tr><th scope="col">Indicateur</th><th scope="col">{{nom}}</th><th scope="col">France</th><th scope="col">Écart</th><th scope="col">Rang</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><th scope="row">Licences pour 1&nbsp;000 habitants</th><td>{{lpm:number:1}}</td><td>{{fr_lpmv:number:1}}</td><td>{{t_lpm}}</td><td>{{r_lpm}}</td></tr>
+                    <tr><th scope="row">Clubs et établissements actifs pour 10&nbsp;000 habitants</th><td>{{cl:number:1}}</td><td>{{fr_clv:number:1}}</td><td>{{t_cl}}</td><td>{{r_cl}}</td></tr>
+                    <tr><th scope="row">Équipements sportifs pour 10&nbsp;000 habitants</th><td>{{eq:number:1}}</td><td>{{fr_eqv:number:1}}</td><td>{{t_eq}}</td><td>{{r_eq}}</td></tr>
+                    <tr><th scope="row">Part des licences féminines (%)</th><td>{{pf:number:1}}</td><td>{{fr_pfv:number:1}}</td><td>{{t_pf}}</td><td>{{r_pf}}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="fr-hint-text">Rang&nbsp;: 1er = la valeur la plus élevée des {{mailles}}.
+                Une même population (au 1er janvier 2024) sert de dénominateur aux trois taux&nbsp;;
+                les régions et la France sont des sommes de départements, jamais des moyennes de
+                taux.</p>
+            </template>
+          </dsfr-data-repeat>
+        </template>
+      </dsfr-data-repeat>
+    </section>
+
+    <!-- ======================================================================
+         2. LA PREUVE — la carte des pairs, le territoire mis en avant.
+            Type (map / map-reg) et source viennent de la ligne choisie ; la
+            synthèse de la maille est jointe en une ligne.
+            ⚠️ PAS de `map-highlight` : dsfr-data le transmet en attribut
+            `highlight` à <map-chart>, que DSFR Chart 2.1.1 ne déclare pas
+            (props : data, value, date, level, name, selectedPalette, databox*) —
+            ignoré sans un mot, le territoire n'était pas marqué (vérifié au
+            navigateur et dans le bundle). La valeur du territoire est dite en
+            texte, au-dessus de la carte.
+         ====================================================================== -->
+    <section id="preuve" class="fr-mt-6w">
+      <dsfr-data-repeat source="choix" key-field="code">
+        <template>
+          <dsfr-data-join id="cs-{{$uid}}" left="choix" right="syn-{{ext}}" on="k"></dsfr-data-join>
+          <dsfr-data-repeat source="cs-{{$uid}}" key-field="code">
+            <template>
+              <h2 class="fr-h3">D'un bout à l'autre des {{mailles}}, la licence varie du simple au {{ratio:number:1}}</h2>
+              <p>
+                En 2024, le taux le plus bas&nbsp;: {{b_nom_court}} ({{b_lpm_a:number}} licences pour
+                1&nbsp;000 habitants)&nbsp;; le plus haut&nbsp;: {{h_nom_court}} ({{h_lpm_a:number}}).
+                {{#if geo}}{{nom}}&nbsp;: {{lpm_a:number}}.{{/if}}
+              </p>
+              <dsfr-data-chart id="carte-{{code}}" source="{{pairs}}" type="{{carte}}"
+                code-field="geo" value-field="lpm_a" name="Licences pour 1 000 habitants"
+                unit-tooltip="pour 1 000 habitants" selected-palette="sequentialAscending"
+                map-summary="weighted" map-summary-weight="pop" map-summary-field="lpm"
+                databox databox-title="Licences sportives pour 1 000 habitants, par {{maille_carte}} — 2024"
+                databox-source="Ministère des Sports (INJEP), recensement des licences 2024 ; population au 1er janvier 2024 — data.sports.gouv.fr"
+                databox-date="2024"></dsfr-data-chart>
+              <dsfr-data-a11y for="carte-{{code}}" source="{{pairs}}" label-field="nom"
+                value-field="lpm_a" table download filename="licences-pour-1000-habitants.csv" decimals="0"
+                description="Carte des {{mailles}}, en couleur selon le nombre de licences sportives pour 1 000 habitants en 2024, de {{b_lpm_a}} à {{h_lpm_a}}. Le résumé France est la moyenne pondérée par la population, soit le taux national."></dsfr-data-a11y>
+            </template>
+          </dsfr-data-repeat>
+        </template>
+      </dsfr-data-repeat>
+    </section>
+
+    <!-- ======================================================================
+         3. LA NUANCE — la licence mesure le club, pas le sport.
+         ====================================================================== -->
+    <section id="nuance" class="fr-mt-6w">
+      <dsfr-data-repeat source="metro-bas" key-field="code">
+        <template>
+          <h2 class="fr-h3">La licence mesure le club, pas le sport&nbsp;: {{nom_court}}, la moins
+            licenciée de métropole, compte {{part_prat_reg}}&nbsp;% de sportifs réguliers</h2>
+          <p>
+            {{nom_court}}&nbsp;: {{lpm_a:number}} licences pour 1&nbsp;000 habitants, {{t_lpm}} — le
+            taux le plus bas des régions de métropole. Pourtant {{part_prat_reg}}&nbsp;% de ses
+            habitants de 15 ans et plus déclarent une pratique sportive régulière, {{t_prat}}.
+            En métropole, les deux mesures ne se suivent pas&nbsp;: la licence compte le sport
+            en club, l'enquête tout le sport déclaré. Le tableau classe les régions par licences&nbsp;; la dernière colonne
+            dit ce que l'enquête mesure ({{annees}}).
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="choix-t" key-field="code">
+        <template>
+          <p class="fr-callout fr-icon-information-line fr-callout__text fr-text--md">
+            {{nom}}&nbsp;: {{#if part_prat_reg}}{{part_prat_reg}}&nbsp;% de pratiquants réguliers
+            parmi les 15 ans et plus, {{t_prat}} — mesure de l'enquête pour le territoire
+            «&nbsp;{{territoire}}&nbsp;»{{/if}}{{#unless part_prat_reg}}pratique régulière
+            non mesurée par l'enquête (Mayotte n'y figure pas){{/unless}}.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-list source="pairs-reg" sort="lpm_a:desc" decimals="0" count-label="région"
+        caption="Régions : licences sportives pour 1 000 habitants (2024) et part des 15 ans et plus déclarant une pratique sportive régulière (enquête 2024-2025)"
+        columns="nom:Région, lpm_a:Licences pour 1 000 hab., t_lpm:Écart à la France, part_prat_reg:Pratique régulière (%), territoire:Territoire de l'enquête"></dsfr-data-list>
+      <p class="fr-hint-text">La pratique régulière vient d'une enquête par sondage, publiée en
+        pourcentages entiers, par région&nbsp;: PACA et Corse y sont un seul territoire,
+        Guadeloupe et Martinique aussi («&nbsp;Antilles&nbsp;») — les deux régions de chaque paire
+        portent donc la même valeur. Un département reçoit celle de sa région.</p>
+    </section>
+
+    <!-- ======================================================================
+         4. EXPLORER — tous les territoires, triables.
+         ====================================================================== -->
+    <section id="explorer" class="fr-mt-6w">
+      <h2 class="fr-h3">Tous les territoires, pour comparer</h2>
+      <p>Les 18 régions et les 101 départements, sur les mêmes indicateurs. Triez une colonne,
+        cherchez un nom, filtrez la maille&nbsp;; l'export CSV donne les valeurs non arrondies.</p>
+      <dsfr-data-query id="explo" source="t" where="niveau:neq:fr"></dsfr-data-query>
+      <dsfr-data-list source="explo" search filters="maille" sort="lpm_a:desc" pagination="20"
+        decimals="1" count-label="territoire" export="csv"
+        caption="Indicateurs sportifs par région et par département, 2024"
+        columns="nom:Territoire, maille:Maille, lpm_a:Licences pour 1 000 hab., t_lpm:Écart à la France, cl_a:Clubs pour 10 000 hab., eq_a:Équipements pour 10 000 hab., pf_a:Part des femmes (%), part_prat_reg:Pratique régulière de la région (%)"></dsfr-data-list>
+    </section>
+
+    <!-- ======================================================================
+         5. CE QU'ON NE MONTRE PAS
+         ====================================================================== -->
+    <section id="non-montre" class="fr-mt-6w">
+      <div class="fr-callout fr-icon-eye-off-line">
+        <h2 class="fr-callout__title fr-h5">Ce que cette page ne montre pas</h2>
+        <ul class="fr-callout__text fr-text--sm">
+          <li><strong>Des licences, pas des licenciés.</strong> Une personne inscrite dans deux
+            fédérations compte deux fois&nbsp;: «&nbsp;249 pour 1&nbsp;000&nbsp;» n'est pas
+            «&nbsp;un habitant sur quatre&nbsp;».</li>
+          <li><strong>148&nbsp;226 licences hors départements</strong> sur 17&nbsp;161&nbsp;064 en
+            2024&nbsp;: licences délivrées à l'étranger (67&nbsp;873), dans les collectivités
+            d'outre-mer (Polynésie, Nouvelle-Calédonie, Saint-Martin…) et lieu non renseigné.
+            Elles n'ont pas de population de référence&nbsp;; elles sont écartées de tous les
+            totaux, France comprise.</li>
+          <li><strong>La commune et l'intercommunalité.</strong> L'original y descend&nbsp;; ses
+            jeux communaux ne sont pas lus ici.</li>
+          <li><strong>Les formations, le volontariat et les dispositifs de l'État</strong>
+            (BPJEPS, STAPS, sections sportives, Service Civique, Pass'Sport, Maisons Sport-Santé,
+            Savoir rouler), que l'original range en quatre onglets. Ce sont des volumes sans
+            dénominateur commun&nbsp;: le jeu du Pass'Sport a une colonne de bénéficiaires
+            éligibles et une de taux de recours, <strong>vides sur ses 107 lignes</strong> — on ne
+            peut donc pas dire si un territoire y recourt plus qu'un autre. Ils restent sur
+            <a href="https://data.sports.gouv.fr/pages/portrait-territoire/" target="_blank" rel="noopener external">la page d'origine</a>.</li>
+          <li><strong>Un comparateur de deux territoires.</strong> Le rang parmi les pairs et le
+            tableau de tous les territoires y répondent sans second sélecteur.</li>
+          <li><strong>Les équipements</strong> sont ceux du recensement par commune
+            (<code>data-es-par-commune</code>, 331&nbsp;339 rattachés à un département)&nbsp;;
+            douze n'ont pas de département et sortent du compte. L'original affichait un autre
+            total «&nbsp;en France&nbsp;», tiré d'un autre jeu (LIM-015).</li>
+        </ul>
       </div>
-
-      <!-- ─────────────── 5. Dispositifs État ─────────────── -->
-      <div id="onglet-dispositifs" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-dispositifs" tabindex="0">
-        <h2 class="fr-h4">Pass'Sport, en 2024</h2>
-        <dsfr-data-kpi-group cols="2" gap="md" class="fr-mb-2w">
-          <dsfr-data-kpi source="t-base" value="psp:max" format="nombre"
-            heading="Pass'Sports utilisés" label="dans le territoire"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-base" value="psp:max" format="nombre"
-            heading="Pass'Sports — France" label="référence nationale"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <h3 class="fr-h5">Les dix premières fédérations en nombre de Pass'Sport</h3>
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-          <div class="fr-col-12 fr-col-lg-6">
-            <p class="fr-text--sm fr-text--bold fr-mb-1w">Dans le territoire</p>
-            <div class="odv-viz" data-code="Graphique (5)">
-            <dsfr-data-podium source="t-psp" label-field="psp_federations_court" value-field="n"
-              value-unit="Pass'Sport" max-items="10"></dsfr-data-podium>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-lg-6">
-            <p class="fr-text--sm fr-text--bold fr-mb-1w">En France</p>
-            <div class="odv-viz" data-code="Graphique (6)">
-            <dsfr-data-podium source="f-psp" label-field="psp_federations_court" value-field="n"
-              value-unit="Pass'Sport" max-items="10" selected-palette="neutral"></dsfr-data-podium>
-            </div>
-          </div>
-        </div>
-
-        <h2 class="fr-h4">Quelques chiffres</h2>
-        <dsfr-data-kpi-group cols="4" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="t-base" value="hg:max" format="nombre"
-            heading="Clubs référencés au Handiguide" label="dans le territoire, 2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-base" value="hg:max" format="nombre"
-            heading="Handiguide — France" label="référence nationale"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-base" value="mss:max" format="nombre"
-            heading="Maisons Sport-Santé habilitées" label="dans le territoire, 2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="f-base" value="mss:max" format="nombre"
-            heading="Maisons Sport-Santé — France" label="référence nationale"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <h2 class="fr-h4">Aisance aquatique et Savoir rouler à vélo</h2>
-        <dsfr-data-kpi-group cols="3" gap="md" class="fr-mb-4w">
-          <dsfr-data-kpi source="t-base" value="aq:max" format="nombre"
-            heading="Aisance aquatique : interventions" label="depuis 2021 (champ aq_interventions)"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-base" value="aqe:max" format="nombre"
-            heading="Aisance aquatique : enfants" label="bénéficiaires depuis 2021"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-base" value="srav:max" format="nombre"
-            heading="Savoir rouler à vélo" label="attestations en 2025"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-        <div class="odv-viz" data-code="Savoir rouler à vélo : évolution des attestations depuis 2020">
-        <dsfr-data-chart id="g-srav" source="t-srav-n" type="bar"
-          label-field="an" value-field="n" name="Attestations"
-          unit-tooltip="attestations" heading-level="3"
-          databox databox-title="Savoir rouler à vélo : évolution des attestations depuis 2020"
-          databox-source="Ministère des Sports — portrait_territoires_base_annees" databox-download></dsfr-data-chart>
-        <dsfr-data-a11y for="g-srav" source="t-srav-n" table download
-          label-field="an" value-field="n"></dsfr-data-a11y>
-        </div>
-      </div>
-
-      <!-- ─────────────── 6. Me comparer ─────────────── -->
-      <div id="onglet-comparer" class="fr-tabs__panel" role="tabpanel" aria-labelledby="tab-comparer" tabindex="0">
-        <h2 class="fr-h4">Me comparer</h2>
-        <p class="fr-text--sm fr-mb-2w">
-          Le territoire de référence est celui choisi en haut de page. Le territoire de comparaison
-          se choisit ici ; sans choix, c'est la France.
-        </p>
-        <div class="fr-grid-row fr-grid-row--gutters fr-mb-2w">
-          <div class="fr-col-12 fr-col-md-6">
-            <div class="fr-select-group">
-              <label class="fr-label" for="sel-reg2">Région de comparaison</label>
-              <select class="fr-select" id="sel-reg2">
-                <option value="">France entière</option>
-            <option value="01">Guadeloupe</option>
-            <option value="02">Martinique</option>
-            <option value="03">Guyane</option>
-            <option value="04">La Réunion</option>
-            <option value="06">Mayotte</option>
-            <option value="11">Île-de-France</option>
-            <option value="24">Centre-Val de Loire</option>
-            <option value="27">Bourgogne-Franche-Comté</option>
-            <option value="28">Normandie</option>
-            <option value="32">Hauts-de-France</option>
-            <option value="44">Grand Est</option>
-            <option value="52">Pays de la Loire</option>
-            <option value="53">Bretagne</option>
-            <option value="75">Nouvelle-Aquitaine</option>
-            <option value="76">Occitanie</option>
-            <option value="84">Auvergne-Rhône-Alpes</option>
-            <option value="93">Provence-Alpes-Côte d&#x27;Azur</option>
-            <option value="94">Corse</option>
-              </select>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-md-6">
-            <div class="fr-select-group">
-              <label class="fr-label" for="sel-dep2">Département de comparaison</label>
-              <select class="fr-select" id="sel-dep2">
-                <option value="">Tous</option>
-            <option value="01">01 — Ain</option>
-            <option value="02">02 — Aisne</option>
-            <option value="03">03 — Allier</option>
-            <option value="04">04 — Alpes-de-Haute-Provence</option>
-            <option value="05">05 — Hautes-Alpes</option>
-            <option value="06">06 — Alpes-Maritimes</option>
-            <option value="07">07 — Ardèche</option>
-            <option value="08">08 — Ardennes</option>
-            <option value="09">09 — Ariège</option>
-            <option value="10">10 — Aube</option>
-            <option value="11">11 — Aude</option>
-            <option value="12">12 — Aveyron</option>
-            <option value="13">13 — Bouches-du-Rhône</option>
-            <option value="14">14 — Calvados</option>
-            <option value="15">15 — Cantal</option>
-            <option value="16">16 — Charente</option>
-            <option value="17">17 — Charente-Maritime</option>
-            <option value="18">18 — Cher</option>
-            <option value="19">19 — Corrèze</option>
-            <option value="21">21 — Côte-d&#x27;Or</option>
-            <option value="22">22 — Côtes-d&#x27;Armor</option>
-            <option value="23">23 — Creuse</option>
-            <option value="24">24 — Dordogne</option>
-            <option value="25">25 — Doubs</option>
-            <option value="26">26 — Drôme</option>
-            <option value="27">27 — Eure</option>
-            <option value="28">28 — Eure-et-Loir</option>
-            <option value="29">29 — Finistère</option>
-            <option value="2A">2A — Corse-du-Sud</option>
-            <option value="2B">2B — Haute-Corse</option>
-            <option value="30">30 — Gard</option>
-            <option value="31">31 — Haute-Garonne</option>
-            <option value="32">32 — Gers</option>
-            <option value="33">33 — Gironde</option>
-            <option value="34">34 — Hérault</option>
-            <option value="35">35 — Ille-et-Vilaine</option>
-            <option value="36">36 — Indre</option>
-            <option value="37">37 — Indre-et-Loire</option>
-            <option value="38">38 — Isère</option>
-            <option value="39">39 — Jura</option>
-            <option value="40">40 — Landes</option>
-            <option value="41">41 — Loir-et-Cher</option>
-            <option value="42">42 — Loire</option>
-            <option value="43">43 — Haute-Loire</option>
-            <option value="44">44 — Loire-Atlantique</option>
-            <option value="45">45 — Loiret</option>
-            <option value="46">46 — Lot</option>
-            <option value="47">47 — Lot-et-Garonne</option>
-            <option value="48">48 — Lozère</option>
-            <option value="49">49 — Maine-et-Loire</option>
-            <option value="50">50 — Manche</option>
-            <option value="51">51 — Marne</option>
-            <option value="52">52 — Haute-Marne</option>
-            <option value="53">53 — Mayenne</option>
-            <option value="54">54 — Meurthe-et-Moselle</option>
-            <option value="55">55 — Meuse</option>
-            <option value="56">56 — Morbihan</option>
-            <option value="57">57 — Moselle</option>
-            <option value="58">58 — Nièvre</option>
-            <option value="59">59 — Nord</option>
-            <option value="60">60 — Oise</option>
-            <option value="61">61 — Orne</option>
-            <option value="62">62 — Pas-de-Calais</option>
-            <option value="63">63 — Puy-de-Dôme</option>
-            <option value="64">64 — Pyrénées-Atlantiques</option>
-            <option value="65">65 — Hautes-Pyrénées</option>
-            <option value="66">66 — Pyrénées-Orientales</option>
-            <option value="67">67 — Bas-Rhin</option>
-            <option value="68">68 — Haut-Rhin</option>
-            <option value="69">69 — Rhône</option>
-            <option value="70">70 — Haute-Saône</option>
-            <option value="71">71 — Saône-et-Loire</option>
-            <option value="72">72 — Sarthe</option>
-            <option value="73">73 — Savoie</option>
-            <option value="74">74 — Haute-Savoie</option>
-            <option value="75">75 — Paris</option>
-            <option value="76">76 — Seine-Maritime</option>
-            <option value="77">77 — Seine-et-Marne</option>
-            <option value="78">78 — Yvelines</option>
-            <option value="79">79 — Deux-Sèvres</option>
-            <option value="80">80 — Somme</option>
-            <option value="81">81 — Tarn</option>
-            <option value="82">82 — Tarn-et-Garonne</option>
-            <option value="83">83 — Var</option>
-            <option value="84">84 — Vaucluse</option>
-            <option value="85">85 — Vendée</option>
-            <option value="86">86 — Vienne</option>
-            <option value="87">87 — Haute-Vienne</option>
-            <option value="88">88 — Vosges</option>
-            <option value="89">89 — Yonne</option>
-            <option value="90">90 — Territoire de Belfort</option>
-            <option value="91">91 — Essonne</option>
-            <option value="92">92 — Hauts-de-Seine</option>
-            <option value="93">93 — Seine-Saint-Denis</option>
-            <option value="94">94 — Val-de-Marne</option>
-            <option value="95">95 — Val-d&#x27;Oise</option>
-            <option value="971">971 — Guadeloupe</option>
-            <option value="972">972 — Martinique</option>
-            <option value="973">973 — Guyane</option>
-            <option value="974">974 — La Réunion</option>
-            <option value="976">976 — Mayotte</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="fr-grid-row fr-grid-row--gutters odv-comparer">
-          <div class="fr-col-6">
-            <div class="odv-territoire__ligne fr-text--lg fr-text--bold fr-mb-1w">
-              <dsfr-data-display source="t-reg" cols="1" idle-message="France entière">
-                <template>{{reg_nom}}</template></dsfr-data-display>
-              <dsfr-data-display source="t-dep" cols="1" idle-message=" ">
-                <template>› {{dep_nom}}</template></dsfr-data-display>
-            </div>
-          </div>
-          <div class="fr-col-6">
-            <div class="odv-territoire__ligne fr-text--lg fr-text--bold fr-mb-1w">
-              <dsfr-data-display source="c-reg" cols="1" idle-message="France entière">
-                <template>{{reg_nom}}</template></dsfr-data-display>
-              <dsfr-data-display source="c-dep" cols="1" idle-message=" ">
-                <template>› {{dep_nom}}</template></dsfr-data-display>
-            </div>
-          </div>
-        </div>
-
-        <!-- Treize indicateurs, deux colonnes : la référence reprend les sources
-             t-* des onglets (aucune requête de plus), la comparaison a les siennes. -->
-        <dsfr-data-kpi-group cols="2" gap="md">
-          <dsfr-data-kpi source="j-lic" value="lics:sum" format="nombre" heading="Licences sportives annuelles" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="jc-lic" value="lics:sum" format="nombre" heading="Licences sportives annuelles" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-lic" value="lics_k:sum / pop:sum" format="nombre" decimals="1" heading="Licences pour 1 000 habitants" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="jc-lic" value="lics_k:sum / pop:sum" format="nombre" decimals="1" heading="Licences pour 1 000 habitants" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-age" value="lics:sum{sexe:eq:F} / lics:sum" format="pourcentage" decimals="1" heading="Part des licences féminines" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="c-age" value="lics:sum{sexe:eq:F} / lics:sum" format="pourcentage" decimals="1" heading="Part des licences féminines" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-age" value="lics:sum{trage:in:0 à 4 ans|5 à 9 ans|10 à 14 ans|15 à 19 ans} / lics:sum" format="pourcentage" decimals="1" heading="Part des licences des moins de 20 ans" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="c-age" value="lics:sum{trage:in:0 à 4 ans|5 à 9 ans|10 à 14 ans|15 à 19 ans} / lics:sum" format="pourcentage" decimals="1" heading="Part des licences des moins de 20 ans" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-popage" value="pop:sum{trage:in:0 à 4 ans|5 à 9 ans|10 à 14 ans|15 à 19 ans} / pop:sum" format="pourcentage" decimals="1" heading="Part de la population de moins de 20 ans" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="c-popage" value="pop:sum{trage:in:0 à 4 ans|5 à 9 ans|10 à 14 ans|15 à 19 ans} / pop:sum" format="pourcentage" decimals="1" heading="Part de la population de moins de 20 ans" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-clubs" value="n:max" format="nombre" heading="Clubs et établissements actifs" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="c-clubs" value="n:max" format="nombre" heading="Clubs et établissements actifs" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-es" value="n10k:sum / pop:sum" format="nombre" decimals="1" heading="Équipements pour 10 000 habitants" label="Data ES"></dsfr-data-kpi>
-          <dsfr-data-kpi source="jc-es" value="n10k:sum / pop:sum" format="nombre" decimals="1" heading="Équipements pour 10 000 habitants" label="Data ES"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-es" value="n100:sum / surface:sum" format="nombre" decimals="2" heading="Équipements par km²" label="Data ES"></dsfr-data-kpi>
-          <dsfr-data-kpi source="c-es" value="n100:sum / surface:sum" format="nombre" decimals="2" heading="Équipements par km²" label="Data ES"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-sc" value="ms:max" format="nombre" heading="Missions de Service Civique dans le sport" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="c-sc" value="ms:max" format="nombre" heading="Missions de Service Civique dans le sport" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="t-sc" value="ms:sum / m:sum" format="pourcentage" decimals="0" heading="Part du sport dans le Service Civique" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="c-sc" value="ms:sum / m:sum" format="pourcentage" decimals="0" heading="Part du sport dans le Service Civique" label="2024"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-prat" value="part_prat_reg:max" format="nombre" unit="%" heading="Pratique régulière des 15 ans et plus (région)" label="2024-2025" idle-message="France : voir l'onglet 1"></dsfr-data-kpi>
-          <dsfr-data-kpi source="jc-prat" value="part_prat_reg:max" format="nombre" unit="%" heading="Pratique régulière des 15 ans et plus (région)" label="2024-2025" idle-message="France : voir l'onglet 1"></dsfr-data-kpi>
-          <dsfr-data-kpi source="j-bpj" value="taux:max" format="nombre" decimals="1" unit="%" heading="Insertion à un an des diplômés BPJEPS (région)" label="2023-2024" idle-message="France : voir l'onglet 3"></dsfr-data-kpi>
-          <dsfr-data-kpi source="jc-bpj" value="taux:max" format="nombre" decimals="1" unit="%" heading="Insertion à un an des diplômés BPJEPS (région)" label="2023-2024" idle-message="France : voir l'onglet 3"></dsfr-data-kpi>
-        </dsfr-data-kpi-group>
-
-        <h3 class="fr-h5 fr-mt-4w">Les dix premières fédérations en nombre de licences annuelles</h3>
-        <div class="fr-grid-row fr-grid-row--gutters">
-          <div class="fr-col-12 fr-col-md-6">
-            <div class="odv-viz" data-code="Graphique (7)">
-            <dsfr-data-podium source="t-fede" label-field="federation_court" value-field="lics" value-unit="licences" max-items="10"></dsfr-data-podium>
-            </div>
-          </div>
-          <div class="fr-col-12 fr-col-md-6">
-            <div class="odv-viz" data-code="Graphique (8)">
-            <dsfr-data-podium source="c-fede" label-field="federation_court" value-field="lics" value-unit="licences" max-items="10" selected-palette="neutral"></dsfr-data-podium>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Le territoire de comparaison : ses propres sources et son propre contexte. -->
-    <dsfr-data-source id="c-reg" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="portrait_territoires_base" group-by="reg_code, reg_nom" select="count(*) as n"
-      max-records="30" require-where></dsfr-data-source>
-    <dsfr-data-source id="c-dep" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="portrait_territoires_base" group-by="dep_code, dep_nom" select="count(*) as n"
-      max-records="200" require-where></dsfr-data-source>
-    <dsfr-data-source id="c-lic" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="lics_dep" where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-      group-by="dep" select="sum(lics) as lics, sum(lics) * 1000 as lics_k" max-records="200"></dsfr-data-source>
-    <dsfr-data-source id="c-pop" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="pop_dep_age_sexe" where="annee = '2024'"
-      group-by="dep" select="sum(pop) as pop" max-records="200"></dsfr-data-source>
-    <dsfr-data-source id="c-age" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="lics_dep_age_sexe" group-by="sexe, trage" select="sum(lics) as lics" max-records="60"></dsfr-data-source>
-    <dsfr-data-source id="c-popage" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="pop_dep_age_sexe" where="annee = '2024'"
-      group-by="trage" select="sum(pop) as pop" max-records="30"></dsfr-data-source>
-    <dsfr-data-source id="c-fede" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="lics_dep" where="not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-      group-by="federation_court" select="sum(lics) as lics" order-by="lics:desc" limit="10"></dsfr-data-source>
-    <dsfr-data-source id="c-clubs" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="clubs_dep" where="year(annee) = 2024 and not dep in ('ETR','COM','988','987','986','980','978','977','975','NR')"
-      select="sum(n_actifs) as n" limit="1"></dsfr-data-source>
-    <dsfr-data-source id="c-es" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="data-es-par-commune" group-by="dep_code_filled"
-      select="sum(nb_equip) as n, sum(nb_equip) * 10000 as n10k, sum(nb_equip) * 100 as n100, sum(surface) as surface"
-      max-records="200"></dsfr-data-source>
-    <dsfr-data-source id="c-refgeo" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="ref-geo-dataes" group-by="codedepartement" select="sum(population) as pop"
-      max-records="200"></dsfr-data-source>
-    <dsfr-data-source id="c-sc" lazy api-type="opendatasoft" base-url="https://data.sports.gouv.fr"
-      dataset-id="sc_missions" where="annee = '2024'"
-      select="sum(nb_missions) as m, sum(nb_missions_sport) as ms" limit="1"></dsfr-data-source>
-
-    <!-- PG-028 consommé le 2026-09-20, et pas par la voie qu'on croyait. Deux
-         contextes à `url-sync` qui partagent un nom de champ s'échangent bien
-         leurs paramètres au rechargement — la 0.33.0 le dit désormais en console
-         (#942) mais ne l'empêche pas. Ce qui l'empêche est `url-param-map`, qui
-         donne à CE contexte ses propres noms de paramètres.
-         ⚠️ L'attribut existe depuis au moins la 0.29.1 : il était disponible
-         quand le constat a été écrit. On l'avait manqué en cherchant le nom que
-         notre propre demande proposait (`url-param-prefix`) au lieu de lire la
-         liste d'attributs du composant — la règle n° 1 du lot 11, repayée.
-         Un paramètre par champ, et la clé en porte huit ici (AM-056) : d'où la
-         longueur de la table. C'est le prix du lien profond complet, qui porte
-         désormais le territoire de comparaison. -->
-    <dsfr-data-context id="ctx2" url-sync
-      url-param-map="cmp_reg:newreg | cmp_reg_code:reg_code | cmp_coderegion:coderegion | cmp_reg_num:reg | cmp_dep:dep | cmp_dep_code:dep_code | cmp_dep_filled:dep_code_filled | cmp_codedep:codedepartement"
-      sources="c-reg c-dep c-lic c-pop c-age c-popage c-fede c-clubs c-es c-refgeo c-sc">
-      <dsfr-data-context-filter ui="sel-reg2" field="newreg" label="Région de comparaison"
-        apply-to="c-lic c-pop c-age c-popage c-fede c-clubs"></dsfr-data-context-filter>
-      <dsfr-data-context-filter ui="sel-reg2" field="reg_code" apply-to="c-reg c-es"></dsfr-data-context-filter>
-      <dsfr-data-context-filter ui="sel-reg2" field="coderegion" apply-to="c-refgeo"></dsfr-data-context-filter>
-      <dsfr-data-context-filter ui="sel-reg2" field="reg" apply-to="c-sc"></dsfr-data-context-filter>
-      <dsfr-data-context-filter ui="sel-dep2" field="dep" label="Département de comparaison"
-        apply-to="c-lic c-pop c-age c-popage c-fede c-clubs c-sc"></dsfr-data-context-filter>
-      <dsfr-data-context-filter ui="sel-dep2" field="dep_code" apply-to="c-reg c-dep"></dsfr-data-context-filter>
-      <dsfr-data-context-filter ui="sel-dep2" field="dep_code_filled" apply-to="c-es"></dsfr-data-context-filter>
-      <dsfr-data-context-filter ui="sel-dep2" field="codedepartement" apply-to="c-refgeo"></dsfr-data-context-filter>
-    </dsfr-data-context>
+    </section>
   </div>
 
   <!-- ==========================================================================
-       TRANSFORMATEURS
+       ANALYSE
        ========================================================================== -->
-
-  <!-- Licences pour 1 000 habitants : agréger par département des deux côtés,
-       joindre, puis laisser le ratio du KPI sommer AVANT de diviser (#748).
-       Les deux jeux publient le département sur deux caractères (« 01 ») :
-       101 lignes appariées sur 101 au national, vérifié. -->
-  <dsfr-data-join id="j-lic" left="t-lic" right="t-pop" on="dep" type="inner"></dsfr-data-join>
-  <dsfr-data-join id="jf-lic" left="f-lic" right="f-pop" on="dep" type="inner"></dsfr-data-join>
-  <dsfr-data-join id="jc-lic" left="c-lic" right="c-pop" on="dep" type="inner"></dsfr-data-join>
-
-  <!-- Part des moins de 20 ans, des 65 ans et plus, et part féminine : une
-       somme filtrée sur UN SEUL côté du ratio. Jusqu'à la 0.28.0, le `where` du
-       KPI filtrait les deux côtés (AM-070) : il fallait six `dsfr-data-normalize`
-       calculant une colonne `u20`/`o65` ligne à ligne, plus trois sources sur
-       `lics_dep_sexe` pour la part féminine. La 0.29.0 (#797) accepte un filtre
-       de lignes entre accolades sur une expression — `lics:sum{trage:in:…} / lics:sum` —
-       et les neuf composants ont été retirés : les KPI lisent directement
-       t-age / f-age / c-age et t-popage / f-popage / c-popage. -->
-
-  <!-- La « pyramide » : part de chaque tranche dans le total de son sexe, pour
-       le territoire et pour la France, puis les deux juxtaposées par
-       (sexe, tranche). Le total par sexe demandait jusqu'à la 0.28.0 une SOURCE
-       serveur de plus par côté : une `dsfr-data-query group-by` sur t-age
-       réécrivait t-age pour tous ses autres consommateurs (BUG-009). Corrigé en
-       0.29.0 (#811) : le regroupement est de nouveau une query branchée sur la
-       source partagée, et les deux sources `-s` ont été retirées. -->
-  <dsfr-data-query id="t-age-q" source="t-age" where="trage:notin:NR - Non réparti|NR"></dsfr-data-query>
-  <dsfr-data-query id="t-age-s" source="t-age" where="trage:notin:NR - Non réparti|NR"
-    group-by="sexe" aggregate="lics:sum"></dsfr-data-query>
-  <dsfr-data-join id="t-pyr-j" left="t-age-q" right="t-age-s" on="sexe" type="inner"></dsfr-data-join>
-  <dsfr-data-normalize id="t-pyr" source="t-pyr-j" compute="part = round(lics / lics__sum * 100, 1)"></dsfr-data-normalize>
-  <dsfr-data-query id="f-age-q" source="f-age" where="trage:notin:NR - Non réparti|NR"></dsfr-data-query>
-  <dsfr-data-query id="f-age-s" source="f-age" where="trage:notin:NR - Non réparti|NR"
-    group-by="sexe" aggregate="lics:sum"></dsfr-data-query>
-  <dsfr-data-join id="f-pyr-j" left="f-age-q" right="f-age-s" on="sexe" type="inner"></dsfr-data-join>
-  <dsfr-data-normalize id="f-pyr" source="f-pyr-j" compute="part = round(lics / lics__sum * 100, 1)"></dsfr-data-normalize>
-  <dsfr-data-join id="tf-pyr" left="t-pyr" right="f-pyr" on="sexe,trage" type="left"></dsfr-data-join>
-  <dsfr-data-query id="pyr-f" source="tf-pyr" where="sexe:eq:F" order-by="trage_full:desc"></dsfr-data-query>
-  <dsfr-data-query id="pyr-h" source="tf-pyr" where="sexe:eq:H" order-by="trage_full:desc"></dsfr-data-query>
-
-  <!-- Les indicateurs régionaux : le jeu entier, joint à la région du
-       territoire. Sans territoire choisi, la région attend ; la France a ses
-       propres afficheurs. -->
-  <dsfr-data-join id="j-prat" left="t-reg" right="s-prat" on="reg_code" type="inner"></dsfr-data-join>
-
-  <dsfr-data-join id="j-pcs-r" left="t-reg" right="s-pcs" on="reg_code" type="inner"></dsfr-data-join>
-  <dsfr-data-query id="s-pcs-fr" source="s-pcs" where="reg_code:eq:FR"></dsfr-data-query>
-
-  <!-- La normalisation du taux APRÈS la jointure, pas avant : un
-       transformateur à droite d'une jointure dont la gauche attend un filtre
-       fige l'afficheur sur « Chargement… » (voir plus haut). -->
-  <dsfr-data-join id="j-bpj" left="t-reg" right="s-bpj-n" on="reg_code" type="inner"></dsfr-data-join>
-  <dsfr-data-join id="j-bpjm" left="t-reg" right="s-bpjm" on="reg_code" type="inner"></dsfr-data-join>
-  <dsfr-data-query id="s-bpjm-fr" source="s-bpjm" where="reg_code:eq:FR"></dsfr-data-query>
-
-  <!-- Équipements pour 10 000 habitants : Data ES par commune d'un côté, le
-       référentiel de population de l'autre — deux jeux, même motif. -->
-  <dsfr-data-join id="j-es" left="t-es" right="t-refgeo" on="dep_code_filled=codedepartement" type="inner"></dsfr-data-join>
-  <dsfr-data-join id="jf-es" left="f-es" right="f-refgeo" on="dep_code_filled=codedepartement" type="inner"></dsfr-data-join>
-  <dsfr-data-join id="jc-es" left="c-es" right="c-refgeo" on="dep_code_filled=codedepartement" type="inner"></dsfr-data-join>
-
-  <!-- L'année sort du `group-by` en nombre : sans cette colonne texte, le
-       tableau accessible écrit « 2 020 », séparateur de milliers compris.
-       En courbe (`type="line"`), DSFR Chart gradue quand même l'axe en
-       « 2020,5 » : d'où les barres. -->
-  <dsfr-data-normalize id="t-srav-n" source="t-srav" compute="an = concat(annee, '')"></dsfr-data-normalize>
-
-  <!-- Comparaison : la région du territoire de comparaison, mêmes jointures. -->
-  <dsfr-data-join id="jc-prat" left="c-reg" right="s-prat" on="reg_code" type="inner"></dsfr-data-join>
-  <dsfr-data-join id="jc-bpj" left="c-reg" right="s-bpj-n" on="reg_code" type="inner"></dsfr-data-join>
-
-  <!-- ====================== Analyse de reproduction ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse de reproduction — Portrait de territoires — ce que la reproduction a coûté</summary>
+    <details class="odv-technique">
+      <summary>Analyse — ce que la recréation a coûté</summary>
 
-    <div class="fr-container">
-      <p class="fr-text--sm fr-mb-2w">
-        Cible d'origine :
-        <a href="https://data.sports.gouv.fr/pages/portrait-territoire/" target="_blank" rel="noopener external">une page AngularJS de <code>data.sports.gouv.fr</code></a>,
-        <strong>291 Ko de template</strong>, 102 contextes Opendatasoft sur 29 jeux,
-        160 <code>ods-adv-analysis</code>. Fiche d'audit : <code>docs/portail-sports/portrait-territoire.md</code>.
-        Même famille que le <a href="/education/portrait-de-territoire-sports">portrait d'<code>equipements.sports.gouv.fr</code></a>
-        déjà reproduit au lot 12 — même ministère, autre page, autres jeux.
-      </p>
-      <p class="fr-text--sm fr-mb-4w">
-        <strong>Fidélité, relevée pour la Gironde et pour la France</strong> : plus d'une centaine
-        de valeurs lues sur l'original — licences, établissements, les trois parts et leurs
-        références nationales, population, les deux Top 10, pratique régulière et ses sept
-        catégories, équipements et leurs dix familles, BPJEPS et ses cinq mentions, sections,
-        STAPS, Service Civique, Pass'Sport et ses deux Top 10, Handiguide, Maisons Sport-Santé,
-        aisance aquatique, Savoir rouler année par année — sont <strong>identiques</strong>, à deux
-        écarts voulus près, dits plus bas : la France des équipements (48,9 pour 10 000 habitants
-        au lieu de 49,0) et la densité d'équipements, donnée ici au centième (0,59 / 0,58) là où
-        l'original écrit « 0,6 » des deux côtés. La pyramide n'a pas été comparée chiffre à
-        chiffre : l'original ne l'écrit que dans des infobulles.
-      </p>
-
-      <h3 class="fr-h5">Onglet par onglet</h3>
-      <div class="fr-table fr-table--bordered fr-mb-4w">
-        <table>
-          <caption>Ce que chaque onglet reproduit</caption>
-          <thead><tr><th scope="col">Onglet</th><th scope="col">Original</th><th scope="col">Ici</th><th scope="col">Statut</th></tr></thead>
-          <tbody>
-            <tr><td>Licences et pratiques sportives</td><td>2 KPI en phrase, 5 encadrés + 5 « en France », une pyramide en <code>div</code>, 2 Top 10 en <code>div</code>, 1 KPI + 4 jauges de pratique, 1 barre comparée par PCS</td><td>20 KPI, 2 graphiques de pyramide, 2 podiums, 2 graphiques PCS</td><td>Reproduit</td></tr>
-            <tr><td>Équipements sportifs</td><td>1 KPI, 2 encadrés + France, 1 carte à grappes, 1 Top 10</td><td>6 KPI, 1 carte à grappes, 1 graphique</td><td>Reproduit (la carte attend un territoire)</td></tr>
-            <tr><td>Enseignement et diplômes</td><td>1 KPI BPJEPS + France + diplômes, 1 Top 5, 4 encadrés</td><td>8 KPI, 2 podiums (région, France)</td><td>Reproduit</td></tr>
-            <tr><td>Volontariat sportif</td><td>1 KPI + France, 1 encadré avec son taux</td><td>6 KPI</td><td>Reproduit (vide pour 5 régions d'outre-mer, voir encadré)</td></tr>
-            <tr><td>Dispositifs État</td><td>1 KPI + France, 2 Top 10, 2 encadrés + France, 2 phrases chiffrées, 1 courbe</td><td>9 KPI, 2 podiums, 1 graphique</td><td>Reproduit (barres au lieu d'une courbe)</td></tr>
-            <tr><td>Me comparer</td><td>2 moteurs de recherche, 13 indicateurs × 2 dont 1 Top 10</td><td>2 × 2 listes, 24 KPI, 2 podiums</td><td>Reproduit</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+      <div class="fr-grid-row fr-grid-row--gutters fr-mt-3w">
         <div class="fr-col-12 fr-col-md-6">
-          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+          <h3 class="fr-h6">Ce qui a été simple</h3>
           <ul>
-            <li><strong>Une clé, onze noms, onze balises.</strong> Le département s'appelle
-              <code>dep</code>, <code>dep_code</code>, <code>dep_code_filled</code>,
-              <code>codedepartement</code> ou <code>departement_code_complet</code> ; la région
-              <code>newreg</code>, <code>reg_code</code>, <code>reg</code>, <code>coderegion</code>,
-              <code>region_depeta</code> ou <code>region_code</code>. Un
-              <code>dsfr-data-context-filter</code> par nom, tous sur les deux mêmes listes. L'original
-              recopie le choix dans 96 paramètres de contexte par une expression AngularJS, puis dans
-              33 autres pour la comparaison.</li>
-            <li><strong>La région d'un département, retrouvée par jointure.</strong> Pratique sportive
-              et BPJEPS ne sont publiés que par région. L'original le règle au clic
-              (<code>selectedReg = item.newreg</code>). Ici : un référentiel
-              (<code>portrait_territoires_base</code>, <code>group-by="reg_code, reg_nom"</code>)
-              filtré par le contexte rend une ligne, la région du territoire, et une jointure
-              <code>inner</code> la croise avec le jeu régional chargé entier (18 à 209 lignes).
-              Choisir la Gironde seule donne 58 % de pratique régulière et 84,3 % d'insertion — les
-              valeurs de la Nouvelle-Aquitaine, comme l'original. Le même référentiel écrit le nom
-              du territoire en tête de page.</li>
-            <li><strong>Les ratios entre deux jeux, sans calcul faux.</strong> Licences pour
-              1 000 habitants (<code>lics_dep</code> ⨝ <code>pop_dep_age_sexe</code>) et équipements
-              pour 10 000 habitants (<code>data-es-par-commune</code> ⨝ <code>ref-geo-dataes</code>) :
-              agréger par département des deux côtés, joindre, puis laisser le ratio du KPI sommer
-              avant de diviser. 101 départements appariés sur 101 ; 259,2 et 36,4 pour la Gironde,
-              248,6 pour la France, identiques à l'original.</li>
-            <li><strong>Le comparateur est un second contexte.</strong> Douze sources, huit filtres,
-              et les KPI de référence réemploient les sources des onglets : changer de territoire
-              de comparaison coûte <strong>11 requêtes</strong>. L'original y consacre 46 de ses
-              102 contextes.</li>
-            <li><strong>Les Top 10 en <code>div</code> deviennent des podiums.</strong> Dix-sept
-              <code>ods-subaggregation</code> calculent chez l'original la largeur de barres HTML ;
-              <code>dsfr-data-podium max-items="10"</code> rend le rang, la valeur et la barre.</li>
-            <li><strong>Toute la page coûte moins que le premier onglet de l'original.</strong>
-              Mesuré au navigateur : l'original émet 68 requêtes au chargement, pour l'onglet 1
-              seulement, puis 3 à 46 au premier affichage de chaque autre onglet ; ici 61 au
-              chargement, six onglets compris, puis 22 au choix de la Gironde et 11 au choix d'un
-              territoire de comparaison.</li>
+            <li><strong>Cinq requêtes au lieu de 68.</strong> Chaque jeu agrégé par département
+              côté serveur (≈&nbsp;110 lignes), puis tout le reste dans le navigateur&nbsp;:
+              régions et France par <code>dsfr-data-query group-by</code> sur les départements,
+              référence France posée par jointure, rangs par une query par indicateur. Changer
+              de territoire ne coûte <strong>aucune</strong> requête — la reproduction
+              précédente en coûtait 22.</li>
+            <li><strong>Un sélecteur, une clé.</strong> La reproduction précédente diffusait le
+              choix sur onze noms de clé par onze <code>context-filter</code>. Ici une facette
+              locale filtre un code calculé (<code>D33</code>, <code>R75</code>) et le libelle
+              par son nom (<code>value-labels</code>), avec défaut et URL.</li>
+            <li><strong>Des phrases calculées dans une page sans script.</strong>
+              <code>dsfr-data-repeat</code> sur la ligne choisie, et <code>compute</code> pour le
+              sens de l'écart («&nbsp;de plus&nbsp;» / «&nbsp;de moins&nbsp;», point ou
+              points).</li>
+            <li><strong>Une carte qui suit la maille.</strong> Le type
+              (<code>map</code> / <code>map-reg</code>) et la source des pairs sont interpolés
+              depuis la ligne choisie&nbsp;; le résumé France est pondéré par la population
+              (248,59, le taux national).</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
-          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+          <h3 class="fr-h6">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Une jointure qui restait sur « Chargement… », selon l'ordre du DOM — corrigé
-              depuis.</strong> Le référentiel de région porte <code>require-where</code> : au niveau
-              France, il attend. Une jointure dont une entrée attend et dont l'autre charge relayait
-              le <em>dernier</em> événement reçu ; si c'était le chargement, rien ne le levait jamais.
-              Six KPI, un podium et deux graphiques restaient figés, quand la jointure jumelle du
-              comparateur, écrite pareil mais placée plus bas, affichait son message d'attente. La
-              seule différence entre la page qui marchait et celle qui bloquait était l'ordre de deux
-              balises, sans message ni erreur console. Déposé en <code>dsfr-data#897</code>,
-              <strong>corrigé en 0.32.0</strong> : un transformateur à plusieurs entrées dérive
-              désormais son état de <em>toutes</em> ses entrées — erreur d'abord, puis attente, puis
-              chargement. Le contournement a été retiré de cette page : les deux jointures BPJEPS
-              joignent la source déjà normalisée au lieu de redupliquer la normalisation derrière
-              elles, soit <strong>quatre <code>dsfr-data-normalize</code> en moins</strong>, à
-              chiffres rigoureusement identiques (Bretagne : 86,8 % d'insertion, 553 diplômes,
-              recalculés à l'API). Ce qui reste vrai : la délégation ne revient pas quand une chaîne
-              redevient exclusive (BUG-015).</li>
-            <li><strong>Deux listes écrites à la main, faute de facette qui convienne.</strong>
-              18 régions et 101 départements en <code>&lt;option&gt;</code> générées depuis l'API.
-              <code>dsfr-data-facets context="…"</code> (0.23.0) peuple un sélecteur depuis la donnée,
-              mais diffuse <em>un</em> nom de champ, qui doit exister sur toutes les sources visées
-              (JSDoc de <code>context</code>) — la clé en a onze ici (AM-056) ; et elle affiche le code
-              qu'elle filtre, « 33 », là où l'on veut « Gironde » (AM-081).</li>
-            <li><strong>Trois parts de sommes — payées au lot 19, rendues au lot 20.</strong> La part
-              des licences des moins de 20 ans divise une somme filtrée par une somme totale, et le
-              <code>where</code> du KPI filtrerait les deux côtés (AM-070). Il a fallu six
-              <code>dsfr-data-normalize</code> calculant une colonne <code>u20 = when trage = … then
-              lics else 0</code>, et trois sources de plus sur <code>lics_dep_sexe</code> pour la part
-              féminine. <strong>La 0.29.0 (#797) accepte un filtre de lignes sur un seul côté du
-              ratio</strong> : <code>lics:sum{trage:in:0 à 4 ans|…} / lics:sum</code>. Les
-              <strong>neuf composants ont été retirés</strong>, les KPI lisent directement les sources
-              agrégées, et les 73 chiffres de la page sont inchangés — vérifié au navigateur, France et
-              Gironde, avant et après (52,0 % et 39,5 % en Gironde, 56,1 % et 38,9 % en France).</li>
-            <li><strong>Un choix, onze tags, onze paramètres d'URL.</strong> Chaque alias de clé est
-              un filtre : <code>dsfr-data-context-tags</code> affichait « Département : 33 · dep_code :
-              33 · dep_code_filled : 33… » et l'URL onze paramètres. Les tags ont été retirés. Pire :
-              avec <code>url-sync</code> sur les deux contextes, recharger l'URL faisait de la région
-              de comparaison la région de référence (les deux contextes lisent
-              <code>reg_code</code>). Aucun avertissement, en 0.28 comme en 0.29.
-              <strong>Deux choses ont changé depuis, et la seconde est un aveu.</strong> La 0.33.0
-              <em>dit</em> désormais le piège en console, en nommant le paramètre et les deux
-              contextes (<code>dsfr-data#942</code>) — mais elle ne l'empêche pas. Ce qui l'empêche
-              est <code>url-param-map</code>, qui donne à chaque contexte ses propres noms de
-              paramètres&nbsp;: <strong>et cet attribut existe depuis au moins la 0.29.1</strong>,
-              donc il était disponible quand nous avons écrit le constat. Nous l'avions manqué en
-              cherchant le nom que notre propre demande proposait (<code>url-param-prefix</code>)
-              au lieu de lire la liste d'attributs du composant — la règle n°&nbsp;1 du lot 11,
-              repayée. Le contexte de comparaison est de nouveau dans l'URL&nbsp;: vérifié au
-              navigateur, <code>?newreg=53…&amp;cmp_reg=28…</code>, et après rechargement la
-              référence reste la Bretagne et la comparaison la Normandie (PG-028).</li>
-            <li><strong>Le nom du territoire coûte une requête et un « 1 resultat ».</strong>
-              <code>dsfr-data-context-value</code> rend la valeur du filtre, « 33 », pas le libellé
-              de l'option. Le nom vient d'un <code>dsfr-data-display</code> sur le référentiel, qui
-              écrit toujours « 1 resultat » devant son gabarit — masqué par CSS (AM-077).</li>
-            <li><strong>Un code entier, un filtre textuel.</strong> <code>sc_missions</code> publie la
-              région en entier (1, 75). Le filtre demande <code>reg = "01"</code> et ne trouve rien
-              pour la Guadeloupe, là où le <code>refine</code> de l'original trouve 1 306 missions.
-              Laissé tel quel, avec son encadré (PG-030).</li>
-            <li><strong>Pas de pyramide des âges.</strong> Deux graphiques en barres horizontales,
-              femmes et hommes, territoire et France côte à côte — la même donnée, dix composants :
-              la part de chaque tranche dans le total de son sexe demande ce total, une jointure et un
-              calcul. Le total par sexe coûtait en plus <em>une source serveur par côté</em> : une
-              <code>dsfr-data-query group-by</code> sur la source partagée l'aurait réécrite pour ses
-              autres consommateurs (BUG-009). <strong>Corrigé en 0.29.0 (#811)</strong> : les deux
-              sources ont été remplacées par deux <code>dsfr-data-query</code>, la pyramide est
-              identique ligne à ligne (Gironde, 17 tranches × 2 sexes) et la page fait trois requêtes
-              de moins. La query annonce en console qu'elle calcule côté client, faute de pouvoir
-              déléguer sans réécrire la source — c'est le correctif qui parle, pas un défaut.</li>
-            <li><strong>Une courbe d'années graduée en « 2020,5 ».</strong> Le Savoir rouler à vélo
-              est une courbe chez l'original. <code>dsfr-data-chart</code> transmet bien les années
-              en texte (<code>x</code> sérialisé en JSON de chaînes, lu au source) ; c'est la courbe de
-              DSFR&nbsp;Chart qui les gradue comme des nombres. Rendu en barres. À porter chez
-              <a href="https://github.com/GouvernementFR/dsfr-chart" target="_blank" rel="noopener external">DSFR&nbsp;Chart</a>,
-              après lecture de son source — pas fait ici.</li>
-            <li><strong>Pas de niveau commune ni EPCI.</strong> L'original descend à la commune et à
-              l'EPCI par six jeux de plus (<code>lics_cc</code>, <code>lics_cc_wide</code>,
-              <code>lics_cc_pyra</code>, <code>clubs_cc</code>, <code>pop_cc_age</code>,
-              <code>diag_commune</code>) et une recherche sur 34 935 communes. <strong>Non tenté</strong>,
-              par choix de périmètre : ce n'est pas une limite établie de la bibliothèque.</li>
+            <li><strong>Pas de rang natif.</strong> Aucune fonction de fenêtre&nbsp;: le rang
+              est «&nbsp;nombre de pairs au-dessus, plus un&nbsp;»&nbsp;: une query par indicateur,
+              jointe à la ligne choisie.</li>
+            <li><strong><code>map-highlight</code> sans effet.</strong> Transmis à DSFR Chart
+              en <code>highlight</code>, que <code>&lt;map-chart&gt;</code> 2.1.1 ne déclare
+              pas&nbsp;: aucun contour, aucun message. Le territoire est dit en texte.</li>
+            <li><strong>Un répéteur imbriqué casse la phrase.</strong> Il rend un bloc&nbsp;;
+              un chiffre venu d'une autre ligne (rang, extrêmes) doit donc être <em>joint</em>
+              à la ligne de la phrase (clé constante) avant d'être écrit.</li>
+            <li><strong>Un contexte ne filtre pas une colonne calculée.</strong> Il délègue aux
+              sources&nbsp;; le code de territoire n'existe qu'en aval. D'où la facette locale —
+              c'est la bonne architecture ici, pas un contournement&nbsp;: tout est déjà chargé.</li>
           </ul>
         </div>
       </div>
 
-      <div class="fr-callout fr-icon-alert-line fr-mb-4w">
-        <h3 class="fr-callout__title fr-text--md">Ce que l'original affiche de travers</h3>
-        <ul class="fr-callout__text fr-text--sm">
-          <li><strong>Trois nombres d'équipements « en France » dans la même page.</strong> Le
-            territoire est compté sur <code>data-es-par-commune</code> (331 677 au national), la France
-            sur <code>data-es</code> d'un autre portail (333 629, affiché) et la carte sur
-            <code>data-es-territoires</code> (333 635). Le « 49,0 pour 10 000 habitants en France »
-            n'est donc pas calculé comme le chiffre du territoire qu'il accompagne ; ici, les deux le
-            sont sur le même jeu (48,9).</li>
-          <li><strong>Deux Pass'Sport.</strong> 39 899 utilisés en Gironde selon le KPI
-            (<code>portrait_territoires_base</code>), 39 155 selon le jeu par fédération qui nourrit
-            le Top 10 juste en dessous (1 649 414 contre 1 642 136 en France).</li>
-          <li><strong>« Données non disponibles à ce niveau de territoire »</strong> dans l'onglet
-            « Me comparer » pour la pratique régulière et le BPJEPS d'un département, alors que les
-            onglets 1 et 3 affichent pour ce même département la valeur de sa région (58 % et 84,3 %
-            pour la Gironde).</li>
-          <li><strong>La recherche de l'onglet « Me comparer » écrase celle du haut de page</strong> :
-            elles partagent quatre contextes (<code>ctxcommunes</code>, <code>ctxepcis</code>,
-            <code>ctxdepts</code>, <code>ctxregions</code>). Relevé : « Gironde » dans le champ,
-            « Départements (20 résultats) » et la liste de l'Ain au Cher en dessous.</li>
-          <li><strong>« Projets Aisance Aquatique »</strong> est la somme du champ
-            <code>aq_interventions</code> : le libellé et le nom du champ ne disent pas la même
-            chose, et rien ne permet de trancher à la lecture du jeu.</li>
-        </ul>
-      </div>
-
-      <div class="fr-table fr-table--bordered">
+      <div class="fr-table fr-table--bordered fr-mt-3w">
         <table>
           <caption>Correspondance directive Opendatasoft → composant dsfr-data</caption>
           <thead>
             <tr><th scope="col">Page AngularJS d'origine</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>102 contextes sur 29 jeux, dont 46 de comparaison</td><td>46 <code>dsfr-data-source</code>, 2 <code>dsfr-data-context</code></td><td>Équivalent</td></tr>
-            <tr><td>recherche libre sur 4 mailles (commune, EPCI, département, région)</td><td>2 listes (région, département)</td><td>Écart assumé : ni commune ni EPCI</td></tr>
-            <tr><td>{{ … parameters['refine.dep'] = … }} × 96, puis × 33</td><td>19 <code>dsfr-data-context-filter</code></td><td>Natif</td></tr>
-            <tr><td><code>selectedReg = item.newreg</code> au clic</td><td>référentiel filtré ⨝ jeu régional</td><td>Natif — mais voir la jointure figée</td></tr>
-            <tr><td>160 <code>ods-adv-analysis</code> (un par nombre)</td><td>73 <code>dsfr-data-kpi</code> sur les sources agrégées</td><td>Équivalent</td></tr>
-            <tr><td><code>sum(lics)/sum(pop)*1000</code> sur deux contextes</td><td><code>group-by</code> × 2 → <code>dsfr-data-join</code> → <code>a:sum / b:sum</code></td><td>Natif (motif #748)</td></tr>
-            <tr><td><code>lic20[0].lic20v / lict[0].lictv</code> (deux requêtes)</td><td><code>compute</code> + ratio de sommes</td><td><strong>Natif depuis la 0.29.0</strong> (<code>{filtre}</code>, #797)</td></tr>
-            <tr><td>pyramide en <code>div</code>, largeur <code>n / total × 400 %</code></td><td>2 <code>dsfr-data-chart type="bar" horizontal</code> à 2 séries</td><td>Substitut : pas de pyramide</td></tr>
-            <tr><td>17 <code>ods-subaggregation</code> (Top 10 en <code>div</code>)</td><td><code>dsfr-data-podium max-items="10"</code></td><td>Meilleur</td></tr>
-            <tr><td><code>&lt;ods-map&gt;</code> sur 333 635 équipements</td><td><code>require-where</code> + <code>fetch-mode="export"</code> + <code>cluster</code></td><td>Équivalent, attend un territoire</td></tr>
-            <tr><td><code>&lt;ods-chart&gt;</code> spline + scatter</td><td><code>dsfr-data-chart type="bar"</code></td><td>Substitut (courbe mal graduée, DSFR&nbsp;Chart)</td></tr>
-            <tr><td><code>{{variables.selectedLib}}</code> × 30</td><td><code>dsfr-data-display</code> sur le référentiel</td><td>Contourné : <code>context-value</code> rend le code</td></tr>
-            <tr><td><code>ng-if="variables.selectedReg=='06'"</code> (Mayotte)</td><td>jointure vide, message d'attente</td><td>Équivalent</td></tr>
-            <tr><td>—</td><td><code>dsfr-data-a11y</code> sous chaque graphique</td><td>Sans équivalent</td></tr>
+            <tr><td>102 <code>ods-dataset-context</code> sur 29 jeux</td><td>5 <code>dsfr-data-source</code> agrégées par département</td><td>Autre architecture, 5 requêtes au lieu de 68</td></tr>
+            <tr><td>recherche libre sur 4 mailles, 96 <code>refine</code> recopiés</td><td>une <code>dsfr-data-facets</code> locale, <code>value-labels</code>, <code>url-sync</code></td><td>Natif (sans commune ni EPCI)</td></tr>
+            <tr><td>160 <code>ods-adv-analysis</code>, un par nombre</td><td><code>dsfr-data-repeat</code> + <code>compute</code> : titre et chapeau calculés</td><td>Natif</td></tr>
+            <tr><td>« … en France » recalculé dans un autre contexte</td><td><code>dsfr-data-join on="k" prefix-right="fr_"</code></td><td>Natif</td></tr>
+            <tr><td>onglet « Me comparer »</td><td>rang parmi les pairs + tableau de tous les territoires</td><td>Remplacé</td></tr>
+            <tr><td><code>ods-map</code> des équipements</td><td><code>dsfr-data-chart type="map|map-reg"</code> d'un taux</td><td>Autre question : le taux, pas les points</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p>Reproduction <strong>complète aux mailles région, département et France</strong>, sans
-          une ligne de JavaScript, sur des chiffres identiques à l'original. Ce qui distingue cette
-          page de sa cousine du lot 12 n'est pas le nombre de jeux, mais qu'elle
-          <strong>compare</strong> : un second contexte suffit, et la région d'un département se
-          retrouve par jointure plutôt que par affectation. La 0.29.0, publiée le lendemain de la
-          reproduction, a retiré <strong>onze composants</strong> de cette page : neuf pour les parts
-          de sommes (#797) et deux pour le total par sexe de la pyramide (#811), à chiffres
-          rigoureusement identiques. C'est le meilleur résumé de ce que vaut un registre de
-          constats : ce qui était un contournement au lot 19 est redevenu une ligne d'attribut au
-          lot 20.</p>
-        <p>Des deux choses qui résistaient — <strong>un pipeline correct figé sur
-          « Chargement… »</strong> selon l'ordre de ses balises, et <strong>une page à deux contextes
-          qui ne sait pas partager l'URL</strong> —, la première est tombée : déposée en
-          <code>dsfr-data#897</code>, corrigée en 0.32.0, contournement retiré. La seconde attend la
-          0.33.0 (<code>dsfr-data#942</code>, PG-028). C'est le motif que ce banc observe depuis vingt
-          lots : <em>ce qui était un contournement devient une ligne d'attribut</em> — à condition
-          d'avoir écrit le constat, avec la preuve qui l'établit, au moment où il coûtait.</p>
+        <p>La page la plus lourde du dépôt devient l'une des plus légères&nbsp;: cinq requêtes,
+          un sélecteur, et une réponse avant le premier clic. Rien de ce qu'il a fallu n'est un
+          contournement de la bibliothèque — c'est le modèle d'Opendatasoft («&nbsp;un contexte
+          par jeu, un filtre par contexte&nbsp;») qui coûtait les 174 requêtes, pas la question.
+          Le seul manque réel est le rang, qui se construit.</p>
       </div>
-    </div>
-  
-      </details></section>
-
+    </details>
+  </section>
 
 </main>
 
 <div id="site-footer"></div>
 
 <script src="/assets/layout.js"></script>
-<script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>

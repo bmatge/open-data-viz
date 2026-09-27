@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rappel Conso — open-data-viz</title>
-  <meta name="description" content="Reconstitution avec dsfr-data du tableau de bord Rappel Conso : la page du portail est en 404 et pointe un jeu supprimé, mais une version 2 du jeu existe.">
+  <meta name="description" content="Les fiches de rappel de produits publiées sur RappelConso : ce qui fait monter 2026 (les alertes européennes Safety Gate), et un moteur de recherche dans toutes les fiches.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -21,6 +21,94 @@
 
 <main role="main" id="contenu">
 
+  <!-- ==========================================================================
+       RECRÉATION DU 2026-09-27 — page en récit, dsfr-data 0.42.0.
+       Jeu : rappelconso-v2-gtin-espaces, UNE LIGNE PAR FICHE DE RAPPEL (et non
+       -gtin-trie, une ligne par code-barre : voir #analyse).
+
+       L'histoire : la hausse de l'année en cours ne vient presque pas des fiches
+       nationales, elle vient des alertes du réseau européen Safety Gate (ex-RAPEX)
+       que RappelConso republie. On les reconnaît à leur lien, qui finit par
+       « /rapex » (rappel.conso.gouv.fr/fiche-rappel/<id>/rapex). Au 2026-09-27,
+       ce critère isole 2 001 fiches — exactement les 2 001 fiches sans nature
+       juridique ni compensation : le « groupe null » du jeu, c'était elles.
+
+       Comparaison à date égale sans une date écrite : six fenêtres « du
+       1er janvier au même jour », calculées par le portail (`now()`), une par
+       année. `date_format(…, 'MM-dd') <= date_format(now(), …)` est refusé par
+       ODSQL (400) : d'où la chaîne de OR.
+       ========================================================================== -->
+
+  <dsfr-data-source id="s-ad" api-type="opendatasoft" base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as n"
+    group-by="date_format(date_publication, 'yyyy') as an"
+    where="(date_publication >= now(month=1, day=1) OR (date_publication >= now(years=-1, month=1, day=1) AND date_publication < now(years=-1)) OR (date_publication >= now(years=-2, month=1, day=1) AND date_publication < now(years=-2)) OR (date_publication >= now(years=-3, month=1, day=1) AND date_publication < now(years=-3)) OR (date_publication >= now(years=-4, month=1, day=1) AND date_publication < now(years=-4)) OR (date_publication >= now(years=-5, month=1, day=1) AND date_publication < now(years=-5)))">
+  </dsfr-data-source>
+  <dsfr-data-source id="s-ad-eu" api-type="opendatasoft" base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as eu"
+    group-by="date_format(date_publication, 'yyyy') as an"
+    where="(date_publication >= now(month=1, day=1) OR (date_publication >= now(years=-1, month=1, day=1) AND date_publication < now(years=-1)) OR (date_publication >= now(years=-2, month=1, day=1) AND date_publication < now(years=-2)) OR (date_publication >= now(years=-3, month=1, day=1) AND date_publication < now(years=-3)) OR (date_publication >= now(years=-4, month=1, day=1) AND date_publication < now(years=-4)) OR (date_publication >= now(years=-5, month=1, day=1) AND date_publication < now(years=-5))) AND lien_vers_la_fiche_rappel like '%/rapex'">
+  </dsfr-data-source>
+  <dsfr-data-join id="ad-j" left="s-ad" right="s-ad-eu" on="an" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="ad" source="ad-j"
+    compute="eu = coalesce(eu, 0); nat = n - eu; part_eu = round(eu / n * 100, 1); k = 'r'">
+  </dsfr-data-normalize>
+  <dsfr-data-query id="ad-tri" source="ad" order-by="an:asc"></dsfr-data-query>
+  <!-- Année en cours = la plus récente ; année précédente = la première des deux
+       plus récentes, relue dans l'autre sens (pas d'`offset` côté client).
+       Une seule query par source : deux queries sur la même source font
+       avertir la bibliothèque (#765 : calcul maintenu côté client — c'est
+       voulu ici, six lignes). Le `normalize` intermédiaire sert d'aiguillage. -->
+  <dsfr-data-query id="ad-deux" source="ad-tri" order-by="an:desc" limit="2"></dsfr-data-query>
+  <dsfr-data-query id="ad-prev" source="ad-deux" order-by="an:asc" limit="1"></dsfr-data-query>
+  <dsfr-data-normalize id="ad-deux-b" source="ad-deux" compute="k = 'r'"></dsfr-data-normalize>
+  <dsfr-data-query id="ad-cur" source="ad-deux-b" limit="1"></dsfr-data-query>
+  <dsfr-data-join id="evol-j" left="ad-cur" right="ad-prev" on="k" prefix-right="p_"></dsfr-data-join>
+  <dsfr-data-normalize id="evol" source="evol-j"
+    compute="d = n - p_n; d_eu = eu - p_eu; d_nat = nat - p_nat;
+             pct = round(d / p_n * 100);
+             pct_nat = round(d_nat / p_nat * 100, 1);
+             x_eu = round(eu / p_eu, 1);
+             part_hausse = round(d_eu / d * 100)">
+  </dsfr-data-normalize>
+
+  <!-- Dernière fiche publiée, et dernière alerte européenne : bornent la lecture. -->
+  <dsfr-data-source id="s-max" api-type="opendatasoft" base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    select="max(date_publication) as mx" limit="1"></dsfr-data-source>
+  <dsfr-data-source id="s-max-eu" api-type="opendatasoft" base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    select="max(date_publication) as mx_eu" where="lien_vers_la_fiche_rappel like '%/rapex'" limit="1"></dsfr-data-source>
+  <dsfr-data-normalize id="max-k" source="s-max" compute="k = 'r'"></dsfr-data-normalize>
+  <dsfr-data-normalize id="max-eu-k" source="s-max-eu" compute="k = 'r'"></dsfr-data-normalize>
+  <dsfr-data-join id="dates" left="max-k" right="max-eu-k" on="k"></dsfr-data-join>
+
+  <!-- Mois par mois depuis le 1er janvier de l'an dernier, par origine. -->
+  <dsfr-data-source id="s-mois" api-type="opendatasoft" base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as n"
+    group-by="date_format(date_publication, 'yyyy-MM') as mois"
+    where="date_publication >= now(years=-1, month=1, day=1)">
+  </dsfr-data-source>
+  <dsfr-data-source id="s-mois-eu" api-type="opendatasoft" base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="count(*) as eu"
+    group-by="date_format(date_publication, 'yyyy-MM') as mois"
+    where="date_publication >= now(years=-1, month=1, day=1) AND lien_vers_la_fiche_rappel like '%/rapex'">
+  </dsfr-data-source>
+  <dsfr-data-join id="mois-j" left="s-mois" right="s-mois-eu" on="mois" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="mois" source="mois-j" compute="eu = coalesce(eu, 0); nat = n - eu"></dsfr-data-normalize>
+  <dsfr-data-query id="mois-tri" source="mois" order-by="mois:asc"></dsfr-data-query>
+
+  <!-- Ce que visent les alertes européennes, même période. Part calculée AVANT
+       `limit` : le top 6 ne somme pas à 100 %, c'est voulu. -->
+  <dsfr-data-source id="s-eu-sous" api-type="opendatasoft" base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+    fetch-mode="export" select="sous_categorie_produit, count(*) as n"
+    group-by="sous_categorie_produit"
+    where="date_publication >= now(years=-1, month=1, day=1) AND lien_vers_la_fiche_rappel like '%/rapex'">
+  </dsfr-data-source>
+  <dsfr-data-query id="eu-sous-part" source="s-eu-sous" aggregate="n:share_percent:part" order-by="n:desc"></dsfr-data-query>
+  <dsfr-data-normalize id="eu-sous" source="eu-sous-part" round="part:1"></dsfr-data-normalize>
+  <dsfr-data-query id="eu-sous-top" source="eu-sous" limit="6"></dsfr-data-query>
+  <dsfr-data-query id="eu-sous-1" source="eu-sous" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="eu-jouets" source="eu-sous" where="sous_categorie_produit:eq:jouets"></dsfr-data-query>
+
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
       <button class="fr-breadcrumb__button" aria-expanded="false" aria-controls="fil-ariane">Voir le fil d'Ariane</button>
@@ -32,250 +120,217 @@
       </div>
     </nav>
 
-    <h1>Tableau de bord Rappel Conso</h1>
+    <p class="fr-text--sm fr-hint-text fr-mb-1w">Rappel Conso — fiches de rappel de produits publiées par l'État</p>
+    <h1>Plus de rappels cette année&nbsp;: la hausse vient des alertes européennes</h1>
 
-    <div class="fr-callout fr-icon-arrow-right-line fr-callout--brown-caramel fr-mt-2w">
-      <p class="fr-callout__text fr-text--sm">
-        <strong>La page officielle n'a pas disparu, elle a changé de slug.</strong> Cette reconstitution a été
-        écrite alors que <code>/pages/rappelconso/</code> répondait 404&nbsp;; une recherche dans les
-        descriptions des jeux du portail a ensuite montré que la page vit sous
-        <a href="https://data.economie.gouv.fr/pages/rappel-conso-v2/" target="_blank" rel="noopener external">/pages/rappel-conso-v2/</a>.
-        Sa reproduction fidèle — sélecteur de date, compteurs période / année / mois, deux contextes —
-        est sur <a href="/viz/rappel-conso-tableau-de-bord">une page variante</a> (constats AM-029, AM-030, LIM-006).
-      </p>
+    <dsfr-data-repeat source="evol">
+      <template>
+        <p class="fr-text--lead">
+          Depuis le 1<sup>er</sup>&nbsp;janvier {{an}}, RappelConso a publié {{n:number}} fiches de rappel,
+          contre {{p_n:number}} à la même date en {{p_an}}&nbsp;: {{d:number}} de plus
+          ({{pct:number}}&nbsp;%). Presque toute la différence tient aux <strong>alertes du réseau européen
+          Safety Gate</strong>, que le site republie&nbsp;: {{eu:number}} fiches contre {{p_eu:number}}, soit
+          {{part_hausse:number}}&nbsp;% de la hausse. Les fiches nationales, elles, passent de
+          {{p_nat:number}} à {{nat:number}}&nbsp;: une variation de {{pct_nat:number:1}}&nbsp;%.
+        </p>
+      </template>
+    </dsfr-data-repeat>
+
+    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+      <div class="fr-col-12 fr-col-md-8">
+        <details class="fr-callout fr-icon-database-line odv-contexte">
+          <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
+          <p class="fr-callout__text fr-text--sm">
+            <a href="https://data.economie.gouv.fr/explore/dataset/rappelconso-v2-gtin-espaces/"
+               target="_blank" rel="noopener external"><code>rappelconso-v2-gtin-espaces</code></a>
+            — les fiches publiées sur <a href="https://rappel.conso.gouv.fr/" target="_blank"
+            rel="noopener external">rappel.conso.gouv.fr</a> (DGCCRF, DGAL, DGEC, DGPR), <strong>une ligne
+            par fiche de rappel</strong>, rafraîchies chaque jour. C'est le jeu de la page vivante du portail,
+            <a href="https://data.economie.gouv.fr/pages/rappel-conso-v2/" target="_blank"
+               rel="noopener external"><code>rappel-conso-v2</code></a>&nbsp;; le catalogue pointe encore une
+            ancienne page (404) et un ancien jeu (<code>rappelconso0</code>), disparus.
+          </p>
+          <p class="fr-callout__text fr-text--sm">
+            <strong>Alerte européenne</strong>&nbsp;: une fiche dont le lien se termine par
+            <code>/rapex</code> — le nom historique de Safety Gate, le système d'alerte rapide de l'Union
+            européenne pour les produits dangereux non alimentaires. Aucun champ du jeu ne porte l'origine&nbsp;:
+            c'est la page qui la déduit du lien. Chaque chiffre est recalculé à l'ouverture.
+          </p>
+          <p class="fr-callout__text fr-text--sm">
+            Pour lire les fiches <em>par motif</em> (oxyde d'éthylène, listeria), voir
+            <a href="/viz/rappel-conso-tableau-de-bord">Ce qui fait rappeler</a>.
+          </p>
+        </details>
+      </div>
+      <div class="fr-col-12 fr-col-md-4">
+        <dsfr-data-kpi-group>
+          <dsfr-data-kpi source="ad-cur" value="n:sum" format="nombre" span="12"
+            heading="Depuis le 1er janvier" label="fiches de rappel publiées"
+            icon="fr-icon-calendar-line"></dsfr-data-kpi>
+          <dsfr-data-kpi source="ad-cur" value="eu:sum" format="nombre" span="12"
+            heading="Dont alertes européennes" label="fiches reprises de Safety Gate"
+            icon="fr-icon-global-line"></dsfr-data-kpi>
+        </dsfr-data-kpi-group>
+      </div>
     </div>
-
-    <div class="fr-alert fr-alert--info fr-mb-4w">
-      <h2 class="fr-alert__title">Une page morte, un jeu de données déplacé</h2>
-      <p>
-        La page <code>/pages/rappelconso/</code> renvoie une <strong>erreur 404</strong>, et le jeu
-        qu'elle référence — <code>rappelconso0</code> — n'existe plus au catalogue. Mais une
-        <strong>version 2 est publiée sous d'autres identifiants</strong>, mise à jour
-        quotidiennement (dernière modification relevée le 26&nbsp;septembre&nbsp;2026).
-        Le catalogue officiel n'a pas suivi&nbsp;: il continue de pointer l'ancien.
-      </p>
-    </div>
-
-    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
-      <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-        <a href="https://data.economie.gouv.fr/explore/dataset/rappelconso-v2-gtin-espaces/" target="_blank" rel="noopener external"><code>rappelconso-v2-gtin-espaces</code></a>
-        — les fiches de rappel publiées sur RappelConso par la DGCCRF, la DGAL, la DGEC et la
-        DGPR, <strong>une ligne par fiche</strong>&nbsp;: catégorie, marque, motif du rappel,
-        risques encourus, conduite à tenir. Le service public
-        <a href="https://rappel.conso.gouv.fr" target="_blank" rel="noopener external">rappel.conso.gouv.fr</a>
-        s'appuie sur la même source.
-      </p>
-      <p class="fr-callout__text fr-text--sm">
-        <strong>Pourquoi pas le jeu voisin <code>rappelconso-v2-gtin-trie</code>&nbsp;?</strong>
-        Cette page l'a lu jusqu'au 26&nbsp;septembre&nbsp;2026. Une de ses lignes est un
-        <em>code-barre</em> (GTIN), pas un rappel&nbsp;: une fiche de peintures y occupait
-        81&nbsp;lignes, et le total surcomptait les fiches de près de moitié. Il écarte en outre
-        les produits sans code-barre — un tiers des fiches, dont presque tous les véhicules.
-      </p>
-    </details>
   </div>
 
-  <!-- ==========================================================================
-       Régime serveur, et c'est un choix mesuré : l'export complet de ce jeu
-       met 10 s (1,3 Mo même avec un select restreint). Une source `server-side`
-       rend la page immédiate — 12 fiches par page, facettes lues sur /facets —
-       et les graphiques s'appuient sur des agrégations séparées.
+  <div class="fr-container fr-mb-8w">
 
-       Relecture métier du 2026-09-26 : le jeu est `rappelconso-v2-gtin-espaces`
-       (une ligne = une fiche de rappel), et non plus `rappelconso-v2-gtin-trie`
-       (une ligne = un code-barre GTIN, produits sans GTIN exclus) — voir
-       scripts/audit-visuel/dossiers/bercy--viz-rappelconso/.
-       `order-by` : sans lui, le portail rend son ordre d'indexation et la
-       grille s'ouvrait sur des fiches de mars 2021.
-       ========================================================================== -->
+    <!-- ============================ 1. LA PREUVE ============================ -->
+    <section class="fr-mb-6w" aria-labelledby="t-preuve">
+      <h2 id="t-preuve">À date égale, les fiches nationales sont stables, les alertes européennes font la hausse</h2>
+      <dsfr-data-repeat source="evol">
+        <template>
+          <p class="odv-lecture">
+            Chaque barre compte les fiches publiées du 1<sup>er</sup>&nbsp;janvier au même jour de l'année que
+            la dernière colonne. La part des alertes européennes passe de {{p_eu:number}} en
+            {{p_an}} à {{eu:number}} en {{an}} ({{x_eu:number:1}} fois plus)&nbsp;: {{part_eu:number:1}}&nbsp;%
+            des fiches de l'année. Le haut de 2021 est celui de l'oxyde d'éthylène, une crise alimentaire.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <div class="odv-viz" data-code="Fiches de rappel du 1er janvier au même jour, par année et par origine">
+          <dsfr-data-chart id="g-ad" source="ad-tri" type="bar" stacked
+            label-field="an"
+            value-field="nat:Fiches nationales"
+            value-fields="eu:Alertes européennes (Safety Gate)"
+            databox databox-title="Fiches de rappel publiées du 1er janvier au même jour, chaque année, selon l'origine"
+            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-ad" source="ad-tri" table download
+            label-field="an" value-field="nat, eu, n, part_eu"
+            description="Pour chacune des six dernières années, les fiches de rappel publiées entre le 1er janvier et le même jour de l'année que la date de consultation. Alertes européennes : fiches dont le lien se termine par /rapex (reprises du réseau Safety Gate). Fiches nationales : toutes les autres. La colonne n est le total, part_eu la part européenne en pourcentage."></dsfr-data-a11y>
+        </div>
+      </div>
+    </section>
 
-  <dsfr-data-source id="rc" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    api-key-ref="ods-mef" server-side page-size="12"
-    order-by="date_publication:desc">
-  </dsfr-data-source>
+    <!-- ============================ 2. LA NUANCE ============================ -->
+    <section class="fr-mb-6w" aria-labelledby="t-nuance">
+      <h2 id="t-nuance">Les alertes européennes arrivent par vagues, et la dernière s'est arrêtée</h2>
+      <dsfr-data-repeat source="dates">
+        <template>
+          <p class="odv-lecture">
+            La dernière alerte européenne reprise date du <strong>{{mx_eu:date}}</strong>. Les fiches
+            nationales, elles, ont continué&nbsp;: la plus récente est du {{mx:date}}. Pause de la reprise
+            ou fin d'un rattrapage&nbsp;? Le jeu ne le dit pas. Si le flux ne reprend pas, l'avance de l'année
+            en cours fondra d'ici décembre. Le dernier mois du graphique est incomplet.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <div class="odv-viz" data-code="Fiches de rappel par mois et par origine, depuis janvier de l'an dernier">
+          <dsfr-data-chart id="g-mois" source="mois-tri" type="bar" stacked
+            label-field="mois"
+            value-field="nat:Fiches nationales"
+            value-fields="eu:Alertes européennes (Safety Gate)"
+            databox databox-title="Fiches de rappel publiées chaque mois, selon l'origine"
+            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-mois" source="mois-tri" table download
+            label-field="mois" value-field="nat, eu, n"
+            description="Fiches de rappel publiées chaque mois depuis le 1er janvier de l'an dernier, fiches nationales et alertes européennes (lien en /rapex) séparées. Le dernier mois est en cours."></dsfr-data-a11y>
+        </div>
+      </div>
 
-  <!-- Lot 13 — les agrégations étaient écrites en mode générique
-       (`url=` vers /exports/json + `params`), contournement d'AM-011 : le mode
-       adaptateur chargeait par /records, 100 lignes par requête et en série
-       (mesure d'origine : 31 allers-retours, 28,9 s pour 3 080 lignes, contre
-       1 requête et 0,62 s par l'export), au prix de la délégation serveur.
-       `fetch-mode="export"` (#689, dsfr-data 0.25.0) donne la requête unique
-       SANS quitter le mode adaptateur. 10 groupes pour les catégories, une
-       dizaine pour les années : très en deçà du plafond `max-records` de 1 000.
-       La source `rc` ci-dessus reste, elle, en `server-side` — les deux modes
-       ne se combinent pas, et la pagination serveur est ici le bon régime.
-       (La source `rc-nature`, qu'aucun graphique ne lisait, a été retirée.) -->
+      <h3 class="fr-h4 fr-mt-4w">Ce que l'Europe fait rappeler&nbsp;: des véhicules, et de plus en plus de jouets</h3>
+      <dsfr-data-repeat source="eu-sous-1">
+        <template>
+          <p class="odv-lecture">
+            Depuis le 1<sup>er</sup>&nbsp;janvier de l'an dernier, {{part:number:1}}&nbsp;% des alertes
+            européennes reprises concernent des {{sous_categorie_produit}} ({{n:number}} fiches)&nbsp;: presque tous les
+            rappels de véhicules passent par ce circuit, et depuis les plus anciennes fiches du jeu.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="eu-jouets">
+        <template>
+          <p class="odv-lecture">
+            Ce qui est nouveau, ce sont les produits de consommation courante, dont la fiche ne nomme aucun
+            distributeur&nbsp;: les jouets en font {{part:number:1}}&nbsp;% ({{n:number}} fiches),
+            devant l'électroménager et les vêtements. Aucune n'est alimentaire&nbsp;: Safety Gate ne couvre pas
+            l'alimentation.
+          </p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <div class="odv-viz" data-code="Part des alertes européennes par famille de produits">
+          <dsfr-data-chart id="g-eu-sous" source="eu-sous-top" type="bar" horizontal
+            label-field="sous_categorie_produit" value-field="part:Part des alertes européennes (%)" unit-tooltip=" %"
+            databox databox-title="Part des alertes européennes par famille de produits, depuis janvier de l'an dernier (six premières)"
+            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr">
+          </dsfr-data-chart>
+          <dsfr-data-a11y for="g-eu-sous" source="eu-sous-top" table download
+            label-field="sous_categorie_produit" value-field="n, part"
+            description="Part de chaque famille de produits dans les fiches reprises de Safety Gate (lien en /rapex) depuis le 1er janvier de l'an dernier. Six premières familles : les parts ne somment pas à 100 %."></dsfr-data-a11y>
+        </div>
+      </div>
+    </section>
 
-  <dsfr-data-source id="rc-cat" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    fetch-mode="export"
-    select="categorie_produit, count(*) as n"
-    group-by="categorie_produit"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
+    <!-- ========================== 3. L'EXPLORATION ========================== -->
+    <!-- Régime serveur, choix mesuré : l'export complet de ce jeu met plus de
+         10 s. Douze fiches par page, les plus récentes d'abord, facettes lues
+         sur /facets, recherche envoyée au portail (`server-search`), limitée
+         par le gabarit aux six champs annoncés par le placeholder. -->
+    <dsfr-data-source id="rc" api-type="opendatasoft" base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces" api-key-ref="ods-mef"
+      server-side page-size="12" order-by="date_publication:desc">
+    </dsfr-data-source>
 
-  <!-- Années closes seulement : l'année en cours, incomplète, se lisait comme
-       une baisse. Les fiches 2018-2020 (reprises antérieures à l'ouverture du
-       site, en avril 2021) sont écartées de la courbe, pas du total.
-       `date_format(…, 'yyyy')` rend l'année en texte (« 2021 », pas « 2 021 »).
-       Barres et non courbe : le `line-chart` de DSFR Chart gradue des années
-       en 2021.5, 2022.5… même reçues en texte (LIM-017, constaté ici aussi). -->
-  <dsfr-data-source id="rc-an" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    fetch-mode="export"
-    select="count(*) as n"
-    group-by="date_format(date_publication, 'yyyy') as an"
-    where="date_publication >= '2021-01-01' AND date_publication < now(month=1, day=1)"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
+    <section aria-labelledby="t-explorer">
+      <h2 id="t-explorer">Chercher une fiche de rappel</h2>
+      <p class="fr-text--sm fr-hint-text">
+        Toutes les fiches depuis 2018, les plus récentes d'abord. La recherche interroge le portail, pas la
+        page affichée, et travaille par début de mot («&nbsp;ammo&nbsp;» trouve aussi «&nbsp;ammoniaque&nbsp;»).
+        Les alertes européennes portent un badge&nbsp;: elles n'ont ni nature juridique ni modalité de
+        compensation, et n'apparaissent donc dans aucune valeur de ces deux filtres.
+      </p>
+    </section>
+  </div>
 
-  <!-- « À ce jour » contre « à la même date l'an dernier » : deux fenêtres
-       calculées par le portail (`now()`), sans date écrite en dur. Un seul
-       groupe par source (l'année), donc `n:sum` lit bien une valeur. -->
-  <dsfr-data-source id="rc-ytd" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    fetch-mode="export"
-    select="count(*) as n"
-    group-by="year(date_publication) as an"
-    where="date_publication >= now(month=1, day=1)"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="rc-ytd-1" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="rappelconso-v2-gtin-espaces"
-    fetch-mode="export"
-    select="count(*) as n"
-    group-by="year(date_publication) as an"
-    where="date_publication >= now(years=-1, month=1, day=1) AND date_publication < now(years=-1)"
-    api-key-ref="ods-mef">
-  </dsfr-data-source>
-
-  <!-- Part de chaque catégorie : une barre écrasante (l'alimentation) rend
-       illisibles les rangs suivants en volume ; en part, ils se lisent. -->
-  <!-- Une part SANS group-by (la source est déjà groupée par le portail) :
-       un tri sur un alias d'agrégat (`fiches:desc`) partait au serveur en
-       0.33.0 et y rendait un 400 (corrigé après la 0.33.0, dsfr-data#1045).
-       Trier sur `n`, colonne du `select` serveur, est juste dans les deux cas. -->
-  <dsfr-data-query id="rc-cat-part" source="rc-cat"
-    aggregate="n:share_percent:part" order-by="n:desc"></dsfr-data-query>
-  <dsfr-data-normalize id="rc-cat-tri" source="rc-cat-part" round="part:1"></dsfr-data-normalize>
-  <dsfr-data-query id="rc-an-tri" source="rc-an" order-by="an:asc"></dsfr-data-query>
-
-  <!-- Famille C — corpus documentaire : « la recherche est l'action, la liste
-       le resultat, le graphique un contexte ». Le champ est grand et seul dans
-       son bandeau -- c'est une page de recherche, pas un tableau de bord.
-       `server-search` : sans lui, la recherche ne filtrait que les 12 fiches
-       de la page courante. Le gabarit restreint la recherche plein texte
-       d'Opendatasoft aux champs annoncés par le placeholder (en 0.33.0,
-       `fields` n'est pas lu en mode serveur : le gabarit par défaut est
-       `search("{q}")`, tous champs). -->
   <section class="odv-bandeau">
     <div class="fr-container">
       <div class="odv-bandeau__recherche">
         <dsfr-data-search id="rc-q" source="rc" server-search
-        fields="libelle, marque_produit, modeles_ou_references, categorie_produit, sous_categorie_produit, motif_rappel"
-        search-template='search(libelle, marque_produit, modeles_ou_references, categorie_produit, sous_categorie_produit, motif_rappel, "{q}")'
-        label="Rechercher un rappel" placeholder="Produit, marque, motif de rappel…"
-        count count-label="fiche de rappel|fiches de rappel"></dsfr-data-search>
+          fields="libelle, marque_produit, modeles_ou_references, categorie_produit, sous_categorie_produit, motif_rappel"
+          search-template='search(libelle, marque_produit, modeles_ou_references, categorie_produit, sous_categorie_produit, motif_rappel, "{q}")'
+          label="Rechercher un rappel" placeholder="Produit, marque, motif de rappel…"
+          count count-label="fiche de rappel|fiches de rappel"></dsfr-data-search>
       </div>
     </div>
   </section>
 
   <div class="fr-container fr-mb-8w">
-
-    <dsfr-data-kpi-group class="fr-mb-4w">
-      <dsfr-data-kpi source="rc-cat-tri" value="n:sum" format="nombre"
-        heading="Depuis 2018" label="fiches de rappel publiées" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="rc-ytd" value="n:sum" format="nombre"
-        heading="Année en cours, à ce jour" label="fiches publiées depuis le 1er janvier" col="4"></dsfr-data-kpi>
-      <dsfr-data-kpi source="rc-ytd-1" value="n:sum" format="nombre"
-        heading="Année précédente, à la même date" label="fiches publiées" col="4"></dsfr-data-kpi>
-    </dsfr-data-kpi-group>
-
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-6w">
-      <div class="fr-col-12 fr-col-lg-5">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Fiches de rappel par année close">
-          <dsfr-data-chart id="g-an" source="rc-an-tri" type="bar"
-            label-field="an" value-field="n" name="Fiches de rappel publiées"
-            databox databox-title="Fiches de rappel publiées par année close"
-            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr"
-            databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-an" source="rc-an-tri" table download
-            description="Années civiles closes depuis l'ouverture du site RappelConso, en avril 2021 : 2021 ne compte donc que neuf mois d'activité du site. L'année en cours, incomplète, est comptée à part (encadrés ci-dessus) ; les fiches datées de 2018 à 2020 figurent dans le total mais pas sur la courbe."></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-      <div class="fr-col-12 fr-col-lg-7">
-        <div class="odv-chart-slot">
-          <div class="odv-viz" data-code="Part des fiches de rappel par catégorie de produit">
-          <dsfr-data-chart id="g-cat" source="rc-cat-tri" type="bar" horizontal
-            label-field="categorie_produit" value-field="part:Part des fiches (%)" unit-tooltip=" %"
-            databox databox-title="Part des fiches de rappel par catégorie de produit"
-            databox-source="DGCCRF — rappelconso-v2-gtin-espaces, via data.economie.gouv.fr"
-            databox-download>
-          </dsfr-data-chart>
-          <dsfr-data-a11y for="g-cat" source="rc-cat-tri" table download
-            description="Part de chaque catégorie dans l'ensemble des fiches de rappel publiées depuis 2018. L'alimentation représente près des trois quarts des fiches ; viennent ensuite les véhicules, puis les articles pour bébés et enfants."></dsfr-data-a11y>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="fr-callout fr-icon-lightbulb-line fr-mb-6w">
-      <h2 class="fr-callout__title fr-h5">Ce qu'il faut retenir</h2>
-      <p class="fr-callout__text fr-text--md">
-        Depuis l'ouverture de RappelConso, en avril 2021, l'État publie <strong>environ trois
-        mille fiches de rappel par an</strong>. <strong>Près des trois quarts concernent
-        l'alimentation</strong>, loin devant les véhicules (une fiche sur dix environ) et les
-        articles pour bébés et enfants. Au 26&nbsp;septembre&nbsp;2026, l'année en cours
-        dépassait l'année précédente à date égale — les deux encadrés ci-dessus en donnent le
-        compte du jour.
-      </p>
-    </div>
-
-    <h2 class="fr-h4">Les fiches de rappel</h2>
-    <p class="fr-text--sm fr-hint-text">
-      Les plus récentes d'abord, paginées sur le serveur&nbsp;: rien n'est chargé d'avance, et la
-      recherche interroge le portail, pas la page affichée. Les filtres lisent leurs valeurs et
-      leurs compteurs sur l'endpoint <code>/facets</code> du portail. Environ une fiche sur dix
-      n'a ni nature juridique ni modalité de compensation renseignées (2&nbsp;001 au
-      26&nbsp;septembre&nbsp;2026)&nbsp;: elles n'apparaissent dans aucune valeur de ces deux
-      filtres, mais restent dans la liste tant qu'on ne filtre pas sur eux.
-    </p>
-
-    <div class="fr-grid-row fr-grid-row--gutters">
+    <div class="fr-grid-row fr-grid-row--gutters odv-zone">
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
           Filtrer<span class="odv-filtres__compte"></span>
         </summary>
         <h2 class="fr-h6">Filtrer</h2>
-
-
         <dsfr-data-facets id="rc-f" source="rc-q" server-facets
           fields="categorie_produit, sous_categorie_produit, nature_juridique_rappel, modalites_de_compensation"
           labels="categorie_produit:Catégorie | sous_categorie_produit:Sous-catégorie | nature_juridique_rappel:Nature du rappel | modalites_de_compensation:Compensation"
           max-values="6"
           display="categorie_produit:multiselect | sous_categorie_produit:multiselect | modalites_de_compensation:multiselect">
         </dsfr-data-facets>
-        <!-- Lot 11 : `split` sépare ses entrées par une virgule, et le premier
-             deux-points isole le séparateur — `|` est donc découpable (AM-028
-             était un faux problème). `blessures|incendie` devient un tableau. -->
-        <dsfr-data-normalize id="rc-risques" source="rc-f" split="risques_encourus:|">
+        <!-- `split` : le premier deux-points isole le séparateur, `|` est donc
+             découpable (FP-010). `europe` : l'origine déduite du lien. -->
+        <dsfr-data-normalize id="rc-cartes" source="rc-f" split="risques_encourus:|"
+          compute="europe = contains(lien_vers_la_fiche_rappel, '/rapex')">
         </dsfr-data-normalize>
       </details>
       <div class="fr-col-12 fr-col-lg-9">
-        <dsfr-data-display source="rc-risques" cols="2" uid-field="numero_fiche"
+        <dsfr-data-display source="rc-cartes" cols="2" uid-field="numero_fiche"
           empty="Aucune fiche de rappel ne correspond à ces critères." count-label="fiche de rappel|fiches de rappel">
           <template>
             <div class="fr-card fr-card--sm">
               <div class="fr-card__body">
                 <div class="fr-card__content">
                   <div class="fr-card__start">
-                    <p class="fr-badge fr-badge--sm fr-badge--warning">{{categorie_produit|Catégorie non précisée}}</p>
+                    <ul class="fr-badges-group">
+                      <li><p class="fr-badge fr-badge--sm fr-badge--warning">{{categorie_produit|Catégorie non précisée}}</p></li>
+                      {{#if europe}}<li><p class="fr-badge fr-badge--sm fr-badge--info">Alerte européenne</p></li>{{/if}}
+                    </ul>
                   </div>
                   <h3 class="fr-card__title fr-text--sm">
                     <a href="{{lien_vers_la_fiche_rappel}}" target="_blank" rel="noopener external">{{libelle|Produit non désigné}}</a>
@@ -286,7 +341,7 @@
                   </p>
                   <div class="fr-card__end">
                     <p class="fr-text--xs fr-mb-0">
-                      Fiche {{numero_fiche}} · {{nature_juridique_rappel|nature non précisée}}
+                      Fiche {{numero_fiche}} · publiée le {{date_publication:date}}{{#if nature_juridique_rappel}} · {{nature_juridique_rappel}}{{/if}}
                     </p>
                   </div>
                 </div>
@@ -297,173 +352,117 @@
       </div>
     </div>
 
+    <!-- ====================== 4. CE QU'ON NE MONTRE PAS ===================== -->
+    <section class="fr-mt-6w" aria-labelledby="t-hors-champ">
+      <h2 id="t-hors-champ" class="fr-h3">Ce que cette page ne dit pas, et pourquoi</h2>
+      <ul>
+        <li><strong>L'origine est déduite, pas déclarée.</strong> Aucun champ ne dit «&nbsp;Safety Gate&nbsp;»&nbsp;:
+          la page lit la fin du lien de la fiche (<code>/rapex</code>). Relevé le 27&nbsp;septembre&nbsp;2026, ce
+          critère isole 2&nbsp;001 fiches, les mêmes que celles qui n'ont ni nature juridique ni compensation.
+          Si le site change la forme de ses liens, la séparation disparaîtra sans bruit.</li>
+        <li><strong>Pourquoi les alertes européennes augmentent.</strong> Davantage de produits dangereux, ou
+          davantage d'alertes reprises en France&nbsp;? Le jeu décrit des publications, pas une politique. On ne
+          tranche pas.</li>
+        <li><strong>Les fiches antérieures à 2021</strong> (228 au 27&nbsp;septembre&nbsp;2026) sont toutes des
+          alertes européennes sur des véhicules, reprises avant l'ouverture du site en avril 2021. Elles sont
+          dans la recherche, pas dans la comparaison à date égale, qui ne remonte qu'à six ans.</li>
+        <li><strong>L'unité est la fiche, pas le produit.</strong> Une fiche peut couvrir plusieurs références
+          ou codes-barres. Le jeu voisin <code>rappelconso-v2-gtin-trie</code> compte, lui, une ligne par
+          code-barre, et écarte les produits qui n'en ont pas&nbsp;: il ne sert pas à compter des rappels.</li>
+        <li><strong>Les risques multiples.</strong> Une fiche peut citer plusieurs risques
+          («&nbsp;blessures|brûlures&nbsp;»)&nbsp;: les cartes les séparent, mais le portail compte les
+          combinaisons telles quelles.</li>
+      </ul>
+      <p>
+        <a class="fr-btn fr-btn--secondary fr-icon-external-link-line fr-btn--icon-right"
+           href="https://data.economie.gouv.fr/explore/dataset/rappelconso-v2-gtin-espaces/"
+           target="_blank" rel="noopener external">Consulter les données</a>
+      </p>
+    </section>
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
   <section class="fr-container fr-mb-8w" id="analyse">
-      <details class="odv-technique">
-        <summary>Analyse — Rappel Conso, une page morte, un jeu déplacé, et une ligne qui n'était pas un rappel</summary>
-
-    <div class="fr-container">
-      <p class="fr-text--lead">
-        Comme <a href="/viz/signalconso">Signal Conso</a>, la page du catalogue renvoie une 404 et
-        pointe un jeu supprimé (<code>rappelconso0</code>)&nbsp;; la version 2 vit sous d'autres
-        identifiants. Cette page est un <strong>corpus consultable</strong> — chercher une fiche,
-        la lire, situer le dispositif — et non le tableau de bord statistique d'origine, que
-        reproduit <a href="/viz/rappel-conso-tableau-de-bord">la variante fidèle</a>. La relecture
-        métier du 26&nbsp;septembre&nbsp;2026 l'a trouvée fausse sur l'essentiel&nbsp;: elle
-        comptait des codes-barres en les appelant des rappels, et sa recherche ne cherchait pas.
-      </p>
-
-      <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-        <div class="fr-col-12 fr-col-md-6">
-          <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
-          <ul>
-            <li><strong>Le régime serveur au bon endroit.</strong> Ce jeu est lent à
-              l'export&nbsp;: 10,4&nbsp;s même avec un <code>select</code> restreint, 15&nbsp;s et
-              9,6&nbsp;Mo sans (mesures du lot 6). Une source <code>server-side</code> rend la page
-              immédiate — douze fiches à la fois, facettes lues sur <code>/facets</code> — et les
-              graphiques s'appuient sur des agrégations séparées, une requête d'export chacune.</li>
-            <li><strong>Une pagination serveur sur des cartes, pas seulement un tableau.</strong>
-              <code>dsfr-data-display</code> détecte la pagination serveur de sa source&nbsp;: la
-              grille de cartes se comporte comme le tableau de la
-              <a href="/viz/fiscalite-locale">fiscalité locale</a>, sans attribut supplémentaire.</li>
-            <li><strong>Changer de jeu a coûté cinq attributs.</strong> Le jeu à une ligne par fiche
-              (<code>rappelconso-v2-gtin-espaces</code>) porte les mêmes noms de champs et les mêmes
-              facettes déclarées que le jeu à une ligne par code-barre&nbsp;: seul
-              <code>dataset-id</code> a changé sur les sources.</li>
-            <li><strong>Une recherche qui interroge le portail&nbsp;: un attribut.</strong>
-              <code>server-search</code> envoie la clause au portail&nbsp;; le compteur sous le champ
-              et celui de la grille lisent alors le total serveur, et les compteurs des facettes
-              suivent la saisie. Vérifié au navigateur&nbsp;: «&nbsp;enamel paints&nbsp;» rend deux
-              fiches, dont la fiche de peintures <em>une</em> fois&nbsp;; la requête
-              <code>/records</code> porte bien <code>search(…)</code>.</li>
-            <li><strong>Des fenêtres de dates sans date écrite.</strong> ODSQL calcule
-              <code>now(month=1, day=1)</code> et <code>now(years=-1)</code>&nbsp;: «&nbsp;année en
-              cours à ce jour&nbsp;» et «&nbsp;année précédente à la même date&nbsp;» sont deux
-              <code>where</code>, et la courbe annuelle s'arrête d'elle-même à la dernière année
-              close. Rien ne vieillit dans le code.</li>
-            <li><strong>Les plus récentes d'abord.</strong> <code>order-by="date_publication:desc"</code>
-              sur la source serveur devient <code>order_by=date_publication DESC</code> dans chaque
-              requête de la grille, recherche comprise.</li>
-          </ul>
-        </div>
-
-        <div class="fr-col-12 fr-col-md-6">
-          <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
-          <ul>
-            <li><strong>Une ligne était un code-barre, pas un rappel — erreur de lecture, pas de
-              bibliothèque.</strong> Jusqu'au 26&nbsp;septembre&nbsp;2026 la page lisait
-              <code>rappelconso-v2-gtin-trie</code>, qui publie <em>une ligne par GTIN</em> et exclut
-              les produits sans code-barre. Relevé ce jour-là à l'API&nbsp;: 18&nbsp;472 lignes pour
-              12&nbsp;435 fiches distinctes (une fiche de peintures y pesait 81&nbsp;lignes), et
-              6&nbsp;264 fiches absentes, dont 1&nbsp;697 des 1&nbsp;756 rappels de véhicules. Le KPI
-              «&nbsp;rappels&nbsp;», les compteurs, les facettes et le graphique par catégorie
-              comptaient donc des codes-barres, sur un périmètre amputé d'un tiers. Rien ne
-              l'annonçait&nbsp;: pas d'erreur, un total du bon ordre de grandeur. C'est le piège des
-              jointures 1-N (PG-001) transposé au simple comptage — la question «&nbsp;qu'est-ce
-              qu'une ligne&nbsp;?&nbsp;» se pose avant tout <code>count</code>, et
-              <code>group_by=numero_fiche</code> à l'API y répond en une requête.</li>
-            <li><strong>Une recherche qui ne cherchait que la page affichée.</strong> Sans
-              <code>server-search</code>, <code>dsfr-data-search</code> filtre les lignes déjà reçues
-              — ici les douze de la page courante&nbsp;: au chargement il annonçait «&nbsp;12
-              rappels&nbsp;», et une marque présente sur 150 lignes du jeu rendait zéro. Capacité
-              native non posée, donc pas une limite. Ce qui reste vrai&nbsp;: en 0.33.0,
-              <code>fields</code> n'est pas lu en mode serveur (le gabarit par défaut est
-              <code>search("{q}")</code>, tous champs)&nbsp;; pour s'en tenir aux champs annoncés par
-              le placeholder, il faut les réécrire dans <code>search-template</code>. Et la recherche
-              plein texte d'Opendatasoft travaille par préfixe de mot&nbsp;: «&nbsp;ammo&nbsp;»
-              trouve aussi «&nbsp;ammoniaque&nbsp;».</li>
-            <li><strong>Un tri sur un alias d'agrégat parti au serveur.</strong> Pour la part par
-              catégorie, une query <code>group-by</code> + <code>share_percent</code> triée sur son
-              propre alias (<code>fiches:desc</code>) a envoyé <code>order_by=fiches DESC</code> au
-              portail, qui a répondu 400 — le KPI voisin affichait «&nbsp;Erreur de chargement&nbsp;».
-              Le même tri partait côté client tant qu'un second lecteur partageait la source.
-              Le changelog de la 0.36.0 annonce le correctif (dsfr-data#1045, non rejoué ici&nbsp;: le
-              dépôt charge la 0.33.0)&nbsp;; ici, une part <em>sans</em>
-              <code>group-by</code> (la source est déjà groupée par le portail) triée sur
-              <code>n</code> suffit.</li>
-            <li><strong>Des années graduées 2021.5 sur une courbe.</strong> Le
-              <code>line-chart</code> de DSFR Chart fait d'années reçues en texte un axe continu
-              (LIM-017, côté <code>GouvernementFR/dsfr-chart</code>)&nbsp;: la série annuelle est
-              passée en barres. <code>date_format(date_publication, 'yyyy')</code> dans le
-              <code>group-by</code> rend en revanche l'année en texte dans le tableau accessible
-              («&nbsp;2021&nbsp;», plus «&nbsp;2&nbsp;021&nbsp;»).</li>
-            <li><strong>Le groupe null revient avec le bon jeu.</strong> Environ une fiche sur dix du
-              jeu complet n'a ni nature juridique ni compensation (2&nbsp;001 au
-              26&nbsp;septembre&nbsp;2026, toutes parmi les produits sans code-barre)&nbsp;: les
-              facettes serveur ne les listent pas. Le jeu à codes-barres n'en avait aucune, ce qui
-              avait caché le sujet. Dit en page, au-dessus des filtres (PG-015).</li>
-            <li><strong>Des catégories en identifiants techniques.</strong>
-              <code>maison-habitat</code>, <code>hygiene-beaute</code>… Même manque que sur Signal
-              Conso et les carburants (AM-020)&nbsp;; les en-têtes du tableau accessible restent les
-              noms de colonnes (<code>categorie_produit</code>, <code>n</code>, <code>part</code>).</li>
-            <li><strong>Un champ multi-valeurs à séparateur <code>|</code> — faux problème
-              (FP-010).</strong> <code>split="risques_encourus:|"</code> découpe bien le champ&nbsp;:
-              <code>split</code> sépare ses entrées par une virgule, le premier deux-points isole le
-              séparateur. Ce qui reste vrai&nbsp;: la facette serveur compte des chaînes combinées
-              (<code>blessures|brûlures</code>), pas des risques — l'original fait de même.</li>
-          </ul>
-
-          <div class="fr-alert fr-alert--success fr-mt-4w odv-corrige-depuis">
-            <h4 class="fr-alert__title">✅ Corrigé depuis — <code>dsfr-data</code> 0.23.0</h4>
-            <p class="fr-text--sm">
-              4 des frictions rencontrées au lot 6 ont été comblées par la bibliothèque
-              <em>après</em> cette reproduction. Détail et vérification au
-              <a href="/retours#AM-012">registre des retours</a>.
-            </p>
-            <ul class="fr-text--sm">
-              <li><strong>AM-012</strong> — <strong>0.21.1</strong> (#656)&nbsp;: <code>chart.js</code> retiré de la recette CDN — DSFR Chart l'embarque déjà.</li>
-              <li><strong>AM-007</strong> — <strong>0.22.0</strong> (#664)&nbsp;: blocs <code>{{#if}}</code> / <code>{{#unless}}</code> et pipe <code>{{lien:url}}</code> dans les templates&nbsp;: un lien optionnel s'enveloppe. Ici le lien de fiche n'est jamais vide (0 fiche sans lien au 26&nbsp;septembre&nbsp;2026).</li>
-              <li><strong>AM-020</strong> — <strong>0.22.0</strong> (#668)&nbsp;: alias inline <code>col:Libellé</code> sur <code>value-cols</code> de l'unpivot et sur les séries du graphique — posé ici sur <code>value-field="part:Part des fiches (%)"</code>.</li>
-              <li><strong>AM-003</strong> — <strong>0.23.0</strong> (#680)&nbsp;: <code>server-facets</code> sans <code>fields</code> découvre les facettes déclarées par le jeu.</li>
+    <details class="odv-technique">
+      <summary>Analyse — Rappel Conso, ou comment le groupe null cachait l'histoire</summary>
+      <div class="fr-container">
+        <p class="fr-text--lead">
+          Page recréée le 27&nbsp;septembre&nbsp;2026 sur <code>dsfr-data</code> 0.42.0. La version précédente
+          était un corpus consultable (recherche, deux graphiques de contexte, trois compteurs). Celle-ci
+          commence par ce que le jeu raconte, puis laisse chercher.
+        </p>
+        <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
+          <div class="fr-col-12 fr-col-md-6">
+            <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
+            <ul>
+              <li><strong>Une comparaison à date égale sur six ans, sans une date écrite.</strong> Six fenêtres
+                <code>now(years=-k, month=1, day=1)</code> / <code>now(years=-k)</code> jointes par
+                <code>OR</code> dans le <code>where</code> d'une source d'export, groupée par
+                <code>date_format(…, 'yyyy')</code>&nbsp;: une requête, six barres comparables.</li>
+              <li><strong>L'origine d'une fiche, en une clause.</strong>
+                <code>lien_vers_la_fiche_rappel like '%/rapex'</code> côté portail pour les agrégats&nbsp;;
+                <code>compute="europe = contains(…, '/rapex')"</code> côté page pour le badge des cartes
+                (<code>{{#if europe}}</code>).</li>
+              <li><strong>Le chapeau se calcule.</strong> Année en cours et année précédente sortent de la même
+                source (<code>order-by</code> + <code>limit</code>, deux fois), sont jointes sur une clé
+                constante, et un <code>compute</code> donne écarts et parts&nbsp;; <code>dsfr-data-repeat</code>
+                les écrit.</li>
+              <li><strong>Le corpus garde ses acquis.</strong> Pagination serveur sur des cartes (AV-018),
+                <code>server-search</code> restreint par <code>search-template</code>, tri
+                <code>date_publication:desc</code>, facettes <code>/facets</code>.</li>
+            </ul>
+          </div>
+          <div class="fr-col-12 fr-col-md-6">
+            <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
+            <ul>
+              <li><strong>Le groupe null était l'histoire, et deux relectures l'ont traité en bruit.</strong>
+                Les 2&nbsp;001 fiches «&nbsp;sans nature juridique ni compensation&nbsp;» ont été écartées
+                («&nbsp;nommer ou écarter&nbsp;», PG-015) sans qu'on demande <em>qui</em> elles étaient.
+                Ce sont exactement les alertes Safety Gate. Question de métier, pas de bibliothèque.</li>
+              <li><strong>ODSQL refuse <code>now()</code> dans un <code>date_format</code></strong>
+                (<code>date_format(now(), 'MM-dd')</code> → 400)&nbsp;: pas de «&nbsp;même jour de l'année&nbsp;»
+                en une clause, d'où la chaîne de six <code>OR</code>. Limite du portail.</li>
+              <li><strong>Pas de décalage de ligne côté client.</strong> Pour lire l'avant-dernière année, deux
+                <code>dsfr-data-query</code> (<code>limit="2"</code> puis tri inverse et <code>limit="1"</code>).
+                Ça marche, sans être évident.</li>
+              <li><strong>Les en-têtes du tableau accessible restent des noms de colonnes</strong>
+                (<code>nat</code>, <code>eu</code>, <code>part_eu</code>) — même constat qu'AM-020.</li>
             </ul>
           </div>
         </div>
-      </div>
 
-      <div class="fr-table fr-table--bordered">
-        <table>
-          <caption>Correspondance page d'origine (<code>/pages/rappel-conso-v2/</code>) → composant dsfr-data</caption>
-          <thead>
-            <tr><th scope="col">Opendatasoft</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
-          </thead>
-          <tbody>
-            <tr><td><code>ods-dataset-context</code> sur <code>rappelconso-v2-gtin-espaces</code></td><td><code>dsfr-data-source</code> sur le même jeu&nbsp;: une en <code>server-side</code> pour les fiches, une en <code>fetch-mode="export"</code> par agrégat</td><td>Équivalent — même jeu, même unité (la fiche)</td></tr>
-            <tr><td><code>ods-results</code> (<code>nhits</code>) «&nbsp;sur toute la période&nbsp;»</td><td><code>dsfr-data-kpi value="n:sum"</code> sur l'agrégat par catégorie</td><td>Équivalent</td></tr>
-            <tr><td>compteurs «&nbsp;sur l'année&nbsp;» / «&nbsp;sur le mois&nbsp;» à une date choisie</td><td>deux KPI à fenêtre <code>now()</code>&nbsp;: année en cours à ce jour, année précédente à la même date</td><td>Autre lecture, assumée&nbsp;: pas de rejeu à une date passée (rôle de la variante)</td></tr>
-            <tr><td><code>ods-chart</code> barres par catégorie, en nombre</td><td><code>dsfr-data-query aggregate="n:share_percent:part"</code> + <code>dsfr-data-chart type="bar" horizontal</code></td><td>Équivalent, en part plutôt qu'en nombre&nbsp;; le nombre reste dans le tableau accessible</td></tr>
-            <tr><td>—</td><td>barres des fiches par année close (<code>date_format(…, 'yyyy')</code> en <code>group-by</code>)</td><td>Ajout</td></tr>
-            <tr><td><code>ods-facet-results</code> dans deux <code>&lt;select&gt;</code> (catégorie, sous-catégorie)</td><td><code>dsfr-data-facets server-facets</code>, avec nature et compensation en plus</td><td>Équivalent et au-delà</td></tr>
-            <tr><td>lien «&nbsp;Consultez les données&nbsp;»</td><td><code>dsfr-data-search server-search</code> + <code>dsfr-data-display</code> paginé serveur, les plus récentes d'abord</td><td>Ajout&nbsp;: les fiches elles-mêmes, que l'original ne montre pas</td></tr>
-            <tr><td>camemberts nature juridique / compensation, top&nbsp;20 des sous-catégories</td><td>—</td><td>Non repris ici (couverts par la variante fidèle)</td></tr>
-          </tbody>
-        </table>
-      </div>
+        <div class="fr-table fr-table--bordered">
+          <table>
+            <caption>Correspondance page d'origine (<code>/pages/rappel-conso-v2/</code>) → composant dsfr-data</caption>
+            <thead>
+              <tr><th scope="col">Opendatasoft</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>ods-dataset-context</code> sur <code>rappelconso-v2-gtin-espaces</code></td><td><code>dsfr-data-source</code> sur le même jeu&nbsp;: <code>server-side</code> pour les fiches, <code>fetch-mode="export"</code> par agrégat</td><td>Équivalent</td></tr>
+              <tr><td>compteurs «&nbsp;sur l'année&nbsp;» à une date choisie</td><td>comparaison à date égale sur six ans (fenêtres <code>now()</code>), chapeau calculé</td><td>Autre lecture, assumée (le rejeu à une date passée est sur <a href="/viz/rappel-conso-tableau-de-bord">la page sœur</a>)</td></tr>
+              <tr><td>barres par catégorie, camemberts nature / compensation</td><td>—</td><td>Non repris&nbsp;: le camembert nature écartait sans le dire les 2&nbsp;001 alertes européennes</td></tr>
+              <tr><td>—</td><td>origine nationale / européenne (lien <code>/rapex</code>), par année à date égale et par mois</td><td>Ajout&nbsp;: c'est l'histoire</td></tr>
+              <tr><td><code>ods-facet-results</code> dans deux <code>&lt;select&gt;</code></td><td><code>dsfr-data-facets server-facets</code>, quatre champs</td><td>Équivalent et au-delà</td></tr>
+              <tr><td>lien «&nbsp;Consultez les données&nbsp;»</td><td><code>dsfr-data-search server-search</code> + <code>dsfr-data-display</code> paginé serveur</td><td>Ajout&nbsp;: les fiches elles-mêmes</td></tr>
+            </tbody>
+          </table>
+        </div>
 
-      <div class="odv-verdict fr-mt-4w">
-        <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>La leçon de cette page n'est plus le catalogue mort, c'est l'unité.</strong> Elle
-          a vécu plus de deux semaines en affichant un total faux de près de moitié, sur un périmètre amputé
-          d'un tiers, sans qu'aucune recette ni aucune console ne le signale&nbsp;: le jeu choisi
-          comptait des codes-barres. La correction n'a demandé aucune capacité nouvelle — changer de
-          jeu, poser <code>server-search</code> et <code>order-by</code>, borner les années par
-          <code>now()</code>. Ce qui manquait n'était pas un attribut mais une question posée au
-          jeu avant de compter.</p>
-        <p>Le choix d'architecture reste juste&nbsp;: sur ce jeu lent à l'export, le régime
-          <code>server-side</code> fait une page immédiate — et, maintenant que la recherche
-          interroge le portail, une page de recherche qui cherche vraiment.</p>
-        <p class="fr-text--sm fr-hint-text">
-          Constats&nbsp;: AV-018 (pagination serveur sur une grille de cartes), PG-010 (identifiant
-          de jeu périmé au catalogue), PG-001 étendu au comptage (une ligne n'est pas l'unité),
-          PG-015 (groupe null), LIM-017 (axe des années de <code>line-chart</code>), AM-020, AM-007,
-          FP-010. Relecture métier et preuves&nbsp;:
-          <code>scripts/audit-visuel/dossiers/bercy--viz-rappelconso/</code>.
-        </p>
+        <div class="odv-verdict fr-mt-4w">
+          <p class="fr-text--lead fr-mb-1v">Verdict</p>
+          <p><strong>La bibliothèque n'a manqué de rien&nbsp;; c'est la question qui manquait.</strong> Deux fois
+            cette page a été corrigée sur son unité et ses compteurs, et deux fois elle a écarté le seul groupe qui
+            racontait quelque chose. La recréation n'a demandé que des attributs existants&nbsp;: des
+            <code>where</code> à fenêtres <code>now()</code>, un <code>like</code> sur le lien, des jointures sur une
+            clé constante et un <code>compute</code>.</p>
+          <p class="fr-text--sm fr-hint-text">
+            Constats&nbsp;: AV-018, PG-001 étendu au comptage, PG-015 (le groupe null était une population), AM-020,
+            FP-010. Preuves&nbsp;: <code>scripts/audit-visuel/dossiers/bercy--viz-rappelconso/</code>.
+          </p>
+        </div>
       </div>
-    </div>
-
-      </details></section>
+    </details>
+  </section>
 
 </main>
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bulletins officiels des finances publiques — open-data-viz</title>
-  <meta name="description" content="Reproduction avec dsfr-data du moteur de recherche des BOFiP (economie.gouv.fr), sur le jeu bofip-vigueur de data.economie.gouv.fr.">
+  <meta name="description" content="Un commentaire fiscal sur cinq en vigueur au BOFiP est encore dans la version versée à son ouverture, le 12 septembre 2012 — six sur dix au contentieux, moins d'un sur dix à l'impôt sur le revenu. Recréation avec dsfr-data, sur le jeu bofip-vigueur de data.economie.gouv.fr.">
   <link rel="icon" href="/assets/vignette-vide.svg">
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -15,22 +15,173 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.css">
   <link rel="stylesheet" href="/assets/site.css">
   <script src="/assets/cles.js"></script>
-  <style>
-    /* Le compteur du bandeau de recherche dit déjà « N documents » : celui de la
-       liste le répétait à l'écran. `dsfr-data-display` ne sait pas le taire
-       (count-label le renomme seulement, AM-080) : masquage VISUEL seulement,
-       la région annoncée reste lue par les lecteurs d'écran. Dépend du DOM
-       interne du composant — contournement, dit en #analyse. */
-    #bofip-liste .dsfr-data-display > p[role="status"] {
-      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-    }
-  </style>
 </head>
 <body>
 <div id="site-header"></div>
 
 <main role="main" id="contenu">
+
+  <!-- ==========================================================================
+       Recréation du 2026-09-27. Aucun chargement complet : chaque ligne du jeu
+       porte plusieurs Ko de texte (`contenu`, `contenu_html`). Le récit repose
+       sur de petits agrégats calculés par le portail (quelques dizaines de
+       lignes chacun) ; l'exploration pagine côté serveur.
+       Le jour d'ouverture du BOFiP, 12 septembre 2012, est min(debut_de_validite) :
+       une version datée de ce jour est celle versée à l'ouverture, jamais
+       republiée depuis.
+       ========================================================================== -->
+
+  <!-- Totaux par type (Contenu = commentaires, Actualité = actualités). -->
+  <dsfr-data-source id="b-tot" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur" api-key-ref="ods-mef"
+    select="count(*) as n" group-by="type" limit="10">
+  </dsfr-data-source>
+  <!-- Date de la dernière version publiée : borne l'année en cours. -->
+  <dsfr-data-source id="b-max" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur" api-key-ref="ods-mef"
+    select="max(debut_de_validite) as mx" limit="1">
+  </dsfr-data-source>
+
+  <!-- ---------- Par année de version, commentaires seulement ----------
+       `date_format(…,'yyyy')` rend une chaîne « 2012 » (l'entier de year()
+       s'affiche « 2 012 » dans un tableau). -->
+  <dsfr-data-source id="b-an" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur" api-key-ref="ods-mef"
+    where="type = 'Contenu'"
+    select="count(*) as nb" group-by="date_format(debut_de_validite,'yyyy') as annee"
+    order-by="annee" limit="40">
+  </dsfr-data-source>
+  <dsfr-data-source id="b-an-ouv" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur" api-key-ref="ods-mef"
+    where="type = 'Contenu' and debut_de_validite = date'2012-09-12'"
+    select="count(*) as ouv" group-by="date_format(debut_de_validite,'yyyy') as annee" limit="5">
+  </dsfr-data-source>
+  <!-- Clé `annee` unique des deux côtés (group-by). La ligne 2012 reçoit le
+       compte du jour d'ouverture ; les autres, null → 0. -->
+  <dsfr-data-join id="b-an-j" left="b-an" right="b-an-ouv" on="annee" type="left"></dsfr-data-join>
+  <dsfr-data-normalize id="b-an-n" source="b-an-j"
+    compute="tout = 'x';
+      v_ouv = coalesce(ouv, 0);
+      v_autre = nb - coalesce(ouv, 0)">
+  </dsfr-data-normalize>
+  <!-- Cumul et part cumulée : l'année où la moitié du stock est atteinte. -->
+  <dsfr-data-query id="b-cumul" source="b-an-n"
+    aggregate="nb:running_sum:cumul_nb, nb:share_percent:part, part:running_sum:cumul_part"
+    order-by="annee:asc">
+  </dsfr-data-query>
+  <dsfr-data-query id="b-mediane" source="b-cumul" where="cumul_part:gte:50" limit="1"></dsfr-data-query>
+  <!-- Synthèse : total des commentaires, dont version d'ouverture. -->
+  <dsfr-data-query id="b-synth" source="b-an-n" group-by="tout"
+    aggregate="nb:sum:n, v_ouv:sum:ouv">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="b-synth-p" source="b-synth" compute="p_ouv = ouv / n * 100; un_sur = n / ouv"></dsfr-data-normalize>
+  <!-- Rythme de réécriture sur les années pleines après l'ouverture. Bornes
+       écrites en clair (2013-2025) et répétées dans la phrase : 2026 est en cours. -->
+  <dsfr-data-query id="b-rythme" source="b-an-n" where="annee:gte:2013, annee:lte:2025"
+    group-by="tout" aggregate="nb:min:mn, nb:max:mx, nb:avg:moy">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="b-an-tab" source="b-cumul"
+    round="cumul_part:1"
+    rename="annee:Année | v_ouv:Version du 12/09/2012 | v_autre:Version publiée dans l'année | nb:Commentaires | cumul_part:Part cumulée (%)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Par série, commentaires seulement ----------
+       Trois comptes serveur par série (tous, version d'ouverture, version
+       publiée depuis le 1er janvier 2024), joints sur `serie` — unique de
+       chaque côté puisque chaque source est groupée sur elle. Les 6 lignes
+       sans série (annexes-racines) sont écartées. -->
+  <dsfr-data-source id="b-ser" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur" api-key-ref="ods-mef"
+    where="type = 'Contenu' and serie is not null"
+    select="count(*) as n" group-by="serie" limit="60">
+  </dsfr-data-source>
+  <dsfr-data-source id="b-ser-ouv" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur" api-key-ref="ods-mef"
+    where="type = 'Contenu' and serie is not null and debut_de_validite = date'2012-09-12'"
+    select="count(*) as ouv" group-by="serie" limit="60">
+  </dsfr-data-source>
+  <dsfr-data-source id="b-ser-rec" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur" api-key-ref="ods-mef"
+    where="type = 'Contenu' and serie is not null and debut_de_validite >= date'2024-01-01'"
+    select="count(*) as rec" group-by="serie" limit="60">
+  </dsfr-data-source>
+  <!-- Libellés des séries : le jeu ne porte que le code. Repris du titre du
+       document-racine de chaque série (BOI-CTX « CTX - Contentieux », etc.),
+       relevé à l'API le 2026-09-27, casse normalisée. -->
+  <dsfr-data-source id="b-lib" data='[
+    {"serie":"AIS","libelle":"Autres impositions sectorielles"},
+    {"serie":"BA","libelle":"Bénéfices agricoles"},
+    {"serie":"BIC","libelle":"Bénéfices industriels et commerciaux"},
+    {"serie":"BNC","libelle":"Bénéfices non commerciaux"},
+    {"serie":"CAD","libelle":"Cadastre"},
+    {"serie":"CF","libelle":"Contrôle fiscal"},
+    {"serie":"CTX","libelle":"Contentieux"},
+    {"serie":"CVAE","libelle":"Cotisation sur la valeur ajoutée"},
+    {"serie":"DAE","libelle":"Droit à l’erreur"},
+    {"serie":"DJC","libelle":"Dispositions juridiques communes"},
+    {"serie":"ENR","libelle":"Enregistrement"},
+    {"serie":"IF","libelle":"Impôts fonciers"},
+    {"serie":"IMG","libelle":"Imposition mondiale des groupes"},
+    {"serie":"INT","libelle":"Fiscalité internationale"},
+    {"serie":"IR","libelle":"Impôt sur le revenu"},
+    {"serie":"IS","libelle":"Impôt sur les sociétés"},
+    {"serie":"PAT","libelle":"Impôts sur le patrimoine"},
+    {"serie":"REC","libelle":"Recouvrement"},
+    {"serie":"RES","libelle":"Rescrits"},
+    {"serie":"RFPI","libelle":"Revenus fonciers et plus-values immobilières"},
+    {"serie":"RPPM","libelle":"Revenus du patrimoine mobilier"},
+    {"serie":"RSA","libelle":"Revenus salariaux et assimilés"},
+    {"serie":"SJ","libelle":"Sécurité juridique"},
+    {"serie":"TCA","libelle":"Taxes sur le chiffre d’affaires"},
+    {"serie":"TCAS","libelle":"Taxes sur les conventions d’assurance"},
+    {"serie":"TFP","libelle":"Taxes sur les facteurs de production"},
+    {"serie":"TPS","libelle":"Taxes et participations sur les salaires"},
+    {"serie":"TVA","libelle":"Taxe sur la valeur ajoutée"}]'>
+  </dsfr-data-source>
+  <dsfr-data-join id="b-ser-j1" left="b-ser" right="b-ser-ouv" on="serie" type="left"></dsfr-data-join>
+  <dsfr-data-join id="b-ser-j2" left="b-ser-j1" right="b-ser-rec" on="serie" type="left"></dsfr-data-join>
+  <dsfr-data-join id="b-ser-j3" left="b-ser-j2" right="b-lib" on="serie" type="left"></dsfr-data-join>
+  <!-- Parts en points, sur les commentaires de la série. Les trois tranches
+       font 100 (à l'arrondi près) : ouverture / republié de fin 2012 à 2023 /
+       republié depuis 2024. -->
+  <dsfr-data-normalize id="b-ser-n" source="b-ser-j3"
+    compute="tout_s = 'x';
+      nom = coalesce(libelle, serie) + ' (' + serie + ')';
+      n_ouv = coalesce(ouv, 0);
+      n_rec = coalesce(rec, 0);
+      n_mid = n - coalesce(ouv, 0) - coalesce(rec, 0);
+      p_ouv = round(n_ouv / n * 100, 1);
+      p_rec = round(n_rec / n * 100, 1);
+      p_mid = round(n_mid / n * 100, 1)">
+  </dsfr-data-normalize>
+  <!-- Moins de 20 commentaires : une part n'y veut rien dire (DAE, IMG au
+       2026-09-27). Dit sous le graphique. -->
+  <dsfr-data-query id="b-ser-q" source="b-ser-n" where="n:gte:20" order-by="p_ouv:desc"></dsfr-data-query>
+  <dsfr-data-query id="b-ser-haut" source="b-ser-q" limit="1"></dsfr-data-query>
+  <dsfr-data-query id="b-ser-ir" source="b-ser-n" where="serie:eq:IR"></dsfr-data-query>
+  <dsfr-data-query id="b-ser-exclu" source="b-ser-n" where="n:lt:20" group-by="tout_s"
+    aggregate="serie:count:k, n:sum:c">
+  </dsfr-data-query>
+  <dsfr-data-normalize id="b-ser-tab" source="b-ser-q"
+    rename="nom:Série | n:Commentaires | p_ouv:Version du 12/09/2012 (%) | p_mid:Republié fin 2012-2023 (%) | p_rec:Republié depuis 2024 (%)">
+  </dsfr-data-normalize>
+
+  <!-- ---------- Nuance : un exemple que tout lecteur peut vérifier ----------
+       « Tribunal de grande instance » : juridiction remplacée par le tribunal
+       judiciaire au 1er janvier 2020. `like` porte sur les mots du titre. -->
+  <dsfr-data-source id="b-tgi" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur" api-key-ref="ods-mef"
+    where="type = 'Contenu' and titre like 'tribunal de grande instance'"
+    select="count(*) as n, max(debut_de_validite) as mx" limit="1">
+  </dsfr-data-source>
+
+  <!-- ---------- Exploration : recherche plein texte, facettes, pagination serveur ---------- -->
+  <dsfr-data-source id="bofip" api-type="opendatasoft"
+    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur"
+    api-key-ref="ods-mef" server-side page-size="10"
+    select="type, titre, debut_de_validite, serie, division, identifiant_juridique, permalien"
+    order-by="debut_de_validite:desc">
+  </dsfr-data-source>
 
   <div class="fr-container fr-mt-6w">
     <nav role="navigation" class="fr-breadcrumb" aria-label="vous êtes ici :">
@@ -43,115 +194,168 @@
       </div>
     </nav>
 
-    <h1>Bulletins officiels des finances publiques en vigueur</h1>
+    <h1>Un commentaire fiscal sur cinq n'a pas changé depuis l'ouverture du BOFiP, en 2012</h1>
 
-    <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
-      <div class="fr-col-12 fr-col-md-8">
-        <details class="fr-callout fr-icon-database-line odv-contexte">
+    <dsfr-data-repeat source="b-synth-p">
+      <template>
+        <p class="fr-text--lead">Le Bulletin officiel des finances publiques rassemble la doctrine de
+          l'administration fiscale. Sur ses <strong>{{n:number}} commentaires</strong> en vigueur,
+          <strong>{{ouv:number}}</strong> — {{p_ouv:number:0}}&nbsp;%, un sur {{un_sur:number:0}} — sont
+          encore dans la version versée le jour de son ouverture, le 12&nbsp;septembre 2012, et n'ont
+          jamais été republiés depuis. Et la proportion change du tout au tout d'une série à
+          l'autre&nbsp;: une partie de la doctrine a été réécrite, une autre attend toujours.</p>
+      </template>
+    </dsfr-data-repeat>
+    <dsfr-data-repeat source="b-max">
+      <template>
+        <p class="fr-text--sm fr-hint-text">Jeu <code>bofip-vigueur</code> de la DGFiP, dernière version
+          publiée le {{mx:date}}. Les nombres de cette page sont lus dans le jeu à chaque chargement.</p>
+      </template>
+    </dsfr-data-repeat>
+
+    <dsfr-data-kpi-group class="fr-mb-4w">
+      <dsfr-data-kpi source="b-synth" value="n:sum" format="nombre"
+        heading="Commentaires" label="en vigueur au BOFiP" span="4"></dsfr-data-kpi>
+      <dsfr-data-kpi source="b-synth" value="ouv:sum / n:sum" format="pourcentage" decimals="0"
+        heading="Version de 2012" label="jamais republiés depuis l'ouverture" span="4"></dsfr-data-kpi>
+      <dsfr-data-kpi source="b-tot" value="n:sum{type:eq:Actualité}" format="nombre"
+        heading="Actualités" label="en vigueur, à part des commentaires" span="4"></dsfr-data-kpi>
+    </dsfr-data-kpi-group>
+
+    <details class="fr-callout fr-icon-database-line fr-mb-4w odv-contexte">
       <summary><h2 class="fr-callout__title fr-text--md">Le jeu de données utilisé</h2></summary>
-<p class="fr-callout__text fr-text--sm">
-            <a href="https://data.economie.gouv.fr/explore/dataset/bofip-vigueur/"
-               target="_blank" rel="noopener external"><code>bofip-vigueur</code></a>
-            — les documents du BOFiP-Impôts actuellement en vigueur, <strong>commentaires et actualités</strong>
-            (types «&nbsp;Contenu&nbsp;» et «&nbsp;Actualité&nbsp;», dont la facette Type donne la part), avec leur
-            série, leur division, leur identifiant juridique, leur date de début de validité (celle de la
-            <em>version publiée</em> du commentaire, pas la date d'application des règles qu'il commente),
-            leur contenu intégral et leur permalien sur
-            <a href="https://bofip.impots.gouv.fr/" target="_blank" rel="noopener external">bofip.impots.gouv.fr</a>.
-            Mis à jour quotidiennement par la DGFiP. Le compte est un compte de lignes du jeu&nbsp;: une vingtaine
-            d'identifiants juridiques y figurent deux fois (deux versions en vigueur, ou deux enregistrements
-            distincts). Le catalogue renvoie à
-            <a href="https://www.economie.gouv.fr/dgfip/bulletins-officiels" target="_blank" rel="noopener external">une
-            page d'economie.gouv.fr</a> qui présente les bulletins et renvoie vers leur moteur de recherche.
-          </p>
+      <p class="fr-callout__text fr-text--sm">
+        <a href="https://data.economie.gouv.fr/explore/dataset/bofip-vigueur/"
+           target="_blank" rel="noopener external"><code>bofip-vigueur</code></a>
+        — les documents du BOFiP-Impôts en vigueur&nbsp;: <strong>commentaires</strong> (type
+        «&nbsp;Contenu&nbsp;», la doctrine proprement dite) et <strong>actualités</strong> (type
+        «&nbsp;Actualité&nbsp;», les annonces de mise à jour). Pour chacun&nbsp;: série (l'impôt ou la
+        procédure), division, identifiant juridique, date de <em>début de validité</em> — celle de la
+        version en vigueur, qui figure aussi dans le permalien —, texte intégral et lien vers
+        <a href="https://bofip.impots.gouv.fr/" target="_blank" rel="noopener external">bofip.impots.gouv.fr</a>.
+        Mis à jour chaque jour par la DGFiP. Le catalogue renvoie à
+        <a href="https://www.economie.gouv.fr/dgfip/bulletins-officiels" target="_blank" rel="noopener external">une
+        page d'economie.gouv.fr</a> qui présente les bulletins, sans dataviz.
+      </p>
     </details>
+  </div>
+
+  <div class="fr-container fr-mb-8w">
+
+    <!-- ============================ PREUVE 1 ============================ -->
+    <div class="odv-viz" data-code="Âge de la version en vigueur, par série">
+      <h2 class="fr-h4">Le contentieux et l'enregistrement reposent encore largement sur la version de 2012&nbsp;; l'impôt sur le revenu a été réécrit</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Pour chaque série, part des commentaires
+        en vigueur selon la date de leur version&nbsp;: celle du 12&nbsp;septembre 2012 (jamais
+        republiée), une version publiée entre fin 2012 et 2023, ou une version publiée depuis le
+        1er&nbsp;janvier 2024. Séries triées par la première part. Actualités exclues&nbsp;; séries de
+        moins de 20 commentaires non dessinées.</p>
+      <dsfr-data-repeat source="b-ser-haut">
+        <template>
+          <p class="odv-lecture">En tête, la série <strong>{{nom}}</strong>&nbsp;:
+            <strong>{{p_ouv:number:0}}&nbsp;%</strong> de ses {{n:number}} commentaires sont dans leur
+            version d'ouverture, {{p_rec:number:0}}&nbsp;% seulement ont été republiés depuis 2024.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="b-ser-ir">
+        <template>
+          <p class="odv-lecture">Contrepoint, une des plus grandes séries, l'<strong>impôt sur le revenu</strong>&nbsp;:
+            {{p_ouv:number:0}}&nbsp;% de ses {{n:number}} commentaires ont gardé la version de 2012, et
+            <strong>{{p_rec:number:0}}&nbsp;%</strong> ont été republiés depuis 2024.</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <dsfr-data-chart id="g-serie" source="b-ser-q" type="bar" horizontal stacked
+          label-field="nom" value-field="p_ouv:Version du 12/09/2012"
+          value-fields="p_mid:Republié fin 2012-2023, p_rec:Republié depuis 2024"
+          unit-tooltip="%"
+          databox databox-title="Date de la version en vigueur des commentaires, par série (en % des commentaires de la série)"
+          databox-source="DGFiP — bofip-vigueur, via data.economie.gouv.fr" databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-serie" source="b-ser-tab" table download
+          label-field="Série" value-field="Commentaires, Version du 12/09/2012 (%), Republié fin 2012-2023 (%), Republié depuis 2024 (%)"
+          description="Barres horizontales empilées à 100 %, une par série du BOFiP, triées par la part des commentaires encore dans leur version du 12 septembre 2012. Le contentieux vient en tête, où la majorité des commentaires n'ont jamais été republiés, suivi de l'enregistrement. En bas, les impôts sur le patrimoine, les bénéfices agricoles et les taxes sur le chiffre d'affaires en gardent quelques pour cent ; les autres impositions sectorielles, les rescrits et les taxes sur les salaires, aucun. L'impôt sur le revenu, grande série, n'en garde qu'un peu moins d'un dixième et a republié un tiers de ses commentaires depuis 2024."></dsfr-data-a11y>
       </div>
-      <div class="fr-col-12 fr-col-md-4">
-        <dsfr-data-kpi source="bofip-total" value="nb:max" format="nombre"
-          heading="En vigueur" label="documents au BOFiP" icon="fr-icon-book-2-line">
-        </dsfr-data-kpi>
+      <dsfr-data-repeat source="b-ser-exclu">
+        <template>
+          <p class="fr-text--xs fr-hint-text">Non dessinées&nbsp;: {{k:number}} séries de moins de 20
+            commentaires ({{c:number}} commentaires au total), trop petites pour qu'une part y ait un sens.
+            Elles restent dans la recherche ci-dessous.</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+
+    <!-- ============================ PREUVE 2 ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="Année de la version en vigueur des commentaires">
+      <h2 class="fr-h4">Chaque année, quelques centaines de commentaires changent de version&nbsp;; le bloc de 2012, lui, reste</h2>
+      <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Nombre de commentaires en vigueur selon
+        l'année de leur version actuelle. Un commentaire republié en 2024 compte en 2024, quelle que
+        soit sa date de première publication&nbsp;: le jeu ne porte que la version en vigueur, pas
+        l'historique. La dernière barre est l'année en cours.</p>
+      <dsfr-data-repeat source="b-rythme">
+        <template>
+          <p class="odv-lecture">De 2013 à 2025, entre <strong>{{mn:number}}</strong> et
+            <strong>{{mx:number}}</strong> commentaires par an portent une version publiée cette
+            année-là ({{moy:number:0}} en moyenne). En 2012, la barre est haute pour une autre raison&nbsp;:
+            c'est le versement initial de la doctrine, en une journée.</p>
+        </template>
+      </dsfr-data-repeat>
+      <dsfr-data-repeat source="b-mediane">
+        <template>
+          <p class="odv-lecture">La moitié des commentaires en vigueur sont dans une version de
+            <strong>{{annee}} ou d'avant</strong> (le cumul y franchit {{cumul_part:number:0}}&nbsp;%).</p>
+        </template>
+      </dsfr-data-repeat>
+      <div class="odv-chart-slot">
+        <dsfr-data-chart id="g-annee" source="b-an-n" type="bar" stacked
+          label-field="annee" value-field="v_ouv:Version du 12/09/2012 (ouverture)"
+          value-fields="v_autre:Version publiée dans l'année"
+          unit-tooltip=" commentaires"
+          databox databox-title="Commentaires en vigueur, selon l'année de leur version actuelle"
+          databox-source="DGFiP — bofip-vigueur, via data.economie.gouv.fr" databox-download>
+        </dsfr-data-chart>
+        <dsfr-data-a11y for="g-annee" source="b-an-tab" table download
+          label-field="Année" value-field="Commentaires, Version du 12/09/2012, Version publiée dans l'année, Part cumulée (%)"
+          description="Barres empilées par année, de 2012 à l'année en cours : le nombre de commentaires en vigueur dont la version actuelle date de cette année. La barre de 2012 domine, presque entièrement faite des commentaires versés le jour de l'ouverture du BOFiP. Les années suivantes, de deux cents à cinq cents commentaires environ, sans tendance nette. La dernière année n'est pas complète."></dsfr-data-a11y>
       </div>
+      <dsfr-data-repeat source="b-max">
+        <template>
+          <p class="fr-text--xs fr-hint-text">Année en cours arrêtée à la dernière version publiée, le
+            {{mx:date}}&nbsp;: sa barre n'est pas comparable aux années pleines.</p>
+        </template>
+      </dsfr-data-repeat>
+    </div>
+
+    <!-- ============================ NUANCE ============================ -->
+    <div class="odv-viz fr-mt-6w" data-code="Un exemple : le tribunal de grande instance">
+      <h2 class="fr-h4">Ancien n'est pas faux&nbsp;— mais une doctrine de 2012 parle le droit de 2012</h2>
+      <p>Un commentaire resté dans sa version d'ouverture peut être parfaitement à jour&nbsp;: une
+        procédure stable n'a pas besoin d'être réécrite, et le jeu ne dit pas si la loi commentée a
+        changé. Mais certains écarts se lisent dans les titres mêmes.</p>
+      <dsfr-data-repeat source="b-tgi">
+        <template>
+          <p class="odv-lecture"><strong>{{n:number}} commentaires</strong> en vigueur portent encore
+            «&nbsp;tribunal de grande instance&nbsp;» dans leur titre, juridiction devenue tribunal
+            judiciaire le 1er&nbsp;janvier 2020. La plus récente de leurs versions date du
+            <strong>{{mx:date}}</strong>&nbsp;: toutes sont antérieures à la réforme. La recherche
+            ci-dessous en trouve bien davantage, parce qu'elle lit aussi le texte, y compris de versions
+            récentes où la mention peut n'être qu'historique&nbsp;: un mot dans un titre est un indice,
+            pas une preuve.</p>
+        </template>
+      </dsfr-data-repeat>
+      <p class="fr-text--sm">Pour le lecteur, la conséquence est pratique&nbsp;: la date affichée sur un
+        commentaire est celle de sa version, pas celle des règles qu'il commente. Une version de 2012
+        peut viser un texte de 1980, et ne pas voir une loi de 2019.</p>
     </div>
   </div>
 
-  <!-- ==========================================================================
-       Pipeline serveur : les quelque 9 000 documents ont un champ `contenu` de
-       plusieurs kilo-octets chacun ; on ne les charge jamais. Recherche plein
-       texte Opendatasoft (qui indexe le contenu), facettes serveur, pagination
-       serveur. Des sources agrégées pour le compteur et la chronologie.
-       ========================================================================== -->
-
-  <!-- Les facettes Série / Division / Type passent par ce contexte, qui diffuse
-       chaque sélection en `where` à la liste ET à la chronologie : les trois
-       champs existent sur les deux sources. La recherche plein texte reste
-       chaînée à la seule liste — en mode `context` elle deviendrait un
-       `contains` sur UN champ, pas le `search()` de l'index qui couvre `contenu`. -->
-  <dsfr-data-context id="bofip-ctx" sources="bofip bofip-annees"></dsfr-data-context>
-
-  <dsfr-data-source id="bofip" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur"
-    api-key-ref="ods-mef" server-side page-size="10"
-    select="type, titre, debut_de_validite, serie, division, identifiant_juridique, permalien"
-    order-by="debut_de_validite:desc">
-  </dsfr-data-source>
-
-  <dsfr-data-source id="bofip-total" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur"
-    api-key-ref="ods-mef" select="count(*) as nb" limit="1">
-  </dsfr-data-source>
-
-  <!-- Chronologie : une expression dans `group-by` passe telle quelle depuis
-       #641 (0.23.0). `date_format(…,'yyyy')` plutôt que `year(…)` : le portail
-       renvoie une CHAÎNE « 2012 » (et non l'entier 2012, que le tableau
-       accessible rendait « 2 012 ») ; l'ordre lexicographique vaut l'ordre
-       chronologique, et l'adaptateur ne coupe pas la virgule entre parenthèses
-       (#767). Ce qui reste vrai de PG-014 : BUG-010 — un alias SANS parenthèse
-       (`x as y`) est toujours backquoté et vaut un HTTP 400. -->
-  <dsfr-data-source id="bofip-annees" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur"
-    api-key-ref="ods-mef"
-    select="count(*) as nb" group-by="date_format(debut_de_validite,'yyyy') as annee"
-    order-by="annee" limit="30">
-  </dsfr-data-source>
-  <!-- Deux faits lus dans la donnée, jamais écrits à la main : le poids du jour
-       d'ouverture du BOFiP (12 septembre 2012 = min(debut_de_validite)), et la
-       date de la dernière version publiée, qui borne l'année en cours. Hors
-       contexte : ils décrivent l'ensemble du corpus. -->
-  <dsfr-data-source id="bofip-j0" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur"
-    api-key-ref="ods-mef" select="count(*) as nb"
-    where="debut_de_validite = date'2012-09-12'" limit="1">
-  </dsfr-data-source>
-  <dsfr-data-source id="bofip-max" api-type="opendatasoft"
-    base-url="https://data.economie.gouv.fr" dataset-id="bofip-vigueur"
-    api-key-ref="ods-mef" select="max(debut_de_validite) as mx" limit="1">
-  </dsfr-data-source>
-  <!-- Agrégats de fenêtre (#738, #926), calculés au client sur les quinze lignes
-       déjà agrégées par le portail : le cumul en documents pour la ligne du
-       graphique, la part de chaque année et son cumul pour la phrase de lecture.
-       Tous s'appliquent après le tri et avant `limit`. -->
-  <dsfr-data-query id="bofip-cumul" source="bofip-annees"
-    aggregate="nb:running_sum:cumul_nb, nb:share_percent:part, part:running_sum:cumul_part"
-    order-by="annee:asc">
-  </dsfr-data-query>
-  <!-- L'année où le cumul franchit la moitié du corpus : première ligne au-delà de 50 %. -->
-  <dsfr-data-query id="bofip-mediane" source="bofip-cumul" where="cumul_part:gte:50" limit="1"></dsfr-data-query>
-  <!-- Le tableau équivalent se lit seul : en-têtes en français, part arrondie
-       au dixième. Le graphique garde `bofip-cumul` et ses noms de champ. -->
-  <dsfr-data-normalize id="bofip-tableau" source="bofip-cumul"
-    round="cumul_part:1"
-    rename="annee:Année | nb:Documents | cumul_nb:Cumul | cumul_part:Part cumulée (%)">
-  </dsfr-data-normalize>
-
-  <!-- Socle du gabarit : la recherche sort de la colonne de filtres pour un
-       bandeau pleine largeur. Elle dit « combien » AVANT que le lecteur ne
-       choisisse « lesquels » -- et un champ large se repere d'un coup d'oeil,
-       la ou une recherche rangee dans une colonne se confond avec les filtres. -->
+  <!-- ============================ EXPLORATION ============================ -->
   <section class="odv-bandeau">
     <div class="fr-container">
+      <h2 class="fr-h4">Chercher un commentaire, et voir de quand date sa version</h2>
       <div class="odv-bandeau__recherche">
-        <dsfr-data-search id="bofip-q" source="bofip" server-search count count-label="document"
-        label="Mots du titre ou du contenu, identifiant BOI-…" placeholder="Ex. : crédit d'impôt recherche, BOI-IR-RICI">
+        <dsfr-data-search id="bofip-q" source="bofip" server-search
+          label="Mots du titre ou du contenu, identifiant BOI-…" placeholder="Ex. : crédit d’impôt recherche, BOI-IR-RICI">
         </dsfr-data-search>
       </div>
     </div>
@@ -159,217 +363,154 @@
 
   <div class="fr-container fr-mb-8w">
     <div class="fr-grid-row fr-grid-row--gutters odv-zone">
-
       <details class="fr-col-12 fr-col-lg-3 odv-filtres" open>
         <summary class="fr-btn fr-btn--secondary fr-btn--icon-left fr-icon-filter-line fr-mb-2w">
-          Rechercher un bulletin<span class="odv-filtres__compte"></span>
+          Filtrer<span class="odv-filtres__compte"></span>
         </summary>
-        <h2 class="fr-h6">Rechercher un bulletin</h2>
-
-        <dsfr-data-facets id="bofip-f" source="bofip-q" server-facets context="bofip-ctx"
-          fields="serie, division, type"
-          labels="serie:Série | division:Division | type:Type de document"
+        <h3 class="fr-h6">Filtrer</h3>
+        <!-- `server-facets` + `fields` : le jeu ne déclare aucune facette au
+             back-office, mais le portail calcule celles qu'on lui demande. -->
+        <dsfr-data-facets id="bofip-f" source="bofip-q" server-facets
+          fields="type, serie, division"
+          labels="type:Type de document | serie:Série | division:Division"
+          value-labels='{"type": {"Contenu": "Commentaire"}, "serie": {"AIS": "Autres impositions sectorielles (AIS)", "BA": "Bénéfices agricoles (BA)", "BIC": "Bénéfices industriels et commerciaux (BIC)", "BNC": "Bénéfices non commerciaux (BNC)", "CAD": "Cadastre (CAD)", "CF": "Contrôle fiscal (CF)", "CTX": "Contentieux (CTX)", "CVAE": "Cotisation sur la valeur ajoutée (CVAE)", "DAE": "Droit à l’erreur (DAE)", "DJC": "Dispositions juridiques communes (DJC)", "ENR": "Enregistrement (ENR)", "IF": "Impôts fonciers (IF)", "IMG": "Imposition mondiale des groupes (IMG)", "INT": "Fiscalité internationale (INT)", "IR": "Impôt sur le revenu (IR)", "IS": "Impôt sur les sociétés (IS)", "PAT": "Impôts sur le patrimoine (PAT)", "REC": "Recouvrement (REC)", "RES": "Rescrits (RES)", "RFPI": "Revenus fonciers et plus-values immobilières (RFPI)", "RPPM": "Revenus du patrimoine mobilier (RPPM)", "RSA": "Revenus salariaux et assimilés (RSA)", "SJ": "Sécurité juridique (SJ)", "TCA": "Taxes sur le chiffre d’affaires (TCA)", "TCAS": "Taxes sur les conventions d’assurance (TCAS)", "TFP": "Taxes sur les facteurs de production (TFP)", "TPS": "Taxes et participations sur les salaires (TPS)", "TVA": "Taxe sur la valeur ajoutée (TVA)"}}'
           searchable="division" max-values="8"
           display="serie:multiselect | division:multiselect">
         </dsfr-data-facets>
-        <p class="fr-text--xs fr-hint-text fr-mt-1w odv-avert-division">Les actualités n'ont pas de
-          division&nbsp;: choisir une division les écarte.</p>
+        <p class="fr-text--xs fr-hint-text fr-mt-1w">Les actualités n'ont pas de division&nbsp;: choisir
+          une division les écarte.</p>
       </details>
 
       <div class="fr-col-12 fr-col-lg-9">
-        <div class="odv-viz" data-code="Année de la version en vigueur et cumul du corpus">
-          <h2 class="fr-h4">De quand date la version en vigueur des commentaires</h2>
-          <p class="fr-text--sm fr-hint-text fr-mb-2w odv-methode">Nombre de documents en vigueur
-            (commentaires et actualités) par année de leur version actuelle. Suit les filtres Série,
-            Division et Type&nbsp;; ne suit pas la recherche plein texte.</p>
-          <dsfr-data-repeat source="bofip-mediane">
-            <template>
-              <p class="odv-lecture">La moitié des documents en vigueur sont dans leur version actuelle
-                <strong>depuis {{annee}} ou avant</strong>&nbsp;: c'est l'année où le cumul franchit
-                <strong>{{cumul_part:number:0}}&nbsp;%</strong> des documents (colonne «&nbsp;Part
-                cumulée&nbsp;» du tableau). La date est celle de la version publiée du commentaire, pas
-                la date d'application des règles commentées.</p>
-            </template>
-          </dsfr-data-repeat>
-          <div class="odv-chart-slot fr-mb-4w">
-            <!-- Essayé en `bar-line` (barres = documents de l'année, ligne = cumul,
-                 même unité) : DSFR Chart trace TOUJOURS deux axes Y indépendants
-                 (`yBar` à gauche, `yLine` à droite, bornes séparées), et dsfr-data
-                 0.33 ne pose `y-bar-max` / `y-line-max` que depuis `targets`. Un
-                 cumul à 9 000 face à des barres à 1 500 donnait un double axe
-                 trompeur — vérifié à l'écran. Le cumul reste dans le tableau. -->
-            <dsfr-data-chart id="g-annees" source="bofip-cumul" type="bar"
-              label-field="annee" value-field="nb" name="Documents dont la version en vigueur date de l'année"
-              unit-tooltip="documents"
-              databox databox-title="Année de la version en vigueur, pour les documents encore applicables"
-              databox-source="DGFiP — bofip-vigueur, via data.economie.gouv.fr" databox-download>
-            </dsfr-data-chart>
-            <dsfr-data-a11y for="g-annees" source="bofip-tableau" table download
-              label-field="Année" value-field="Documents, Cumul, Part cumulée (%)"
-              description="Pour chaque année depuis 2012, le nombre de documents du BOFiP encore en vigueur dont la version en vigueur a été publiée cette année-là, le cumul et la part cumulée du corpus. La barre de 2012 n'est pas une année féconde : la plupart de ses documents portent la date du 12 septembre 2012, jour d'ouverture du BOFiP, où la doctrine antérieure a été reprise en bloc. La dernière année est l'année en cours, arrêtée à la dernière version publiée : elle n'est pas comparable aux années pleines."></dsfr-data-a11y>
-          </div>
-          <dsfr-data-repeat source="bofip-j0">
-            <template>
-              <p class="fr-text--sm odv-pic-2012">2012 n'est pas une année féconde&nbsp;: <strong>{{nb:number}}
-                documents</strong> portent la date du 12 septembre 2012, jour d'ouverture du BOFiP, où la
-                doctrine antérieure a été reprise en bloc (ensemble du corpus).</p>
-            </template>
-          </dsfr-data-repeat>
-          <dsfr-data-repeat source="bofip-max">
-            <template>
-              <p class="fr-text--sm odv-annee-en-cours">La dernière barre est l'année en cours, arrêtée à la
-                dernière version publiée, le <strong>{{mx:date}}</strong>&nbsp;: elle n'est pas comparable
-                aux années pleines.</p>
-            </template>
-          </dsfr-data-repeat>
-        </div>
-
         <div class="odv-viz" data-code="Les documents, recherche et facettes serveur">
-        <h2 class="fr-h4">Les documents</h2>
-        <dsfr-data-display id="bofip-liste" source="bofip-f" cols="1" uid-field="permalien"
-          empty="Aucun document ne correspond à cette recherche." count-label="document">
-          <template>
-            <div class="fr-card fr-card--sm fr-card--horizontal fr-enlarge-link">
-              <div class="fr-card__body">
-                <div class="fr-card__content">
-                  <h3 class="fr-card__title"><a href="{{permalien}}" target="_blank" rel="noopener external">{{titre}}</a></h3>
-                  <p class="fr-card__desc fr-text--sm">{{identifiant_juridique}} — version du {{debut_de_validite:date}}</p>
-                  <div class="fr-card__start">
-                    <ul class="fr-tags-group">
-                      <li><p class="fr-tag fr-tag--sm">{{serie}}</p></li>
-                      {{#if division}}<li><p class="fr-tag fr-tag--sm">{{division}}</p></li>{{/if}}
-                      <li><p class="fr-tag fr-tag--sm">{{type}}</p></li>
-                    </ul>
+          <h3 class="fr-h5">Les documents, du plus récemment republié au plus ancien</h3>
+          <dsfr-data-display id="bofip-liste" source="bofip-f" cols="1" uid-field="permalien"
+            empty="Aucun document ne correspond à cette recherche." count-label="document">
+            <template>
+              <div class="fr-card fr-card--sm fr-card--horizontal fr-enlarge-link">
+                <div class="fr-card__body">
+                  <div class="fr-card__content">
+                    <h4 class="fr-card__title"><a href="{{permalien}}" target="_blank" rel="noopener external">{{titre}}</a></h4>
+                    <p class="fr-card__desc fr-text--sm">{{identifiant_juridique}} — version du {{debut_de_validite:date}}</p>
+                    <div class="fr-card__start">
+                      <ul class="fr-tags-group">
+                        <li><p class="fr-tag fr-tag--sm">{{type}}</p></li>
+                        {{#if serie}}<li><p class="fr-tag fr-tag--sm">{{serie}}</p></li>{{/if}}
+                        {{#if division}}<li><p class="fr-tag fr-tag--sm">{{division}}</p></li>{{/if}}
+                      </ul>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </template>
-        </dsfr-data-display>
+            </template>
+          </dsfr-data-display>
         </div>
       </div>
+    </div>
 
+    <!-- ============================ CE QU'ON NE MONTRE PAS ============================ -->
+    <div class="fr-callout fr-mt-6w">
+      <h2 class="fr-callout__title fr-h5">Ce que cette page ne montre pas</h2>
+      <ul class="fr-callout__text fr-text--sm">
+        <li><strong>La date du droit.</strong> <code>debut_de_validite</code> date la version publiée du
+          commentaire, pas l'entrée en vigueur des règles commentées. «&nbsp;Version de 2012&nbsp;» ne veut
+          dire ni «&nbsp;règle de 2012&nbsp;» ni «&nbsp;règle périmée&nbsp;».</li>
+        <li><strong>L'historique.</strong> Le jeu ne porte que la version en vigueur&nbsp;: on ne sait pas
+          combien de fois un commentaire a été republié, ni quand il a été créé. Les graphiques décrivent
+          l'âge du stock, pas l'activité d'une année.</li>
+        <li><strong>Les actualités dans le récit.</strong> Elles annoncent les mises à jour mais ne
+          portent pas la doctrine&nbsp;: les deux graphiques ne comptent que les commentaires. La recherche
+          les inclut.</li>
+        <li><strong>Les lignes sans série.</strong> Six documents-racines d'annexes et de barèmes n'ont
+          pas de série (relevé le 2026-09-27)&nbsp;: absents du premier graphique, présents dans le
+          second et dans la recherche.</li>
+        <li><strong>Les doublons d'identifiant.</strong> Au 2026-09-27, 9&nbsp;148 lignes pour
+          9&nbsp;125 identifiants juridiques distincts&nbsp;: une vingtaine de BOI figurent deux fois (deux
+          versions «&nbsp;en vigueur&nbsp;», ou deux enregistrements de même date). Les comptes sont des
+          comptes de lignes&nbsp;; l'écart est de 0,25&nbsp;%.</li>
+      </ul>
     </div>
   </div>
 
   <!-- ====================== Analyse de reproduction ====================== -->
-  <details class="odv-technique fr-container" id="analyse">
-    <summary>Analyse technique — ce que la reproduction a coûté</summary>
-  <section class="odv-analyse fr-py-8w">
-    <div class="fr-container">
-      <h2>Analyse de reproduction — Bulletins officiels des finances publiques</h2>
-      <p>
-        Cible d'origine&nbsp;: une page éditoriale d'economie.gouv.fr qui explique ce que sont les BOFiP
-        et renvoie au site <code>bofip.impots.gouv.fr</code>, dont le moteur de recherche est l'outil réel.
-        Le catalogue la classe en «&nbsp;Visualisation&nbsp;» et lui associe le jeu
-        <code>bofip-vigueur</code>. Il n'y a pas de dataviz à reproduire, mais il y a un usage
-        évident&nbsp;: chercher dans les documents en vigueur (9&nbsp;148 au 2026-09-26), et voir de quand
-        date leur version actuelle.
+  <div class="fr-container fr-mb-8w">
+  <details class="odv-technique" id="analyse">
+    <summary>Analyse technique — ce que la recréation a coûté</summary>
+  <section class="odv-analyse fr-py-4w">
+    <div>
+      <h2>Analyse — Bulletins officiels des finances publiques, une page recréée</h2>
+
+      <p class="fr-text--lead">
+        Cible d'origine&nbsp;: une page éditoriale d'economie.gouv.fr, sans dataviz, qui renvoie au
+        moteur de <code>bofip.impots.gouv.fr</code>. La version précédente de cette page reconstruisait
+        ce moteur et y ajoutait une chronologie. La recréation du 2026-09-27 garde le moteur en bas de
+        page et répond d'abord à une question que ni l'original ni la version précédente ne posaient&nbsp;:
+        <em>quelle part de la doctrine fiscale n'a jamais été republiée depuis 2012, et où&nbsp;?</em>
       </p>
 
       <div class="fr-grid-row fr-grid-row--gutters fr-mb-4w">
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a été simple</h3>
           <ul>
-            <li><strong>La recherche plein texte porte sur le contenu sans le charger.</strong>
-              <code>server-search</code> envoie <code>search("…")</code> à Opendatasoft, dont l'index couvre
-              le champ <code>contenu</code> (plusieurs Ko par document)&nbsp;; la page ne reçoit que dix titres.
-              C'est le cas où le mode serveur n'est pas une option mais la seule voie.</li>
-            <li><strong>Une fonction de date en agrégation serveur.</strong>
-              <code>group-by="date_format(debut_de_validite,'yyyy') as annee"</code> donne la chronologie en
-              une requête de quinze lignes, depuis l'adaptateur (l'alias dans <code>group_by</code>, pas dans
-              <code>select</code>, PG-008). <code>date_format</code> plutôt que <code>year()</code>&nbsp;: le
-              portail rend une chaîne «&nbsp;2012&nbsp;», là où l'entier de <code>year()</code> s'affichait
-              «&nbsp;2&nbsp;012&nbsp;» dans le tableau accessible. La virgule entre parenthèses ne coupe pas la
-              liste (#767).</li>
-            <li><strong>Les facettes pilotent aussi la chronologie.</strong> Un <code>dsfr-data-context</code>
-              qui vise la liste et l'agrégat annuel, et <code>context="bofip-ctx"</code> sur les facettes&nbsp;:
-              après «&nbsp;Actualité&nbsp;», la requête annuelle part avec <code>where type = "Actualité"</code>
-              et la première ligne du tableau passe de 1&nbsp;478 à 67 documents (relevé le 2026-09-26). Aucune
-              ligne de JavaScript.</li>
-            <li><strong>Les faits qui bornent la lecture viennent de la donnée.</strong> Le poids du
-              12&nbsp;septembre&nbsp;2012 (<code>count(*)</code> filtré sur la date d'ouverture) et la date de
-              la dernière version (<code>max(debut_de_validite)</code>, rendue <code>{{mx:date}}</code>) sont
-              deux sources d'une ligne, rendues par <code>dsfr-data-repeat</code> — rien n'est écrit à la main.</li>
-            <li><strong><code>server-facets</code> marche sur un jeu qui ne déclare aucune facette.</strong>
-              <code>/facets</code> est vide à l'API, mais le composant demande
-              <code>/facets?facet=serie&amp;facet=division&amp;facet=type</code> et le portail calcule à la
-              demande (Contenu / Actualité à l'écran). Le piège «&nbsp;jeu sans facette déclarée → liste
-              vide&nbsp;» ne vaut que sans <code>fields</code>.</li>
-            <li><strong>Le permalien fait le lien</strong> — et c'est aussi la bonne clé&nbsp;:
-              <code>uid-field="permalien"</code>, unique ligne à ligne, là où l'identifiant juridique revient
-              deux fois pour une vingtaine de documents.</li>
+            <li><strong>Rien n'est chargé en entier.</strong> Huit agrégats serveur de 1 à 28 lignes
+              (<code>count(*)</code> groupé par série ou par <code>date_format(…,'yyyy')</code>) portent tout
+              le récit&nbsp;; le texte intégral, plusieurs Ko par ligne, ne quitte jamais le portail.</li>
+            <li><strong>Trois comptes deviennent trois parts sans script.</strong> Trois sources groupées
+              par série, deux <code>dsfr-data-join</code> sur une clé unique des deux côtés,
+              <code>compute</code> avec <code>coalesce</code> pour les séries sans version d'ouverture.</li>
+            <li><strong>Les phrases se calculent.</strong> Série de tête, contrepoint de l'impôt sur le
+              revenu, rythme annuel, année médiane (<code>running_sum</code> + <code>share_percent</code>),
+              exemple du tribunal de grande instance&nbsp;: tous par <code>dsfr-data-repeat</code>.</li>
+            <li><strong>Le moteur tient en quatre balises</strong> (source serveur, recherche plein texte
+              sur l'index du contenu, facettes serveur, display paginé), et son unique compteur est celui du
+              display&nbsp;: la règle de page qui masquait un second compteur a disparu.</li>
           </ul>
         </div>
-
         <div class="fr-col-12 fr-col-md-6">
           <h3 class="fr-h5 fr-mb-2v">Ce qui a coincé</h3>
           <ul>
-            <li><strong>Le sens du champ date, pas la syntaxe.</strong> La première version de la page disait
-              huit fois qu'un document était «&nbsp;entré en vigueur&nbsp;» à sa <code>debut_de_validite</code>.
-              C'est faux&nbsp;: le libellé du champ au portail est «&nbsp;Début de validité&nbsp;», chaque
-              permalien porte cette date en suffixe (<code>…-20260909</code>), et le BOI de la convention
-              France-Hongrie (signée en 1980) est «&nbsp;en vigueur du 12/09/2012&nbsp;» — date de sa version,
-              pas du droit. Un corpus versionné date la version, pas la règle&nbsp;: lire le libellé du champ au
-              portail avant d'écrire «&nbsp;depuis&nbsp;». Aucune bibliothèque n'y pouvait rien.</li>
-            <li><strong>Le pic de 2012 est un artefact d'ouverture.</strong> Le BOFiP a ouvert le
-              12&nbsp;septembre&nbsp;2012 et la doctrine antérieure y a été versée ce jour-là (1&nbsp;354
-              documents sur les 1&nbsp;478 de l'année, au 2026-09-26). Sans une phrase, la barre se lit comme
-              une année féconde. Pas de <code>reference-lines</code>&nbsp;: sous <code>databox</code>, la ligne
-              n'est pas dessinée — d'où la phrase calculée sous le graphique.</li>
-            <li><strong>La chronologie ne suit pas la recherche plein texte.</strong> Les facettes passent par
-              le contexte, pas la recherche&nbsp;: en mode <code>context</code>, <code>dsfr-data-search</code>
-              devient un <code>contains</code> sur UN champ, pas le <code>search()</code> de l'index qui couvre
-              <code>contenu</code>. La recherche reste donc chaînée à la seule liste, et le sous-titre du bloc
-              le dit.</li>
-            <li><strong>Deux compteurs identiques.</strong> <code>dsfr-data-search count</code> et le compteur
-              de <code>dsfr-data-display</code> affichaient tous deux «&nbsp;N documents&nbsp;».
-              <code>count-label</code> renomme le second sans savoir le taire (AM-077)&nbsp;; contournement&nbsp;:
-              masquage <em>visuel</em> par une règle de page qui vise le DOM interne du composant
-              (<code>p[role="status"]</code>) — la région reste annoncée aux lecteurs d'écran.</li>
-            <li><strong>Le tableau équivalent parlait en noms de colonnes.</strong> «&nbsp;annee | nb |
-              cumul_nb | cumul_part&nbsp;», parts à deux décimales. Un <code>dsfr-data-normalize</code> dédié
-              (<code>rename</code> + <code>round="cumul_part:1"</code>) entre le cumul et l'a11y&nbsp;; le
-              graphique garde ses noms de champ. <code>decimals</code> sur l'a11y aurait aussi formaté les
-              colonnes entières («&nbsp;1&nbsp;478,0&nbsp;»)&nbsp;: écarté.</li>
-            <li><strong>Levés en route, restés au registre.</strong> PG-014 — l'adaptateur backquotait une
-              expression de <code>group-by</code>&nbsp;: rencontré, levé par #641, voie native en page depuis le
-              lot 18 (la source générique d'alors a disparu). AM-036 — dates brutes dans les gabarits&nbsp;:
-              levé par le pipe <code>{{champ:date}}</code> (0.22.0), appliqué aux cartes
-              («&nbsp;version du 09/09/2026&nbsp;»). AM-034 — le compteur de recherche existait&nbsp;:
-              <code>dsfr-data-search count count-label="document"</code>.</li>
+            <li><strong>Le jeu ne porte pas le nom des séries.</strong> Seulement le code
+              («&nbsp;CTX&nbsp;»). Les libellés sont repris du titre du document-racine de chaque série et
+              posés en source inline jointe&nbsp;; ODSQL ne sait pas sélectionner ces racines (le
+              <code>like</code> porte sur des mots, pas sur la forme de l'identifiant).</li>
+            <li><strong>Le sens de la date, encore.</strong> La correction du pilote tient&nbsp;: une date
+              de version, pas de droit. La page la reformule en tête des limites et dans la nuance.</li>
+            <li><strong><code>count(distinct …)</code> d'Opendatasoft est approximatif</strong>&nbsp;: 9&nbsp;278
+              identifiants «&nbsp;distincts&nbsp;» pour 9&nbsp;148 lignes. Le compte exact (9&nbsp;125) vient d'un
+              export. Côté portail, pas de <code>dsfr-data</code>.</li>
+            <li><strong>Les bornes du rythme annuel sont écrites</strong> (2013-2025)&nbsp;: exclure
+              «&nbsp;la dernière année&nbsp;» d'un agrégat demanderait de joindre la date maximale à chaque
+              ligne. Les bornes sont dites dans la phrase.</li>
           </ul>
         </div>
       </div>
 
-      <div class="fr-table fr-table--bordered">
+      <div class="fr-table fr-table--sm">
         <table>
           <caption>Correspondance cible d'origine → composant dsfr-data</caption>
           <thead>
             <tr><th scope="col">bofip.impots.gouv.fr</th><th scope="col">Ici</th><th scope="col">Verdict</th></tr>
           </thead>
           <tbody>
-            <tr><td>moteur de recherche plein texte</td><td><code>dsfr-data-search server-search count</code></td><td>Équivalent, sur l'index Opendatasoft (pertinence différente)</td></tr>
-            <tr><td>navigation par série / division</td><td><code>dsfr-data-facets server-facets context</code></td><td>Équivalent&nbsp;; les actualités, sans division, sortent dès qu'on choisit une division (dit sous la facette)</td></tr>
-            <tr><td>liste de résultats</td><td><code>dsfr-data-display</code> paginé serveur, <code>{{debut_de_validite:date}}</code>, <code>{{#if division}}</code>, permaliens</td><td>Équivalent</td></tr>
-            <tr><td>navigation par plan, historique des versions d'un BOI</td><td>—</td><td>Absent&nbsp;: le jeu ne porte que la version en vigueur</td></tr>
-            <tr><td>—</td><td>chronologie des versions en vigueur, année médiane par <code>running_sum</code> + <code>share_percent</code>, suivie par les facettes via <code>dsfr-data-context</code></td><td>Ajout&nbsp;; le <code>bar-line</code> essayé pour le cumul rendait deux axes Y — écarté</td></tr>
+            <tr><td>moteur de recherche plein texte</td><td><code>dsfr-data-search server-search</code></td><td>Équivalent, sur l'index Opendatasoft (pertinence différente)</td></tr>
+            <tr><td>navigation par série / division</td><td><code>dsfr-data-facets server-facets</code></td><td>Équivalent</td></tr>
+            <tr><td>liste de résultats</td><td><code>dsfr-data-display</code> paginé serveur, <code>{{debut_de_validite:date}}</code></td><td>Équivalent</td></tr>
+            <tr><td>plan, historique des versions</td><td>—</td><td>Absent&nbsp;: le jeu ne porte que la version en vigueur</td></tr>
+            <tr><td>—</td><td>âge de la doctrine par série et par année (<code>join</code> + <code>compute</code>, barres empilées)</td><td>Ajout</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="odv-verdict fr-mt-4w">
         <p class="fr-text--lead fr-mb-1v">Verdict</p>
-        <p><strong>Rien à reproduire, mais un moteur de recherche à construire — et il tient en une page.</strong>
-          L'entrée du catalogue est un lien éditorial&nbsp;; la donnée qu'il désigne est un corpus de textes
-          que seul le mode serveur peut exploiter. C'est la démonstration inverse des annuaires&nbsp;: ici,
-          charger serait impossible, et déléguer est trivial. Ce qui a coûté n'est pas la bibliothèque mais
-          le sens d'un champ&nbsp;: une date de version lue comme une date de droit.</p>
-        <p class="fr-text--sm fr-hint-text">Constats&nbsp;: PG-014 (levé, #641), AM-036 (levé, appliqué), AM-034 requalifié (<code>search count</code>), AM-044, AM-077 (compteur du display, contourné), AM-001 (facettes → contexte, voie native appliquée), PG-008 appliqué&nbsp;; piège métier nouveau&nbsp;: un corpus versionné date la version, pas la règle.</p>
+        <p><strong>Un corpus de textes a aussi une histoire chiffrée&nbsp;: son âge.</strong> Le coût
+          n'est pas venu de la bibliothèque — le mode serveur rend l'agrégat trivial — mais de la donnée&nbsp;:
+          un code sans libellé, une date qui dit la version et pas le droit.</p>
       </div>
     </div>
   </section>
   </details>
+  </div>
 
 </main>
 
@@ -378,7 +519,7 @@
 <script src="/assets/layout.js"></script>
 <script src="/assets/odv-code.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr-chart@2.1.1/dist/DSFRChart/DSFRChart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.core.umd.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/dsfr-data@0.42.0/dist/dsfr-data.esm.js"></script>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.14.4/dist/dsfr.module.min.js"></script>
 </body>
 </html>
