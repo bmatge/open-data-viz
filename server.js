@@ -32,6 +32,9 @@ const MIME = {
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.vtt': 'text/vtt; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
   '.map': 'application/json; charset=utf-8'
 };
@@ -141,6 +144,33 @@ const server = createServer(async (req, res) => {
     if ((inm && inm.split(/,\s*/).includes(f.etag)) || (!inm && ims && ims === f.lastModified)) {
       res.writeHead(304, entetes);
       return res.end();
+    }
+
+    // Vidéos : lecture progressive par plages d'octets (Safari refuse une vidéo servie sans
+    // `Accept-Ranges`, et l'avance dans la lecture en dépend partout). Jamais compressées.
+    if (f.type.startsWith('video/')) {
+      entetes['accept-ranges'] = 'bytes';
+      entetes['cache-control'] = 'public, max-age=86400';
+      delete entetes.vary;
+      const plage = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      if (plage) {
+        const total = f.brut.length;
+        let debut = plage[1] === '' ? total - Number(plage[2]) : Number(plage[1]);
+        let fin = plage[1] !== '' && plage[2] !== '' ? Number(plage[2]) : total - 1;
+        if (plage[1] === '' && plage[2] === '') debut = total;
+        fin = Math.min(fin, total - 1);
+        if (!(debut >= 0 && debut <= fin)) {
+          res.writeHead(416, { 'content-range': `bytes */${total}`, ...ENTETES_SECURITE });
+          return res.end();
+        }
+        entetes['content-range'] = `bytes ${debut}-${fin}/${total}`;
+        entetes['content-length'] = fin - debut + 1;
+        res.writeHead(206, entetes);
+        return res.end(req.method === 'HEAD' ? undefined : f.brut.subarray(debut, fin + 1));
+      }
+      entetes['content-length'] = f.brut.length;
+      res.writeHead(200, entetes);
+      return res.end(req.method === 'HEAD' ? undefined : f.brut);
     }
 
     const accepte = req.headers['accept-encoding'] || '';
