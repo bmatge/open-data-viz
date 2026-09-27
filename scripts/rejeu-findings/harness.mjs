@@ -18,10 +18,13 @@ import { homedir } from 'node:os';
 const pw = await import(join(homedir(), 'Developer/GitHub/dsfr-data/node_modules/playwright/index.js'));
 const { chromium } = pw.default ?? pw;
 const ICI = dirname(fileURLToPath(import.meta.url));
-const BASE = 'http://localhost:3000';
+// REJEU_BASE : le banc sur un autre port (plusieurs agents en parallèle) ;
+// REJEU_PROXY (ou RECETTE_PROXY) : navigateur derrière un tunnel, localhost exclu.
+const BASE = process.env.REJEU_BASE || 'http://localhost:3000';
+const PROXY = process.env.REJEU_PROXY || process.env.RECETTE_PROXY || '';
 
 export async function ouvrir(chemin, { bundle, width = 1400, height = 1000, headless = true } = {}) {
-  const browser = await chromium.launch({ headless });
+  const browser = await chromium.launch({ headless, ...(PROXY ? { proxy: { server: PROXY, bypass: 'localhost,127.0.0.1' } } : {}) });
   const ctx = await browser.newContext({ viewport: { width, height } });
   const logs = [];
   let substitues = 0;
@@ -38,7 +41,8 @@ export async function ouvrir(chemin, { bundle, width = 1400, height = 1000, head
     const f = route.request().url().replace(`${BASE}/_test/`, '').split('?')[0];
     const local = join(ICI, 'pages', f);
     if (!existsSync(local)) return route.fulfill({ status: 404, body: 'absent : ' + local });
-    return route.fulfill({ body: readFileSync(local, 'utf8'), contentType: 'text/html; charset=utf-8' });
+    const type = f.endsWith('.json') ? 'application/json' : 'text/html; charset=utf-8';
+    return route.fulfill({ body: readFileSync(local, 'utf8'), contentType: type });
   });
   const page = await ctx.newPage();
   page.on('console', (m) => logs.push({ type: m.type(), texte: m.text() }));

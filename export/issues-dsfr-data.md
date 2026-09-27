@@ -1,9 +1,9 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 22 demandes cadrées — 11 bugs,
-> 8 améliorations,
-> 3 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
+> 25 demandes cadrées — 12 bugs,
+> 9 améliorations,
+> 4 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
 ## Comment lire ce rapport
@@ -88,11 +88,13 @@ _5 demandes — S 5, M 0, L 0._
 | BUG-033 | `color-map` sur `type="line"` recolore le trait et la légende, pas les points : quatrième surface de la famille BUG-016 / BUG-022 | bug | S | 4 | Déposer chez dsfr-data |
 | BUG-035 | La vue tableau de la DataBox ne montre que `label-field` et `value-field` : les séries de `value-fields` en sont absentes, et les lignes sont coupées à 100 | bug | S | 1 | Déposer chez dsfr-data |
 | AM-107 | `radius-field` fait croître le rayon, pas l'aire, et la plus petite valeur prend `radius-min` : pas de cercles proportionnels honnêtes, et `compute` n'a pas de racine carrée pour compenser | amelioration | S | 1 | Déposer chez dsfr-data |
+| PG-083 | Le résumé d'une carte (`map-summary`) ne porte que sur les lignes dessinées : les lignes hors découpage en sortent, et l'écran ne le dit pas | piege | S | 3 | Déposer chez dsfr-data |
+| BUG-039 | La couche d'une `dsfr-data-map` ignore le retour en attente (`require-where`) : après retrait du dernier filtre, les marqueurs restent | bug | S | 2 | Déposer chez dsfr-data |
 | BUG-034 | Un encart de carte clone la couche entière : chaque encart dessine tous les points, parfois en double, et garde les anciens après un filtre | bug | M | 2 | Déposer chez dsfr-data |
 | BUG-038 | `min` / `max` de `dsfr-data-query` sur plus de ~125 000 valeurs par groupe : `Math.min(...values)` dépasse la pile, et l'affichage garde l'ancien résultat | bug | XS | 1 | Déposer chez dsfr-data |
 | AM-087 | La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-_12 demandes — S 9, M 1, L 0._
+_14 demandes — S 11, M 1, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -101,10 +103,11 @@ _12 demandes — S 9, M 1, L 0._
 | AM-110 | `share_percent` n'a pas de partition : la part se calcule sur toutes les lignes de sortie, jamais par groupe — une part « parmi les répondants de l'année » coûte un second `group-by`, une jointure et un `compute` | amelioration | S | 1 | Déposer chez dsfr-data |
 | AM-088 | Le podium ne formate ni sa valeur ni son sous-titre : la valeur est arrondie à l'unité (9,98 et 10,41 deviennent « 10 »), `subtitle-field` affiche le nombre brut | amelioration | S | 2 | Déposer chez dsfr-data |
 | AM-102 | Préréglages d'encart : La Réunion (zoom 9) coupe le sud de l'île, et Wallis-et-Futuna (zoom 7) laisse ses deux îles hors cadre | amelioration | S | 3 | Déposer chez dsfr-data |
+| AM-113 | Le repli « Autres valeurs » de la légende de carte est écrit en dur : `dsfr-data-map-layer` et `dsfr-data-map-legend` n'ont pas d'équivalent d'`empty-label` | amelioration | S | 2 | Déposer chez dsfr-data |
 | AM-090 | `compute` n'a aucun échappement de la quote simple dans un littéral : `'J''en ai'` est impossible | amelioration | XS | 4 | Déposer chez dsfr-data |
 | BUG-037 | Un élément répété dans une cellule tableau compte deux fois dans une facette : « Patrimoine 3 » pour 2 lignes, et la sélection en rend 2 | bug | XS | 1 | Déposer chez dsfr-data |
 
-_5 demandes — S 3, M 0, L 0._
+_6 demandes — S 4, M 0, L 0._
 
 ### P4 — hors périmètre ou refus motivé
 
@@ -231,6 +234,8 @@ Structurel : filtrer un agrégat par un seuil d'effectif est le geste qu'impose 
 ### Comment ça a été vérifié
 
 Agent de recréation, /education/dataviz-ips-ecoles, dsfr-data 0.42.0, 2026-09-26 : requête d'export relevée au réseau avec `…AND n >= 40`, HTTP 400, message console « l'export ne sera plus retenté », source `paire` en `/records` puis 400. Seuil déplacé derrière un `dsfr-data-normalize` : les deux exports répondent 200 (835 ms et 2 757 ms). Non rejoué sur une page minimale.
+
+— **Rejoué sur page minimale le 2026-09-27 (issue #71)** : `scripts/rejeu-findings/pages/f71-where-alias.html`, `run-70-71.mjs alias`, Playwright. Source Opendatasoft `donnees-ips-ecoles`, `select="code_departement, count(ips) as n" group-by="code_departement"`, `fetch-mode="export"` ; `dsfr-data-query where="n:gte:500"` seule lectrice ; une source voisine `s2` sur le même jeu. **Bundle publié 0.42.0** : export `…where=rentree_scolaire = '2024-2025' AND n >= 500…` → **HTTP 400**, avertissement « export JSON indisponible … l'export ne sera plus retenté », repli `/records` avec la même clause → 400, erreur `dsfr-data-source[s]`. **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. **Confirmé en 0.42.0 et sur origin/main.** Deux précisions : (1) ce n'est pas silencieux à l'écran — le KPI branché sur la query affiche « Erreur de chargement: HTTP 400: » ; (2) **l'extension de l'échec à la source voisine n'est pas reproduite** sur la page minimale : `s2` part en export et répond 200 dans les deux ordres observés (avant et après l'échec de `s`) — la seconde moitié du constat reste attestée par la seule page `dataviz-ips-ecoles`. Contrôle à l'API du même jour : un `where` sur l'alias d'un champ de groupement (`dep = '075'`, alias posé dans `select` ou dans `group_by`) répond 200 — seul l'alias d'**agrégat** pose problème, ce qui situe la relecture du 2026-09-20 (« where délégué sur un alias de group-by ») dans ce constat.
 
 ### Contournement actuel
 
@@ -754,6 +759,90 @@ Une échelle en aire pour `radius-field` (`radius-scale="sqrt"`, et pourquoi pas
 
 ---
 
+## PG-083 — Le résumé d'une carte (`map-summary`) ne porte que sur les lignes dessinées : les lignes hors découpage en sortent, et l'écran ne le dit pas
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement, dx`, `severity:moyenne`, `dsfr-data-chart`
+**Rencontré sur** 3 page(s) : edu/educajou-ecolemap, edu/offre-formation-langues, edu/fei-chiffres-cles
+
+### Constat
+
+`map-summary="sum"` (comme `avg` et `weighted`) calcule le résumé sur les lignes que la carte **dessine**, pas sur les lignes qu'elle **reçoit**. Une ligne dont le code géographique sort du découpage (collectivités d'outre-mer 975 à 988 sur une carte départementale, entité hors académies, pays absent du fond) est écartée de la carte **et** du chiffre affiché sous le titre « …, en France ». Seul un `console.warn` compte les lignes ignorées, et il ne dit pas que le résumé les ignore aussi. Le total affiché est plausible et faux de la part écartée.
+
+C'est le comportement documenté : le JSDoc de `map-summary` écrit « calculé sur les lignes dessinées » et « les lignes écartées faute de code géographique exploitable ne sont dans aucun résumé — le compte de ces lignes est déjà journalisé ». Mais un journal de console n'est pas un signal pour le lecteur. La même famille est déjà apparue deux fois au registre : la moyenne académique pondérée de l'allemand (81,13 % contre 80,2 %, PG-031, lot 3) et les sommes de la carte du monde d'ENIC (49 734 pour 50 477, AM-095, lot 5). La page d'origine (`educajou-ecolemap`, relecture du 2026-09-20 : 62 485 affichés pour 63 186, écart 701 = somme des cinq collectivités ignorées) a été recréée depuis avec `map-summary="none"`.
+
+### Impact de l'erreur ou du manque
+
+Un total national faux de la part hors découpage, affiché sous le titre de la carte, plausible et sans signal à l'écran. Trois pages du banc l'ont payé (éducation outre-mer, académies, carte du monde).
+
+### Objectif métier de la correction
+
+Qu'un lecteur sache, sans ouvrir la console, que le chiffre sous la carte ne porte pas sur toutes les lignes reçues.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : tout jeu national qui inclut les collectivités d'outre-mer, ou tout jeu mondial, a des lignes que DSFR Chart ne dessine pas.
+
+### Comment ça a été vérifié
+
+**Rejoué le 2026-09-27 (issue #70)**, page minimale `scripts/rejeu-findings/pages/f70-map-summary.html`, `node scripts/rejeu-findings/run-70-71.mjs summary`, Playwright. Neuf lignes en données inline, total 201 : 75, 13, 2A, 971 (165 à elles quatre) plus 977, 978, 986, 987 et un code vide (36). **Bundle publié 0.42.0 (jsDelivr)** : KPI témoin « 201 » ; carte `type="map" map-summary="sum"` : `data` du `map-chart` = `{"13":50,"75":100,"971":5,"2A":10}`, attribut `value` = 165, texte rendu « Nombre, en France 165 » ; `getSkippedCount()` = 5 ; console : un seul avertissement, « 5 ligne(s) sur 9 ignorée(s) — code géographique absent, invalide ou hors référentiel dans "dep" pour map ». **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. Source lu : `_processMapData` fait `continue` avant `_mapRows.push`, `_computeMapSummary` parcourt `_mapRows` (`packages/core/src/components/dsfr-data-chart.ts`, 0.42.0) ; `isValidDeptCode` n'accepte que 01-95, 2A, 2B et 971-976 (`packages/shared/src/utils/dept-codes.ts`).
+
+### Contournement actuel
+
+Comparer le résumé à un KPI calculé sur les lignes reçues : l'écart est le signal. Quand les lignes hors découpage existent, soit `map-summary-value` (valeur nationale publiée), soit `map-summary="none"` et le total dans un KPI à côté de la carte, avec une phrase qui dit ce que la carte ne montre pas (c'est ce que fait `educajou-ecolemap` recréée). `map-summary-value` est un littéral : il ne suit plus les filtres.
+
+### Demande
+
+Rendre la part écartée visible là où le chiffre est lu : au minimum un avertissement qui dit que le RÉSUMÉ ignore N lignes (valeur écartée incluse en mode `sum`), idéalement une mention sous la carte (« hors 5 territoires non cartographiés ») ou un mode qui résume les lignes reçues. Le libellé « en France » appartient à DSFR Chart ; le calcul et le compte appartiennent à `dsfr-data`.
+
+### Critères d'acceptation
+
+- [ ] Sur la page minimale f70 (201 reçus, 165 dessinés), l'écran ou au moins l'avertissement console dit que le résumé porte sur 4 lignes sur 9 et en écarte 36.
+- [ ] Le calcul par défaut ne change pas sans attribut (aucun chiffre déjà publié ne bouge).
+
+---
+
+## BUG-039 — La couche d'une `dsfr-data-map` ignore le retour en attente (`require-where`) : après retrait du dernier filtre, les marqueurs restent
+
+**Priorité** P2 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `bug`, `severity:moyenne`, `dsfr-data-map-layer`, `dsfr-data-map`
+**Rencontré sur** 2 page(s) : prix-controle-technique, edu/educajou-ecolemap
+
+### Constat
+
+Quand une source ou une query en `require-where` repasse en attente (le dernier filtre est retiré), les afficheurs rendent leur message « choisissez un filtre » : c'est le rôle de `onSourceReset`, que `SourceSubscriberMixin` appelle sur l'événement `dsfr-data-idle` pour qu'« un graphique ne garde pas les lignes du filtre qu'on vient de retirer ». `dsfr-data-map-layer` ne surcharge pas `onSourceReset` : la couche garde les marqueurs du dernier filtre, sous une page dont le reste dit « aucun filtre ». La carte n'a pas non plus d'`idle-message`. Vu à la relecture du 2026-09-20 sur `prix-controle-technique` (les 30 derniers marqueurs restaient après retrait du filtre) ; `educajou-ecolemap` recréée porte le même montage (source `require-where` → couche), non rejoué sur la page.
+
+### Impact de l'erreur ou du manque
+
+Une carte qui montre des points que plus aucun filtre ne sélectionne, à côté d'une liste et d'un compteur qui disent « choisissez un filtre » : deux parties de la page se contredisent.
+
+### Objectif métier de la correction
+
+Que la carte suive l'état d'attente comme le display, la liste et le graphique.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : toute page d'exploration en `require-where` avec une carte (localisateur, annuaire).
+
+### Comment ça a été vérifié
+
+**Rejoué le 2026-09-27 (issue #71)**, page minimale `scripts/rejeu-findings/pages/f71-map-idle.html`, `run-70-71.mjs idle`, Playwright : trois points inline, `dsfr-data-query require-where`, un `dsfr-data-display` témoin et une couche `type="circle"` sur la query. **Bundle publié 0.42.0** : (1) chargement : display « Choisissez un filtre », 0 cercle ; (2) `where="t:eq:a"` posé : display « 2 resultats Paris Lyon », 2 cercles, annonce « Couches : 2 cercles » ; (3) `where` retiré : display revenu à « Choisissez un filtre », **2 cercles toujours dessinés**, annonce inchangée. Aucune erreur console. **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. Source lu (0.42.0) : `dsfr-data-map-layer.ts` n'implémente que `onSourceData`, l'`onSourceReset` du mixin est un no-op.
+
+### Contournement actuel
+
+Aucun vérifié depuis la page. Le texte d'accompagnement doit dire que la carte garde la dernière sélection.
+
+### Demande
+
+Implémenter `onSourceReset` sur `dsfr-data-map-layer` (vider la couche, les grappes et l'entrée de légende) et donner à `dsfr-data-map` un état d'attente (`idle-message`), comme les autres afficheurs depuis #690.
+
+### Critères d'acceptation
+
+- [ ] Sur la page minimale f71-map-idle, après retrait du `where`, la couche compte 0 cercle.
+- [ ] La carte affiche un message d'attente configurable tant que la source est en attente.
+
+---
+
 ## BUG-034 — Un encart de carte clone la couche entière : chaque encart dessine tous les points, parfois en double, et garde les anciens après un filtre
 
 **Priorité** P2 · **Effort estimé** M (un à trois jours) · **Décision proposée** Déposer chez dsfr-data
@@ -1008,6 +1097,47 @@ Recaler les deux préréglages pour une emprise de 160 px : La Réunion au zoom 
 
 - [ ] Un point à Saint-Pierre de La Réunion est visible dans l'encart `la-reunion` de 160 px.
 - [ ] Wallis et Futuna sont visibles dans l'encart `wallis-et-futuna` de 160 px.
+
+---
+
+## AM-113 — Le repli « Autres valeurs » de la légende de carte est écrit en dur : `dsfr-data-map-layer` et `dsfr-data-map-legend` n'ont pas d'équivalent d'`empty-label`
+
+**Priorité** P3 · **Effort estimé** S (moins d'un jour) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:basse`, `dsfr-data-map-layer`, `dsfr-data-map-legend`
+**Rencontré sur** 2 page(s) : fermeture-reseau-cuivre, edu/educajou-ecolemap
+
+### Constat
+
+Quand une valeur de `color-field` n'est pas dans `color-map`, le point prend la couleur `color` et la légende ajoute une entrée « Autres valeurs ». Ce libellé est une constante de `dsfr-data-map-layer` (`getLegendEntries`) ; `dsfr-data-map-legend` n'a que `for` et `label`. Impossible de dire « Non renseigné » ou « Secteur inconnu », alors que `dsfr-data-a11y` et `dsfr-data-facets` savent nommer leur valeur vide (`empty-label`). Relevé à la relecture du 2026-09-20 (`fermeture-reseau-cuivre`, `educajou-ecolemap`).
+
+### Impact de l'erreur ou du manque
+
+Une légende qui nomme mal une catégorie (« Autres valeurs » pour des lignes sans valeur), ou un `compute` de recodage à écrire et à maintenir par page.
+
+### Objectif métier de la correction
+
+Nommer le repli de légende comme on nomme la valeur vide d'un tableau ou d'une facette.
+
+### Pérennité et reproductibilité du besoin
+
+Durable : toute carte catégorielle sur un champ incomplet.
+
+### Comment ça a été vérifié
+
+**Rejoué le 2026-09-27 (issue #71)**, page minimale `scripts/rejeu-findings/pages/f71-map-legend.html`, `run-70-71.mjs legend`, Playwright : trois points (a, b, c), `color-map="a:…,b:…"`, `color="#929292"`. **Bundle publié 0.42.0** : légende « Type a b Autres valeurs », `getLegendEntries()` = a, b, « Autres valeurs » ; `empty-label`, `other-label` et `fallback-label` posés sur la couche : trois avertissements « attribut … inconnu de la version chargée », sans effet ; les mêmes sur la légende : sans effet et **sans avertissement**. **`origin/main` de dsfr-data (23b1b9a, 0.42.0 + 7 commits sans changement dans `packages/core`), construit par `git archive` + `vite-node scripts/build-lib.ts` et substitué au bundle du CDN** : relevé identique. Contournement vérifié dans la même page : `dsfr-data-normalize compute="t2 = when t = 'a' then 'a' else when t = 'b' then 'b' else 'Non renseigné'"` puis `color-map` qui nomme « Non renseigné » : légende « Type a b Non renseigné ».
+
+### Contournement actuel
+
+Recoder en amont (`dsfr-data-normalize compute="… else 'Non renseigné'"`) et donner sa couleur à la catégorie dans `color-map` : le repli ne sert plus. Ne tient que si l'ensemble des valeurs est connu et fermé ; sur un champ ouvert (une nouvelle valeur apparaît dans le jeu), elle retombe dans le `else` sous le nom choisi, ce qui peut mentir si ce nom est « Non renseigné » alors que la valeur est renseignée.
+
+### Demande
+
+Un attribut de libellé du repli (`other-label` ou nom équivalent) sur `dsfr-data-map-layer`, relayé par `getLegendEntries()` à la légende.
+
+### Critères d'acceptation
+
+- [ ] Sur la page minimale f71-map-legend, l'attribut rend « Non renseigné » à la place d'« Autres valeurs », sans recodage.
+- [ ] Sans attribut, la légende est inchangée.
 
 ---
 
