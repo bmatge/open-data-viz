@@ -1,8 +1,8 @@
 # Demandes à déposer sur bmatge/dsfr-data — rapport de cadrage
 
 > Fichier généré par `node scripts/build-retours.mjs` depuis `public/data/retours.json`.
-> 26 demandes cadrées — 14 bugs,
-> 8 améliorations,
+> 27 demandes cadrées — 14 bugs,
+> 9 améliorations,
 > 4 pièges à désamorcer dans la bibliothèque plutôt que dans la documentation.
 > Chaque bloc est rédigé pour être collé tel quel dans une issue.
 
@@ -94,9 +94,10 @@ _11 demandes — S 9, M 0, L 0._
 | AM-107 | `radius-field` fait croître le rayon, pas l'aire, et la plus petite valeur prend `radius-min` : pas de cercles proportionnels honnêtes, et `compute` n'a pas de racine carrée pour compenser | amelioration | S | 1 | Déposer chez dsfr-data |
 | BUG-039 | La couche d'une `dsfr-data-map` ignore le retour en attente (`require-where`) : après retrait du dernier filtre, les marqueurs restent | bug | S | 2 | Déposer chez dsfr-data |
 | BUG-034 | Un encart de carte clone la couche entière : chaque encart dessine tous les points, parfois en double, et garde les anciens après un filtre | bug | M | 2 | Déposer chez dsfr-data |
+| AM-114 | `proxy-url` ne relaie pas un portail Opendatasoft, et le relais générique passe sa cible dans un en-tête : un site hôte ne peut pas mettre les données d'une dataviz dans son cache (CDN, cache de page) | amelioration | M | 2 | Déposer chez dsfr-data |
 | AM-087 | La fiche `apiProviders` annonce que Tabular exige un proxy CORS : l'API répond `access-control-allow-origin: *`, requêtes et préflight comprises | amelioration | XS | 1 | Déposer chez dsfr-data |
 
-_10 demandes — S 8, M 1, L 0._
+_11 demandes — S 8, M 2, L 0._
 
 ### P3 — backlog : confort, cas moins fréquents
 
@@ -1048,6 +1049,48 @@ Filtrer la couche clonée à l'emprise de l'encart, et remplacer (au lieu d'ajou
 - [ ] Un encart ne contient que les entités de son emprise.
 - [ ] Après un filtre, chaque encart a exactement les entités filtrées de son emprise.
 - [ ] Le temps de refiltre ne croît pas avec le nombre d'encarts vides.
+
+---
+
+## AM-114 — `proxy-url` ne relaie pas un portail Opendatasoft, et le relais générique passe sa cible dans un en-tête : un site hôte ne peut pas mettre les données d'une dataviz dans son cache (CDN, cache de page)
+
+**Priorité** P2 · **Effort estimé** M (un à trois jours) · **Décision proposée** Déposer chez dsfr-data
+**Labels suggérés** : `enhancement`, `severity:moyenne`, `dsfr-data-source`
+**Rencontré sur** 2 page(s) : demo/ips-college-territoire, demo/cuivre-qui-bascule
+
+### Constat
+
+Question posée par PG-084 : un site intégrateur qui a du cache (Drupal, Varnish, CDN) peut-il éviter que chaque visiteur aille rechercher la donnée au portail ? Il faut pour cela que la requête passe par son domaine, sous une URL qui identifie la donnée. Deux obstacles. (1) En mode adaptateur Opendatasoft, `proxy-url` (avec ou sans `use-proxy`) est sans effet : la réécriture ne connaît qu'une liste fixe d'hôtes (Tabular, Grist, Albert, INSEE) et rend l'URL d'un portail inchangée, sans avertissement. (2) En mode URL générique, `use-proxy` appelle toujours la même adresse (`<proxy>/cors-proxy`) et passe la cible dans l'en-tête `X-Target-URL` : deux jeux différents ont la même URL, un cache indexé par URL ne peut ni les distinguer ni les servir. Par ailleurs `cache-ttl` n'est lu qu'en repli sur échec de requête (hors ligne), jamais avant le réseau, et seulement si la page enregistre `window.DSFR_DATA_CACHE_PROVIDER`.
+
+### Impact de l'erreur ou du manque
+
+Sur un portail lent ou qui interdit le cache, chaque visiteur repaie l'export. Mesuré ici : 2 à 7 s par chargement sur six pages. Un intégrateur dont le site a déjà un cache ne peut pas s'en servir pour les données.
+
+### Objectif métier de la correction
+
+Qu'un site hôte puisse servir les données d'une dataviz depuis son propre cache, en posant un attribut sur la source.
+
+### Pérennité et reproductibilité du besoin
+
+Structurel : tout portail lent, limité par quota ou en `no-store`.
+
+### Comment ça a été vérifié
+
+**Rejoué le 2026-10-03**, page minimale `scripts/rejeu-findings/pages/proxy-relais.html`, `node scripts/rejeu-findings/run-proxy.mjs`, Playwright, **bundle publié 0.42.0** du CDN. Source A (`api-type="opendatasoft"` + `proxy-url="/relais"`) et source B (la même + `use-proxy`) : requêtes émises vers `https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/fermeture-reseau-cuivre/records?…`, aucune vers `/relais`. Sources C et D (mode `url=` + `use-proxy proxy-url="/relais"`, deux portails différents) : deux requêtes vers la **même** URL `http://rejeu.test/relais/cors-proxy`, distinguées seulement par `x-target-url`. **Lecture du source** (`packages/shared/src/api/proxy.ts`, `rewriteKnownHost` et `buildProxiedRequest` ; `packages/core/src/components/dsfr-data-source.ts`, `_getCache` appelé dans les seules branches d'erreur) sur le dépôt local au commit d3c3d88f, **en retard de 3 commits sur `origin/main`** : `origin/main` n'a pas été construit ni rejoué.
+
+### Contournement actuel
+
+Sans toucher la bibliothèque : pointer la source sur une URL du site hôte (`url="/relais/…"` ou fichier figé, PG-084), donc en mode générique, sans `where` ni `group-by` délégués. Cesse de convenir dès que la page filtre ou agrège au portail.
+
+### Demande
+
+Un mode de relais cachable : la cible portée par l'URL (chemin et paramètres, par exemple `<relais>/<hôte>/<chemin>?<requête>`), applicable à tout hôte y compris les portails Opendatasoft, en restant en mode adaptateur ; des URL déterministes (même requête, même URL) ; la clé d'API laissée au relais plutôt qu'en `Authorization` navigateur, qu'un CDN ne cache pas. Avec un contrat documenté et un relais de référence (Node sans dépendance, nginx, module Drupal) borné par une liste blanche d'hôtes. À défaut, un avertissement quand `proxy-url` est posé sur un hôte qu'il ne relaie pas.
+
+### Critères d'acceptation
+
+- [ ] Sur la page minimale `proxy-relais.html`, la source A émet sa requête vers le relais, et deux cibles différentes produisent deux URL différentes.
+- [ ] Une même requête rejouée produit la même URL au caractère près.
+- [ ] Sans relais configuré, le comportement actuel ne change pas.
 
 ---
 

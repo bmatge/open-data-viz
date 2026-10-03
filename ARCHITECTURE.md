@@ -19,6 +19,14 @@ portails voisins qu'ils fédèrent (`equipements.sports.gouv.fr`, `public.openda
 Rien n'est mis en cache côté serveur, rien n'est copié dans le repo : une page qui affiche des
 chiffres faux est un bug de requête, jamais un problème de fraîcheur.
 
+**Une exception, et une seule : `public/data/ref/insee-communes-2020.json`.** Le référentiel
+communal INSEE (`insee-2020-geoapi-2023`, 35 075 lignes) est copié dans le repo et lu par trois
+pages de `/demo` (`url="/data/ref/…"`). Mesuré le 2026-10-03 : le portail mettait 2,3 s en médiane
+et jusqu'à 7,6 s à produire cet export, répond `no-store`, et tout chiffre joint l'attendait. C'est
+un millésime, donc figé sans perte de fraîcheur. Régénération et contrôles (volume, unicité de la
+clé) : `node scripts/build-referentiel-insee.mjs`. Avant d'en figer un autre : le jeu doit être
+stable, et la lenteur mesurée.
+
 ## 2. Points d'entrée
 
 - Serveur / routage : `server.js:28` (`resolveFile`) et `server.js:47` (handler)
