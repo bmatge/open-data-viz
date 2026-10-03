@@ -310,7 +310,7 @@ il faut donc chercher l'attribut dans le source, **puis vérifier dans quelle ve
 apparaît**. Trois demandes de ce rapport sont nées de ce piège, et deux constats antérieurs
 (AM-017, AM-039) en sont sortis.
 
-Le dépôt charge aujourd'hui \`dsfr-data@0.42.0\`. Les montées successives ont comblé
+Le dépôt charge aujourd'hui \`dsfr-data@0.44.0\`. Les montées successives ont comblé
 ${retours.filter((r) => r.statut === 'corrige' && r.type !== 'faux-probleme').length} des constats déposés,
 passés au statut \`corrige\` et sortis de ce rapport. Chaque constat restant porte dans son champ
 *Vérifié* la date et la version contre lesquelles il a été rejoué : c'est cette preuve, et non la
