@@ -8160,5 +8160,58 @@
         "Sans attribut, la légende est inchangée."
       ]
     }
+  },
+  {
+    "id": "PG-084",
+    "titre": "Une jointure rend chaque chiffre aussi lent que la source la plus lente : tout ce qui lit le résultat l'attend, même ce qui n'a besoin d'aucun croisement",
+    "type": "piege",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-join",
+      "dsfr-data-source",
+      "dsfr-data-kpi"
+    ],
+    "dataviz": [
+      "demo/ips-college-territoire",
+      "demo/cuivre-qui-bascule",
+      "demo/vacance-logements"
+    ],
+    "constat": "Les trois pages branchaient tous leurs KPI et graphiques sur le résultat d'une chaîne de jointures (`donnees`). Les sources partent bien en parallèle, mais aucun chiffre ne peut s'afficher avant la fin de la plus lente — ici le référentiel communal INSEE (`insee-2020-geoapi-2023`, 35 075 lignes, portail `equipements.sports.gouv.fr`), alors que le jeu principal de la page IPS arrive en moins d'une seconde. Deux idées fausses à écarter : la bibliothèque n'attend pas « toutes les sources » (chaque composant rend dès que SA chaîne émet), et le poids n'est pas le coût — c'est le temps que le portail met à produire l'export. Le portail répond de plus `cache-control: no-cache, no-store` : aucun cache navigateur ne l'absorbe, la lenteur se repaie à chaque visite.",
+    "verifie": "**Mesuré le 2026-10-03, Playwright + CDP (horodatage de chaque requête et de l'apparition de `.dsfr-data-kpi__value`), pages en ligne, dsfr-data 0.42.0.** `ips-college-territoire` : trois requêtes parties à ~180 ms ; IPS finie à 0,87 s, équipements à 0,36 s, INSEE à 4,71 s ; les 10 KPI apparaissent ensemble à 4,90 s. `cuivre-qui-bascule` : INSEE finie à 2,9 s, cuivre à 5,8 s, les 7 KPI ensemble à 6,2 s. Relevé des 110 dataviz le même jour (un passage par page) : six pages chargent ce jeu, durée médiane 2,3 s, maximum 7,6 s. **Le poids n'explique rien** : `curl` sur le même export réduit à une colonne (107 Ko transférés) → 3,1 s ; six colonnes (782 Ko) → 2,5 s et 5,4 s sur deux appels successifs. En-têtes relevés par `curl -D-` : `no-cache, no-store, max-age=0` sur equipements.sports.gouv.fr, `public, max-age=300` sur data.economie.gouv.fr, `max-age=60` sur data.education.gouv.fr. **Découplage prouvé** en retardant de 4 s `data-es-par-commune` par interception Playwright sur la page IPS modifiée : les quatre KPI de tête et le graphique par secteur (branchés sur `ips`) apparaissent à 457 ms, les six KPI croisés à 4 543 ms. **Non-régression** : tous les KPI, les données des graphiques et les comptes de liste des trois pages comparés avant (en ligne) / après (fichier statique, local) — identiques sur `cuivre-qui-bascule` et `vacance-logements` ; sur la page IPS seuls changent les deux KPI découplés (6 979 → 6 981 collèges, 1 655 → 1 656 privés sous contrat : les deux collèges dont la commune est absente du référentiel).",
+    "contournement": "Deux gestes, tous deux dans la page. (1) Brancher ce qui ne croise rien sur la source qui suffit : KPI de tête et premier graphique lisent le jeu principal, pas le résultat de la jointure — et dire en page que le compte avant jointure diffère du compte après. Ne gagne rien quand la source lente est le jeu principal lui-même. (2) Figer un référentiel stable en fichier servi par le site (`url=\"/data/ref/…\"`, généré par `scripts/build-referentiel-insee.mjs` qui contrôle volume et unicité de la clé). Ne vaut que pour un jeu qui ne bouge pas (un millésime) : la source passe en mode URL générique, sans `where` ni `group-by` délégués, et la page ne peut plus dire « aucun fichier intermédiaire ».",
+    "statut": "acte",
+    "date": "2026-10-03"
+  },
+  {
+    "id": "AM-114",
+    "titre": "`proxy-url` ne relaie pas un portail Opendatasoft, et le relais générique passe sa cible dans un en-tête : un site hôte ne peut pas mettre les données d'une dataviz dans son cache (CDN, cache de page)",
+    "type": "amelioration",
+    "severite": "moyenne",
+    "composants": [
+      "dsfr-data-source"
+    ],
+    "dataviz": [
+      "demo/ips-college-territoire",
+      "demo/cuivre-qui-bascule"
+    ],
+    "constat": "Question posée par PG-084 : un site intégrateur qui a du cache (Drupal, Varnish, CDN) peut-il éviter que chaque visiteur aille rechercher la donnée au portail ? Il faut pour cela que la requête passe par son domaine, sous une URL qui identifie la donnée. Deux obstacles. (1) En mode adaptateur Opendatasoft, `proxy-url` (avec ou sans `use-proxy`) est sans effet : la réécriture ne connaît qu'une liste fixe d'hôtes (Tabular, Grist, Albert, INSEE) et rend l'URL d'un portail inchangée, sans avertissement. (2) En mode URL générique, `use-proxy` appelle toujours la même adresse (`<proxy>/cors-proxy`) et passe la cible dans l'en-tête `X-Target-URL` : deux jeux différents ont la même URL, un cache indexé par URL ne peut ni les distinguer ni les servir. Par ailleurs `cache-ttl` n'est lu qu'en repli sur échec de requête (hors ligne), jamais avant le réseau, et seulement si la page enregistre `window.DSFR_DATA_CACHE_PROVIDER`.",
+    "verifie": "**Rejoué le 2026-10-03**, page minimale `scripts/rejeu-findings/pages/proxy-relais.html`, `node scripts/rejeu-findings/run-proxy.mjs`, Playwright, **bundle publié 0.42.0** du CDN. Source A (`api-type=\"opendatasoft\"` + `proxy-url=\"/relais\"`) et source B (la même + `use-proxy`) : requêtes émises vers `https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/fermeture-reseau-cuivre/records?…`, aucune vers `/relais`. Sources C et D (mode `url=` + `use-proxy proxy-url=\"/relais\"`, deux portails différents) : deux requêtes vers la **même** URL `http://rejeu.test/relais/cors-proxy`, distinguées seulement par `x-target-url`. **Lecture du source** (`packages/shared/src/api/proxy.ts`, `rewriteKnownHost` et `buildProxiedRequest` ; `packages/core/src/components/dsfr-data-source.ts`, `_getCache` appelé dans les seules branches d'erreur) sur le dépôt local au commit d3c3d88f, **en retard de 3 commits sur `origin/main`** : `origin/main` n'a pas été construit ni rejoué.",
+    "contournement": "Sans toucher la bibliothèque : pointer la source sur une URL du site hôte (`url=\"/relais/…\"` ou fichier figé, PG-084), donc en mode générique, sans `where` ni `group-by` délégués. Cesse de convenir dès que la page filtre ou agrège au portail.",
+    "demande": "Un mode de relais cachable : la cible portée par l'URL (chemin et paramètres, par exemple `<relais>/<hôte>/<chemin>?<requête>`), applicable à tout hôte y compris les portails Opendatasoft, en restant en mode adaptateur ; des URL déterministes (même requête, même URL) ; la clé d'API laissée au relais plutôt qu'en `Authorization` navigateur, qu'un CDN ne cache pas. Avec un contrat documenté et un relais de référence (Node sans dépendance, nginx, module Drupal) borné par une liste blanche d'hôtes. À défaut, un avertissement quand `proxy-url` est posé sur un hôte qu'il ne relaie pas.",
+    "statut": "a-deposer",
+    "date": "2026-10-03",
+    "cadrage": {
+      "priorite": "P2",
+      "effort": "M",
+      "decision": "Déposer chez dsfr-data",
+      "impact": "Sur un portail lent ou qui interdit le cache, chaque visiteur repaie l'export. Mesuré ici : 2 à 7 s par chargement sur six pages. Un intégrateur dont le site a déjà un cache ne peut pas s'en servir pour les données.",
+      "objectif": "Qu'un site hôte puisse servir les données d'une dataviz depuis son propre cache, en posant un attribut sur la source.",
+      "perennite": "Structurel : tout portail lent, limité par quota ou en `no-store`.",
+      "acceptation": [
+        "Sur la page minimale `proxy-relais.html`, la source A émet sa requête vers le relais, et deux cibles différentes produisent deux URL différentes.",
+        "Une même requête rejouée produit la même URL au caractère près.",
+        "Sans relais configuré, le comportement actuel ne change pas."
+      ]
+    }
   }
 ]
